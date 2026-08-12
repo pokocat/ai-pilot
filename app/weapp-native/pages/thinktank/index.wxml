@@ -5,6 +5,11 @@
     <view class="pad think think-native">
       <tab-header title="图籍" kicker="军师断事的依据" glyph="籍"></tab-header>
 
+      <view wx:if="{{loadFailed}}" class="think-retry card" bindtap="retry">
+        <text class="think-retry-t">图籍没读出来，网络不畅或服务端在忙</text>
+        <text class="think-retry-go">重试</text>
+      </view>
+
       <view class="think-tabs">
         <view wx:for="{{segments}}" wx:key="*this" class="think-tab {{segment===index?'on':''}}" data-index="{{index}}" bindtap="switchSegment"><text>{{item}}</text></view>
       </view>
@@ -78,6 +83,7 @@
       <view class="tabbar-space"></view>
     </view>
   </scroll-view>
+  <view class="native-bottom-fade"></view>
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
   <coach-marks></coach-marks>
 </view>

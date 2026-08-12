@@ -90,7 +90,7 @@ Page({
     stage: 'staging',
     stageTabs: [{key:'staging',label:'待整理',count:0},{key:'optimized',label:'已优化',count:0},{key:'confirmed',label:'知识库',count:0}],
     processSteps: PROCESS_STEPS,
-    showLogin: false, loginReason: 'save', authed: false, loading: false, uploading: false, organizing: false, confirming: false, purchasing: '', refreshingForces: false,
+    showLogin: false, loginReason: 'save', authed: false, loading: false, loadFailed: false, uploading: false, organizing: false, confirming: false, purchasing: '', refreshingForces: false,
     uploadText: '', counts: { staging:0,optimized:0,confirmed:0 }, quotaText:'200/200MB', quotaDocs:'0 / 30',
     batches:[], optimizedItems:[], folders:[], sources:[], sourceStats:{bound:0,needed:0,total:0},
     confirmButton:'确认 0 份并写入知识库'
@@ -117,10 +117,13 @@ Page({
     items[index]=Object.assign({},item,{previewOpen:!item.previewOpen});
     this.setData({optimizedItems:items});
   },
+  retry(){this.setData({loadFailed:false});this.load();},
   async load(){
     if(!store.isAuthed())return;
     this.setData({loading:true});
     const [p,d,s]=await Promise.allSettled([api.knowledgePipeline(),api.dataSources(),api.skus()]);
+    // 管道与数据源都没回来 = 网络/服务端问题，给一条可重试的提示条，别把空列表说成「你还没上传」。
+    this.setData({loadFailed:p.status!=='fulfilled'&&d.status!=='fulfilled'});
     const pipe=p.status==='fulfilled'?(p.value||{}):{};
     const counts=pipe.counts||{staging:0,optimized:0,confirmed:0};
     const quota=pipe.quota||{};

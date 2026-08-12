@@ -3,37 +3,66 @@
 @use "../../../src/pages/studio/index.scss" as muster;
 
 /* 锦囊 · 作品页。
-   骨架借战局（.card / .section-label / .pad）与点兵（.agrid / .acard / .ai / .ah / .ap / .ameta）两份既有事实源，
-   本文件只加锦囊自己的横滑作品卡、手艺格识别色与置灰态。类名统一 pch- 前缀，避免与全局撞。
+   骨架借战局的 .card / .section-label / .pad；手艺格与作品流是本页自己的东西，类名统一 pch- 前缀。
 
-   识别色铁律：只落在 38px 图标块上，卡体一律暖纸白卡（.card）——一页里同时出现四五种手艺时，
-   彩色卡体会把整页打成拼贴画，图标块足够完成识别。 */
+   识别靠插画（src/assets/craft/*.jpg，与生成头像同一条资产路子），不靠彩色卡体——
+   一页里同时出现四五门手艺时，彩色卡体会把整页打成拼贴画。卡体一律暖纸白卡。
+
+   尺寸铁律（product-ui-completeness · long content）：卡片宽高全部写死，
+   标题单行截断、角色行两行截断——文案再长都不许把卡撑变形或溢出容器。 */
+
+/* —— 失败重试条：三条通道全塌才出现，只塌一条时各格显示「—」不打扰 —— */
+.pch-retry {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px; padding: 12px 14px;
+}
+.pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
 
 /* —— ① 最近做的：横滑作品流 —— */
 .pouch .pch-flow { width: 100%; margin: 6px 0 var(--rhythm-block); white-space: nowrap; }
 .pouch .pch-track { display: inline-flex; gap: 10px; padding-bottom: 6px; }
 .pch-work {
-  width: 214px; box-sizing: border-box; padding: 14px;
-  display: flex; flex-direction: column; align-items: flex-start;
+  width: 176px; box-sizing: border-box; padding: 9px 9px 11px;
+  display: flex; flex-direction: column; align-items: stretch;
   white-space: normal;
 }
 .pch-work:active { opacity: .82; }
-.pch-w-tag {
-  display: inline-block; padding: 2px 8px; border-radius: 999px;
-  font-size: 10.5px; font-weight: 600; line-height: 1.6;
+/* 缩略图：真实成品图优先（海报签名图 / 成片抽帧），取不到落回插画（js onThumbError）。 */
+.pch-w-thumb {
+  position: relative;
+  width: 100%; height: 106px;
+  border-radius: 9px; overflow: hidden;
+  background: var(--surface-2, #F1EFE8);
 }
-.pch-tag-poster { color: var(--accent); background: var(--accent-soft); }
-.pch-tag-clip { color: #A65B2B; background: #F3E3D5; }
-.pch-tag-report { color: #33373D; background: #EDECE7; }
+.pch-w-img { width: 100%; height: 100%; display: block; }
+.pch-w-tag {
+  position: absolute; left: 6px; bottom: 6px;
+  padding: 2px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; line-height: 1.6;
+  background: rgba(251, 250, 246, .92);
+}
+.pch-tag-poster { color: var(--accent); }
+.pch-tag-clip { color: #A65B2B; }
+.pch-tag-report { color: #33373D; }
 .pch-w-t {
-  display: block; width: 100%; margin-top: 10px;
-  font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.35;
+  display: block; width: 100%; margin-top: 9px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.35;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.pch-w-from { display: block; margin-top: 6px; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.pch-w-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  margin-top: 7px;
+}
+.pch-w-from {
+  flex: 1; min-width: 0;
+  font-size: 10.5px; color: var(--ink-3); line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .pch-w-verb {
-  display: flex; align-items: center; gap: 3px; margin-top: 12px;
-  color: var(--accent); font-size: 12.5px; font-weight: 600;
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 2px;
+  color: var(--accent); font-size: 11.5px; font-weight: 600;
 }
 
 /* —— 空态：不催登录，只指回战局 —— */
@@ -42,24 +71,45 @@
 .pouch-empty .pe-d { font-size: 13px; color: var(--ink-2); line-height: 1.7; }
 .pouch-empty .pe-go { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--accent); font-size: 13px; font-weight: 600; }
 
-/* —— ② 手艺：两列宫格（.agrid/.acard 来自点兵事实源） —— */
-.pouch .pch-grid { margin-top: 10px; }
+/* —— ② 手艺：两列宫格，一门手艺一格 —— */
+.pch-grid {
+  margin-top: 10px;
+  display: flex; flex-wrap: wrap; justify-content: space-between;
+}
+.pch-craft {
+  width: 48.5%; box-sizing: border-box;
+  margin-bottom: 11px; padding: 10px 10px 12px;
+  display: flex; flex-direction: column;
+}
 .pch-craft:active { opacity: .82; }
-.pch-craft .pch-ic { display: flex; align-items: center; justify-content: center; }
-.pch-glyph { font-size: 19px; font-weight: 600; line-height: 1; }
-.pch-ic-clip { background: #F3E3D5; }
-.pch-ic-clip .pch-glyph { color: #A65B2B; }
-.pch-ic-poster { background: var(--accent-soft); }
-.pch-ic-poster .pch-glyph { color: var(--accent); }
-.pch-ic-report { background: #EDECE7; }
-.pch-ic-report .pch-glyph { color: #33373D; }
-.pch-ic-agent { background: var(--accent-soft); }
-.pch-ic-agent .pch-glyph { color: var(--accent); }
-.pch-ic-off { background: #EFEDE7; }
-.pch-ic-off .pch-glyph { color: #B4B0A5; }
-.pch-craft .pch-meta { color: var(--accent); }
+/* 插画贴片：整宽 4:3，圆角收口 + 发丝线，让插画自带的纸底读成「有意为之的贴片」而不是脏底。 */
+.pch-art {
+  width: 100%; height: 92px;
+  border-radius: 9px; overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2, #F1EFE8);
+}
+.pch-art-img { width: 100%; height: 100%; display: block; }
+.pch-c-name {
+  display: block; margin-top: 9px;
+  font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 角色行固定两行高：一行的和两行的卡并排时底边仍然齐平。 */
+.pch-c-role {
+  display: block; margin-top: 4px; height: 34px;
+  font-size: 11.5px; color: var(--ink-3); line-height: 1.45;
+  overflow: hidden;
+}
+.pch-c-meta {
+  display: block; margin-top: 7px;
+  font-size: 11.5px; font-weight: 600; color: var(--accent); line-height: 1.3;
+}
 
-/* 置灰格：不显示价格、不放开通按钮——教育归军师，本页不卖。 */
-.pch-craft.pch-off .ah { color: var(--ink-2); }
-.pch-craft.pch-off .ap { color: #B4B0A5; }
-.pch-craft.pch-off .pch-meta { color: var(--ink-3); }
+/* 置灰格：不显示价格、不放开通按钮——教育归军师，本页不卖。
+   插画同步去饱和，让「还没点亮」一眼可辨，但结构与正常格完全一致。 */
+.pch-craft.pch-off { border-style: dashed; border-color: var(--line-strong); }
+.pch-craft.pch-off .pch-art-img { filter: grayscale(1); opacity: .5; }
+.pch-craft.pch-off .pch-c-name { color: var(--ink-2); }
+.pch-craft.pch-off .pch-c-role { color: #B4B0A5; }
+.pch-craft.pch-off .pch-c-meta { color: var(--ink-3); }

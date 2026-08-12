@@ -9,6 +9,8 @@ const { getToken } = require('../../services/token');
 const { baseData, syncTabBar } = require('../../services/page');
 const { TABS, visualTabs } = require('../../services/tabbar');
 const { chatCore, useStreamRenderer } = require('../../chat-core/behavior');
+// mock 数据档案开关（只有 mock 包渲染角标；非 mock 构建下是死代码）。
+const mockProfile = require('../../services/mockProfile');
 const { GUEST_PRELUDE, FALLBACK_HINTS } = require('../../data/wence-defaults');
 
 const ALIASES = { general: '玄衡', strat: '观澜', growth: '青衍', ip: '鸣璋', ops: '照微', org: '云枢', intel: '察远', fund: '泓策', model: '构衡', brand: '声澜' };
@@ -123,7 +125,7 @@ Page({
     const snapshot = store.snapshot();
     // 先补 overlay 再 syncTabBar：顺序反过来会让 custom-tab-bar 先亮一帧再被浮岛顶掉。
     if (this.data.form === 'chat') store.setOverlay(true, 'wence-isle');
-    this.setData({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, isleTabs: visualTabs(snapshot.themeClass) });
+    this.setData({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, mockProfileLabel: snapshot.mock ? mockProfile.label() : '', isleTabs: visualTabs(snapshot.themeClass) });
     syncTabBar(this, 0);
     this._enterAt = Date.now();
     this.boot(false);
@@ -137,6 +139,10 @@ Page({
     if (this.data.drawerOpen) this.setData({ drawerOpen: false });
   },
 
+  // 数据档案切换后整页重进：问策的会话/提示都在 onShow 链路里成型，reLaunch 比逐个重取干净。
+  switchMockProfile() {
+    mockProfile.switchProfile(() => { wx.reLaunch({ url: '/pages/sessions/index' }); });
+  },
   onUnload() {
     store.setOverlay(false, 'wence-isle');
     store.setOverlay(false, 'wence-drawer');

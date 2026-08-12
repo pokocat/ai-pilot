@@ -132,7 +132,8 @@ function clearOutputRoot() {
 // 不会静默退回 lucide。
 // 新五键 = 2026-08-09 重设计的底栏图标（问策泡/沙盘旗台/点兵名册/锦囊束口袋/主公玉玺）；
 // 老五键仍被报告卡/项目页等处消费，继续按 H5 同源路径发射，不回退 lucide。
-const CUSTOM_TAB_ICONS = ['counsel', 'sandtable', 'muster', 'brocade', 'lord', 'conversation', 'flag', 'token', 'pouch', 'crown'];
+// codex = 图籍专用书册（2026-08-12）；muster 仍要发射——老键在别处消费，且它还是 H5 侧的资产。
+const CUSTOM_TAB_ICONS = ['counsel', 'sandtable', 'muster', 'brocade', 'lord', 'codex', 'conversation', 'flag', 'token', 'pouch', 'crown'];
 function extractIconPaths(names) {
   const source = fs.readFileSync(path.join(APP_ROOT, 'src', 'components', 'Icon', 'index.tsx'), 'utf8');
   const paths = {};

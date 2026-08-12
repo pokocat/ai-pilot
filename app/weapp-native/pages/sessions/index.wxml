@@ -5,7 +5,7 @@
      form==='chat' 走终态「总军师对话即 tab」；其余（control / dock / 字段缺失 / 取数失败）
      一律落到下面那棵现状军师列表，一个节点都不动，灰度回退才有意义。-->
 <view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
-  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <view wx:if="{{isMock}}" class="native-mock-badge" bindtap="switchMockProfile"><text>MOCK · {{mockProfileLabel}}</text></view>
 
   <!-- 合一页头：固定不滚。kicker 位换成对话对象身份（总军师 + 花名 + 在线），
        大字与谋印沿用 TabHeader 度量；这是自绘页头，不是 TabHeader 实例（见 AGENTS §7.2）。-->
@@ -35,7 +35,7 @@
   </view>
 
   <!-- 对话区：滚动容器留在宿主页（scroll-into-view 不进模板，避免流式自动滚底带着整张列表重算）。-->
-  <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll {{coachOn ? 'coach-lift' : ''}}">
+  <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll {{coachOn ? 'coach-lift' : ''}} {{hintText && !chipsSpent && !coachOn && !drawerOpen && !busy && !inputCount && !keyboardHeight ? 'pill-on' : ''}}">
     <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent, chapterPending, chapterPendingLabel, historyHasMore, historyLoading}}"></template>
   </scroll-view>
 
@@ -122,7 +122,7 @@
 </view>
 
 <view wx:else class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
-  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <view wx:if="{{isMock}}" class="native-mock-badge" bindtap="switchMockProfile"><text>MOCK · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad council">

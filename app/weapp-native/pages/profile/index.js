@@ -2,6 +2,8 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
 const { baseData, syncTabBar } = require('../../services/page');
+// mock 数据档案开关（只有 mock 包渲染角标；非 mock 构建下是死代码）。
+const mockProfile = require('../../services/mockProfile');
 
 const MENU_GROUPS = [
   { title: '档案', rows: [
@@ -67,7 +69,7 @@ Page({
   }),
   onShow() {
     const state = store.snapshot();
-    this.setData({ themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock, authed: state.authed });
+    this.setData({ themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock, mockProfileLabel: state.mock ? mockProfile.label() : '', authed: state.authed });
     syncTabBar(this, 4);
     this.load();
   },
@@ -110,15 +112,25 @@ Page({
       serviceReady: Boolean(service), teacherName: service && service.teacherName || '', teacherInitial: service && service.teacherName ? service.teacherName.slice(0,1) : '师', teacherWechat: service && service.teacherWechat || '', teacherNote: service && service.note || '', className: service && service.className || '', groupQrUrl: service && service.groupQrUrl || '', loading: false,
     });
   },
+  switchMockProfile() {
+    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
+  },
   login() { this.setData({ showLogin: true }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
   openIdentity() { navTo('/packages/main/settings/index'); },
   openPlans() { navTo('/packages/work/plans/index'); },
   openCommunity() { navTo('/packages/work/community/index'); },
-  openTeacher() { if (!this.data.serviceReady) { this.openCommunity(); return; } this.setData({ sheet: 'teacher' }); },
-  openGroup() { if (!this.data.serviceReady) { this.openCommunity(); return; } this.setData({ sheet: 'group' }); },
-  closeSheet() { this.setData({ sheet: '' }); },
+  // 未分配服务也照常开这一层：里面有占位与「先去军师社群」的下一步。
+  // 原先直接转跳社群页，等于把「这项服务存在但还没分到人」这句话吞了。
+  // 三个 sheet 都是全屏层，必须 setOverlay 让自定义底栏让位——z-index 压不过微信独立
+  // custom tabbar 层（AGENTS §7.2）；这层历史上一直漏了，二维码底下压着一排 tab。
+  openTeacher() { this._openSheet('teacher'); },
+  openGroup() { this._openSheet('group'); },
+  _openSheet(key) { store.setOverlay(true, 'profile-sheet'); this.setData({ sheet: key }); },
+  closeSheet() { store.setOverlay(false, 'profile-sheet'); this.setData({ sheet: '' }); },
+  onHide() { if (this.data.sheet) this.closeSheet(); },
+  onUnload() { if (this.data.sheet) this.closeSheet(); },
   stop() {},
   copyWechat() { if (!this.data.teacherWechat) return; wx.setClipboardData({ data: this.data.teacherWechat }); },
   previewGroup() { if (this.data.groupQrUrl) wx.previewImage({ urls: [this.data.groupQrUrl] }); },
@@ -134,7 +146,7 @@ Page({
     const item = group && group.rows[Number(event.currentTarget.dataset.index)];
     if (!item) return;
     if (item.action === 'logout') { this.logout(); return; }
-    if (item.action === 'workbench') { this.setData({ sheet: 'workbench' }); return; }
+    if (item.action === 'workbench') { this._openSheet('workbench'); return; }
     navTo(item.route);
   },
   tapGuestMenu(event) {

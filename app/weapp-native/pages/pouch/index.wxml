@@ -5,39 +5,51 @@
     <view class="pad pouch">
       <tab-header title="锦囊" kicker="军师替你出的妙计" glyph="计"></tab-header>
 
-      <!-- ① 最近做的：跨来源混排（方案/海报/成片），按时间倒序最多 10 张。整卡即复出动词。 -->
+      <view wx:if="{{loadFailed}}" class="pch-retry card" bindtap="retry">
+        <text class="pch-retry-t">作品没读出来，网络不畅或服务端在忙</text>
+        <text class="pch-retry-go">重试</text>
+      </view>
+
+      <!-- ① 最近做的：跨来源混排（方案/海报/成片），按时间倒序最多 10 张。整卡即复出动词。
+           标题单行截断、卡宽固定：长标题不许把卡撑变形（product-ui-completeness）。 -->
       <block wx:if="{{recent.length}}">
         <text class="section-label">最 近 做 的</text>
         <scroll-view scroll-x enhanced show-scrollbar="false" class="pch-flow"><view class="pch-track">
           <view wx:for="{{recent}}" wx:key="key" class="pch-work card" data-index="{{index}}" bindtap="openWork">
-            <text class="pch-w-tag {{item.typeClass}}">{{item.typeLabel}}</text>
+            <view class="pch-w-thumb">
+              <image class="pch-w-img" src="{{item.thumb}}" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onThumbError"></image>
+              <text class="pch-w-tag {{item.typeClass}}">{{item.typeLabel}}</text>
+            </view>
             <text class="pch-w-t">{{item.title}}</text>
-            <text class="pch-w-from">出自 · {{item.from}}</text>
-            <view class="pch-w-verb"><text>{{item.verb}}</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view>
+            <view class="pch-w-foot">
+              <text class="pch-w-from">出自 · {{item.from}}</text>
+              <view class="pch-w-verb"><text>{{item.verb}}</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="11"></native-icon></view>
+            </view>
           </view>
         </view></scroll-view>
       </block>
       <!-- 空态（游客或全无作品）：不催登录，只把人指回战局领军令。 -->
-      <view wx:else class="pouch-empty card">
+      <view wx:elif="{{!loading}}" class="pouch-empty card">
         <text class="pe-t serif">还没有作品</text>
-        <text class="pe-d">去战局领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第二次，就归到这里。</text>
+        <text class="pe-d">去战局领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
         <view class="pe-go" bindtap="goBattle"><text>去战局领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
       </view>
 
       <!-- ② 手艺：一门手艺一格。固定子应用三格 + 创意 agents 动态格（上新自动多一格）。 -->
       <text class="section-label">手 艺</text>
-      <view class="agrid pch-grid">
-        <view wx:for="{{crafts}}" wx:key="key" class="acard card pch-craft {{item.locked?'pch-off':''}}" data-index="{{index}}" bindtap="openCraft">
-          <view class="ai pch-ic {{item.iconClass}}"><text class="pch-glyph serif">{{item.glyph}}</text></view>
-          <text class="ah">{{item.name}}</text>
-          <text class="ap">{{item.roleLine}}</text>
-          <text class="ameta pch-meta">{{item.metaLine}}</text>
+      <view class="pch-grid">
+        <view wx:for="{{crafts}}" wx:key="key" class="pch-craft card {{item.locked?'pch-off':''}}" data-index="{{index}}" bindtap="openCraft">
+          <view class="pch-art"><image class="pch-art-img" src="{{item.art}}" mode="aspectFill" lazy-load></image></view>
+          <text class="pch-c-name serif">{{item.name}}</text>
+          <text class="pch-c-role">{{item.roleLine}}</text>
+          <text wx:if="{{authed || item.locked}}" class="pch-c-meta">{{item.metaLine}}</text>
         </view>
       </view>
 
       <view class="tabbar-space"></view>
     </view>
   </scroll-view>
+  <view class="native-bottom-fade"></view>
   <login-sheet open="{{showLogin}}" reason="save" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
   <coach-marks></coach-marks>
 </view>

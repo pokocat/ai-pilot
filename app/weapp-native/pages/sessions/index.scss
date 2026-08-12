@@ -65,10 +65,17 @@
 .wh-rule { height: 1px; margin-top: 14px; background: var(--line); }
 
 /* —— 对话区：滚动容器留在宿主页。上边界随页头实测高度，下边界 = 浮岛(composer + 63) + 14 呼吸 + 44 pill 位 —— */
+/* 滚动区下沿只让开浮岛本体（14 岛距 + 66 tab 行 + 分隔 ≈ composer-height + 85）。
+   提示问题 pill 那 36px 的带子按需让位：pill 不在时不许留空——它是 fixed 定位，
+   不占布局，早先无条件预留 121px 的结果是浮岛上方常年悬着一条纸色空栏（用户反馈「白色遮罩」）。
+   .pill-on 的判据必须与 index.wxml 里 pill 的 wx:if 逐字同源，native-weapp.test.mjs 锁死这一点。 */
 .wence-scroll {
   position: fixed;
   left: 0; right: 0;
   top: var(--wence-head-h);
+  bottom: calc(var(--composer-height) + 85px + env(safe-area-inset-bottom) + var(--keyboard-height));
+}
+.wence-scroll.pill-on {
   bottom: calc(var(--composer-height) + 121px + env(safe-area-inset-bottom) + var(--keyboard-height));
 }
 

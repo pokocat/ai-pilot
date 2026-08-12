@@ -95,7 +95,7 @@ function activePrescriptions(result) {
 
 Page({
   data: baseData({
-    authed: false, onboarded: false, onboardingKnown: false, showLogin: false, loading: false, heroExpanded: false, committing: false,
+    authed: false, onboarded: false, onboardingKnown: false, showLogin: false, loading: false, loadFailed: false, heroExpanded: false, committing: false,
     fortuneOn: false, chart: null, cited: [],
     forcesOpen: false, evidenceOpen: false, reviewOpen: false,
     forceDetails: [], forceSynthesis: null, risks: [], kpi: null,
@@ -110,7 +110,7 @@ Page({
     battleForces: [], pendingDecision: null, verifying: false,
     bizItems: [], bizSaved: false, bizEditing: false, savingBiz: false,
   }),
-  onLoad() { this._backfill = {}; this._orderText = ''; this._orderResultText = ''; this._goalDraft = ''; this._bizDraft = {}; this._forceVerdicts = {}; },
+  onLoad() { this._backfill = {}; this._orderResultText = ''; this._goalDraft = ''; this._bizDraft = {}; this._forceVerdicts = {}; },
   onShow() {
     const state = store.snapshot();
     this.setData({
@@ -134,6 +134,9 @@ Page({
       api.reminders(), api.reviews(), api.bizMetricTemplate(), api.bizMetricSeries(8), api.prescriptions(),
     ]);
     const me = meResult.status === 'fulfilled' ? meResult.value : null;
+    // 判断与案卷两条主干都没回来 = 网络/服务端问题。给一条可重试的提示条，
+    // 否则页面会拿默认文案假装「你还没有判断」——空态和读失败必须分得开。
+    this.setData({ loadFailed: meResult.status !== 'fulfilled' && casefileResult.status !== 'fulfilled' });
     const workbench = workbenchResult.status === 'fulfilled' ? workbenchResult.value : null;
     const decisions = decisionsResult.status === 'fulfilled' ? decisionsResult.value : { stats: { pending: 0 } };
     const casefile = casefileResult.status === 'fulfilled' ? casefileResult.value : null;
@@ -189,7 +192,10 @@ Page({
     const displayOrders = pendingOrders
       .map((item, index) => Object.assign({}, item, { weapon: weapons[index] || null }))
       .concat(doneOrders);
-    const leftoverWeapons = weapons.slice(pendingOrders.length);
+    // 兵器只挂在军令上。没有军令时一条都不单列——否则「还没有军令」的引导卡下面紧跟两张
+    // 兵器卡，页面既在说没事可做又在推工具（用户反馈「两个配了军旗的卡片」）；
+    // 有军令时最多补 2 张，不让富余处方堆成第四个货架。
+    const leftoverWeapons = pendingOrders.length ? weapons.slice(pendingOrders.length, pendingOrders.length + 2) : [];
     const backfill = dossier && dossier.backfill ? dossier.backfill[today()] || null : null;
     this.setData({
       summary, questions, forces, fortuneOn, chart, cited,
@@ -231,6 +237,7 @@ Page({
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
+  retry() { this.setData({ loadFailed: false }); this.load(); },
   // 三个抽屉都是组件式全屏层：必须走 store.setOverlay 隐藏自定义底栏——
   // 单纯 z-index 压不过微信独立 custom tabbar 层（AGENTS §7.2，agent-unlock 踩过）。
   _sheet(field, open) {
@@ -348,10 +355,22 @@ Page({
     } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '保存失败，请重试' }); }
     finally { this.setData({ savingBiz: false }); }
   },
-  inputOrder(event) { this._orderText = event.detail.value; },
+  // 手动加令走 showModal 的 editable 输入框：页内 input 在长滚动页里会被键盘顶走焦点。
   // 没案卷先说清楚，别让用户打完字再吃一个服务端 409（/casefile/orders 与 /casefile/backfill
   // 都要求先有 active casefile）。mock 会当场捏一份空案卷，缺门禁只在真机暴露。
-  async addInlineOrder() { const text = String(this._orderText || '').trim(); if (!text) { wx.showToast({ title: '先写下今天要完成的事', icon: 'none' }); return; } if (!this.data.hasDossier) { wx.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; } try { await api.addOrder(text); this._orderText = ''; await this.load(); } catch (error) { wx.showToast({ title: error.message || '添加失败', icon: 'none' }); } },
+  addOrderByModal() {
+    if (!this.requireLogin()) return;
+    if (!this.data.hasDossier) { wx.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; }
+    wx.showModal({
+      title: '加一条今日军令', editable: true, placeholderText: '今天必须完成的一件事', confirmText: '加入',
+      success: async (result) => {
+        const value = String(result.content || '').trim();
+        if (!result.confirm || !value) return;
+        try { await api.addOrder(value); await this.load(); wx.showToast({ title: '已加入今日军令', icon: 'none' }); }
+        catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '添加失败' }); }
+      },
+    });
+  },
   async toggleOrder(event) {
     const id = event.currentTarget.dataset.id;
     const current = this.data.orders.find((item) => item.id === id);

@@ -10,6 +10,10 @@
         <view class="battle-empty"><text class="battle-empty-title serif">还没有战局判断</text><text class="battle-empty-desc">先和军师说说眼下最难拿主意的事，第一份判断会写在这里。</text><button bindtap="ask">去问策</button></view>
       </block>
       <block wx:else>
+        <view wx:if="{{loadFailed}}" class="pch-retry card" bindtap="retry">
+          <text class="pch-retry-t">判断没读出来，网络不畅或服务端在忙</text>
+          <text class="pch-retry-go">重试</text>
+        </view>
         <view wx:if="{{onboardingKnown&&!onboarded}}" class="guest-notice card">
           <view class="guest-notice-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="17"></native-icon></view>
           <view class="guest-notice-body"><text class="guest-notice-title serif">你的战局还没有建档</text><text class="guest-notice-desc">建档是自愿的；完成三问后，军师会把第一份判断写到这里。</text></view>
@@ -38,7 +42,9 @@
           <view class="task-check" data-id="{{item.id}}" catchtap="toggleOrder"><native-icon wx:if="{{item.done}}" name="check" tone="white" size="15"></native-icon></view>
         </view>
         <view wx:for="{{leftoverWeapons}}" wx:key="id" class="rx-item card" data-id="{{item.id}}" bindtap="openPrescription"><view class="rx-main"><text class="rx-for">为「{{item.problem}}」</text><text class="rx-play">{{item.playbook}}</text></view><view class="rx-cta"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>军师配了兵器</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
-        <view wx:if="{{orders.length}}" class="order-add"><input class="oa-input" placeholder="手动加一条今天的军令" bindinput="inputOrder" /><view class="oa-btn" bindtap="addInlineOrder">加入</view></view>
+        <!-- 手动加令走 showModal 输入：这条 input 原本嵌在长滚动页里，点一下键盘顶起页面、
+             焦点跟着滚走（用户反馈「页面跳走了」）。弹层输入两端行为一致，也少一个输入态。 -->
+        <view wx:if="{{orders.length}}" class="order-add-row" bindtap="addOrderByModal"><native-icon name="plus" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>手动加一条今天的军令</text></view>
 
         <!-- ④ 回填与复盘只出现一次：做完、填数、复盘，次序即页面次序。 -->
         <view class="data-fill"><view class="df-head"><text class="df-t serif">今日数据回填</text><text class="df-s {{backfill?'ok':''}}">{{backfill?'今日已回填':'线索 / 咨询 / 成交'}}</text></view><view class="df-row"><view class="df-cell"><text class="df-label">线索</text><input class="df-input" type="number" value="{{backfill.leads||''}}" data-field="leads" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">咨询</text><input class="df-input" type="number" value="{{backfill.consults||''}}" data-field="consults" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">成交</text><input class="df-input" type="number" value="{{backfill.deals||''}}" data-field="deals" bindinput="inputBackfill" /></view></view><view class="df-save" bindtap="saveBackfill">{{savingBackfill?'保存中…':'保存今日数据'}}</view></view>
@@ -48,6 +54,7 @@
       <view class="tabbar-space"></view>
     </view>
   </scroll-view>
+  <view class="native-bottom-fade"></view>
 
   <!-- 三势合参抽屉（原样保留，刷新判断收进抽屉） -->
   <view wx:if="{{forcesOpen}}" class="force-sheet-mask" bindtap="closeForces" catchtouchmove="stop">

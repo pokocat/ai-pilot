@@ -129,16 +129,39 @@ page .native-ob-head {
   padding: var(--native-nav-top) var(--native-nav-right) 10px 16px;
 }
 
+/* MOCK 角标 = mock 包的数据档案开关（点按切「经营中 / 空态」）。
+   原先钉在状态栏下、且 pointer-events:none —— 位置在胶囊同高、手指够不着，事件也被吃掉，
+   等于一个假按钮。改到底栏胶囊上方左侧（底栏 bottom 14 + 高 66，这里让开到 88），
+   并给足 28px 高的命中区。非 mock 构建不渲染这个节点，线上无影响。 */
 .native-mock-badge {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + 7px);
-  left: 8px;
+  bottom: calc(env(safe-area-inset-bottom) + 88px);
+  left: 12px;
   z-index: 899;
-  padding: 3px 7px;
+  min-height: 26px;
+  padding: 5px 10px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   border-radius: 999px;
-  background: #9C4A38;
+  /* 半透明压深：它落在渐隐带上，内容已淡出，但仍要让人看得见它压住了什么。 */
+  background: rgba(156, 74, 56, .9);
   color: #fff;
-  font: 600 9px/1.2 var(--sans);
-  letter-spacing: .05em;
+  font: 600 10px/1.2 var(--sans);
+  letter-spacing: .04em;
+  box-shadow: 0 3px 10px rgba(22, 25, 29, .18);
+}
+.native-mock-badge:active { opacity: .82; }
+
+/* 底部渐隐：悬浮胶囊底栏与屏幕底缘之间有一条未遮盖的带，内容滚过时会从中穿过、被 home
+   indicator 半切（2026-08-12 DevTools 截图实证，锦囊/图籍最明显）。这里让内容在触到那条带
+   之前先淡出。必须 pointer-events:none，否则会吞掉底部卡片的点击。 */
+.native-bottom-fade {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: 0;
+  height: calc(env(safe-area-inset-bottom) + 92px);
+  z-index: 99;
   pointer-events: none;
+  background: linear-gradient(to top, var(--paper) 0%, var(--paper) 52%, rgba(251, 250, 246, 0) 100%);
 }

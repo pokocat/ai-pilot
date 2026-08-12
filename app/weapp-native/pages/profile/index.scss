@@ -1,5 +1,11 @@
 @use "../../../src/pages/profile/index.scss";
 
+/* 老师 / 班级群未分配时的占位（2026-08-12）：占位框改成纵向图标+文案，
+   次要按钮（先去军师社群）用描边态，不跟已分配态的实心主按钮抢。 */
+/* 占位框比真二维码小一档：留出说明与「先去军师社群」的位置，别把按钮挤出可视区。 */
+.pf-qr.pf-qr-ph { width: 150px; height: 150px; flex-direction: column; gap: 8px; color: var(--ink-3); font-size: 13px; font-weight: 600; }
+.pf-primary.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+
 .profile-empty { padding: 42px 0 18px; text-align: center; }
 .profile-empty-icon { width: 56px; height: 56px; margin: 0 auto; border-radius: 18px; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); }
 .profile-empty-title { display: block; margin-top: 13px; font-size: 15px; font-weight: 600; }

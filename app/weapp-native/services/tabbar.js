@@ -6,12 +6,13 @@
 // 角标数据同样只有一个来源：`store.snapshot().unread`（syncUnread 聚合全部会话未读）。
 
 // 2026-08 IA 重排：沙盘+点兵合并为战局；锦囊改为作品页（pages/pouch，束口袋字形归它）；
-// 原锦囊页（thinktank）改叫图籍，借点兵的名册字形——「册」正是档案义，暂不新画图标。
+// 原锦囊页（thinktank）改叫图籍，用新画的 codex（两册线装书）——点兵那枚 muster 是打勾名册，
+// 语义是「点检」不是「档案」，不合图籍。
 const TABS = [
   { path: '/pages/sessions/index', icon: 'counsel', text: '问策' },
   { path: '/pages/home/index', icon: 'sandtable', text: '战局' },
   { path: '/pages/pouch/index', icon: 'brocade', text: '锦囊' },
-  { path: '/pages/thinktank/index', icon: 'muster', text: '图籍' },
+  { path: '/pages/thinktank/index', icon: 'codex', text: '图籍' },
   { path: '/pages/profile/index', icon: 'lord', text: '主公' },
 ];
 

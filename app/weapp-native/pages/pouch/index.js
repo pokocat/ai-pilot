@@ -18,32 +18,33 @@ const mockProfile = require('../../services/mockProfile');
 
 /** 分类型复出动词（文案铁律，不得改写）：海报「再来一张」、成片「再出一条」、方案「改一版」。 */
 const TYPES = {
-  poster: { label: '海报', verb: '再来一张', tagClass: 'pch-tag-poster' },
-  clip: { label: '成片', verb: '再出一条', tagClass: 'pch-tag-clip' },
-  report: { label: '方案', verb: '改一版', tagClass: 'pch-tag-report' },
+  poster: { label: '海报', verb: '再来一张', tagClass: 'pch-tag-poster', art: '/assets/craft/poster.jpg' },
+  clip: { label: '成片', verb: '再出一条', tagClass: 'pch-tag-clip', art: '/assets/craft/clip.jpg' },
+  report: { label: '方案', verb: '改一版', tagClass: 'pch-tag-report', art: '/assets/craft/report.jpg' },
 };
 
 /**
- * 固定子应用三格。识别色只落在 38px 图标块上，卡体一律暖纸白卡（复用 .card）。
- * countKey 对应 load() 里三条通道的归一化结果；取数失败该格计数显示「—」。
+ * 固定子应用三格。插画（src/assets/craft/*.jpg，随 ASSET_ROOT 拷进产物，与头像同一条路子）
+ * 只承担识别，卡体一律暖纸白卡；countKey 对应 load() 里三条通道的归一化结果。
  */
 const CRAFT_APPS = [
   {
-    key: 'app-clip', name: '快出片', glyph: '片', iconClass: 'pch-ic-clip', countKey: 'clip',
-    roleLine: '你的数字分身念稿，出一条能直接发的成片',
+    key: 'app-clip', name: '快出片', art: '/assets/craft/clip.jpg', countKey: 'clip',
+    roleLine: '你的分身替你出镜，念完稿就是一条能发的片',
     route: '/packages/video/home/index',
   },
   {
-    key: 'app-poster', name: '海报快印', glyph: '报', iconClass: 'pch-ic-poster', countKey: 'poster',
-    roleLine: '一句主张进去，一张能发的主视觉出来',
+    key: 'app-poster', name: '海报快印', art: '/assets/craft/poster.jpg', countKey: 'poster',
+    roleLine: '一句主张进去，一张能贴出去的海报出来',
     route: '/packages/work/gallery/index',
   },
   {
-    key: 'app-report', name: '方案报告', glyph: '案', iconClass: 'pch-ic-report', countKey: 'report',
-    roleLine: '军师定过的方案都在这，改版留痕可回看',
+    key: 'app-report', name: '方案报告', art: '/assets/craft/report.jpg', countKey: 'report',
+    roleLine: '军师定过的方案都在这，改一版留一版',
     route: '/packages/work/library/index',
   },
 ];
+const AGENT_ART = '/assets/craft/agent.jpg';
 
 function safeList(value) { return Array.isArray(value) ? value : []; }
 function text(value) { return String(value == null ? '' : value).trim(); }
@@ -54,9 +55,10 @@ function settled(result) { return result && result.status === 'fulfilled' ? resu
 
 /**
  * 归一化：三条来源各自的形状统一成一张作品小卡。
- * { id, type, title, updatedAt, verb, verbRoute, from } —— 排序只看 updatedAt，展示只看剩下的字段。
+ * thumb 优先用真实成品图（海报签名图 / 成片抽帧），拿不到就落回该类型的插画——
+ * 缺图不留空框（product-ui-completeness：missing media 必须有兜底）。
  */
-function normalize(type, id, title, updatedAt, from, verbRoute) {
+function normalize(type, id, title, updatedAt, from, verbRoute, thumb) {
   const meta = TYPES[type];
   return {
     key: `${type}:${id}`,
@@ -67,12 +69,16 @@ function normalize(type, id, title, updatedAt, from, verbRoute) {
     typeClass: meta.tagClass,
     verb: meta.verb,
     verbRoute,
+    thumb: thumb || meta.art,
+    // 真图 404 / 签名过期时 binderror 换成插画，见 onThumbError。
+    art: meta.art,
   };
 }
 
 /**
  * 海报（GET /creative/posters → CreativePosterListResult）。
  * 只收 succeeded：pending/running 还没有成品，摆进作品流会给出一句「再来一张」却无物可看。
+ * 缩略图走 poster.previewUrl —— 600 秒签名链接，所以本页每次 onShow 都重新取数，不做缓存。
  */
 function posterWorks(payload) {
   return safeList(payload && payload.items)
@@ -81,6 +87,7 @@ function posterWorks(payload) {
       'poster', text(row.jobId), text(row.headline),
       at(row.completedAt || row.createdAt), '海报快印',
       '/packages/work/poster/index',
+      text(row.poster && row.poster.previewUrl),
     ));
 }
 
@@ -96,6 +103,7 @@ function clipWorks(payload) {
       'clip', text(row.id), text(row.title),
       at(row.generatedAt || row.createdAt), '快出片',
       '/packages/video/home/index',
+      text(row.thumbnailUrl),
     ));
 }
 
@@ -107,10 +115,14 @@ function reportWorks(payload) {
       'report', text(row.id), text(row.title),
       at(row.updatedAt), text(row.agentName) || '军师参谋部',
       `/packages/work/report/index?id=${encodeURIComponent(text(row.id))}`,
+      '',
     ));
 }
 
-/** 计数文案：null = 那一路取数失败（或游客没请求），显示「—」而不是骗人的 0。 */
+/**
+ * 计数文案：null = 那一路取数失败，显示「—」而不是骗人的 0；
+ * 游客态整行不渲染（wxml 判 authed），不摆一排「—」让人以为坏了。
+ */
 function countLine(count) {
   if (count == null) return '—';
   return count > 0 ? `${count} 件作品` : '还没有作品';
@@ -127,8 +139,7 @@ function craftFromAgent(agent) {
   const enabled = Boolean(agent.owned) || text(agent.billing) !== 'unlock';
   if (enabled) {
     return {
-      key: `agent-${key}`, name, glyph: name.slice(0, 1),
-      iconClass: 'pch-ic-agent', locked: false,
+      key: `agent-${key}`, name, art: AGENT_ART, locked: false,
       roleLine: text(agent.role) || '创意手艺',
       metaLine: '接着做一件',
       route: `/packages/main/chat/index?agentKey=${encodeURIComponent(key)}&continue=1`,
@@ -136,8 +147,7 @@ function craftFromAgent(agent) {
   }
   const send = encodeURIComponent(`军师还没带我用过「${name}」。先说说它能替我出什么、我现在的案卷用得上吗？`);
   return {
-    key: `agent-${key}`, name, glyph: name.slice(0, 1),
-    iconClass: 'pch-ic-off', locked: true,
+    key: `agent-${key}`, name, art: AGENT_ART, locked: true,
     roleLine: '还没一起用过',
     metaLine: '让军师带你做一次',
     route: `/packages/main/chat/index?agentKey=general&continue=1&send=${send}`,
@@ -146,7 +156,7 @@ function craftFromAgent(agent) {
 
 Page({
   data: baseData({
-    authed: false, loading: false, showLogin: false,
+    authed: false, loading: false, loadFailed: false, showLogin: false,
     recent: [], crafts: [],
   }),
   onShow() {
@@ -183,6 +193,8 @@ Page({
       clip: clips ? clips.length : null,
       report: reports ? reports.length : null,
     };
+    // 三条都塌了 = 网络/服务端问题，给一条可重试的提示条；只塌一条时各格自己显示「—」，不打扰。
+    const loadFailed = authed && posters === null && clips === null && reports === null;
     const recent = []
       .concat(posters || [], clips || [], reports || [])
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -191,13 +203,22 @@ Page({
     const agents = safeList(settled(agentsResult) || store.snapshot().agents);
     const crafts = CRAFT_APPS
       .map((app) => ({
-        key: app.key, name: app.name, glyph: app.glyph, iconClass: app.iconClass,
+        key: app.key, name: app.name, art: app.art,
         locked: false, roleLine: app.roleLine, metaLine: countLine(counts[app.countKey]),
         route: app.route,
       }))
       .concat(agents.filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key)).map(craftFromAgent));
 
-    this.setData({ authed, recent, crafts, loading: false });
+    this.setData({ authed, recent, crafts, loadFailed, loading: false });
+  },
+  retry() { this.setData({ loadFailed: false }); this.load(); },
+
+  /** 真实成品图取不到（签名过期 / 已清理）时换成该类型插画，不留破图。 */
+  onThumbError(event) {
+    const index = Number(event.currentTarget.dataset.index);
+    const item = this.data.recent[index];
+    if (!item || item.thumb === item.art) return;
+    this.setData({ [`recent[${index}].thumb`]: item.art });
   },
 
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据（作品流与手艺格计数一起变）。 */

@@ -27,8 +27,21 @@
 .force-sheet .fs-body{max-height:52vh;}
 
 /* —— 原 studio 补丁（执行区块随迁） —— */
-.execution .exec-deck { margin-top: 2px; }
-.execution .oa-btn { background: var(--accent); }
+/* 取数失败提示条（与锦囊/图籍同款，类名复用便于三处一起改） */
+.pch-retry {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 14px;
+}
+.pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+
+.order-add-row {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 14px;
+  border: 1px dashed var(--line-strong); border-radius: 13px;
+  color: var(--accent); font-size: 13px; font-weight: 600;
+}
+.order-add-row:active { opacity: .8; }
 .task-check text { color: #fff; font-size: 12px; font-weight: 700; }
 .ac-go, .oe-go, .remind-soon { display: flex; align-items: center; gap: 4px; }
 .dv-more { display: flex; align-items: center; gap: 4px; }
@@ -39,12 +52,38 @@
 .da-k, .da-action, .tf-k { color: var(--accent); }
 .da-action { background: var(--accent-soft); }
 
-/* —— 战局重排（对齐设计稿 v5 战局屏）：判断一张牌 / 三势一行 / 兵器挂军令 / 回填→复盘 —— */
+/* —— 战局重排（对齐设计稿 v5 战局屏）：判断一张牌 / 三势一行 / 兵器挂军令 / 回填→复盘 ——
+
+   统一竖向节奏：合并页的区块来自两份 scss，各带自己的 margin，堆在一起就是「间距有点乱」
+   （用户 2026-08-12 反馈）。这里把直接子元素的上下 margin 全部归零，改由容器 gap 统一发号施令，
+   只对少数需要更强分组感的段头单独补一点上间距。改间距只动这一处，别再回各自的 scss 里加 margin。 */
+.pad.home.execution { display: flex; flex-direction: column; gap: 11px; }
+.pad.home.execution > view,
+.pad.home.execution > text,
+.pad.home.execution > button,
+.pad.home.execution > scroll-view { margin-top: 0; margin-bottom: 0; }
+/* 段头（今日军令）前多留一档，让判断区与执行区分开；紧随其后的卡不再额外拉开。 */
+.pad.home.execution > .ohead { margin-top: 7px; }
+/* 页头与今日献策压紧：原先 22px 页头留白 + 两行献策，首屏还没进入判断就吃掉小半屏。 */
+.home .tab-head { margin-bottom: 2px; }
+.home .say-strip {
+  display: flex; align-items: baseline; gap: 8px;
+  padding-bottom: 2px;
+}
+.home .say-k { flex-shrink: 0; }
+.home .say-line {
+  flex: 1; min-width: 0; margin-top: 0; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .bh-ask.solid { background: #F2F1EA; border-radius: 999px; padding: 5px 14px; }
 .bh-ask.solid text { color: var(--accent-deep); font-weight: 600; }
 .bh-foot .bh-ask { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 5px 14px; }
-.bf-compact { margin-top: 4px; }
+/* 三势一行：三张卡等高，强度条一律贴卡底——结论长短不一时条子跟着文字浮动，一排看着是歪的。 */
+.bf-compact { margin-top: 4px; align-items: stretch; }
+.bf-compact .force { display: flex; flex-direction: column; }
 .bf-compact .force-concl { min-height: 0; }
+.bf-compact .force-bar { margin-top: auto; }
 .ohead { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 2px 2px; }
 .ohead-t { font-size: 17px; font-weight: 600; color: var(--ink); }
 .ohead-m { font-size: 12px; color: var(--accent); font-weight: 600; }

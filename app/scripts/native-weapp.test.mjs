@@ -968,7 +968,9 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
   assert.match(tabTable, /pages\/sessions\/index', icon: 'counsel'/);
   assert.match(tabTable, /icon: 'sandtable', text: '战局'/);
   assert.match(tabTable, /pages\/pouch\/index', icon: 'brocade', text: '锦囊'/);
-  assert.match(tabTable, /pages\/thinktank\/index', icon: 'muster', text: '图籍'/);
+  assert.match(tabTable, /pages\/thinktank\/index', icon: 'codex', text: '图籍'/);
+  assert.match(iconSource, /^  codex: '<rect /m, '图籍书册字形必须在 H5 Icon 的 PATHS 里（构建期抽取，抽不到即构建失败）');
+  assert.ok(builder.includes("'lord', 'codex'"), 'codex 必须登记进 CUSTOM_TAB_ICONS，否则不发射主题态 SVG');
   assert.match(tabTable, /icon: 'lord', text: '主公'/);
   const nativeTabs = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.js'), 'utf8');
   assert.match(nativeTabs, /require\('\.\.\/services\/tabbar'\)/, '底栏不得再自留一份 tab 表');
@@ -1087,6 +1089,30 @@ test('原生会话恢复专项军师启用层，方案过期口径不回归', ()
   assert.match(plans, /expired: plan\.id === currentId && isPlanExpired\(option\.expiresAt\)/);
   assert.match(plansWxml, /\{\{current\.expired\?'已到期':'使用中'\}\}/);
   assert.match(plansWxml, /<block wx:else>[\s\S]*?usage&&!usage\.unlimited[\s\S]*?subscription/);
+});
+
+test('问策提示 pill 不在时不留空栏：预留高度与 pill 的显示判据必须逐字同源', () => {
+  const wxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const scss = fs.readFileSync(path.join(sourceRoot, 'pages/sessions/index.scss'), 'utf8');
+
+  // pill 是 fixed 定位、不占布局，滚动区那 36px 只能按需预留。判据写两处（scroll 的 class 与
+  // pill 的 wx:if），必须完全一致——否则会出现「pill 没了、空栏还在」或反过来压住最后一条消息。
+  const expr = "hintText && !chipsSpent && !coachOn && !drawerOpen && !busy && !inputCount && !keyboardHeight";
+  assert.ok(wxml.includes(`class="wence-scroll {{coachOn ? 'coach-lift' : ''}} {{${expr} ? 'pill-on' : ''}}"`), '滚动区必须按同一判据加 pill-on');
+  assert.ok(wxml.includes(`<view wx:if="{{${expr}}}" class="wence-pill`), 'pill 的 wx:if 必须是同一串判据');
+  assert.match(scss, /\.wence-scroll \{[^}]*\+ 85px/s, '默认下沿只让开浮岛本体');
+  assert.match(scss, /\.wence-scroll\.pill-on \{[^}]*\+ 121px/s, 'pill 在时才补那一档');
+});
+
+test('战局/锦囊/图籍：底部渐隐遮罩必须存在且不吞点击', () => {
+  const appStyle = fs.readFileSync(path.join(sourceRoot, 'app.scss'), 'utf8');
+  assert.match(appStyle, /\.native-bottom-fade \{[^}]*pointer-events: none;/s, '渐隐层必须放行点击，否则吞掉底部卡片');
+  for (const page of ['pages/home', 'pages/pouch', 'pages/thinktank']) {
+    assert.match(read(sourceRoot, `${page}/index.wxml`), /<view class="native-bottom-fade"><\/view>/, `${page} 缺底部渐隐`);
+  }
+  // MOCK 角标是数据档案开关，必须可点（历史上它 pointer-events:none 且钉在状态栏下，等于假按钮）。
+  assert.doesNotMatch(appStyle, /\.native-mock-badge \{[^}]*pointer-events: none;/s, 'MOCK 角标不得禁用点击');
+  assert.match(appStyle, /\.native-mock-badge \{[^}]*bottom: calc\(env\(safe-area-inset-bottom\) \+ 88px\)/s, 'MOCK 角标必须落在底栏上方的可点区');
 });
 
 test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，studio 只做过渡跳转', () => {

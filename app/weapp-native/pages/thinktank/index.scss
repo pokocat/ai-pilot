@@ -1,5 +1,13 @@
 @use "../../../src/pages/thinktank/index.scss";
 
+/* 取数失败提示条（2026-08-12）：与锦囊同款，可点重试。空列表与「读不出来」必须分得开。 */
+.think-retry {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px; padding: 12px 14px;
+}
+.think-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.think-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+
 .think-native { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
 .icon-center { display: flex; align-items: center; justify-content: center; }
 .uz-btn { gap: 5px; }
