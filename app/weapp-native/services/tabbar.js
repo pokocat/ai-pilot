@@ -5,11 +5,13 @@
 // 问策 tab 上的那排迟早和其余四个 tab 长得不一样（图标换了、顺序调了只改了一处）。
 // 角标数据同样只有一个来源：`store.snapshot().unread`（syncUnread 聚合全部会话未读）。
 
+// 2026-08 IA 重排：沙盘+点兵合并为战局；锦囊改为作品页（pages/pouch，束口袋字形归它）；
+// 原锦囊页（thinktank）改叫图籍，借点兵的名册字形——「册」正是档案义，暂不新画图标。
 const TABS = [
   { path: '/pages/sessions/index', icon: 'counsel', text: '问策' },
-  { path: '/pages/home/index', icon: 'sandtable', text: '沙盘' },
-  { path: '/pages/studio/index', icon: 'muster', text: '点兵' },
-  { path: '/pages/thinktank/index', icon: 'brocade', text: '锦囊' },
+  { path: '/pages/home/index', icon: 'sandtable', text: '战局' },
+  { path: '/pages/pouch/index', icon: 'brocade', text: '锦囊' },
+  { path: '/pages/thinktank/index', icon: 'muster', text: '图籍' },
   { path: '/pages/profile/index', icon: 'lord', text: '主公' },
 ];
 

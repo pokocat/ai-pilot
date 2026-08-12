@@ -1,0 +1,65 @@
+/* 两份来源都叫 index.scss，同名 namespace 会被 sass 判重；这里显式改名（本文件只取它们的选择器，不取成员）。 */
+@use "../../../src/pages/home/index.scss" as battle;
+@use "../../../src/pages/studio/index.scss" as muster;
+
+/* 锦囊 · 作品页。
+   骨架借战局（.card / .section-label / .pad）与点兵（.agrid / .acard / .ai / .ah / .ap / .ameta）两份既有事实源，
+   本文件只加锦囊自己的横滑作品卡、手艺格识别色与置灰态。类名统一 pch- 前缀，避免与全局撞。
+
+   识别色铁律：只落在 38px 图标块上，卡体一律暖纸白卡（.card）——一页里同时出现四五种手艺时，
+   彩色卡体会把整页打成拼贴画，图标块足够完成识别。 */
+
+/* —— ① 最近做的：横滑作品流 —— */
+.pouch .pch-flow { width: 100%; margin: 6px 0 var(--rhythm-block); white-space: nowrap; }
+.pouch .pch-track { display: inline-flex; gap: 10px; padding-bottom: 6px; }
+.pch-work {
+  width: 214px; box-sizing: border-box; padding: 14px;
+  display: flex; flex-direction: column; align-items: flex-start;
+  white-space: normal;
+}
+.pch-work:active { opacity: .82; }
+.pch-w-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; line-height: 1.6;
+}
+.pch-tag-poster { color: var(--accent); background: var(--accent-soft); }
+.pch-tag-clip { color: #A65B2B; background: #F3E3D5; }
+.pch-tag-report { color: #33373D; background: #EDECE7; }
+.pch-w-t {
+  display: block; width: 100%; margin-top: 10px;
+  font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pch-w-from { display: block; margin-top: 6px; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.pch-w-verb {
+  display: flex; align-items: center; gap: 3px; margin-top: 12px;
+  color: var(--accent); font-size: 12.5px; font-weight: 600;
+}
+
+/* —— 空态：不催登录，只指回战局 —— */
+.pouch-empty { display: flex; flex-direction: column; gap: 8px; margin-bottom: var(--rhythm-block); padding: 22px 18px; }
+.pouch-empty .pe-t { font-size: 18px; font-weight: 600; }
+.pouch-empty .pe-d { font-size: 13px; color: var(--ink-2); line-height: 1.7; }
+.pouch-empty .pe-go { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--accent); font-size: 13px; font-weight: 600; }
+
+/* —— ② 手艺：两列宫格（.agrid/.acard 来自点兵事实源） —— */
+.pouch .pch-grid { margin-top: 10px; }
+.pch-craft:active { opacity: .82; }
+.pch-craft .pch-ic { display: flex; align-items: center; justify-content: center; }
+.pch-glyph { font-size: 19px; font-weight: 600; line-height: 1; }
+.pch-ic-clip { background: #F3E3D5; }
+.pch-ic-clip .pch-glyph { color: #A65B2B; }
+.pch-ic-poster { background: var(--accent-soft); }
+.pch-ic-poster .pch-glyph { color: var(--accent); }
+.pch-ic-report { background: #EDECE7; }
+.pch-ic-report .pch-glyph { color: #33373D; }
+.pch-ic-agent { background: var(--accent-soft); }
+.pch-ic-agent .pch-glyph { color: var(--accent); }
+.pch-ic-off { background: #EFEDE7; }
+.pch-ic-off .pch-glyph { color: #B4B0A5; }
+.pch-craft .pch-meta { color: var(--accent); }
+
+/* 置灰格：不显示价格、不放开通按钮——教育归军师，本页不卖。 */
+.pch-craft.pch-off .ah { color: var(--ink-2); }
+.pch-craft.pch-off .ap { color: #B4B0A5; }
+.pch-craft.pch-off .pch-meta { color: var(--ink-3); }

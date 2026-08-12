@@ -31,7 +31,7 @@ Page({
   retry() { this.load(); },
   setTab(event) { this.setData({ tab: event.currentTarget.dataset.tab }); },
   startChat() { navTo(`/packages/main/chat/index?projectId=${encodeURIComponent(this._id)}&fresh=1`); },
-  goStudio() { wx.switchTab({ url: '/pages/studio/index' }); },
+  goStudio() { wx.switchTab({ url: '/pages/home/index' }); },
   openSession(event) { navTo(`/packages/main/chat/index?sessionId=${encodeURIComponent(event.currentTarget.dataset.id)}`); },
   openReport(event) { navTo(`/packages/work/report/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}`); },
   openKnowledge(event) { navTo(`/packages/work/knowledge/detail/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}`); },

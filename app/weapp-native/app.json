@@ -2,9 +2,10 @@
   "pages": [
     "pages/sessions/index",
     "pages/home/index",
-    "pages/studio/index",
+    "pages/pouch/index",
     "pages/thinktank/index",
-    "pages/profile/index"
+    "pages/profile/index",
+    "pages/studio/index"
   ],
   "subPackages": [
     {
@@ -37,7 +38,11 @@
     },
     "pages/home/index": {
       "network": "wifi",
-      "packages": ["packages/main"]
+      "packages": ["packages/main", "packages/video"]
+    },
+    "pages/pouch/index": {
+      "network": "wifi",
+      "packages": ["packages/work", "packages/video"]
     },
     "pages/profile/index": {
       "network": "all",
@@ -46,10 +51,6 @@
     "pages/thinktank/index": {
       "network": "all",
       "packages": ["packages/work"]
-    },
-    "pages/studio/index": {
-      "network": "wifi",
-      "packages": ["packages/video"]
     },
     "packages/main/chat/index": {
       "network": "all",
@@ -82,9 +83,9 @@
     "backgroundColor": "#FBFAF6",
     "list": [
       { "pagePath": "pages/sessions/index", "text": "问策" },
-      { "pagePath": "pages/home/index", "text": "沙盘" },
-      { "pagePath": "pages/studio/index", "text": "点兵" },
-      { "pagePath": "pages/thinktank/index", "text": "锦囊" },
+      { "pagePath": "pages/home/index", "text": "战局" },
+      { "pagePath": "pages/pouch/index", "text": "锦囊" },
+      { "pagePath": "pages/thinktank/index", "text": "图籍" },
       { "pagePath": "pages/profile/index", "text": "主公" }
     ]
   },

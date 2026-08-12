@@ -1017,6 +1017,26 @@ function creativePosters(cursor, limit) {
   if (rest.length > size && last) result.nextCursor = `${Date.parse(last.createdAt)}:${last.jobId}`;
   return Promise.resolve(result);
 }
+// 成片作品（GET /video/works）：真实端点回**裸 ClipWork 数组**，mock 必须同形，
+// 否则锦囊的归一化在 mock/server 两种模式下走出两套分支。字段照 shared/contracts.d.ts ClipWork。
+const MOCK_CLIP_WORKS = [
+  {
+    id: 'mock-clip-1', projectId: 'mock-clip-project-1', title: '为实体发声 · 张姐开店第 100 天',
+    status: 'published', durationSec: 162, avatarSec: 38, credits: 68,
+    createdAt: '2026-08-09T15:26:00+08:00', generatedAt: '2026-08-09T15:31:00+08:00', aiWatermark: false,
+  },
+  {
+    id: 'mock-clip-2', projectId: 'mock-clip-project-2', title: '今天开门了 · 周三这条',
+    status: 'done', durationSec: 80, avatarSec: 12, credits: 32,
+    createdAt: '2026-08-05T09:12:00+08:00', generatedAt: '2026-08-05T09:15:00+08:00', aiWatermark: false,
+  },
+  {
+    id: 'mock-clip-3', projectId: 'mock-clip-project-3', title: '中秋礼盒预售口播',
+    status: 'generating', durationSec: 45, avatarSec: 20,
+    createdAt: '2026-08-11T20:04:00+08:00', generatedAt: null, aiWatermark: false,
+  },
+];
+function videoWorks() { return Promise.resolve(MOCK_CLIP_WORKS.map((item) => Object.assign({}, item))); }
 function today() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function casefileKey() { return `junshi.dossier.${wx.getStorageSync('junshi.userId') || 'guest'}`; }
 function casefile() { const value = wx.getStorageSync(casefileKey()); if (!value) return Promise.resolve({ casefile: null }); try { return Promise.resolve({ casefile: typeof value === 'string' ? JSON.parse(value) : value }); } catch (_) { return Promise.resolve({ casefile: null }); } }
@@ -1233,6 +1253,7 @@ function raw(path, method, data) {
   if (clean === '/library') return library();
   if (clean === '/reports') return reports();
   if (clean === '/creative/posters') return creativePosters();
+  if (clean === '/video/works') return videoWorks();
   if (clean === '/reminders') return Promise.resolve({ items: [], subscribeReady: false });
   if (clean.startsWith('/reports/')) return report(clean.split('/')[2]);
   if (clean === '/plans' || clean === '/plans/options') return clean.endsWith('options') ? planOptions() : plans();
@@ -1295,7 +1316,7 @@ module.exports = {
   reports, report, reportVersion, library, saveToLibrary, summarize, credits, chart, saveBazi, chartReport, dossier, generateDossier,
   brandKit, generateBrandKit, fateCardPreview, dailyBattleReport, prescriptions, prescriptionAction,
   bizMetricTemplate, bizMetricSeries, saveBizMetrics,
-  creativeStatus, posterBriefDraft, createPosterJob, creativeJob, reviseJob, regenerateJob, cancelJob, creativePosters, raw,
+  creativeStatus, posterBriefDraft, createPosterJob, creativeJob, reviseJob, regenerateJob, cancelJob, creativePosters, videoWorks, raw,
   casefile, addOrder, toggleOrder, removeOrder, saveBackfill, saveGoals, reviews, reviewCasefile,
   refreshForces, decisions, prophecies, progress, verifyDecision, verifyProphecy, disputeDecision, disputeProphecy,
   battleCommit, acceptDeliverable,

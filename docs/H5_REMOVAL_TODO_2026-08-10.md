@@ -103,3 +103,11 @@ find app/weapp-native -name '*.scss' | wc -l                  # → 50
 新分包 `app/weapp-native/packages/video/`，宿主耦合收进单个 `host.js`；服务端最大工作量是视频供应商
 的异步 job 状态机——`server/src/services/creative/visualProvider.ts:9` 明确只支持同步，异步分支被删过）。
 这条线尚未落成实施单。
+
+---
+
+**2026-08-12 追记（IA 重排造成的分叉）**：小程序侧完成五 tab 信息架构重排（战局合并、锦囊改作品页
+`pages/pouch`、图籍接家底，见 `docs/CHANGELOG.md` 同日条目）。H5 侧的 `app/src/app.config.ts`、
+`app/src/custom-tab-bar/index.tsx`、`app/src/pc/main.tsx` **未随改**——H5 的 tab 结构自此与小程序分叉。
+既然本文档已定 H5 移除方向，分叉按「不修复、随移除一并消灭」处理；若 H5 移除计划取消，需回头补齐
+三处同源改动并为 H5 新建 pouch 页面。

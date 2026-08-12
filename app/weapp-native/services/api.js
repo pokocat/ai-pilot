@@ -183,6 +183,10 @@ const api = {
   regenerateJob: (id, body) => isMock() ? mock.regenerateJob(id, body) : request(`/creative/jobs/${query(id)}/regenerate`, { method: 'POST', data: body }),
   cancelJob: (id) => isMock() ? mock.cancelJob(id) : request(`/creative/jobs/${query(id)}/cancel`, { method: 'POST', data: {} }),
   creativePosters: (cursor, limit) => isMock() ? mock.creativePosters(cursor, limit) : request(`/creative/posters?limit=${limit || 20}${cursor ? `&cursor=${query(cursor)}` : ''}`),
+  // 成片作品索引（GET /video/works → ClipWork[]，**裸数组不是 {items}**，见 server/src/routes/video.ts）。
+  // 锦囊作品页要跨来源混排，需要一条与主包 api 同层的通道；快出片分包自己那份 api（packages/video/api.js）
+  // 走 host.js 的独立请求栈，主包页面不该反向依赖分包代码，故在此单独登记一条。
+  videoWorks: () => isMock() ? mock.videoWorks() : request('/video/works'),
   casefile: () => isMock() ? mock.casefile() : request('/casefile'),
   addOrder: (text) => isMock() ? mock.addOrder(text) : request('/casefile/orders', { method: 'POST', data: { text } }),
   toggleOrder: (id) => isMock() ? mock.toggleOrder(id) : request(`/casefile/orders/${query(id)}`, { method: 'PATCH', data: {} }),

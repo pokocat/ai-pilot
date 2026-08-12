@@ -1781,7 +1781,7 @@ const methods = {
       await this.saveReportItem(item, true).catch(() => {});
       wx.hideLoading();
       wx.showToast({ title: result && result.newOrders ? `已生成 ${result.newOrders} 条军令` : '已生成案卷与军令', icon: 'none' });
-      setTimeout(() => wx.switchTab({ url: '/pages/studio/index' }), 650);
+      setTimeout(() => wx.switchTab({ url: '/pages/home/index' }), 650);
     } catch (error) { wx.hideLoading(); store.handleApiError(error, { fallbackTitle: error.message || '案卷生成未成' }); }
     finally { this.safeSetData({ accepting: false }); }
   },

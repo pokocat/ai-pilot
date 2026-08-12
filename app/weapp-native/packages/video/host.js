@@ -73,7 +73,7 @@ function goHost(absolute) { return navTo(absolute); }
 function back(delta) {
   const pages = getCurrentPages();
   if (pages.length > (delta || 1)) { wx.navigateBack({ delta: delta || 1 }); return; }
-  wx.switchTab({ url: '/pages/studio/index' });
+  wx.switchTab({ url: '/pages/home/index' });
 }
 
 /* ── 4. 网络 ────────────────────────────────────────────────────────── */

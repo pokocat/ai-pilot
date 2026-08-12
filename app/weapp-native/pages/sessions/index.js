@@ -22,8 +22,8 @@ const QUICK = [
   { title: '上传经营资料', desc: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index', reason: 'upload' },
   { title: '账号与数据', desc: '账号矩阵、授权与经营数据', url: '/packages/work/bindings/index', reason: 'execute' },
   { title: '生成方案', desc: '把这次对话炼成一份方案', url: '/packages/work/library/index', reason: 'save' },
-  { title: '转成军令', desc: '方案定了，自动拆成今天要做的事', url: '/pages/studio/index', reason: 'execute' },
-  { title: '今日执行', desc: '军令、任务、打卡、复盘', url: '/pages/studio/index', reason: 'execute' },
+  { title: '转成军令', desc: '方案定了，自动拆成今天要做的事', url: '/pages/home/index', reason: 'execute' },
+  { title: '今日执行', desc: '军令、任务、打卡、复盘', url: '/pages/home/index', reason: 'execute' },
 ];
 const PORTRAITS = { general: 'general', strat: 'strat', growth: 'growth', ip: 'ip', ops: 'ops', org: 'org', intel: 'strat', fund: 'org', model: 'growth', brand: 'ip' };
 

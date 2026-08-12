@@ -1,5 +1,5 @@
 const TAB_ROUTES = new Set([
-  '/pages/sessions/index', '/pages/home/index', '/pages/studio/index',
+  '/pages/sessions/index', '/pages/home/index', '/pages/pouch/index',
   '/pages/thinktank/index', '/pages/profile/index',
 ]);
 

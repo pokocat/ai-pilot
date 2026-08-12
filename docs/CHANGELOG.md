@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-12 · 五 tab 信息架构重排：战局合并 / 锦囊改作品 / 图籍接家底 · 影响面：小程序全部 tab 页、tabbar/nav/coach 基建、跨页跳转面
+
+- tab 定稿：问策｜战局（沙盘+点兵合并，`pages/home` 吸收 studio 全部执行区块，判断在上军令在下）｜锦囊（新建 `pages/pouch` 作品页）｜图籍（原 thinktank 收窄为资料+数据源）｜主公。`services/tabbar.js`（图标复用：brocade 归锦囊、muster 归图籍）、`nav.js` TAB_ROUTES、`app.json`（pages/tabBar/preloadRule，video 分包预下载改挂 home 与 pouch）、custom-tab-bar 复盘红点索引 2→1 同步。
+- 三个能力货架全部拆除（战局关联模块卡、点兵创意 agents 宫格、原锦囊能力中心），分发规则「第一次归军师，第二次起归锦囊」：军令处方条（rx-strip）随执行区迁入战局；锦囊手艺格只亮已用过的，置灰格不标价、点击跳问策军师导览。`/modules` 系接口暂无 UI 消费方（见 §13 TODO）。
+- `pages/studio` 降为过渡跳转页（onShow switchTab 战局），接住老分享卡；全仓 10 处 `/pages/studio/index` 跳转按语义改指战局或锦囊。server `journey` 下发的 `'studio'` 语义键在战局页内改为锚点滚动到军令区。
+- 图籍页删除能力中心与方案存档两个 segment（方案归锦囊），游客兜底 segment 2→0；深度整理依赖的 `openSkuPurchase`/`waitSkuApplied`/`api.skus` 保留。
+- 主公：资产组「作品库」行改指锦囊 tab；系统组模块管理行改口径「已启用的兵器 · 管理与续费」；fortuneOn 时档案组补「天时日历」行（命盘/时运从战局首屏迁出，战局三势 sheet 保留情景入口）；游客菜单「军师能力目录」改指锦囊。
+- coach 引导升 v2：STEPS 文案对齐新 tab；键位 v1→v2 + legacyDone 兜底，走完过 v1 的老用户自动补一轮迁移引导，只补一次。
+- H5（`app/src/app.config.ts` 等三处）未同步改版，tab 配置自此与小程序分叉——H5 已排期移除，记录见 `docs/H5_REMOVAL_TODO_2026-08-10.md`。
+
 ### 2026-08-12 · 明确快出片跨服务器生产拓扑与配置归属 · 影响面：部署说明、环境命名、视频服务运维边界
 
 - 明确 `8.136.36.175` 是军师生产宿主机；其上的 `aistareco-clip-preprod :8081` 是与军师预发配套的“共宿主逻辑预发”，不具备独立预发服务器的物理隔离，但也不能按宿主位置冒充 AIStar 生产。

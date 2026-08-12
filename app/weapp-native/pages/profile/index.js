@@ -11,14 +11,15 @@ const MENU_GROUPS = [
     { icon: 'flag', label: '战略账本 · 决策与天机', status: '决策记录', route: '/packages/work/ledger/index' },
   ] },
   { title: '资产', rows: [
-    { icon: 'image', label: '我的作品库 · 历史成品图', status: '海报', route: '/packages/work/gallery/index' },
+    { icon: 'image', label: '锦囊 · 军师替你出的成品', status: '方案 / 海报 / 成片', route: '/pages/pouch/index' },
     { icon: 'spark', label: '我的品牌资产', status: '数字人 / 短视频', route: '/packages/work/brandkit/index' },
     { icon: 'chart', label: '数据授权与隐私', status: '', route: '/packages/work/bindings/index' },
   ] },
   { title: '系统', rows: [
     { icon: 'clock', label: '提醒与日历', status: '', route: '/packages/work/reminders/index' },
     { icon: 'user', label: '设置 · 资料与偏好', status: '', route: '/packages/main/settings/index' },
-    { icon: 'grid', label: '模块管理 · 添加 / 隐藏', status: '', route: '/packages/work/market/index' },
+    // 账单视角的兵器清单：只管「已启用的管理与续费」，不做推荐——分发归军师（兵器条/兵器卡）。
+    { icon: 'grid', label: '已启用的兵器 · 管理与续费', status: '', route: '/packages/work/market/index' },
     { icon: 'lock', label: '退出登录', status: '', action: 'logout' },
   ] },
 ];
@@ -26,7 +27,7 @@ const MENU_GROUPS = [
 const GUEST_GROUPS = [
   { title: '服务', rows: [
     { icon: 'spark', label: '方案与价格', route: '/packages/work/plans/index' },
-    { icon: 'grid', label: '军师能力目录', route: '/pages/thinktank/index' },
+    { icon: 'grid', label: '军师的手艺 · 锦囊', route: '/pages/pouch/index' },
   ] },
   { title: '规则与隐私', rows: [
     { icon: 'doc', label: '用户协议', route: '/packages/main/legal/index?doc=agreement' },
@@ -48,7 +49,10 @@ function list(value) { return Array.isArray(value) ? value : (value && Array.isA
 function buildMenuGroups(completeness, missingCount, fortuneOn) {
   const groups = MENU_GROUPS.map((group) => ({ title: group.title, rows: group.rows.map((row) => Object.assign({}, row)) }));
   groups[0].rows[0].status = missingCount ? `待补 ${missingCount} 项` : `完整度 ${completeness}%`;
-  if (fortuneOn) groups[0].rows.splice(2, 0, { icon: 'trend', label: '命盘报告 · 八字紫微印证', status: '', route: '/packages/work/mingpan/index' });
+  // 命盘/时运从战局首屏迁出后，唯一常驻入口在这里（战局的三势 sheet 仍有情景入口）。
+  if (fortuneOn) groups[0].rows.splice(2, 0,
+    { icon: 'trend', label: '命盘报告 · 八字紫微印证', status: '', route: '/packages/work/mingpan/index' },
+    { icon: 'clock', label: '天时日历 · 时运节奏', status: '', route: '/packages/work/calendar/index' });
   return groups;
 }
 

@@ -307,7 +307,7 @@ Page({
 
   closeSync() { this.setData({ syncOpen: false }); },
   stopTap() {},
-  goStudio() { this.setData({ syncOpen: false }); wx.switchTab({ url: '/pages/studio/index' }); },
+  goStudio() { this.setData({ syncOpen: false }); wx.switchTab({ url: '/pages/home/index' }); },
 
   async shareImage() {
     if (this.data.shareBusy) return;

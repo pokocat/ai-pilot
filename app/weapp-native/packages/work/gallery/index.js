@@ -43,7 +43,7 @@ Page({
   onHide() { this.clearTimer(); },
   onUnload() { this.clearTimer(); },
 
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/studio/index' }) }); },
+  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/pouch/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.loadStatus(); this.loadFirst(); },
 
@@ -100,5 +100,5 @@ Page({
     if (jobId) navTo(`/packages/work/posterJob/index?jobId=${encodeURIComponent(jobId)}`);
   },
   goLibrary() { navTo('/packages/work/library/index'); },
-  goPosterDesigner() { wx.switchTab({ url: '/pages/studio/index' }); },
+  goPosterDesigner() { wx.switchTab({ url: '/pages/pouch/index' }); },
 });

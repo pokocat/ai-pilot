@@ -10,7 +10,7 @@ Page({
   data: baseData({ loading: true, failed: false, order: null, no: 1, steps: [], metrics: [], actionLabel: '', actionHint: '', showLogin: false }),
   onLoad(options) { this._id = options && options.id || ''; this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/studio/index' }) }); },
+  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); this.load(); },
   async load() {
     if (!this._id) { this.setData({ loading: false, failed: true }); return; }
@@ -25,5 +25,5 @@ Page({
     } catch (error) { const kind = store.handleApiError(error, { silent: true }); this.setData({ loading: false, failed: kind !== 'unauthorized', showLogin: kind === 'unauthorized' }); }
   },
   retry() { this.load(); },
-  runAction() { if (this._actionType === 'upload' || this._actionType === 'topics') wx.switchTab({ url: '/pages/thinktank/index' }); else wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/studio/index' }) }); },
+  runAction() { if (this._actionType === 'upload' || this._actionType === 'topics') wx.switchTab({ url: '/pages/thinktank/index' }); else wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
 });
