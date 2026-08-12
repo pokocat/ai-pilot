@@ -145,19 +145,21 @@ function craftFromAgent(agent) {
       route: `/packages/main/chat/index?agentKey=${encodeURIComponent(key)}&continue=1`,
     };
   }
-  const send = encodeURIComponent(`军师还没带我用过「${name}」。先说说它能替我出什么、我现在的案卷用得上吗？`);
+  // 未启用：卡面仍然不带价格（货架铁律），但点击要能真正走到启用——
+  // agentKey 留着给 agent-unlock 用，启用成功后由它带进这位军师的对话（= 军师带你做第一次）。
   return {
     key: `agent-${key}`, name, art: AGENT_ART, locked: true,
+    agentKey: key,
     roleLine: '还没一起用过',
     metaLine: '让军师带你做一次',
-    route: `/packages/main/chat/index?agentKey=general&continue=1&send=${send}`,
+    route: '',
   };
 }
 
 Page({
   data: baseData({
     authed: false, loading: false, loadFailed: false, showLogin: false,
-    recent: [], crafts: [],
+    recent: [], crafts: [], unlockAgent: null,
   }),
   onShow() {
     const state = store.snapshot();
@@ -201,6 +203,8 @@ Page({
       .slice(0, 10);
 
     const agents = safeList(settled(agentsResult) || store.snapshot().agents);
+    // 原始 agent 留一份索引给启用层用（价格只在 agent-unlock 那一刻出现，不进卡面 data）。
+    this._agentsByKey = Object.fromEntries(agents.filter((item) => item && text(item.key)).map((item) => [text(item.key), item]));
     const crafts = CRAFT_APPS
       .map((app) => ({
         key: app.key, name: app.name, art: app.art,
@@ -240,12 +244,26 @@ Page({
     const item = this.data.recent[Number(event.currentTarget.dataset.index)];
     if (item && item.verbRoute) navTo(item.verbRoute);
   },
-  /** 手艺格：正常格直接进手艺，置灰格回总军师做导览（本页不卖）。
-      游客不拦——快出片等子应用对游客开放浏览、对话页游客可进（登录门铁律：
-      浏览不拦，落库/扣费动作由目标页自己把守）。 */
+  /** 手艺格：已启用的直接进手艺；未启用的开启用层（价格只在这一刻出现，卡面永不标价），
+      启用成功后由 agentUnlocked 带进这位军师的对话——第一次仍然是军师带着做。
+      浏览不拦游客；启用是扣费动作，需要登录。 */
   openCraft(event) {
     const item = this.data.crafts[Number(event.currentTarget.dataset.index)];
-    if (item && item.route) navTo(item.route);
+    if (!item) return;
+    if (item.locked && item.agentKey) {
+      if (!this.requireLogin()) return;
+      const agent = this._agentsByKey && this._agentsByKey[item.agentKey];
+      if (agent) { this.setData({ unlockAgent: agent }); return; }
+    }
+    if (item.route) navTo(item.route);
+  },
+  closeUnlock() { this.setData({ unlockAgent: null }); },
+  agentUnlocked(event) {
+    const agent = event.detail && event.detail.agent;
+    this.setData({ unlockAgent: null });
+    if (!agent || !agent.key) { this.load(); return; }
+    this.load();
+    navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(agent.key)}&continue=1`);
   },
   goBattle() { wx.switchTab({ url: '/pages/home/index' }); },
 });

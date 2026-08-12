@@ -79,6 +79,67 @@ function plainInline(value) {
   }
   return text;
 }
+function dayKey(offset) {
+  const date = new Date();
+  date.setDate(date.getDate() + Number(offset || 0));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+function dateLabel(value) {
+  if (value === today()) return '今天';
+  const parts = String(value || '').split('-');
+  return parts.length === 3 ? `${Number(parts[1])}月${Number(parts[2])}日` : String(value || '');
+}
+const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
+/**
+ * 近 7 天军令按天分组（今天在最上）。只收今天往前 6 天，不是「最近七个有记录的日子」——
+ * 打卡机制的前提是日历连续，跳着显示就看不出断没断。
+ */
+function recentOrderGroups(orders) {
+  const groups = new Map();
+  const minDate = dayKey(-6);
+  const maxDate = today();
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (!order || !order.date || order.date < minDate || order.date > maxDate) continue;
+    if (!groups.has(order.date)) groups.set(order.date, []);
+    groups.get(order.date).push(order);
+  }
+  return [...groups.entries()]
+    .sort((left, right) => left[0] < right[0] ? 1 : -1)
+    .map(([date, rows]) => ({
+      date,
+      label: dateLabel(date),
+      doneText: `${rows.filter((item) => item.done).length}/${rows.length}`,
+      orders: rows,
+    }));
+}
+/**
+ * 七日打卡条：固定七格（周一在左），有军令且全完成=满格，部分完成=半格，有令未动=空格，
+ * 无令=虚格。这是页面上唯一的连续性可视化，断了一天要一眼看得见。
+ */
+function weekStrip(orders) {
+  const byDate = new Map();
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (!order || !order.date) continue;
+    if (!byDate.has(order.date)) byDate.set(order.date, []);
+    byDate.get(order.date).push(order);
+  }
+  const cells = [];
+  for (let offset = -6; offset <= 0; offset += 1) {
+    const date = dayKey(offset);
+    const rows = byDate.get(date) || [];
+    const done = rows.filter((item) => item.done).length;
+    const state = !rows.length ? 'none' : done === rows.length ? 'full' : done ? 'part' : 'idle';
+    cells.push({
+      date,
+      weekday: WEEK_CN[new Date(`${date}T00:00:00`).getDay()],
+      dayNum: Number(date.split('-')[2]),
+      state,
+      isToday: offset === 0,
+      countText: rows.length ? `${done}/${rows.length}` : '—',
+    });
+  }
+  return cells;
+}
 const GOAL_FIELDS = [['weekly', '本周'], ['quarterly', '季度'], ['annual', '年度'], ['longTerm', '3-5年']];
 function goalRows(goals) {
   const value = goals && typeof goals === 'object' ? goals : {};
@@ -104,6 +165,9 @@ Page({
     forces: [], questions: [], saying: '谋定而后动，先把主要矛盾看清。', sayingDate: '', dossierTitle: '', refreshing: false,
     // —— 军令区（原点兵，按设计稿收敛：军令带兵器 → 回填 → 复盘抽屉） ——
     streak: 0, reminders: [], pendingDecisions: 0, hasDossier: false, dossierSource: '',
+    // 日 / 周两段：日计划做今天，周计划看连续性——打卡机制的两半，缺一半就没有「别断」的压力。
+    segments: ['今日军令', '本周'], segment: 0,
+    weekGroups: [], weekStrip: [], weekDone: 0, weekTotal: 0,
     orders: [], displayOrders: [], leftoverWeapons: [], backfill: null, savingBackfill: false,
     orderDone: 0, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
     goalRows: goalRows(null), goalEdit: null, goalDraft: '', savingGoal: false,
@@ -182,6 +246,8 @@ Page({
     }));
     this._bizDraft = Object.fromEntries(bizItems.map((item) => [item.key, item.value]));
     const allOrders = dossier && Array.isArray(dossier.orders) ? dossier.orders : [];
+    const weekFrom = dayKey(-6);
+    const weekOrders = allOrders.filter((item) => item && item.date && item.date >= weekFrom && item.date <= today());
     const orders = allOrders.filter((item) => item.date === today());
     const pendingOrders = orders.filter((item) => !item.done).map((item, index) => Object.assign({}, item, { no: index + 1 }));
     const doneOrders = orders.filter((item) => item.done);
@@ -226,10 +292,13 @@ Page({
       bizItems, bizSaved: Boolean(savedMetrics), bizEditing: false, hasDossier: Boolean(dossier),
       dossierSource: plainInline(dossier && dossier.sourceAgent) || '军师',
       orders, displayOrders, leftoverWeapons, orderDone,
+      weekGroups: recentOrderGroups(allOrders), weekStrip: weekStrip(allOrders),
+      weekDone: weekOrders.filter((item) => item.done).length, weekTotal: weekOrders.length,
       goalRows: goalRows(dossier && dossier.goals), backfill,
       loading: false,
     });
   },
+  selectSegment(event) { this.setData({ segment: Number(event.currentTarget.dataset.index) }); },
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据，用来验收满态与空态两种排版。 */
   switchMockProfile() {
     mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });

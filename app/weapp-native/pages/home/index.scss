@@ -35,6 +35,31 @@
 .pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
 
+/* —— 周计划 · 七日打卡条 ——
+   页面上唯一的连续性可视化：断一天必须一眼看得出来，所以七格固定、不压缩、不跳日。 */
+.week-card { padding: 13px 14px; }
+.wk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.wk-k { font-size: 9.5px; letter-spacing: .4em; color: var(--ink-3); }
+.wk-sum { font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.wk-strip { display: flex; justify-content: space-between; margin-top: 12px; }
+.wk-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.wk-wd { font-size: 10px; color: var(--ink-3); }
+.wk-num { font-size: 10px; color: var(--ink-3); }
+.wk-cell.today .wk-wd, .wk-cell.today .wk-num { color: var(--accent); font-weight: 700; }
+.wk-dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  box-sizing: border-box; border: 1.5px solid var(--line-strong);
+}
+.wk-dot.wk-full { background: var(--accent); border-color: var(--accent); }
+/* 半完成：左满右空的对分，比透明度更能在小尺寸上读出「做了一半」。 */
+.wk-dot.wk-part { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.wk-dot.wk-idle { border-color: var(--accent); background: transparent; }
+.wk-dot.wk-none { border-style: dashed; border-color: var(--line-strong); background: transparent; }
+.wk-cell.today .wk-dot { box-shadow: 0 0 0 3px var(--accent-soft); }
+.wk-note { display: block; margin-top: 11px; font-size: 10.5px; line-height: 1.6; color: var(--ink-3); }
+.wg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wg-done { font-size: 11px; font-weight: 600; color: var(--accent); }
+
 .order-add-row {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 44px; padding: 0 14px;

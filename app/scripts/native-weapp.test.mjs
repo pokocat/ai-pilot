@@ -1150,12 +1150,30 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   assert.match(homeWxml, /做完了多少/);
   assert.match(homeWxml, /bindtap="openReminders"/);
 
-  // 手艺格在锦囊：创意 agents 动态格 + 已启用判定 + 置灰格走军师导览（不标价、不放开通按钮）。
+  // 手艺格在锦囊：创意 agents 动态格 + 已启用判定 + 置灰格能真正走到启用。
   assert.match(pouch, /text\(agent\.type\) === 'creative'/);
   assert.match(pouch, /Boolean\(agent\.owned\) \|\| text\(agent\.billing\) !== 'unlock'/, '已启用判定');
-  assert.match(pouch, /agentKey=general&continue=1&send=/, '置灰格点击回问策军师导览');
   assert.match(pouch, /\/packages\/work\/gallery\/index/);
-  assert.doesNotMatch(pouchWxml, /price|costText|开通/, '锦囊不得出现价格与开通（分发铁律）');
+  // 2026-08-12：置灰格原本只跳问策导览，结果创意军师全端无处启用（付费链断在这里）。
+  // 现在点击开 agent-unlock，启用成功后由 agentUnlocked 带进这位军师的对话——
+  // 第一次仍由军师带着做，但路不再是死的。
+  assert.match(pouch, /this\.setData\(\{ unlockAgent: agent \}\)/, '置灰格必须能开启用层');
+  assert.match(pouch, /if \(!this\.requireLogin\(\)\) return;[\s\S]{0,200}unlockAgent/, '启用是扣费动作，先过登录门');
+  assert.match(pouch, /agentUnlocked\(event\)[\s\S]*?agentKey=\$\{encodeURIComponent\(agent\.key\)\}&continue=1/, '启用后进该军师对话');
+  assert.match(pouchWxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.json'), 'utf8')).usingComponents['agent-unlock'], '/components/agent-unlock/index');
+  // 卡面仍然不许出现价格：价格只在 agent-unlock 那一刻出现（组件自己渲染）。
+  assert.doesNotMatch(pouchWxml, /costText|item\.price|\bx\{\{/, '手艺卡不得渲染价格（分发铁律：货架不标价）');
+  assert.doesNotMatch(pouch, /costText|priceText/, '卡面 data 不得带价格字段');
+
+  // 日 / 周两段是打卡机制的两半：日计划做今天，周计划看连续性。删掉任一半都会削弱「别断」。
+  assert.match(home, /segments: \['今日军令', '本周'\]/, '战局必须保留日/周两段');
+  assert.match(home, /function weekStrip\(orders\)/, '七日打卡条是连续性可视化的唯一载体');
+  assert.match(home, /for \(let offset = -6; offset <= 0; offset \+= 1\)/, '打卡条必须按日历连续七格，不能只列有记录的日子');
+  assert.match(home, /function recentOrderGroups\(orders\)/);
+  assert.match(homeWxml, /wx:for="\{\{weekStrip\}\}"/);
+  assert.match(homeWxml, /wx:for="\{\{weekGroups\}\}"/);
+  assert.match(homeWxml, /连续复盘 '\+streak\+' 天/, '连续天数要在周计划里露出');
 
   // 数据通道与 mock 契约不变。
   assert.match(api, /prescriptions:\s*\(\) => isMock\(\) \? mock\.prescriptions\(\)/);

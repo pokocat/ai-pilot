@@ -1173,10 +1173,23 @@ function seedCasefile() {
     judgment: FULL_MAIN_CONTRADICTION,
     risks: ['到店转化没跑通前，不要再加投第二个渠道。'],
     goals: { weekly: '到店率从 18% 提到 25%', quarterly: '单店月营收站上 26 万', annual: '', longTerm: '', updatedAt: now },
+    // 今天 3 条（2 待执行挂兵器 + 1 已办带回填），另有前六天的历史——
+    // 周计划的七日打卡条要能同时展示全办完 / 办一半 / 有令未动 / 当天没出令四种态，
+    // 只种今天的话六格全是虚线，等于看不见打卡机制（2026-08-12 走查发现）。
     orders: [
       { id: 'mock-order-full-1', text: '发一条到店体验的口播视频，挂门店位置', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: false },
       { id: 'mock-order-full-2', text: '把三条老客见证整理成朋友圈素材', from: '海报设计师', tag: '军令 · 海报设计师', date: day, done: false },
       { id: 'mock-order-full-3', text: '给上周留资的 20 位客人逐个回访，约到店', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: true, resultNote: '接通 9 · 约到店 4' },
+      // 昨天：全办完（实心）
+      { id: 'mock-order-d1-1', text: '门口立牌换成到店礼的新文案', from: '海报设计师', tag: '军令 · 海报设计师', date: daysAgo(1), done: true, resultNote: '立牌已换' },
+      { id: 'mock-order-d1-2', text: '给周末到店的 6 位客人发一句回访', from: '增长操盘手', tag: '军令 · 增长操盘手', date: daysAgo(1), done: true, resultNote: '回访 6 · 复购 2' },
+      // 前天：办了一半（半实）
+      { id: 'mock-order-d2-1', text: '拍一条店内环境的短视频', from: '快出片', tag: '军令 · 快出片', date: daysAgo(2), done: true, resultNote: '已发抖音' },
+      { id: 'mock-order-d2-2', text: '整理三条老客好评截图', from: '海报设计师', tag: '军令 · 海报设计师', date: daysAgo(2), done: false },
+      // 三天前：有令未动（空心）
+      { id: 'mock-order-d3-1', text: '把上月客单价拉出来对一遍', from: '经营参谋', tag: '军令 · 经营参谋', date: daysAgo(3), done: false },
+      // 四天前无令（虚线）；五天前：全办完
+      { id: 'mock-order-d5-1', text: '和隔壁商户谈一次联合引流', from: '增长操盘手', tag: '军令 · 增长操盘手', date: daysAgo(5), done: true, resultNote: '谈成 1 家' },
     ],
     backfill,
   };

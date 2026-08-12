@@ -30,7 +30,10 @@
         <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="neutral" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
 
         <!-- ③ 军令区：兵器挂在军令上——AI 应用的主分发位。 -->
-        <view class="ohead"><text class="ohead-t serif">今日军令</text><text class="ohead-m {{committing?'busy':''}}" bindtap="commitBattle">{{committing?'排兵布阵中…':(orders.length?('完成 '+orderDone+' / '+orders.length+' · 让军师重排'):'让军师来拆')}}</text></view>
+        <view class="ohead"><text class="ohead-t serif">{{segment===0?'今日军令':'本周'}}</text><text class="ohead-m {{committing?'busy':''}}" bindtap="commitBattle">{{committing?'排兵布阵中…':(orders.length?('完成 '+orderDone+' / '+orders.length+' · 让军师重排'):'让军师来拆')}}</text></view>
+        <view class="exec-seg"><view wx:for="{{segments}}" wx:key="*this" class="seg-item {{segment===index?'on':''}}" data-index="{{index}}" bindtap="selectSegment">{{item}}</view></view>
+
+        <block wx:if="{{segment===0}}">
         <view wx:if="{{!orders.length}}" class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">还没有军令</text><text class="oe-d">先让总军师把当前判断拆成可执行动作。</text><view class="oe-go"><text>去对话</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
         <view wx:for="{{displayOrders}}" wx:key="id" class="task card {{item.done?'done':''}}" data-id="{{item.id}}" data-text="{{item.text}}" bindtap="openOrder" bindlongpress="removeOrder">
           <view class="task-b">
@@ -45,9 +48,32 @@
         <!-- 手动加令走 showModal 输入：这条 input 原本嵌在长滚动页里，点一下键盘顶起页面、
              焦点跟着滚走（用户反馈「页面跳走了」）。弹层输入两端行为一致，也少一个输入态。 -->
         <view wx:if="{{orders.length}}" class="order-add-row" bindtap="addOrderByModal"><native-icon name="plus" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>手动加一条今天的军令</text></view>
+        </block>
+
+        <!-- 周计划 = 打卡机制：七日连续条在上（断没断一眼看见），按天记录在下。 -->
+        <block wx:else>
+          <view class="week-card card">
+            <view class="wk-head"><text class="wk-k">连 续 七 日</text><text class="wk-sum">{{streak?('连续复盘 '+streak+' 天 · '):''}}本周完成 {{weekDone}} / {{weekTotal}}</text></view>
+            <view class="wk-strip">
+              <view wx:for="{{weekStrip}}" wx:key="date" class="wk-cell {{item.isToday?'today':''}}">
+                <text class="wk-wd">{{item.weekday}}</text>
+                <view class="wk-dot wk-{{item.state}}"></view>
+                <text class="wk-num">{{item.dayNum}}</text>
+              </view>
+            </view>
+            <text class="wk-note">实心=当天军令全办完，半实=办了一部分，空心=有令未动，虚线=当天没出令。</text>
+          </view>
+          <view wx:if="{{weekGroups.length}}" class="week-list card">
+            <view wx:for="{{weekGroups}}" wx:key="date" class="week-group">
+              <view class="wg-head"><text class="wg-date serif">{{item.label}}</text><text class="wg-done">{{item.doneText}}</text></view>
+              <view wx:for="{{item.orders}}" wx:for-item="order" wx:key="id" class="wg-row"><view class="wg-state {{order.done?'ok':''}}"><native-icon wx:if="{{order.done}}" name="check" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><text class="wg-text {{order.done?'done':''}}">{{order.text}}</text></view>
+            </view>
+          </view>
+          <view wx:else class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">近七天还没有军令记录</text><text class="oe-d">连续打卡从第一条军令开始——让军师把判断拆成今天能做的事。</text><view class="oe-go"><text>去对话</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
+        </block>
 
         <!-- ④ 回填与复盘只出现一次：做完、填数、复盘，次序即页面次序。 -->
-        <view class="data-fill"><view class="df-head"><text class="df-t serif">今日数据回填</text><text class="df-s {{backfill?'ok':''}}">{{backfill?'今日已回填':'线索 / 咨询 / 成交'}}</text></view><view class="df-row"><view class="df-cell"><text class="df-label">线索</text><input class="df-input" type="number" value="{{backfill.leads||''}}" data-field="leads" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">咨询</text><input class="df-input" type="number" value="{{backfill.consults||''}}" data-field="consults" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">成交</text><input class="df-input" type="number" value="{{backfill.deals||''}}" data-field="deals" bindinput="inputBackfill" /></view></view><view class="df-save" bindtap="saveBackfill">{{savingBackfill?'保存中…':'保存今日数据'}}</view></view>
+        <view wx:if="{{segment===0}}" class="data-fill"><view class="df-head"><text class="df-t serif">今日数据回填</text><text class="df-s {{backfill?'ok':''}}">{{backfill?'今日已回填':'线索 / 咨询 / 成交'}}</text></view><view class="df-row"><view class="df-cell"><text class="df-label">线索</text><input class="df-input" type="number" value="{{backfill.leads||''}}" data-field="leads" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">咨询</text><input class="df-input" type="number" value="{{backfill.consults||''}}" data-field="consults" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">成交</text><input class="df-input" type="number" value="{{backfill.deals||''}}" data-field="deals" bindinput="inputBackfill" /></view></view><view class="df-save" bindtap="saveBackfill">{{savingBackfill?'保存中…':'保存今日数据'}}</view></view>
 
         <view class="review-entry card" bindtap="openReview"><view class="re-b"><text class="re-t serif">{{streak?('今晚复盘 · 连续 '+streak+' 天'):'今晚复盘'}}</text><text class="re-s">军令 + 数据都在，复盘决定明日军令</text></view><native-icon name="arrow" tone="green" size="16"></native-icon></view>
       </block>
