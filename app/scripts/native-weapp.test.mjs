@@ -135,9 +135,9 @@ test('更换形象显式 mode=avatar 优先于旧 step 路由兼容判断', () =
   assert.match(cloneJs, /const hasExplicitMode = requestedMode === 'voice' \|\| requestedMode === 'avatar'/);
   assert.match(cloneJs, /const mode = hasExplicitMode\s*\? requestedMode\s*:/);
   const avatarWxml = read('weapp-native/packages/video/avatar/index.wxml');
-  assert.match(avatarWxml, /avatar\.imageStatus === 'training' \? '正在云端训练' : '还没有创建形象'/);
-  assert.match(avatarWxml, /avatar\.imageStatus === 'none' \? '上传形象视频'/);
-  assert.match(avatarWxml, /wx:if="\{\{avatar\.imagePreviewUrl\}\}"[^>]+src="\{\{avatar\.imagePreviewUrl\}\}"/);
+  assert.match(avatarWxml, /item\.imageStatus === 'training' \? '正在云端训练' : '还没有创建形象'/);
+  assert.match(avatarWxml, /item\.imageStatus === 'none' \? '上传一段视频即可创建'/);
+  assert.match(avatarWxml, /wx:if="\{\{item\.imagePreviewUrl\}\}"[^>]+src="\{\{item\.imagePreviewUrl\}\}"/);
   const homeWxml = read('weapp-native/packages/video/home/index.wxml');
   assert.match(homeWxml, /avatar && avatar\.imagePreviewUrl/);
 });

@@ -2388,6 +2388,11 @@ export interface ClipScriptMessage {
   at?: string;
   applied?: boolean;
 }
+export interface ClipSubtitleStyle {
+  /** 成片右上角“AI 生成”可见水印；缺省与 false 均表示关闭。 */
+  aiWatermark?: boolean;
+  [key: string]: unknown;
+}
 export interface ClipTemplate {
   id: string; name: string; industry: string; themeKey: string; description: string;
   estDurationSec: number; avatarSecHint: number; creditHint?: number | null; segmentCount: number;
@@ -2401,6 +2406,7 @@ export interface ClipProject {
   variables: Record<string, string>; segments: ClipSegment[];
   shots?: ClipShot[]; scriptChat?: ClipScriptMessage[];
   avatarId?: string | null; voiceId?: string | null; step?: number; updatedAt?: string | number;
+  subtitleStyle?: ClipSubtitleStyle | null;
 }
 export interface ClipScriptChatResult { reply: string; applied: boolean; project: ClipProject; }
 export interface ClipEstimateItem { key: string; label: string; credits: number; freeText?: string; }
@@ -2429,6 +2435,7 @@ export interface ClipAsset {
 export interface ClipWork {
   id: string; projectId?: string | null; title: string; status: 'generating' | 'done' | 'published';
   durationSec: number; avatarSec: number; credits?: number; videoUrl?: string | null; thumbnailUrl?: string | null;
+  aiWatermark?: boolean;
 }
 export interface ClipAvatarView {
   id: string; name: string;

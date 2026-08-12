@@ -36,6 +36,8 @@
               <text class="avp-state">{{item.imageStatus === 'ready' ? '形象已可用' : (item.imageStatus === 'failed' ? '这段视频需要重拍' : (item.imageStatus === 'training' ? '正在云端训练' : '还没有创建形象'))}}</text>
               <text class="avp-date">{{item.imageStatus === 'none' ? '上传一段视频即可创建' : (item.imageTrainedText || '训练完成后可直接出片')}}</text>
               <text class="avp-voice">{{item.linkedVoiceName ? '关联声音 · ' + item.linkedVoiceName : '尚未关联声音'}}</text>
+              <view class="avp-voice-state"><text class="avv-status {{item.voiceStatus}}">{{item.voiceBadgeText}}</text><text class="avp-voice-desc">{{item.voiceDesc}}</text></view>
+              <text wx:if="{{item.voiceCompletedText}}" class="avp-voice-completed">{{item.voiceCompletedText}}</text>
             </view>
           </view>
           <text wx:if="{{item.imageMessage}}" class="avc-message">{{item.imageMessage}}</text>

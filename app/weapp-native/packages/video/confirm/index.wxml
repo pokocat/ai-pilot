@@ -31,7 +31,7 @@
           <view class="vd-portrait cf-thumb">
             <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="inner" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
             <view wx:else class="inner vd-grain"></view>
-            <view class="vd-ai-badge cf-badge">AI 生成</view>
+            <view wx:if="{{aiWatermark}}" class="vd-ai-badge cf-badge">AI 生成</view>
           </view>
           <view class="cf-pv-body">
             <text class="cf-pv-title">{{project.templateName}}</text>
@@ -42,6 +42,17 @@
               <view class="cf-stat"><text class="k">配画面</text><text class="v">{{summary.brollCount}} 段</text></view>
               <view class="cf-stat"><text class="k">结尾固定段</text><text class="v">{{summary.tailSec}} 秒</text></view>
             </view>
+          </view>
+        </view>
+
+        <view class="cf-watermark vd-card">
+          <view class="cf-watermark-copy">
+            <text class="cf-watermark-title">AI 生成水印</text>
+            <text class="cf-watermark-sub">默认关闭；需要时可加到成片右上角</text>
+          </view>
+          <view class="cf-watermark-control">
+            <text class="cf-watermark-state">{{watermarkSaving ? '保存中' : (aiWatermark ? '已开启' : '已关闭')}}</text>
+            <switch checked="{{aiWatermark}}" disabled="{{watermarkSaving}}" color="#C65232" bindchange="toggleAiWatermark"></switch>
           </view>
         </view>
 
@@ -77,7 +88,7 @@
         </view>
 
         <text class="cf-note">
-          成片会带「AI 生成」角标，声音和形象来自你本人授权的分身。出片后不满意可以改文案重出，只按新的出镜时长收费。
+          AI 生成水印默认关闭，只有你主动开启时才会写入成片。声音和形象来自你本人授权的分身；出片后不满意可以改文案重出，只按新的出镜时长收费。
         </text>
       </block>
 
@@ -88,10 +99,10 @@
   <view class="vd-footer">
     <view class="vd-btn ghost" bindtap="prev">上一步</view>
     <view
-      class="vd-btn {{(loading || !quoteReady || problems.length || submitting) ? 'disabled' : ''}}"
+      class="vd-btn {{(loading || !quoteReady || problems.length || submitting || watermarkSaving) ? 'disabled' : ''}}"
       style="flex:1"
       bindtap="submit"
-    >{{loading || !quoteReady ? '等待服务端报价…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分')}}</view>
+    >{{loading || !quoteReady ? '等待服务端报价…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分'))}}</view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

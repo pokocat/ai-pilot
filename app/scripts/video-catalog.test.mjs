@@ -180,3 +180,22 @@ test('多数字人可复用声音，并在配画面时按项目选择且自动�
   assert.match(shotsView, /关联声音会自动带入/);
   assert.match(shotsView, /imagePreviewUrl/);
 });
+
+test('AI 生成水印默认关闭，确认页主动开启后才保存并显示', async () => {
+  const project = await mock.createProject('ct_shiti');
+  assert.equal(project.subtitleStyle.aiWatermark, false);
+
+  const confirmSource = fs.readFileSync(path.join(videoRoot, 'confirm/index.js'), 'utf8');
+  const confirmView = fs.readFileSync(path.join(videoRoot, 'confirm/index.wxml'), 'utf8');
+  const workSource = fs.readFileSync(path.join(videoRoot, 'work/index.js'), 'utf8');
+  const workView = fs.readFileSync(path.join(videoRoot, 'work/index.wxml'), 'utf8');
+  const templateView = fs.readFileSync(path.join(videoRoot, 'template/index.wxml'), 'utf8');
+
+  assert.match(confirmSource, /aiWatermark: false/);
+  assert.match(confirmSource, /api\.saveProject\(this\.data\.projectId, \{ subtitleStyle \}\)/);
+  assert.match(confirmView, /wx:if="\{\{aiWatermark\}\}" class="vd-ai-badge cf-badge"/);
+  assert.match(confirmView, /默认关闭；需要时可加到成片右上角/);
+  assert.match(workView, /wx:if="\{\{work\.aiWatermark\}\}"/);
+  assert.match(workSource, /this\.data\.work\.aiWatermark/);
+  assert.doesNotMatch(templateView, />AI 生成<\/view>/, '模板能力标签不能冒充默认成片水印');
+});

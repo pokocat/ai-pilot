@@ -33,6 +33,7 @@ function buildProject(templateId, id) {
     scriptChat: [],
     avatarId: 'av_mock',
     voiceId: 'vo_mock',
+    subtitleStyle: { aiWatermark: false },
     updatedAt: Date.now(),
   };
 }
@@ -67,15 +68,15 @@ const ASSETS = [
 const WORKS = [
   {
     id: 'cw_mock_1', title: '为实体发声 · 张姐', status: 'generating',
-    progress: 65, stage: 'avatar', etaText: '还要 3 分钟', durationSec: 162, avatarSec: 38,
+    progress: 65, stage: 'avatar', etaText: '还要 3 分钟', durationSec: 162, avatarSec: 38, aiWatermark: false,
   },
   {
     id: 'cw_mock_2', title: '今天开门了 · 周三', status: 'done',
-    durationSec: 80, avatarSec: 12, createdText: '8 月 6 日出片', credits: 32,
+    durationSec: 80, avatarSec: 12, createdText: '8 月 6 日出片', credits: 32, aiWatermark: false,
   },
   {
     id: 'cw_mock_3', title: '为实体发声 · 首条', status: 'published',
-    durationSec: 162, avatarSec: 38, createdText: '7 月 29 日出片', credits: 68,
+    durationSec: 162, avatarSec: 38, createdText: '7 月 29 日出片', credits: 68, aiWatermark: false,
     publishStats: [
       { platform: '抖音', text: '1.2 万播放 · 86 赞' },
       { platform: '视频号', text: '3400 播放 · 12 转发' },

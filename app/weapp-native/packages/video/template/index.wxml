@@ -16,7 +16,7 @@
         <view class="tp-hero-card">
           <view class="vd-portrait tp-hero">
             <view class="inner vd-grain {{template.coverTone}}"><view class="tp-glow"></view><text class="tp-poster-word">STORY</text></view>
-            <view class="vd-ai-badge tp-badge">AI 生成</view>
+            <view class="vd-ai-badge tp-badge">智能模板</view>
             <text class="tp-dur">{{durationText}}</text>
           </view>
           <view class="tp-intro">

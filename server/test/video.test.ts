@@ -116,6 +116,16 @@ test('视频 BFF 返回多数字人和可复用声音，并支持按分身删除
   assert.equal(deleted.body.ok, true);
 });
 
+test('视频 BFF 原样保存默认关闭的 AI 水印偏好', async () => {
+  const token = await login(uniquePhone(), '水印设置用户');
+  const result = await api('PUT', '/api/video/projects/cp_test', {
+    token,
+    body: { subtitleStyle: { aiWatermark: false } },
+  });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.subtitleStyle.aiWatermark, false);
+});
+
 test('初始文案支持连续 AI 对话；测试环境无真实模型时诚实保留原稿', async () => {
   const token = await login(uniquePhone(), '文案对话用户');
   const result = await api('POST', '/api/video/projects/cp_test/script/chat', {

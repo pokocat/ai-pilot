@@ -235,7 +235,7 @@
 .vd-grain.street { background-image: radial-gradient(circle at 78% 28%, rgba(244,214,178,.55) 0 12%, transparent 35%), linear-gradient(150deg, #C9A682 0%, #8A7565 54%, #4A4C4C 100%); }
 .vd-grain.warm { background-image: radial-gradient(circle at 72% 18%, rgba(255,210,164,.65) 0 14%, transparent 35%), linear-gradient(145deg, #C7825A 0%, #8D5E48 52%, #383A39 100%); }
 
-/* ── AI 生成角标（合规硬要求，见方案 §9.1）──────────────────────────── */
+/* ── 画面角标（AI 水印仅在用户主动开启时使用）───────────────────────── */
 
 .vd-ai-badge {
   display: inline-flex; align-items: center; gap: 4px;

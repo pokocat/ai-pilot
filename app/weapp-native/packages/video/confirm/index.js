@@ -20,6 +20,8 @@ Page({
     balance: null,
     afterBalance: null,
     problems: [],
+    aiWatermark: false,
+    watermarkSaving: false,
     submitting: false,
     showLogin: false,
   }),
@@ -58,6 +60,8 @@ Page({
         problems: check.problems,
         balance,
         afterBalance: null,
+        aiWatermark: !!(project.subtitleStyle && project.subtitleStyle.aiWatermark === true),
+        watermarkSaving: false,
       });
 
       // 服务端报价才是扣费口径，端上这份只用于首屏即时显示；拿到服务端结果后覆盖
@@ -86,9 +90,29 @@ Page({
     });
   },
 
+  toggleAiWatermark(event) {
+    if (this.data.watermarkSaving || !this.data.project) return;
+    const previous = this.data.aiWatermark;
+    const aiWatermark = !!(event && event.detail && event.detail.value);
+    const subtitleStyle = Object.assign({}, this.data.project.subtitleStyle || {}, { aiWatermark });
+    this.setData({ aiWatermark, watermarkSaving: true });
+    api.saveProject(this.data.projectId, { subtitleStyle })
+      .then((project) => {
+        this.setData({
+          project,
+          aiWatermark: !!(project.subtitleStyle && project.subtitleStyle.aiWatermark === true),
+          watermarkSaving: false,
+        });
+      })
+      .catch((error) => {
+        this.setData({ aiWatermark: previous, watermarkSaving: false });
+        host.toast(error && error.message ? error.message : '水印设置保存失败');
+      });
+  },
+
   submit() {
     if (!host.requireLogin(this, 'execute')) return;
-    if (this.data.loading || this.data.submitting) return;
+    if (this.data.loading || this.data.submitting || this.data.watermarkSaving) return;
     if (!this.data.quoteReady || !this.data.estimate) { host.toast(this.data.quoteError || '还在核算价格，稍等一下'); return; }
     if (this.data.problems.length) { host.toast(this.data.problems[0].message); return; }
 

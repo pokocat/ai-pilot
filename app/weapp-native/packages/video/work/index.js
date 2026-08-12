@@ -1,8 +1,6 @@
 // 屏 09 · 成片详情。竖屏播放器 + 保存相册 + 一键代发 + 再出一条。
 //
-// 两处合规硬要求（方案 §9.1）：
-//   · 播放器上必须常驻「AI 生成」角标；
-//   · 代发前要让用户知道成片带 AI 标识。这不是可选项，是《深度合成管理规定》的要求。
+// 水印跟随项目 subtitleStyle.aiWatermark；缺省关闭，只有用户主动开启才显示并随成片保留。
 //
 // 代发平台边界（方案 §11.11）：真正可发只有 抖音 / 快手 / 小红书 / 视频号，
 // 其余平台在 aidrama 侧会 501。**产品文案不要承诺「全平台一键发布」。**
@@ -88,7 +86,9 @@ Page({
     if (!platform || this.data.publishing) return;
     host.confirm({
       title: `发布到${platform.label}`,
-      content: '成片会保留「AI 生成」标识，并提交到对应平台审核。确定继续吗？',
+      content: this.data.work && this.data.work.aiWatermark
+        ? '成片会保留你已开启的「AI 生成」水印，并提交到对应平台。确定继续吗？'
+        : '将把这条成片提交到对应平台。确定继续吗？',
       confirmText: '确认发布',
     }).then((ok) => {
       if (!ok) return;
