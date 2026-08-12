@@ -450,6 +450,16 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.match(c.calls[1].system, /别把信息文字标成装饰/, '打磨轮最容易发生"给信息文字贴 decor 逃逸"');
   });
 
+  // 2026-08-12 三方出图对比实锤：没给二维码素材时，两版引擎都自己画了个"像二维码"的方块阵。
+  // 扫出来是空的 —— 对外物料上的假码是信任事故。量测器拦不住（qr_quiet_zone 只认
+  // <img data-role="qr">，手画的 SVG 方块阵在它眼里就是普通图形），只能在提示词里堵。
+  test('没有二维码素材 → 提示词显式禁止自己画一个像二维码的图案', async () => {
+    const c = stubComplete([okHtml('a'), okHtml('b')]);
+    await runEngine(c.fn, stubRender([[], []]).fn);   // assets 为空 = 没给二维码
+    assert.match(c.calls[0].system, /不许自己画一个像二维码的东西/);
+    assert.match(c.calls[0].system, /扫出来是空的|印在对外物料上就是欺骗/);
+  });
+
   test('提供二维码素材 → 提示词要求 data-role="qr" 与白底静区', async () => {
     const c = stubComplete([okHtml('a'), okHtml('b')]);
     await generateCanvasPoster(
