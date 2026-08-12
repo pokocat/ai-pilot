@@ -1133,6 +1133,12 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
   o: {
     system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
     signal?: AbortSignal; usageMeta?: UsageMeta;
+    /**
+     * 单次请求挂钟超时，覆盖全局 `OPENAI_TIMEOUT_MS`（缺省 60s）。与 completeText 上的同名参数同因：
+     * 长产出（海报宣言 4–6 段中文 + JSON 壳，还开着思考）跑不进 60s → structured 返回 null →
+     * 调用方判「产出不完整」→ 悄悄回落。缺省不传 = 老行为。
+     */
+    timeoutMs?: number;
   },
 ): Promise<StructuredOutcome<z.output<S>>> {
   let attempts = 0;
@@ -1142,8 +1148,13 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     const lp = liveProvider(base);
     if (!lp) return { data: null, attempts: 0, live: false };
     live = true;
-    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
-      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+    const cfg: ResolvedAiConfig = (o.temperature != null || o.model || o.timeoutMs)
+      ? {
+        ...base,
+        ...(o.temperature != null ? { temperature: o.temperature } : {}),
+        ...(o.model ? { model: o.model } : {}),
+        ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+      }
       : base;
     const user = o.user.slice(0, o.maxChars ?? 4000);
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
@@ -1186,7 +1197,7 @@ export async function structured<S extends z.ZodTypeAny>(
   schema: S,
   o: {
     system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
-    signal?: AbortSignal; usageMeta?: UsageMeta;
+    signal?: AbortSignal; usageMeta?: UsageMeta; timeoutMs?: number;
   },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;

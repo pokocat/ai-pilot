@@ -19,6 +19,14 @@ import type { BrandKitView } from '../../../../shared/contracts';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * 宣言这一轮的挂钟上限，覆盖全局 `OPENAI_TIMEOUT_MS`（60s）。
+ * 它要写 4–6 段中文长文 + JSON 壳，高级档还多一段影像路线要求；实测 60s 不够，
+ * 而超时的现象是「宣言不可用 → 整条 AI 路径回落模板」，从画面上完全看不出发生了什么。
+ * 120s 是宣言的量级（比整页 HTML 短得多），不必给到创作轮那么宽。
+ */
+const MANIFESTO_TIMEOUT_MS = 120_000;
+
 // 上游 → 本提示词的移植对照（改动这段时保持这层对应关系可查）：
 //   "Write a manifesto for an art movement"                  → 【产物】第一句
 //   "Name the movement (1-2 words)"                          → movement 字段约束
@@ -244,6 +252,10 @@ export async function generateManifesto(opts: {
       //   远超 700 —— 2026-07-30 生产实锤被拦腰截断，首轮与纠错轮一起截，structured 恒 null，
       //   AI 排版引擎 100% 静默回落模板（错误话术只说「产出不完整」，实际是这里）。
       maxTokens: 2600,
+      // 同 canvasEngine 的理由：全局 OPENAI_TIMEOUT_MS 是 60s，而这一轮要产出 4–6 段中文宣言
+      // （高级档还多一段影像路线要求），实测跑不进 60s → structured 返回 null → 整条 AI 路径
+      // 判「宣言不可用」→ 悄悄回落模板。这条超时只作用于本次调用，不动全局。
+      timeoutMs: MANIFESTO_TIMEOUT_MS,
     });
   } catch (err) {
     console.warn('[creative] 宣言生成失败：', (err as Error).message);
