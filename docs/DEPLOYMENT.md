@@ -501,6 +501,32 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 
 ### 8.1 「快出片」额外上线闸
 
+#### 当前生产 / 预发拓扑（宿主机与逻辑环境必须分开判断）
+
+`8.136.36.175` 是**军师生产宿主机**，但环境归属不能只按物理机器判断：这台机器同时运行军师生产，以及一套只接受军师预发流量的 AIStar Clip 逻辑预发实例。它属于“共宿主的逻辑预发”，不是独立预发服务器；因此有资源争抢和宿主故障同时影响两边的风险，但也不能因为进程落在生产宿主机上就把它当成 AIStar 生产。
+
+| 链路 | 军师服务 | AIStar Clip 服务 | 实际调用方式 | 环境结论 |
+|---|---|---|---|---|
+| 生产 | `junshi-api`，`8.136.36.175` | `aistareco-server`，`47.98.162.120` | `AIDRAMA_CLIP_BASE_URL=https://api.aibuzz.cn`，公网 HTTPS 跨服务器调用 | 军师生产 → AIStar 生产 |
+| 预发 | `junshi-api-preprod :4001`，`8.136.36.175` | `aistareco-clip-preprod 127.0.0.1:8081`，同在 `8.136.36.175` | 本机回环，仅预发 BFF 可访问 | 共宿主的逻辑预发 |
+
+生产当前**确实是跨服务器公网 HTTPS 调用**，不是走本机 `:8081`。但两台 ECS 已在同一 VPC `/20`：军师私网地址为 `172.30.184.223`，AIStar 私网地址为 `172.30.184.224`。目标拓扑应保留两台机器的资源隔离，把军师生产回源改成只允许 `172.30.184.223 → 172.30.184.224` 的私网入口，而不是继续绕公网，也不是把 AIStar Clip 生产挤进军师宿主机。
+
+2026-08-12 只读资源核验显示，军师宿主为 4 核 / 7.3 GiB、无 Swap、可用内存约 1.4 GiB；现有 `aistareco-clip-preprod` Java 已常驻约 644 MiB，FFmpeg 出片还会产生瞬时 CPU/内存/磁盘压力。因此当前**不具备再常驻一套 Clip 生产的安全余量**。若未来确需同机，必须先扩容并完成资源限额、生产数据与存储迁移、systemd/env/端口隔离、service token 轮换、回滚和压力验收；不得改进程名称或直接复用 `aistareco-clip-preprod` 冒充生产迁移。
+
+#### 服务与配置归属
+
+视频能力不是“所有后端与配置都在 AIStar Clip”。当前边界是：军师负责用户与商业入口，AIStar Clip 负责视频领域和生成引擎，石榴 AI 是 AIStar Clip 的上游供应商。
+
+| 归属 | 负责内容 | 主要配置 / 真源 |
+|---|---|---|
+| 军师小程序 | 模板浏览、脚本/镜头编辑、上传与播放交互；不保存任何服务端密钥 | 构建环境只指向军师 `/api` 或 `/api_preprod` |
+| 军师 BFF | 军师 JWT 与租户隔离、`externalOwnerId` 映射、AI 对话式改稿、文本/媒体审核、上传限流、军师积分预扣/结算/退款、微信训练完成通知、审计 | `AIDRAMA_CLIP_BASE_URL/SERVICE_TOKEN/TIMEOUT_MS/ALLOW_PRIVATE_NET`；`CLIP_MEDIA_MODERATION_*`、`ALIYUN_GREEN_*`；`WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID`；军师自己的 LLM/积分/套餐配置 |
+| AIStar Clip | 模板/项目/素材/数字人/声音/任务/作品数据，石榴 speaker/avatar/TTS/video 调用与轮询，ffprobe 采集校验，抽帧/封面，FFmpeg 竖屏总装、字幕/BGM/水印、质量门、持久化与回收 | `AEP_CLIP_SERVICE_TOKEN`；`AEP_CLIP_SHILIU_BASE_URL/TOKEN`；`AEP_CLIP_PRICE_*`；`AEP_CLIP_STALE_MS/MAX_ASSET_BYTES/MAX_AVATAR_SEGMENT_SEC/TRASH_RETENTION_DAYS`；`AEP_CLIP_MIN/MAX_*` 质检阈值；AIStar 自身 DB/对象存储/CDN/FFmpeg 运行配置 |
+| 石榴 AI | 声音克隆、数字人训练、TTS、音频驱动视频等供应商任务 | 凭据只由 AIStar Clip 服务端持有，军师与小程序不直连 |
+
+两边唯一需要成对一致的是服务间 token：军师的 `AIDRAMA_CLIP_SERVICE_TOKEN` 对应 AIStar 的 `AEP_CLIP_SERVICE_TOKEN`。除此之外，配置应落在真正执行该职责的服务中，禁止把石榴 token 下发到军师小程序，或把军师用户 JWT 转发给 AIStar。
+
 - 军师服务端必须配置 `AIDRAMA_CLIP_BASE_URL`、与 AIStar 完全一致的高强度 `AIDRAMA_CLIP_SERVICE_TOKEN`，以及合理的 `AIDRAMA_CLIP_TIMEOUT_MS`；仅受控 VPC 回源才允许 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。
 - AIStar 必须配置 `AEP_CLIP_SERVICE_TOKEN`、石榴 base URL/token、三项非空定价、素材上限与任务超时；production/mysql 环境禁止 `AEP_CLIP_ALLOW_MOCK=true`。官方真实 BaseURL 是 `https://api.16ai.chat/api/v1/`（`api.16ai.vip` 是文档站）；token 只进 0600 运行时 env，不进库、不进日志。
 - 预发固定为同机隔离实例 `aistareco-clip-preprod`（`127.0.0.1:8081`、`/opt/aistareco-clip-preprod`、`/etc/aistareco/clip-preprod.env`），军师预发 BFF 配 `AIDRAMA_CLIP_BASE_URL=http://127.0.0.1:8081` 与 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。Nginx 只允许 `/clip_preprod/cdn|files/`，不得把 AIStar `/api/**` 整段公开。

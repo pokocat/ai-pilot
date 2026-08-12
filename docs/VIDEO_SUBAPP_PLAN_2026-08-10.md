@@ -18,7 +18,7 @@
 - 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
 - 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段可显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 必须再显式设置 `CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION=true`，审计 provider 标为 `operator-bypass`。待正确账号开通内容安全并授权专用身份后，两个开关必须同时恢复为 false。
 - AIStar v0.113 预发已完成逐段 avatar/b-roll 标准化、真实 TTS 时长、H.264/AAC 多段总装、可选低音量 BGM、字幕与全程 AI 标识、三套模板各自的运行时固定品牌尾卡、最终音轨 -16 LUFS / -1.5 dBTP 归一、平均亮度/综合响度/真峰值失败关闭和作品缩略图。预发宿主 180 秒 720×1280 合成探针得到平均亮度 125.50、-16.05 LUFS、单音轨并通过解析；这只证明宿主编解码/滤镜链路，不替代本人授权真实长片压力验收。
-- 预发采用同机隔离拓扑：军师 `junshi-api-preprod :4001` 通过独立 service token 回源 `aistareco-clip-preprod 127.0.0.1:8081`，公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`，AIStar 生产未修改。
+- 预发采用同机隔离拓扑：`8.136.36.175` 虽然是军师生产宿主机，但其中的军师 `junshi-api-preprod :4001` 只通过独立 service token 回源同机 `aistareco-clip-preprod 127.0.0.1:8081`，所以这是**共宿主的逻辑预发**而非独立预发服务器；公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`。军师生产不走该实例，而是通过 `https://api.aibuzz.cn` 跨服务器调用 `47.98.162.120` 上的 AIStar 生产。
 - v0.117 已部署军师 `f6cb58d` 与 AIStar `b5140a8a-20260811T132756Z`；两服务 active、`NRestarts=0`，AIStar 关闭 force-mock 并走真实石榴。AIStar 与公网军师 BFF 的 requirements 均返回形象硬门 5 秒/建议 10–20 秒、声音供应商硬门 2 秒/端上硬门 3 秒/建议 8–15 秒；自动化没有创建计费任务。AppID `wx810ebe6dfef8e75f` 已收到构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / f6cb58d` 的 auto-preview。
 - 隔离预发公网验收已完成：素材上传 → 本人授权 → 声音/形象克隆 → 三套内置模板 → 文案/配画面 → 权威报价 → 军师积分预扣/结算 → AIStar worker → ffmpeg 总装/质检/封面 → 作品 → 抖音 mock 发布状态全部成功。样本成片 44.05 秒、720×1280、H.264/AAC，抽帧可见「测试演示」「AI 生成」和字幕；该次 force-mock 未调用石榴。随后以 server 模式指向预发完成 AppID `wx810ebe6dfef8e75f` 真机 auto-preview。
 - 非生产 mock 可以闭环演示；纯 `api.isMock()` 会话使用 200 点演示额度，避免主应用默认无套餐的新 mock 账号在确认页被 0 余额挡住。隔离预发还可令 AIStar 显式 force-mock：保留真实石榴凭据但以确定性媒体走真实 ffmpeg/质检/存储链，产出永久带「测试演示」的可播放 MP4，不用状态假成功。附身 JWT / server 模式不使用演示额度。production 仍硬拒绝 AIStar force-mock；媒体审核旁路仅在军师双开关明确授权时生效。四平台真实代发仍保持 `CLIP_PUBLISH_NOT_CONFIGURED`。
@@ -115,6 +115,20 @@ app/weapp-native/packages/video/
                          │
                          └── 军师自己的 credits 扣费、OSS、moderation
 ```
+
+当前生产链路是跨服务器公网 HTTPS：`8.136.36.175 / junshi-api` → `https://api.aibuzz.cn` → `47.98.162.120 / aistareco-server`。当前预发才走 `8.136.36.175` 内部的 `junshi-api-preprod :4001` → `127.0.0.1:8081 / aistareco-clip-preprod`。物理宿主和逻辑环境是两层概念；同机预发共享生产宿主资源，不能算严格物理隔离，但其流量、数据库、env、端口和 service token 均按预发隔离，也不能当作 AIStar 生产。
+
+**目标不是把两个生产进程塞到同一台机器，而是同 VPC 私网回源。**两台 ECS 已在同一 `172.30.176.0/20` 网络，军师为 `172.30.184.223`、AIStar 为 `172.30.184.224`。军师宿主当前只有 4 核 / 7.3 GiB、无 Swap、可用内存约 1.4 GiB，现有 Clip 预发 Java 已常驻约 644 MiB；再叠加生产 Java 和 FFmpeg 峰值会直接威胁军师 API。后续应在 AIStar 生产机提供仅允许军师私网源地址访问的 Clip 内网入口，再切军师生产回源；保留两机资源隔离，同时消除公网绕行。
+
+**职责与配置真源**：
+
+| 层 | 负责什么 | 配置放在哪里 |
+|---|---|---|
+| 军师 BFF | 用户鉴权/租户、AI 对话式改稿、文本与媒体审核、积分 hold/settle/refund、微信训练通知、审计和限流 | 军师运行时 env：`AIDRAMA_CLIP_*`、`CLIP_MEDIA_MODERATION_*`、`ALIYUN_GREEN_*`、`WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID`，以及军师 LLM/套餐/积分配置 |
+| AIStar Clip | clip 模板、项目、素材、数字人、声音、任务、作品；石榴调用；ffprobe 校验、抽帧、FFmpeg 总装、字幕/BGM/标识、质检、持久化和回收 | AIStar 运行时 env：`AEP_CLIP_SERVICE_TOKEN`、`AEP_CLIP_SHILIU_*`、`AEP_CLIP_PRICE_*`、任务/素材/回收/质检阈值，以及 AIStar DB/存储/CDN/FFmpeg 配置 |
+| 石榴 AI | speaker/avatar/TTS/video 等供应商任务 | token 只在 AIStar Clip；军师和小程序均不直连 |
+
+所以“生成引擎和视频领域数据主要在 AIStar Clip”是对的，但“视频功能的所有后端服务和配置都在 AIStar Clip”不对。军师 BFF 仍是用户、商业账、审核和通知的权威入口；两边只共享一对服务间 token 映射，军师用户 JWT 不下发给 AIStar，石榴 token 也不进入军师或小程序。
 
 - 小程序**不用加合法域名**（还是打 wxapi.aibuzz.cn）
 - 鉴权不用换票：军师 server 认自己的 token，转发时用服务账号身份调 aidrama
