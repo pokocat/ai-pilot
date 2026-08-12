@@ -107,10 +107,65 @@ type ImagesResponse = {
   id?: unknown; task_id?: unknown; output?: { task_id?: unknown; task_status?: unknown };
 };
 
-/** OpenAI images 兼容适配器。 */
-class OpenAiCompatibleVisualProvider implements VisualProvider {
-  readonly name = 'openai_images';
-  constructor(private cfg: CreativeRuntimeConfig) {}
+/**
+ * 按方言拼请求体。**纯函数**（不碰网络），所以三家的协议差异可以零 IO 单测钉住 ——
+ * 这些差异全都是「填错了才发现」的类型，靠一次次真调去试太贵。
+ *
+ * 共同约定：`extraParams` 先铺底、显式字段后覆盖。运营可以用参数模板补厂商专有项，
+ * 但**不能借它改掉由业务决定的字段**（prompt/model/size，以及方舟那个 watermark）。
+ */
+export function buildVisualBody(cfg: CreativeRuntimeConfig, req: VisualRequest): Record<string, unknown> {
+  const withNegative = req.negativePrompt ? `${req.prompt}\n【排除】${req.negativePrompt}` : req.prompt;
+  const base = { ...cfg.visual.extraParams };
+
+  if (cfg.visual.dialect === 'ark_seedream') {
+    return {
+      ...base,
+      model: cfg.visual.model,
+      prompt: req.prompt,
+      // 方舟原生支持负向提示词 —— 拼进正向 prompt 里是下策（模型经常把"不要 X"读成"要 X"）。
+      ...(req.negativePrompt ? { negative_prompt: req.negativePrompt } : {}),
+      size: cfg.visual.size,
+      response_format: 'b64_json',
+      // ★ watermark 必须显式 false，且**刻意放在 extraParams 之后**：方舟这个参数默认 true，
+      //   一张右下角印着供应商水印的付费海报是直接不能交付的。这不是运营可选项。
+      watermark: false,
+      // 输出 jpeg：2K 的 PNG base64 逼近 10MB 上限，而这张图只是排版层底下的背景，
+      // 最终成品还要由渲染器重新编码成 PNG，中间这一道无损没有意义。
+      output_format: 'jpeg',
+      // 关掉提示词优化：imagePrompt 那套骨架已经把景别/光线/构图写死了（含"画面内不得有文字"），
+      // 让模型再改写一遍等于把这些约束交回给它自己 —— 无文字这条一旦被改写掉，整张图就废了。
+      optimize_prompt: false,
+    };
+  }
+
+  if (cfg.visual.dialect === 'gpt_image') {
+    return {
+      ...base,
+      model: cfg.visual.model,
+      prompt: withNegative,   // gpt-image-1 没有负向字段，只能拼进正向
+      size: cfg.visual.size,
+      // ★ 绝不能带 response_format：gpt-image-1 对这个参数直接 400（它恒定返回 b64）。
+      //   这正是"通用适配器打所有家"会翻车的地方。
+    };
+  }
+
+  // 通用 OpenAI images（原行为，一字不改）
+  return {
+    ...base,
+    prompt: withNegative,
+    model: cfg.visual.model,
+    size: cfg.visual.size,
+    response_format: 'b64_json',
+  };
+}
+
+/** images 兼容适配器（按 cfg.visual.dialect 决定请求体形态）。 */
+class ImagesApiVisualProvider implements VisualProvider {
+  readonly name: string;
+  constructor(private cfg: CreativeRuntimeConfig) {
+    this.name = cfg.visual.dialect;
+  }
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -119,18 +174,7 @@ class OpenAiCompatibleVisualProvider implements VisualProvider {
   }
 
   private body(req: VisualRequest): Record<string, unknown> {
-    const prompt = req.negativePrompt
-      ? `${req.prompt}\n【排除】${req.negativePrompt}`
-      : req.prompt;
-    return {
-      // extraParams 先铺底，显式字段后覆盖：运营可以用参数模板补 quality/style/n 之类的厂商专有项，
-      // 但不能借它悄悄改掉 prompt/model/size 这三个由业务决定的字段。
-      ...this.cfg.visual.extraParams,
-      prompt,
-      model: this.cfg.visual.model,
-      size: this.cfg.visual.size,
-      response_format: 'b64_json',
-    };
+    return buildVisualBody(this.cfg, req);
   }
 
   async submit(req: VisualRequest): Promise<VisualSubmitResult> {
@@ -176,7 +220,7 @@ class OpenAiCompatibleVisualProvider implements VisualProvider {
 export async function resolveVisualProvider(cfg?: CreativeRuntimeConfig): Promise<VisualProvider | null> {
   const c = cfg ?? (await getCreativeConfig());
   if (!visualProviderConfigured(c)) return null;
-  return new OpenAiCompatibleVisualProvider(c);
+  return new ImagesApiVisualProvider(c);
 }
 
 /** 后台「连通性试跑」端点用：未配置时给出可操作的提示而不是空 ok。 */

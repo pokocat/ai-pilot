@@ -636,6 +636,18 @@ export type PosterScene = 'personal_brand' | 'event' | 'service' | 'product';
  * 前端照它做选择器就会做出一个必然 422 的入口。二期真放开比例时再连着模板一起加。
  */
 export type PosterRatio = '3:4';
+/**
+ * 海报档位（2026-08-12）。**由用户在确认页选，不是运营的全局开关**——两档的产物形态与价格都不同。
+ *
+ * · `standard`（标准）：模型用纯 CSS/SVG 写整张海报，不调图片模型。
+ * · `premium`（高级）：先由顶级图片模型（Seedream / GPT Image）出一张**全幅无文字主视觉**，
+ *   再由服务端确定性渲染器把中文、Logo、二维码排在上面。
+ *
+ * ⚠️ 高级档**不是**「让图片模型把整张海报连字一起画出来」。中文仍然由渲染器排——
+ * 这是方案 §4.1 的既定原则：图片模型写出来的中文是不可校验的（量测器只能量自己排的字），
+ * 一张主标题里有个错字的成品图是信任事故，而它恰恰是最难被自动发现的那类。
+ */
+export type PosterTier = 'standard' | 'premium';
 /** 模板白名单（服务端 TEMPLATE_KEYS 同口径；启用中的清单由 GET /creative/status 下发）。 */
 export type PosterTemplateKey = 'person_hero' | 'editorial' | 'business_launch';
 /** 一套可选版式（status 只下发**启用中的**，前端照它渲染选择器，不要再硬编码本地目录）。 */
@@ -657,6 +669,13 @@ export interface PosterBrief {
   visualDirection: string;   // 视觉方向（描述画面属性，不指名复刻在世创作者）
   negativePrompt?: string;   // 排除项（同样只写属性）
   templateKey?: string;      // 缺省或不在白名单 → 服务端按 scene 回退默认模板
+  /**
+   * 档位。缺省 / 非法值一律按 `'standard'`（老客户端不带这个字段时行为一字不变）。
+   * 选 `'premium'` 而高级档当前不可用时，建单**返回 422 而不是静默降标准**：
+   * 用户是为「顶级图片模型出主视觉」付的高级价，给他一张标准图就是货不对板
+   * （与"显式请求了被停用的模板 → 422"同一条口径）。
+   */
+  tier?: PosterTier;
   ratio: PosterRatio;
   portraitAssetId?: string;  // 人物照（kind='source' 的 CreativeAsset，须属本人）
   logoAssetId?: string;
@@ -737,7 +756,17 @@ export interface CreativePosterListResult {
  */
 export interface CreativeStatusResult {
   enabled: boolean;
-  pricePerPoster: number; // 单张价格（钻石），供前端展示 💎x；后台可改，默认 10
+  pricePerPoster: number; // 标准档单价（钻石），供前端展示 💎x；后台可改，默认 10
+  /**
+   * 高级档单价（钻石）。**只在 `premiumAvailable` 为真时有展示意义**。
+   */
+  premiumPricePerPoster: number;
+  /**
+   * 高级档此刻能不能下单 = 图片供应商已配置且启用 且 运营没把 aiMode 锁成 graphic。
+   * 前端据此决定**是否露出高级档这个选项**——同 `enabled` 的口径：不可用就整块隐藏，
+   * 而不是让用户选了再撞 422。
+   */
+  premiumAvailable: boolean;
   /**
    * 当前**启用中**的版式清单（后台停用的不下发）。前端必须照这个列表渲染版式选择器：
    * 硬编码三套恒可选会让用户选到已停用的版式，而服务端对显式请求停用模板一律 422。
@@ -773,6 +802,17 @@ export interface RegeneratePosterJobRequest {
 /** 图片供应商接入点（apiKey 只写不读；读出只回 hasKey）。 */
 export interface AdminCreativeVisualConfig {
   enabled: boolean;
+  /**
+   * 接口方言（2026-08-12）。**不是供应商品牌，是协议差异**——三家的 images 接口长得像但不一样，
+   * 用一套请求体打所有家会稳定翻车：
+   * · `'openai'`：通用 OpenAI images 兼容（原行为，缺省值）。带 `response_format: b64_json`。
+   * · `'ark_seedream'`：火山方舟 Seedream。**必须显式 `watermark: false`**——方舟默认给图片加水印，
+   *   而一张右下角印着供应商水印的付费海报是直接不能交付的。
+   * · `'gpt_image'`：OpenAI gpt-image-1。**绝不能传 `response_format`**（该模型对这个参数直接 400），
+   *   它恒定返回 b64。
+   * 填错方言的症状是「dry-run 报 HTTP 400」，后台文案要把这三条差异写在选择器旁边。
+   */
+  dialect: 'openai' | 'ark_seedream' | 'gpt_image';
   baseUrl: string;
   model: string;
   size: string;              // 请求参数模板：图片尺寸（OpenAI images 兼容 size 字段）
@@ -794,7 +834,12 @@ export interface AdminCreativeVisualConfig {
  */
 export interface AdminCreativeConfig {
   enabled: boolean;              // 功能总开关（唯一真源；行缺失视为关）
-  pricePerPoster: number;        // 单价（钻石/张）
+  pricePerPoster: number;        // 标准档单价（钻石/张）
+  /**
+   * 高级档单价（钻石/张，2026-08-12）。高级档每单要多跑一次图片大模型，成本结构与标准档不同，
+   * 所以是**独立单价**而不是一个倍率——倍率会在改标准价时把高级价一起带偏。
+   */
+  premiumPricePerPoster: number;
   dailyLimit: number;            // 每用户每日任务数上限；**0 = 不限量**（紧急停量请用 enabled）
   timeoutMs: number;             // 单次渲染超时（只传给渲染器，不是端到端）；上限 480000，见 config.ts
   /**
@@ -831,6 +876,12 @@ export interface AdminCreativeJobItem {
   status: string;
   progress: string | null;
   templateKey: string | null;
+  /**
+   * 本单档位（读 brief.tier）：`'premium'` | `'standard'` | `null`（档位上线前的老任务）。
+   * 任务台要显示它，否则「高级单的实际路线是不是真的走了影像」无从对账——
+   * 高级档的钱正是为那次图片大模型调用付的。
+   */
+  tier: string | null;
   /**
    * `CreativeJob.engine` 列：**任务模型的实现引擎**，恒为 `'native'`（军师原生管线）。
    * 与排版引擎不是一回事，别混——排版引擎看下面的 `layoutEngine`。

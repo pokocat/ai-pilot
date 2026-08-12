@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-12 · 新增高级海报档（图片大模型出主视觉）+ 供应商方言 · 影响面：海报定价与产物形态、图片供应商配置、小程序确认页、运营后台
+
+- 新增**档位** `PosterBrief.tier`（`standard` | `premium`，缺省 standard，老客户端不带这个字段行为一字不变）。高级档先由图片大模型（Seedream / GPT Image）出**全幅无文字主视觉**，再由渲染器排中文/Logo/二维码。**不是**让图片模型把整张海报连字画出来——§4.1 原则未变。
+- 高级档三条不变式：不可用一律 **422 而非静默降标准**（`PREMIUM_UNAVAILABLE`；可用性判断 `premiumTierAvailable()` 一处实现，同时供 `/creative/status` 的 `premiumAvailable` 与建单闸门）；**与本人照片互斥且在建单时就拦**（`PREMIUM_PORTRAIT_CONFLICT`，不先扣钱再退）；**失败不降级交付**——photo 链走不通 / AI 引擎未产出 → 整单失败 + 全额退款（`PREMIUM_VISUAL_FAILED`），与标准档的三层回落链刻意相反。
+- 定价独立：`premiumPricePerPoster` 默认 25 钻（不是倍率——倍率会在改标准价时把高级价带偏），`priceForTier()` 是唯一口径，create/regenerate 共用，revise 不计费不设门禁。
+- **图片供应商方言** `visual.dialect`：`ark_seedream` 强制 `watermark:false`（方舟默认加水印，且该字段刻意不接受 `extraParams` 覆盖）+ 原生 `negative_prompt` + `optimize_prompt:false`；`gpt_image` 绝不发 `response_format`（gpt-image-1 收到直接 400）；`openai` 保持原行为。`buildVisualBody()` 是纯函数，三家差异由单测钉死。
+- **主视觉尺寸写入口校验**（`assertVisualSize`，宽高比须在 0.6–0.9）：⚠️ 生产实况是 `1440x2560`（9:16）而画布是 3:4，**每张影像主导海报都在被上下裁掉一大截且完全静默**（渲染成功、任务全绿、图是坏的）；同时 `extraParams.size='2K'` 从未生效（显式 `size` 覆盖它）。缺省值 `1024x1024` → `1440x1920`。此项需运营在后台改一次，代码不代改线上配置。
+- 三端同步：运营后台加两档单价与方言选择器（含那三条差异的说明）；小程序 H5 与原生确认页加档位选择（`premiumAvailable` 为假时整块隐藏），两端 mock 同契约。
+- 测试：server 1583 例、app 108+103 例、admin 75 例全绿；新增高级档门禁/定价/status 下发、`buildVisualBody` 三方言、`assertVisualSize`、`normalizeTier`、路线强制与「高级档失败不降级交付」等用例。
+
 ### 2026-08-12 · 海报 AI 排版引擎补上「看图打磨」闭环 · 影响面：成品图画质、创作成本与时延、LLM 网关参数、可观测性
 
 - 补上此前缺失的一环：整条链路**没有任何环节在评审审美**——`canvasMeasure` 量的是越界/重叠/字号这类事故，审美只由模型盲写那一次决定。新增 `services/creative/visualCritique.ts`：把渲染出的 PNG 交回模型做艺术总监评审，产出「判定 + 最多 5 条具体意见」逐条回喂；**打磨轮本身也带着那张图发出去**，让作者看见自己画成了什么样。

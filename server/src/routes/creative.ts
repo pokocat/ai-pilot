@@ -10,7 +10,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { getCreativeConfig, enabledTemplateOptions } from '../services/creative/config.js';
+import { getCreativeConfig, enabledTemplateOptions, premiumTierAvailable } from '../services/creative/config.js';
 import { buildPosterBriefDraft } from '../services/creative/briefDraft.js';
 import {
   createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView, listPosterJobs,
@@ -42,6 +42,10 @@ export async function creativeRoutes(app: FastifyInstance) {
     return {
       enabled: cfg.enabled,
       pricePerPoster: cfg.pricePerPoster,
+      premiumPricePerPoster: cfg.premiumPricePerPoster,
+      // 与 templates 同一条口径：不可用就别露出来。高级档不可用时前端不该显示那个选项，
+      // 更不该显示价格 —— 让用户选完再撞 422 是最差的一种交互。
+      premiumAvailable: cfg.enabled && premiumTierAvailable(cfg),
       // 功能关着时不下发清单：前端本就该整块隐藏入口，给了列表反而像"能用"。
       templates: cfg.enabled ? enabledTemplateOptions(cfg) : [],
     };

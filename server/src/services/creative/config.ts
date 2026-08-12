@@ -19,7 +19,7 @@ import { encryptSecret, decryptSecretSafe } from '../secretBox.js';
 import type { Prisma } from '@prisma/client';
 import type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
-  PosterTemplateOption,
+  PosterTemplateOption, PosterTier,
 } from '../../../../shared/contracts';
 
 export const CREATIVE_FLAG_ID = 'creative-poster';
@@ -71,7 +71,24 @@ function aiModeOf(v: unknown): AiMode {
   return (AI_MODES as readonly string[]).includes(v as string) ? (v as AiMode) : DEFAULT_AI_MODE;
 }
 
-export const DEFAULT_PRICE_PER_POSTER = 10; // 钻石/张（2026-07-29 拍板，可后台改）
+/**
+ * 图片供应商的接口方言（2026-08-12）。**不是品牌选择，是协议差异**：三家的 images 接口长得像，
+ * 但请求体互不兼容，用一套打所有家会稳定翻车。取值收窄成联合类型，脏值按 'openai' 处理。
+ */
+export const VISUAL_DIALECTS = ['openai', 'ark_seedream', 'gpt_image'] as const;
+export type VisualDialect = (typeof VISUAL_DIALECTS)[number];
+export const DEFAULT_VISUAL_DIALECT: VisualDialect = 'openai';
+
+function dialectOf(v: unknown): VisualDialect {
+  return (VISUAL_DIALECTS as readonly string[]).includes(v as string) ? (v as VisualDialect) : DEFAULT_VISUAL_DIALECT;
+}
+
+export const DEFAULT_PRICE_PER_POSTER = 10; // 标准档钻石/张（2026-07-29 拍板，可后台改）
+/**
+ * 高级档钻石/张。**独立单价而不是倍率**：高级档每单多一次图片大模型调用，成本结构与标准档不同，
+ * 倍率会在改标准价时把高级价一起带偏。25 是个起点，上线后按真实供应商成本校准。
+ */
+export const DEFAULT_PREMIUM_PRICE_PER_POSTER = 25;
 export const DEFAULT_DAILY_LIMIT = 20;      // 每用户每日任务数（0 = 不限量）
 /**
  * 渲染超时缺省与上限。**上限 480s 是个不变式，不是随手写的数**：
@@ -82,13 +99,58 @@ export const DEFAULT_DAILY_LIMIT = 20;      // 每用户每日任务数（0 = �
 const DEFAULT_TIMEOUT_MS = 180_000;
 export const MAX_TIMEOUT_MS = 480_000;
 const DEFAULT_VISUAL_TIMEOUT_MS = 60_000;
-const DEFAULT_VISUAL_SIZE = '1024x1024';
+/**
+ * 主视觉尺寸缺省。**3:4，与画布同比**（曾经是 `1024x1024`，那是个从一开始就不对的默认值：
+ * 海报画布恒为 3:4，方图铺进去必然被 object-fit:cover 裁掉两侧）。
+ */
+const DEFAULT_VISUAL_SIZE = '1440x1920';
+
+/**
+ * 主视觉宽高比的合法区间。海报画布是 3:4（0.75）；主视觉是**全幅铺底**，
+ * 比例对不上就会被 `object-fit:cover` 裁掉一整条 —— 人像档裁掉的往往正是脸。
+ *
+ * 区间放宽到 [0.6, 0.9] 是为了容下 `gpt-image-1`：它只提供 1024×1536（2:3 = 0.667），
+ * 拿不到正 3:4，轻微上下裁切是可接受的代价。而 9:16（0.5625）这类会被明确拒绝。
+ *
+ * ⚠️ 2026-08-12 生产实况：这一项当时配的是 `1440x2560`（9:16），也就是**每一张影像主导海报
+ * 都在被上下裁掉一大截**，而且完全静默 —— 没有任何日志或指标会提到它。校验放在写入口，
+ * 就是要把这种"配得下去、跑起来悄悄坏掉"的值变成一次看得见的保存失败。
+ */
+export const VISUAL_ASPECT_MIN = 0.6;
+export const VISUAL_ASPECT_MAX = 0.9;
+
+/** 配置非法（后台写入口用；路由转 422）。 */
+export class CreativeConfigInvalidError extends Error {
+  statusCode = 422;
+  code = 'CREATIVE_CONFIG_INVALID';
+}
+
+/**
+ * 校验主视觉尺寸。只校验 `宽x高` 像素形态；`2K` / `1K` 这类厂商预设原样放行
+ * （它们的实际比例由 prompt 决定，服务端无从判断）。
+ */
+export function assertVisualSize(size: string): void {
+  const m = /^(\d{2,5})\s*[x×*]\s*(\d{2,5})$/i.exec(size.trim());
+  if (!m) return;
+  const [w, h] = [Number(m[1]), Number(m[2])];
+  if (!w || !h) return;
+  const aspect = w / h;
+  if (aspect < VISUAL_ASPECT_MIN || aspect > VISUAL_ASPECT_MAX) {
+    throw new CreativeConfigInvalidError(
+      `主视觉尺寸 ${size} 的宽高比是 ${aspect.toFixed(3)}，与 3:4 画布相差过大：`
+      + '主视觉是全幅铺底，比例不符会被裁掉一整条（人像档裁掉的往往就是脸）。'
+      + `请填 3:4 的尺寸（如 ${DEFAULT_VISUAL_SIZE}），或改用厂商预设（如 2K）。`,
+    );
+  }
+}
 
 /** 解析后的运行时配置（含明文 apiKey，仅服务端内部使用，绝不下发）。 */
 export interface CreativeRuntimeConfig {
   /** 功能总开关（= FeatureFlag 行的 enabled；行缺失为 false）。唯一真源，无第二层。 */
   enabled: boolean;
   pricePerPoster: number;
+  /** 高级档单价（图片大模型出主视觉）。 */
+  premiumPricePerPoster: number;
   /** 每人每日任务上限；**0 = 不限量**（紧急停量用 enabled，不要靠把它设成 0）。 */
   dailyLimit: number;
   /** 单次渲染超时（传给 renderPoster）；上限见 MAX_TIMEOUT_MS 的不变式说明。 */
@@ -100,6 +162,8 @@ export interface CreativeRuntimeConfig {
   templates: Record<TemplateKey, boolean>;
   visual: {
     enabled: boolean;
+    /** 接口方言（决定请求体怎么拼）；脏值按 'openai'。 */
+    dialect: VisualDialect;
     baseUrl: string;
     model: string;
     apiKey: string;
@@ -110,7 +174,7 @@ export interface CreativeRuntimeConfig {
 }
 
 type RawPayload = {
-  pricePerPoster?: unknown; dailyLimit?: unknown; timeoutMs?: unknown;
+  pricePerPoster?: unknown; premiumPricePerPoster?: unknown; dailyLimit?: unknown; timeoutMs?: unknown;
   layoutEngine?: unknown; aiMode?: unknown; templates?: unknown; visual?: unknown;
 };
 
@@ -149,6 +213,7 @@ export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise
   return {
     enabled,
     pricePerPoster: num(p.pricePerPoster, DEFAULT_PRICE_PER_POSTER, 0, 10_000),
+    premiumPricePerPoster: num(p.premiumPricePerPoster, DEFAULT_PREMIUM_PRICE_PER_POSTER, 0, 10_000),
     dailyLimit: num(p.dailyLimit, DEFAULT_DAILY_LIMIT, 0, 1000),
     timeoutMs: num(p.timeoutMs, DEFAULT_TIMEOUT_MS, 10_000, MAX_TIMEOUT_MS),
     // 缺省即 'ai'：这意味着**部署即切 AI 引擎**（运营不需要动配置）。安全性由回落矩阵兜住，
@@ -160,6 +225,7 @@ export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise
     templates: templatesOf(p.templates),
     visual: {
       enabled: !!(visualRaw.enabled as boolean),
+      dialect: dialectOf(visualRaw.dialect),
       baseUrl: str(visualRaw.baseUrl),
       model: str(visualRaw.model),
       apiKey: decryptSecretSafe(typeof visualRaw.apiKey === 'string' ? visualRaw.apiKey : ''),
@@ -180,10 +246,31 @@ export function visualProviderConfigured(cfg: CreativeRuntimeConfig): boolean {
   return cfg.visual.enabled && !!cfg.visual.baseUrl && !!cfg.visual.model;
 }
 
+/**
+ * 高级档此刻能不能下单。
+ *
+ * 两个条件缺一不可：
+ * ① 图片供应商已配置并启用 —— 高级档的全部溢价就是那次图片大模型调用，供应商没配就没有高级档；
+ * ② 运营没把 `aiMode` 锁成 `'graphic'` —— 那是「全局禁用影像路线」的熔断闸（比如供应商在出事故），
+ *    锁着的时候高级单必然降级成标准产物，那就不该收高级的钱。
+ *
+ * ⚠️ 这个判断同时供 `GET /creative/status`（决定前端露不露出高级档）与建单闸门用，**必须同一个函数**：
+ * 两处各写一遍的下场是前端露着入口、后端一律 422（模板清单当初就是这么对不上的）。
+ */
+export function premiumTierAvailable(cfg: CreativeRuntimeConfig): boolean {
+  return visualProviderConfigured(cfg) && cfg.aiMode !== 'graphic';
+}
+
+/** 本单该扣多少钻（档位定价的唯一口径，路由与退款都走它）。 */
+export function priceForTier(cfg: CreativeRuntimeConfig, tier: PosterTier): number {
+  return tier === 'premium' ? cfg.premiumPricePerPoster : cfg.pricePerPoster;
+}
+
 /** 脱敏对外视图（后台 GET 用；apiKey 只回 hasKey）。 */
 export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeConfig {
   const visual: AdminCreativeVisualConfig = {
     enabled: cfg.visual.enabled,
+    dialect: cfg.visual.dialect,
     baseUrl: cfg.visual.baseUrl,
     model: cfg.visual.model,
     size: cfg.visual.size,
@@ -194,6 +281,7 @@ export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeC
   return {
     enabled: cfg.enabled,
     pricePerPoster: cfg.pricePerPoster,
+    premiumPricePerPoster: cfg.premiumPricePerPoster,
     dailyLimit: cfg.dailyLimit,
     timeoutMs: cfg.timeoutMs,
     layoutEngine: cfg.layoutEngine,
@@ -213,12 +301,18 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     Record<string, unknown> | undefined)?.apiKey ?? '') as string;
 
   const vp = patch.visual ?? {};
+  // 尺寸校验放在**写入口**：跑起来才发现比例不对的代价是一整批被裁坏的成品图，
+  // 而那是静默的（渲染成功、任务是绿的、图是坏的）。
+  if (vp.size !== undefined) assertVisualSize(str(vp.size) || DEFAULT_VISUAL_SIZE);
   const nextApiKey = vp.apiKey === undefined
     ? curEncrypted                                  // 不动：保留库内密文
     : vp.apiKey === '' ? '' : encryptSecret(vp.apiKey); // 空串=清空；否则加密
 
   const payload = {
     pricePerPoster: patch.pricePerPoster === undefined ? cur.pricePerPoster : num(patch.pricePerPoster, cur.pricePerPoster, 0, 10_000),
+    premiumPricePerPoster: patch.premiumPricePerPoster === undefined
+      ? cur.premiumPricePerPoster
+      : num(patch.premiumPricePerPoster, cur.premiumPricePerPoster, 0, 10_000),
     dailyLimit: patch.dailyLimit === undefined ? cur.dailyLimit : num(patch.dailyLimit, cur.dailyLimit, 0, 1000),
     timeoutMs: patch.timeoutMs === undefined ? cur.timeoutMs : num(patch.timeoutMs, cur.timeoutMs, 10_000, MAX_TIMEOUT_MS),
     layoutEngine: patch.layoutEngine === undefined ? cur.layoutEngine : layoutEngineOf(patch.layoutEngine),
@@ -226,6 +320,7 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     templates: patch.templates === undefined ? cur.templates : templatesOf({ ...cur.templates, ...plainObject(patch.templates) }),
     visual: {
       enabled: vp.enabled === undefined ? cur.visual.enabled : !!vp.enabled,
+      dialect: vp.dialect === undefined ? cur.visual.dialect : dialectOf(vp.dialect),
       baseUrl: vp.baseUrl === undefined ? cur.visual.baseUrl : str(vp.baseUrl),
       model: vp.model === undefined ? cur.visual.model : str(vp.model),
       size: vp.size === undefined ? cur.visual.size : (str(vp.size) || DEFAULT_VISUAL_SIZE),

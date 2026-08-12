@@ -22,7 +22,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type AdminCreativeConfig, type AdminCreativeConfigUpdate, type AdminCreativeJobItem } from '../api';
+import {
+  api, type AdminCreativeConfig, type AdminCreativeConfigUpdate, type AdminCreativeJobItem,
+  type AdminCreativeVisualConfig,
+} from '../api';
 import { PageHead, ViewState, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
@@ -71,6 +74,17 @@ const AI_MODES: ['auto' | 'graphic' | 'photo', string, string][] = [
 function aiModeName(k: string): string {
   return AI_MODES.find(([key]) => key === k)?.[1] ?? k;
 }
+
+/**
+ * 图片供应商的接口方言（与服务端 config.VISUAL_DIALECTS 同口径）。
+ * 选项文案要把**那条会翻车的差异**写出来，而不是只写品牌名 —— 运营选错时唯一的现场信息是
+ * 试跑返回的 HTTP 400，那条错误说不出「你该换个方言」。
+ */
+const VISUAL_DIALECTS: [AdminCreativeVisualConfig['dialect'], string, string][] = [
+  ['ark_seedream', '方舟 Seedream', '火山方舟；服务端强制关水印、用原生负向提示词'],
+  ['gpt_image', 'GPT Image', 'OpenAI gpt-image-1；不发 response_format（发了必 400）'],
+  ['openai', '通用 OpenAI', '其它 images 兼容接口（老行为）'],
+];
 
 /**
  * 影像风格档中文名（12 档，与服务端 styleLibrary.POSTER_STYLES 同口径）。
@@ -196,12 +210,15 @@ function msHint(ms: number): string {
 interface CfgDraft {
   enabled: boolean;
   pricePerPoster: number;
+  premiumPricePerPoster: number;
   dailyLimit: number;
   timeoutMs: number;
   layoutEngine: 'ai' | 'template';
   aiMode: 'auto' | 'graphic' | 'photo';
   templates: Record<string, boolean>;
   visualEnabled: boolean;
+  /** 接口方言：三家 images 接口长得像但请求体不兼容，填错的症状是 dry-run 报 400。 */
+  dialect: AdminCreativeVisualConfig['dialect'];
   baseUrl: string;
   model: string;
   size: string;
@@ -221,12 +238,14 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
   return {
     enabled: c.enabled,
     pricePerPoster: c.pricePerPoster,
+    premiumPricePerPoster: c.premiumPricePerPoster,
     dailyLimit: c.dailyLimit,
     timeoutMs: c.timeoutMs,
     layoutEngine: c.layoutEngine,
     aiMode: c.aiMode,
     templates: { ...c.templates },
     visualEnabled: c.visual.enabled,
+    dialect: c.visual.dialect,
     baseUrl: c.visual.baseUrl,
     model: c.visual.model,
     size: c.visual.size,
@@ -239,6 +258,7 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
 function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
   return d.enabled !== c.enabled
     || d.pricePerPoster !== c.pricePerPoster
+    || d.premiumPricePerPoster !== c.premiumPricePerPoster
     || d.dailyLimit !== c.dailyLimit
     || d.timeoutMs !== c.timeoutMs
     || d.layoutEngine !== c.layoutEngine
@@ -248,6 +268,7 @@ function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
 
 function visualDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
   return d.visualEnabled !== c.visual.enabled
+    || d.dialect !== c.visual.dialect
     || d.baseUrl.trim() !== c.visual.baseUrl
     || d.model.trim() !== c.visual.model
     || d.size.trim() !== c.visual.size
@@ -295,6 +316,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     const body: AdminCreativeConfigUpdate = {
       enabled: draft.enabled,
       pricePerPoster: draft.pricePerPoster,
+      premiumPricePerPoster: draft.premiumPricePerPoster,
       dailyLimit: draft.dailyLimit,
       timeoutMs: draft.timeoutMs,
       layoutEngine: draft.layoutEngine,
@@ -311,16 +333,24 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     // 排版引擎切换**自己不弹框**：它可逆、不涉资金、失败必回落（见 LAYOUT_ENGINES 注释）。但如果它和
     // 改价/放量同批保存，就顺带回显一行 —— 一次保存里改了几件事，确认框必须说全，否则回显反而误导。
     const turningOn = draft.enabled && !cfg.enabled;
-    const priceChanged = draft.pricePerPoster !== cfg.pricePerPoster;
+    // 两档单价任一变更都要回显 —— 高级档一张 25 钻，改错了比标准档更贵。
+    const priceChanged = draft.pricePerPoster !== cfg.pricePerPoster
+      || draft.premiumPricePerPoster !== cfg.premiumPricePerPoster;
     const engineChanged = draft.layoutEngine !== cfg.layoutEngine;
     if (turningOn || priceChanged) {
       const echo: NonNullable<ConfirmSpec['echo']> = [];
       if (turningOn) echo.push({ k: '功能开关', v: '未开启 → 已开启' });
-      if (priceChanged) {
-        echo.push({ k: '原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true });
-        echo.push({ k: '新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+      if (draft.pricePerPoster !== cfg.pricePerPoster) {
+        echo.push({ k: '标准档原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '标准档新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
       } else {
-        echo.push({ k: '单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '标准档单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+      }
+      if (draft.premiumPricePerPoster !== cfg.premiumPricePerPoster) {
+        echo.push({ k: '高级档原价', v: `${cfg.premiumPricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '高级档新价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
+      } else {
+        echo.push({ k: '高级档单价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
       }
       echo.push({ k: '每日限额', v: draft.dailyLimit === 0 ? '不限量（0 = 不限）' : `${draft.dailyLimit} 张 / 人` });
       if (engineChanged) {
@@ -369,6 +399,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       await put({
         visual: {
           enabled: draft.visualEnabled,
+          dialect: draft.dialect,
           baseUrl: draft.baseUrl.trim(),
           model: draft.model.trim(),
           size: draft.size.trim(),
@@ -476,8 +507,18 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               </div>
 
               <div className="ai-field">
-                <div className="ai-fl">单张海报价格（钻石 / 张 · 0–10000）</div>
+                <div className="ai-fl">标准档价格（钻石 / 张 · 0–10000）</div>
                 <NumInput className="ai-input" min={0} max={10_000} step={1} value={draft.pricePerPoster} disabled={!isSuper} onChange={(pricePerPoster) => set({ pricePerPoster })} />
+              </div>
+              <div className="ai-field">
+                <div className="ai-fl">高级档价格（钻石 / 张 · 0–10000）</div>
+                <NumInput className="ai-input" min={0} max={10_000} step={1} value={draft.premiumPricePerPoster} disabled={!isSuper} onChange={(premiumPricePerPoster) => set({ premiumPricePerPoster })} />
+                <div className="ai-note">
+                  高级档每单会多调一次图片大模型出全幅主视觉（中文仍由服务端排版，不交给图片模型）。
+                  <b>没配好下方的图片供应商时，高级档在小程序里整块不显示</b>，也不接受下单 —— 不会出现
+                  「用户买了高级、拿到标准图」的情况。高级单若最终没能出主视觉，整单失败并全额退款，
+                  不降级交付。
+                </div>
               </div>
               <div className="ai-field">
                 <div className="ai-fl">每人每日任务上限（0–1000 · 0 = 不限量；紧急停量请用上方功能开关）</div>
@@ -586,19 +627,43 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
             </div>
 
             <div className="ai-field">
-              <div className="ai-fl">接入点 baseUrl（OpenAI images 兼容，带 /v1）</div>
-              <input className="ai-input" value={draft.baseUrl} disabled={!isSuper} placeholder="https://api.example.com/v1" onChange={(e) => set({ baseUrl: e.target.value })} />
+              <div className="ai-fl">接口方言（决定请求体怎么拼 —— 填错的症状是下方试跑报 HTTP 400）</div>
+              <div className="bill-seg">
+                {VISUAL_DIALECTS.map(([k, label, desc]) => (
+                  <div
+                    key={k}
+                    className={`bill-opt ${draft.dialect === k ? 'on' : ''}`}
+                    onClick={() => isSuper && set({ dialect: k })}
+                  >
+                    <div className="bo-t">{label}</div>
+                    <div className="bo-d">{desc}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="ai-note">
+                三家的 images 接口长得像但不通用，各有一条必须照顾的差异：
+                <b>方舟 Seedream 的水印默认是开的</b>（服务端已强制 <code>watermark:false</code>，
+                这一项不接受用「额外请求参数」改回去 —— 印着水印的付费海报没法交付）；
+                <b>gpt-image-1 收到 <code>response_format</code> 会直接 400</b>（服务端对该方言不发这个字段）。
+                选通用 OpenAI 则保持老行为。
+              </div>
+            </div>
+            <div className="ai-field">
+              <div className="ai-fl">接入点 baseUrl（带 /v1 或 /api/v3）</div>
+              <input className="ai-input" value={draft.baseUrl} disabled={!isSuper} placeholder="https://ark.cn-beijing.volces.com/api/v3" onChange={(e) => set({ baseUrl: e.target.value })} />
             </div>
             <div className="ai-field">
               <div className="ai-fl">模型 model</div>
               <input className="ai-input" value={draft.model} disabled={!isSuper} placeholder="gpt-image-1" onChange={(e) => set({ model: e.target.value })} />
             </div>
             <div className="ai-field">
-              <div className="ai-fl">请求尺寸 size（海报按 3:4 裁切，这里只是给上游的参数模板）</div>
-              <input className="ai-input" value={draft.size} disabled={!isSuper} placeholder="1024x1024" onChange={(e) => set({ size: e.target.value })} />
+              <div className="ai-fl">请求尺寸 size（必须是 3:4 一档，服务端会校验）</div>
+              <input className="ai-input" value={draft.size} disabled={!isSuper} placeholder="1440x1920" onChange={(e) => set({ size: e.target.value })} />
               <div className="ai-note">
-                走影像路线时建议把尺寸配成 3:4（如 896×1152 / 1080×1440）：海报画布就是 3:4，
-                拿一张 1:1 去 object-fit:cover 铺底会把左右两侧裁掉，而构图（尤其留白区）是按整幅算好的。
+                <b>尺寸必须贴着 3:4（宽高比 0.6–0.9），否则保存会被拒。</b>主视觉是全幅铺底，
+                比例不符会被 object-fit:cover 裁掉一整条 —— 人像档裁掉的往往正是脸，而且完全静默：
+                渲染成功、任务全绿、图是坏的。gpt-image-1 只提供 1024×1536（2:3），轻微上下裁切可接受；
+                方舟填 1440×1920 这类正 3:4，或改用 2K 这样的厂商预设（预设不做比例校验，靠提示词描述形状）。
                 另外注意生图模型选型 —— 摄影质感类（Midjourney 档）文字必渲染成乱码，对我们反而安全；
                 中文语义与版面留白理解最好的一类（Seedream / 即梦）恰恰擅长渲染文字，会主动往留白处写标题，
                 只能靠提示词里写死的禁字条款压住（服务端已把 no-text 钉在提示词正文末尾）。出图带字就换模型或加负向词。

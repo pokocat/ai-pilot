@@ -16,7 +16,7 @@ import { getCreativeConfig, visualProviderConfigured, type CreativeRuntimeConfig
 import { generatePhilosophy, philosophyText, composeVisualPrompt, type VisualPhilosophy } from './philosophy.js';
 import { generateManifesto, manifestoText, type PosterManifesto } from './manifesto.js';
 import { generateCanvasPoster, AI_ENGINE_BUDGET_MS, type CanvasPoster } from './canvasEngine.js';
-import { photoRouteAllowedFor, resolvePosterRouteFor, type ResolvedPosterRoute } from './posterRoute.js';
+import { photoRouteAllowedFor, resolvePosterRouteFor, isPremiumTier, type ResolvedPosterRoute } from './posterRoute.js';
 import { assembleImagePrompt } from './imagePrompt.js';
 import { renderPoster, PosterRenderError } from './renderer.js';
 import { resolveVisualProvider } from './visualProvider.js';
@@ -291,8 +291,16 @@ async function runPipeline(input: JobExecutionInput, deps: CreativeWorkerDeps = 
     const ai = await runAiEngine(input, cfg, philosophy, deps);
     if (ai.outcome) return ai.outcome;
     aiError = ai.error ?? 'AI 引擎未产出';
-    console.warn('[creative] AI 排版引擎未产出，回落模板路径：', job.id, aiError);
     if (ai.debug) await recordAiDebug(job.id, ai.debug);
+    // ★ 高级档到此为止：**连模板回落也不走**。
+    //   模板海报是标准档的兜底形态；把它交给一个付了高级价的用户，是这条链路上最贵的一次货不对板。
+    //   整单失败 + 全额退款（既有幂等退款路径），用户可以重试或改用标准档。
+    //   注意这与标准档的回落矩阵是**刻意相反**的取舍，不要以"统一行为"为由把它抹平。
+    if (isPremiumTier(brief)) {
+      console.warn('[creative] 高级档 AI 引擎未产出，整单失败并退款（不回落模板）：', job.id, aiError);
+      return { status: 'failed', code: 'PREMIUM_VISUAL_FAILED', message: aiError };
+    }
+    console.warn('[creative] AI 排版引擎未产出，回落模板路径：', job.id, aiError);
   }
 
   return runTemplatePipeline(input, cfg, philosophy, aiError);
@@ -368,6 +376,11 @@ async function runAiEngine(
   const doc: PosterManifesto = manifesto;
   const movement = doc.movement;
   const route = resolvePosterRouteFor(cfg, brief, doc.route);
+  // 高级档但路线没能落到 photo：只可能是宣言没给出可用的 subject（供应商未配 / 本人照片这两条
+  // 建单时就拦掉了）。同样**不降级交付**——整单失败 + 全额退款，用户可以重试。
+  if (isPremiumTier(brief) && route.mode !== 'photo') {
+    return { error: `高级海报未能确定影像主体：${route.reason}` };
+  }
 
   // 宣言进 promptSnapshot（覆盖阶段 1 写的六维度；六维度仍拼在后面，回落排障要看得到两份）。
   // 路线裁定结论也写进去：「模型想走 photo 但被门禁降级」这件事只有这里看得见。
@@ -442,6 +455,8 @@ async function runAiEngine(
       },
       result: {
         engine: 'ai',
+        // 档位进 resultJson：任务台要能把「收了高级价」与「真的走了影像」对上账。
+        tier: brief.tier,
         // 实际路线（不是配置意图）：photo 静默降级成 graphic 时任务台必须看得出来，
         // 否则「影像路线名义上开着、其实全在出图形版」又只存在于日志里（degraded 那次的教训）。
         aiMode: o.aiMode,
@@ -461,6 +476,7 @@ async function runAiEngine(
 
   // ── 子路 A：影像主导 ──
   let photoError: string | null = null;
+  let photoDebug: { violations: string[]; lastHtml?: string } | undefined;
   if (route.mode === 'photo') {
     const visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route);
     if (visual.assetId && visual.dataUri) {
@@ -481,8 +497,18 @@ async function runAiEngine(
         };
       }
       photoError = `影像版排版未通过：${r.error ?? '未知原因'}`;
+      photoDebug = r.debug;
     } else {
       photoError = visual.error ?? '主视觉未产出';
+    }
+    // ★ 高级档到此为止：**不退回 graphic**。
+    //   用户为「顶级图片模型出主视觉」付了高级价，交一张纯图形海报就是货不对板；
+    //   而且影像链走不通通常正是供应商在出问题，那种时候更不该继续收这笔钱。
+    //   返回 error → runJobOnce 走整单失败 + 全额退款（既有幂等退款路径，不新造部分退款）。
+    //   标准档的三层回落链一字不动 —— 它的承诺本来就是「给你一张海报」，不是「给你一张影像海报」。
+    if (isPremiumTier(brief)) {
+      console.warn('[creative] 高级档影像路线失败，整单失败并退款（不降级交付）：', job.id, photoError);
+      return { error: `高级海报未能生成主视觉：${photoError}`, ...(photoDebug ? { debug: photoDebug } : {}) };
     }
     console.warn('[creative] 影像主导路线未走通，退回纯图形路线（复用同一篇宣言）：', job.id, photoError);
   }

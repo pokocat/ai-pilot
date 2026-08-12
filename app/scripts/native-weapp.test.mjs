@@ -1667,7 +1667,15 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(posterWxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
   assert.equal(posterJson.usingComponents?.['agent-unlock'], '/components/agent-unlock/index');
   assert.match(api, /creativeStatus:\s*\(\) => isMock\(\) \? mock\.creativeStatus\(\)/);
-  assert.match(mock, /function creativeStatus\(\) \{ return Promise\.resolve\(\{ enabled: true, pricePerPoster: 10/);
+  // mock 必须与 H5 mock 同契约（两端各一份、字段必须齐）。档位三件套缺任何一个，
+  // 原生端确认页那块档位 UI 就整块不渲染 —— 本地走查会以为"功能没做"，而不是"mock 少了字段"。
+  assert.match(mock, /function creativeStatus\(\)[\s\S]*?enabled: true[\s\S]*?pricePerPoster: 10/);
+  assert.match(mock, /function creativeStatus\(\)[\s\S]*?premiumPricePerPoster: 25/);
+  assert.match(mock, /function creativeStatus\(\)[\s\S]*?premiumAvailable: true/);
+  // 档位选择器：只在 premiumOn 时渲染，且两档都要能点。
+  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]*?data-key="standard"[\s\S]*?data-key="premium"/);
+  assert.match(poster, /chooseTier\(event\)/);
+  assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard'/);
 });
 
 test('构建命令只允许原生微信端与 Taro H5，且产物物理隔离', () => {

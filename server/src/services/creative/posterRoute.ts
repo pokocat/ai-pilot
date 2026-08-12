@@ -41,6 +41,18 @@ export function photoRouteAllowed(o: {
   return true;
 }
 
+/**
+ * 高级档（2026-08-12）**强制影像路线**，不再让模型自选 —— 用户买的就是那次图片大模型调用。
+ *
+ * 门禁仍然全部有效（供应商没配 / 传了本人照片 / 拼不出 subject 一样降级），但对高级单来说
+ * 「降级」的语义不同：标准单降级只是换条路，高级单降级等于**没交付它承诺的东西**。
+ * 所以 worker 对高级单的处理是「photo 走不通 → 整单失败 + 全额退款」，而不是悄悄给一张 graphic
+ * 再照常收高级价。这条判断在 worker.runAiEngine 里，本模块只负责把路线定死。
+ */
+export function isPremiumTier(brief: NormalizedPosterBrief): boolean {
+  return brief.tier === 'premium';
+}
+
 /** 便捷重载：直接吃运行时配置 + brief。 */
 export function photoRouteAllowedFor(cfg: CreativeRuntimeConfig, brief: NormalizedPosterBrief): boolean {
   return photoRouteAllowed({
@@ -87,6 +99,11 @@ export function resolvePosterRoute(o: {
   if (!o.visualConfigured) return graphic('未配置图片供应商，影像路线不可用');
   if (o.brief.portraitAssetId) return graphic('用户上传了本人照片：v1 不做真人融合，强制纯图形路线');
   if (!subject) return graphic('模型未给出可用的影像主体描述（subject 为空）');
+  // 高级档：路线由**用户付的钱**定，不由模型自选。放在三条门禁之后 —— 门禁说的是「走不通」，
+  // 那种情况下 worker 会让整单失败并全额退款，而不是在这里假装还能走 photo。
+  if (isPremiumTier(o.brief)) {
+    return { mode: 'photo', styleKey, style, subject, reason: `高级档强制影像路线 · ${style.name}` };
+  }
   if (o.aiMode === 'photo') {
     return { mode: 'photo', styleKey, style, subject, reason: `后台配置强制影像路线（aiMode=photo）· ${style.name}` };
   }

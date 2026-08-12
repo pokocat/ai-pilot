@@ -17,6 +17,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import {
   api, type Agent, type PosterBrief, type PosterScene, type CreativeUploadRole, type PosterTemplateOption,
+  type PosterTier,
 } from '../../../services/api';
 import { getCreativeStatus, POSTER_LIMITS as LIMITS } from '../../../services/creative';
 import { attachPosterJob, markPosterPending, posterScope, readPosterPending } from '../../../services/posterPending';
@@ -91,6 +92,11 @@ export default function PosterConfirmPage() {
   // 也不带 templateKey 提交——服务端按 scene 回退默认版式，比让用户选到一个必然 422 的版式好。
   const [templates, setTemplates] = useState<PosterTemplateOption[]>([]);
   const [templateKey, setTemplateKey] = useState('');
+  // 档位。**高级档只在服务端说可用时才露出来**（premiumAvailable）——供应商没配好时显示一个
+  // 必然 422 的选项，比不显示更糟（同版式清单的教训）。缺省恒为标准档。
+  const [tier, setTier] = useState<PosterTier>('standard');
+  const [premiumPrice, setPremiumPrice] = useState(0);
+  const [premiumOn, setPremiumOn] = useState(false);
   // 以下两项**用户不填也看不到**，只从服务端草稿透传回 submit（方案 §5.3 的 BrandKit 集成靠它落地）：
   //   · brandKitVersion —— 服务端据它取已确认（approved）的品牌资产包，合并品牌语气与主题色板进提示词；
   //   · negativePrompt  —— 服务端从 BrandKit 的品牌禁忌生成的排除项。
@@ -140,7 +146,13 @@ export default function PosterConfirmPage() {
       if (st && !st.enabled) { setDisabled(true); setLoading(false); return; }
       const tpls = st?.templates ?? [];
       // 默认选中第一套启用中的版式（草稿取不到时也得有个可见的选中态；草稿的推荐值在下面覆盖它）。
-      if (st) { setPrice(st.pricePerPoster); setTemplates(tpls); setTemplateKey(tpls[0]?.key ?? ''); }
+      if (st) {
+        setPrice(st.pricePerPoster);
+        setPremiumPrice(st.premiumPricePerPoster);
+        setPremiumOn(!!st.premiumAvailable);
+        setTemplates(tpls);
+        setTemplateKey(tpls[0]?.key ?? '');
+      }
       if (draft) {
         const b = draft.brief ?? {};
         if (b.scene) setScene(b.scene);
@@ -258,6 +270,9 @@ export default function PosterConfirmPage() {
       ...(negativePrompt.trim() ? { negativePrompt: negativePrompt.trim() } : {}),
       // 空串 = 版式清单没取到 → 不带该字段，让服务端按 scene 回退默认版式。
       ...(templateKey ? { templateKey } : {}),
+      // 只在高级档可用时才敢带 premium：状态过期时（用户停在本页、运营关了供应商）服务端会 422，
+      // 这里少发一次也少一次白扣的风险。
+      tier: premiumOn ? tier : 'standard',
       ratio: '3:4',
       ...(assets.portrait ? { portraitAssetId: assets.portrait.assetId } : {}),
       ...(assets.logo ? { logoAssetId: assets.logo.assetId } : {}),
@@ -418,6 +433,44 @@ export default function PosterConfirmPage() {
                     );
                   })}
                 </View>
+              </Field>
+            ) : null}
+
+            {/* 档位：只在服务端说可用时渲染。高级档会多调一次图片大模型出全幅主视觉，
+                所以价格与产出形态都不同；不可用时整块不显示，而不是显示一个必然 422 的选项。
+                高级档与"本人照片"互斥（服务端同样会 422），选中时把上传区的人像入口一起收起。 */}
+            {premiumOn ? (
+              <Field label="档位">
+                <View className="ps-tpls">
+                  {([
+                    ['standard', '标准海报', `x${price} · 模型用图形与排印现场作画`],
+                    ['premium', '高级海报', `x${premiumPrice} · 顶级图片模型出全幅主视觉，质感更强`],
+                  ] as [PosterTier, string, string][]).map(([k, name, desc]) => {
+                    const on = k === tier;
+                    return (
+                      <View
+                        key={k}
+                        className={`ps-tpl${on ? ' on' : ''}`}
+                        style={on ? { borderColor: accent } : undefined}
+                        onClick={() => setTier(k)}
+                      >
+                        <View className="ps-tpl-h">
+                          <Text className="ps-tpl-n">{name}</Text>
+                          {on ? <Icon name="check" size={13} color={accent} /> : null}
+                        </View>
+                        <View className="ps-tpl-cost">
+                          <Icon name="diamond" size={12} color={accent} />
+                          <Text className="ps-tpl-d">{desc}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+                {tier === 'premium' ? (
+                  <Text className="ps-fhint">
+                    高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。
+                  </Text>
+                ) : null}
               </Field>
             ) : null}
 

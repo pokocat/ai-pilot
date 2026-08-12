@@ -13,15 +13,32 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone 
 import { grantCredits, getBalance } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
 import {
-  CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER, MAX_TIMEOUT_MS, getCreativeConfig, TEMPLATE_CATALOG,
+  CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER, DEFAULT_PREMIUM_PRICE_PER_POSTER, MAX_TIMEOUT_MS,
+  getCreativeConfig, TEMPLATE_CATALOG, assertVisualSize, premiumTierAvailable,
+  type CreativeRuntimeConfig, type VisualDialect,
 } from '../src/services/creative/config.js';
 import { STALE_RUNNING_MS } from '../src/services/creative/worker.js';
 import { parseTemplateRecommendation } from '../src/services/creative/briefDraft.js';
-import { normalizePosterBrief } from '../src/services/creative/schema.js';
+import { normalizePosterBrief, normalizeTier } from '../src/services/creative/schema.js';
+import { buildVisualBody } from '../src/services/creative/visualProvider.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
 const PRICE = DEFAULT_PRICE_PER_POSTER; // 10 钻/张（后台可改，用例按默认值断言）
+const PREMIUM_PRICE = DEFAULT_PREMIUM_PRICE_PER_POSTER; // 25 钻/张
+
+/** 只为 buildVisualBody 造一份最小配置（那是纯函数，只读 cfg.visual）。 */
+function visualCfg(dialect: VisualDialect, extraParams: Record<string, unknown> = {}): CreativeRuntimeConfig {
+  return {
+    enabled: true, pricePerPoster: PRICE, premiumPricePerPoster: PREMIUM_PRICE, dailyLimit: 0,
+    timeoutMs: 180_000, layoutEngine: 'ai', aiMode: 'auto',
+    templates: { person_hero: true, editorial: true, business_launch: true },
+    visual: {
+      enabled: true, dialect, baseUrl: 'https://example.com/v1', model: 'm', apiKey: 'k',
+      size: '1440x1920', timeoutMs: 60_000, extraParams,
+    },
+  };
+}
 
 /** 打开功能开关并清缓存（行缺失=关，所以每个用例都得显式开）。 */
 async function enableCreative(): Promise<void> {
@@ -286,6 +303,72 @@ describe('海报成品图 · 幂等与计费', () => {
     await cleanBusiness();
     await seedBaseline();
     await enableCreative();
+  });
+
+  // ── 高级档（2026-08-12）──
+  // 三条不变式：不可用时 422 而不是静默降级、可用时按高级价扣、与本人照片互斥在**建单时**就拦。
+  // 「悄悄给他标准图再照常扣钱」是这条功能里最容易犯也最伤的错，所以三条都要有守卫。
+  test('高级档：供应商没配好 → 422 PREMIUM_UNAVAILABLE，不建单不扣费（绝不静默降标准）', async () => {
+    const { token } = await posterUser(100);
+    const before = await getBalance(token);
+    const r = await api('POST', '/api/creative/posters', {
+      token, body: { brief: brief({ tier: 'premium' }), idempotencyKey: 'prem-off' },
+    });
+    assert.equal(r.status, 422, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'PREMIUM_UNAVAILABLE');
+    assert.equal(await prisma.creativeJob.count({ where: { userId: token } }), 0, '不建单');
+    assert.equal(await getBalance(token), before, '不扣费');
+  });
+
+  test('高级档：供应商配齐 → 建单成功且按**高级价**扣费', async () => {
+    await setPayload({
+      visual: { enabled: true, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
+    });
+    const { token } = await posterUser(100);
+    const before = await getBalance(token);
+    const r = await api('POST', '/api/creative/posters', {
+      token, body: { brief: brief({ tier: 'premium' }), idempotencyKey: 'prem-on' },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.creditCost, PREMIUM_PRICE, `高级档按 ${PREMIUM_PRICE} 钻计价，不是标准档的 ${PRICE}`);
+    assert.equal(await getBalance(token), before - PREMIUM_PRICE);
+  });
+
+  test('高级档 + 本人照片 → 422（可预见的冲突在建单时就拦，不先扣 25 钻再退）', async () => {
+    await setPayload({
+      visual: { enabled: true, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
+    });
+    const { token } = await posterUser(100);
+    const before = await getBalance(token);
+    const r = await api('POST', '/api/creative/posters', {
+      token,
+      body: { brief: brief({ tier: 'premium', portraitAssetId: 'cxxxxxxxxxxxxxxxxxxxxxxxx' }), idempotencyKey: 'prem-portrait' },
+    });
+    assert.equal(r.status, 422, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'PREMIUM_PORTRAIT_CONFLICT');
+    assert.equal(await getBalance(token), before, '不扣费');
+  });
+
+  test('高级档不可用时 status 不下发这个选项（前端据此整块隐藏，而不是让用户点到 422）', async () => {
+    const { token } = await posterUser(10);
+    const off = await api('GET', '/api/creative/status', { token });
+    assert.equal(off.body.premiumAvailable, false, '没配供应商 → 不可用');
+    assert.equal(off.body.premiumPricePerPoster, PREMIUM_PRICE, '价格照常下发（前端只在可用时展示）');
+
+    await setPayload({
+      visual: { enabled: true, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
+    });
+    const on = await api('GET', '/api/creative/status', { token });
+    assert.equal(on.body.premiumAvailable, true);
+
+    // 运营把 aiMode 锁成 graphic = 全局禁用影像路线（供应商出事故时的熔断闸）→ 高级档必须一起关掉，
+    // 否则会出现「收了高级价、却必然产出标准形态」的单。
+    await setPayload({
+      aiMode: 'graphic',
+      visual: { enabled: true, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
+    });
+    const locked = await api('GET', '/api/creative/status', { token });
+    assert.equal(locked.body.premiumAvailable, false, 'aiMode=graphic 时高级档不可下单');
   });
 
   test('同 (userId, idempotencyKey) 重复创建：只 1 个任务、只扣一次 10 钻', async () => {
@@ -737,5 +820,53 @@ describe('海报成品图 · 纯函数单测', () => {
       () => normalizePosterBrief(brief({ templateKey: undefined }), { person_hero: false }),
       /版式暂时不可用/,
     );
+  });
+
+  test('normalizeTier：只认 premium，缺省 / 脏值 / 老客户端不带 → standard', () => {
+    assert.equal(normalizeTier('premium'), 'premium');
+    assert.equal(normalizeTier('standard'), 'standard');
+    assert.equal(normalizeTier(undefined), 'standard', '老客户端不带这个字段，行为必须一字不变');
+    assert.equal(normalizeTier('PREMIUM'), 'standard', '大小写不宽容：只认精确值');
+    assert.equal(normalizeTier({ tier: 'premium' }), 'standard');
+    assert.equal(normalizePosterBrief(brief()).tier, 'standard', 'brief 归一后 tier 必定有值');
+    assert.equal(normalizePosterBrief(brief({ tier: 'premium' })).tier, 'premium');
+  });
+
+  // ★ 尺寸校验是把一个**静默**故障变成一次可见的保存失败：
+  //   主视觉全幅铺底，比例不符会被 object-fit:cover 裁掉一整条，而渲染成功、任务全绿、图是坏的。
+  //   2026-08-12 生产实况就是 1440x2560（9:16），每张影像海报都在被上下裁。
+  test('assertVisualSize：3:4 放行 / 9:16 拒绝 / 厂商预设原样放行', () => {
+    assert.doesNotThrow(() => assertVisualSize('1440x1920'), '正 3:4');
+    assert.doesNotThrow(() => assertVisualSize('1024x1536'), 'gpt-image-1 的 2:3，轻微裁切可接受');
+    assert.doesNotThrow(() => assertVisualSize('2K'), '厂商预设不做比例校验（比例由提示词描述）');
+    assert.doesNotThrow(() => assertVisualSize(''), '空值交给缺省逻辑，不在这里报错');
+    assert.throws(() => assertVisualSize('1440x2560'), /宽高比/, '9:16 —— 生产踩过的那个值');
+    assert.throws(() => assertVisualSize('1024x1024'), /宽高比/, '方图会被裁掉左右两侧');
+    assert.throws(() => assertVisualSize('1920x1080'), /宽高比/, '横图更离谱');
+  });
+
+  // 三家 images 接口长得像但不通用。这些差异「填错了才发现」，靠真调去试太贵 —— 用纯函数钉死。
+  test('buildVisualBody · 方舟 Seedream：强制关水印 + 原生负向提示词 + 不让 extraParams 改回来', () => {
+    const cfg = visualCfg('ark_seedream', { watermark: true, quality: 'high' });
+    const body = buildVisualBody(cfg, { prompt: 'a calm advisor', negativePrompt: 'text, watermark' });
+    assert.equal(body.watermark, false, '★ 方舟默认加水印；印着水印的付费海报没法交付');
+    assert.equal(body.negative_prompt, 'text, watermark', '方舟有原生负向字段，不该拼进正向 prompt');
+    assert.equal(body.prompt, 'a calm advisor', '正向 prompt 保持干净');
+    assert.equal(body.optimize_prompt, false, '关掉改写：无文字这条约束被改写掉整张图就废了');
+    assert.equal(body.quality, 'high', 'extraParams 里的厂商专有项照常透传');
+  });
+
+  test('buildVisualBody · gpt_image：绝不发 response_format（发了必 400）', () => {
+    const body = buildVisualBody(visualCfg('gpt_image'), { prompt: 'p', negativePrompt: 'no text' });
+    assert.equal('response_format' in body, false, '★ gpt-image-1 收到这个参数直接 400');
+    assert.match(String(body.prompt), /no text/, '没有负向字段，只能拼进正向');
+  });
+
+  test('buildVisualBody · 通用 openai：老行为一字不变', () => {
+    const body = buildVisualBody(visualCfg('openai'), { prompt: 'p', negativePrompt: 'q' });
+    assert.equal(body.response_format, 'b64_json');
+    assert.equal(body.prompt, 'p\n【排除】q');
+    assert.equal('negative_prompt' in body, false);
+    assert.equal('watermark' in body, false);
   });
 });

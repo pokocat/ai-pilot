@@ -1175,7 +1175,7 @@ export async function adminRoutes(app: FastifyInstance) {
     return {
       items: rows.map((j): AdminCreativeJobItem => {
         const u = userMap.get(j.userId);
-        const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown } }).brief;
+        const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown; tier?: unknown } }).brief;
         const result = (j.resultJson ?? {}) as {
           degraded?: unknown; engine?: unknown; rounds?: unknown; aiEngineError?: unknown;
           aiMode?: unknown; styleKey?: unknown; photoError?: unknown;
@@ -1189,6 +1189,9 @@ export async function adminRoutes(app: FastifyInstance) {
           status: j.status,
           progress: j.progress,
           templateKey: typeof brief?.templateKey === 'string' ? brief.templateKey : null,
+          // 档位：档位上线前的老任务 brief 里没有这个字段 → null，不臆断成 'standard'
+          // （那会让"这单到底收没收高级价"在任务台上说不清）。
+          tier: typeof brief?.tier === 'string' ? brief.tier : null,
           engine: j.engine,
           // 排版引擎：老任务（本轮之前成功的）resultJson 里没有 engine 字段 → null，不臆断成 'template'。
           layoutEngine: typeof result.engine === 'string' ? result.engine : null,

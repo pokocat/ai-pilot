@@ -48,6 +48,8 @@ Page({
     ctaCount: `0/${LIMITS.cta}`, visualCount: `0/${LIMITS.visualDirection}`,
     goalOver: false, audienceOver: false, headlineOver: false, subheadlineOver: false, ctaOver: false, visualOver: false,
     proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
+    // 档位：premiumOn 为假时整块不渲染（供应商没配好时露出一个必然 422 的选项比不露更糟）。
+    tier: 'standard', premiumPrice: 0, premiumOn: false,
     assets: [
       { role: 'portrait', label: ROLE_LABEL.portrait, assetId: '', path: '', uploading: false },
       { role: 'logo', label: ROLE_LABEL.logo, assetId: '', path: '', uploading: false },
@@ -114,7 +116,10 @@ Page({
     const updates = {
       loading: false, disabled: false, loadErr: hasDraftBrief ? '' : '需求单预填没取到，可以直接手填后生成。',
       reason: String(draft && draft.templateReason || ''), price: status ? status.pricePerPoster : null,
-      templates, templateKey, scene: brief.scene || 'personal_brand', brandKitVersion: typeof brief.brandKitVersion === 'number' ? brief.brandKitVersion : null,
+      templates, templateKey,
+      premiumPrice: status ? status.premiumPricePerPoster : 0,
+      premiumOn: !!(status && status.premiumAvailable),
+      scene: brief.scene || 'personal_brand', brandKitVersion: typeof brief.brandKitVersion === 'number' ? brief.brandKitVersion : null,
       negativePrompt: String(brief.negativePrompt || ''), proofs,
     };
     Object.keys(fields).forEach((field) => {
@@ -143,6 +148,7 @@ Page({
   },
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
+  chooseTier(event) { this.setData({ tier: String(event.currentTarget.dataset.key || 'standard') }); },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },
 
   async pickAsset(event) {
@@ -199,7 +205,10 @@ Page({
     try {
       const status = normalizeStatus(await api.creativeStatus());
       const templateKey = status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : (status.templates[0] && status.templates[0].key || '');
-      this.setData({ templates: status.templates, templateKey, price: status.pricePerPoster });
+      this.setData({
+        templates: status.templates, templateKey, price: status.pricePerPoster,
+        premiumPrice: status.premiumPricePerPoster, premiumOn: !!status.premiumAvailable,
+      });
     } catch (_) { /* 服务端原错误已经在提交区展示 */ }
   },
 
@@ -215,6 +224,8 @@ Page({
     if (this.data.subheadline.trim()) brief.subheadline = this.data.subheadline.trim();
     if (this.data.negativePrompt.trim()) brief.negativePrompt = this.data.negativePrompt.trim();
     if (this.data.templateKey) brief.templateKey = this.data.templateKey;
+    // 状态过期时（停在本页期间运营关了供应商）少发一次 premium，少一次白扣的风险。
+    brief.tier = this.data.premiumOn ? this.data.tier : 'standard';
     if (asset('portrait')) brief.portraitAssetId = asset('portrait').assetId;
     if (asset('logo')) brief.logoAssetId = asset('logo').assetId;
     if (asset('qr')) brief.qrAssetId = asset('qr').assetId;
