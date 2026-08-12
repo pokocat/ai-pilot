@@ -658,12 +658,15 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
             </div>
             <div className="ai-field">
               <div className="ai-fl">请求尺寸 size（必须是 3:4 一档，服务端会校验）</div>
-              <input className="ai-input" value={draft.size} disabled={!isSuper} placeholder="1440x1920" onChange={(e) => set({ size: e.target.value })} />
+              <input className="ai-input" value={draft.size} disabled={!isSuper} placeholder="1728x2304" onChange={(e) => set({ size: e.target.value })} />
               <div className="ai-note">
                 <b>尺寸必须贴着 3:4（宽高比 0.6–0.9），否则保存会被拒。</b>主视觉是全幅铺底，
                 比例不符会被 object-fit:cover 裁掉一整条 —— 人像档裁掉的往往正是脸，而且完全静默：
-                渲染成功、任务全绿、图是坏的。gpt-image-1 只提供 1024×1536（2:3），轻微上下裁切可接受；
-                方舟填 1440×1920 这类正 3:4，或改用 2K 这样的厂商预设（预设不做比例校验，靠提示词描述形状）。
+                渲染成功、任务全绿、图是坏的。<br />
+                方舟 Seedream 5.0 另有**像素下限 3,686,400**（低于它上游直接 400）。
+                <b>1728×2304</b> 是同时满足「正 3:4」与「过下限」的推荐值 —— 这两个约束不是二选一，
+                别为了压线过像素门槛去改比例。gpt-image-1 只提供 1024×1536（2:3），轻微上下裁切可接受；
+                也可改用 2K 这类厂商预设（预设不做比例校验，靠提示词描述形状）。
                 另外注意生图模型选型 —— 摄影质感类（Midjourney 档）文字必渲染成乱码，对我们反而安全；
                 中文语义与版面留白理解最好的一类（Seedream / 即梦）恰恰擅长渲染文字，会主动往留白处写标题，
                 只能靠提示词里写死的禁字条款压住（服务端已把 no-text 钉在提示词正文末尾）。出图带字就换模型或加负向词。

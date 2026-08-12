@@ -37,10 +37,17 @@ const POLL_INTERVAL_MS = 2000;
 const TICK_BATCH_SIZE = 2;
 /**
  * running 超过此时长视为卡死（进程被杀 / 上游 hang），由 sweep 回收。
- * ★ 不变式：必须**大于** config.ts 的 MAX_TIMEOUT_MS（渲染超时上限 480s）。否则一次正常的长渲染
- *   还没结束就被 sweep 判为卡死重新入队 → 同一单跑两遍、产出两张资产。改这两个数要一起看。
+ *
+ * ★ 两条不变式，改它必须一起看：
+ *   ① 必须**大于** config.ts 的 MAX_TIMEOUT_MS（渲染超时上限 480s）；
+ *   ② 必须**大于**一单的正常挂钟上限 = 宣言 + 主视觉 + `AI_ENGINE_BUDGET_MS` + 上传。
+ *   任一条不满足，一次正常的长任务还没结束就被判卡死重新入队 → 同一单跑两遍、产出两张资产。
+ *
+ * 10min → 15min（2026-08-12）：看图打磨闭环与高级档把一单的正常上限抬到了约 580s
+ * （宣言 40 + 主视觉 40 + 排版 480 + 上传 20），10 分钟只剩 20s 余量，太贴。
+ * 放宽看门狗的代价只是「真卡死的单晚 5 分钟被回收」，而贴太紧的代价是双执行 —— 不对等。
  */
-export const STALE_RUNNING_MS = 10 * 60_000;
+export const STALE_RUNNING_MS = 15 * 60_000;
 /** 最大尝试次数；超过即 failed + 幂等退款。判定统一走 canRetry()。 */
 export const MAX_ATTEMPTS = 3;
 
