@@ -171,7 +171,10 @@ export default function PosterConfirmPage() {
         const rec = String(b.templateKey ?? '');
         setTemplateKey(tpls.length ? (tpls.some((t) => t.key === rec) ? rec : (tpls[0]?.key ?? '')) : rec);
         setReason(draft.templateReason ?? '');
-      } else {
+      } else if (messageId) {
+        // 只有**带着 messageId 却没拿到草稿**才是真出了事。冷启动（没有 messageId，例如从锦囊
+        // 直接开工）服务端本来就 422 MESSAGE_ID_REQUIRED —— 那是「没有可预填的东西」，
+        // 不是「预填失败」，弹报错横幅会把一次正常的空白表单说成故障。
         setLoadErr('需求单预填没取到，可以直接手填后生成。');
       }
       setLoading(false);
@@ -519,7 +522,12 @@ export default function PosterConfirmPage() {
               <Text className="ps-foot-note">出图约一分钟，成品可保存或转发。</Text>
               <View className="ps-btn" style={{ background: accent }} onClick={submit}>
                 <Text className="ps-btn-t">{submitting ? '正在发起…' : '生成成品图'}</Text>
-                {typeof price === 'number' ? <Text className="ps-btn-c">{`💎x${price}`}</Text> : null}
+                {/* 按钮上的价格必须跟着**选中的档位**走：选了高级却显示标准价，是在扣费那一刻
+                    说了假话（服务端按 priceForTier 扣的是 25）。判据与 submit 里带 tier 的判据
+                    逐字同源（premiumOn && tier === 'premium'），两处不能各写各的。 */}
+                {typeof price === 'number' ? (
+                  <Text className="ps-btn-c">{`💎x${premiumOn && tier === 'premium' ? premiumPrice : price}`}</Text>
+                ) : null}
               </View>
             </View>
           </>

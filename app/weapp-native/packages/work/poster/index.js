@@ -114,7 +114,11 @@ Page({
       subheadline: String(brief.subheadline || ''), cta: String(brief.cta || ''), visual: String(brief.visualDirection || ''),
     };
     const updates = {
-      loading: false, disabled: false, loadErr: hasDraftBrief ? '' : '需求单预填没取到，可以直接手填后生成。',
+      loading: false, disabled: false,
+      // 从锦囊直接开工时**没有** messageId（不是从对话成果卡进来的），服务端本来就会 422
+      // MESSAGE_ID_REQUIRED —— 那是「没有可预填的东西」，不是「预填失败」。这种情况下弹一条
+      // 报错横幅会把一次正常的冷启动说成故障。只有带着 messageId 却没拿到草稿才是真出了事。
+      loadErr: hasDraftBrief || !this.data.messageId ? '' : '需求单预填没取到，可以直接手填后生成。',
       reason: String(draft && draft.templateReason || ''), price: status ? status.pricePerPoster : null,
       templates, templateKey,
       premiumPrice: status ? status.premiumPricePerPoster : 0,

@@ -28,7 +28,7 @@
       <view class="ps-slots"><view wx:for="{{assets}}" wx:key="role" class="ps-slot"><view wx:if="{{item.path}}" class="ps-thumb-wrap"><image class="ps-thumb" src="{{item.path}}" mode="aspectFill"></image><view class="ps-thumb-x" data-role="{{item.role}}" catchtap="dropAsset"><native-icon name="close" tone="white" size="13"></native-icon></view></view><view wx:else class="ps-slot-add" data-role="{{item.role}}" bindtap="pickAsset"><native-icon name="image" tone="neutral" size="17"></native-icon><text class="ps-slot-t">{{item.uploading?'上传中':'传'+item.label}}</text></view><text class="ps-slot-k">{{item.label}}</text></view></view>
 
       <view wx:if="{{submitErr}}" class="ps-submit-err"><text class="ps-submit-err-t">{{submitErr}}</text><text wx:if="{{submitErrCredits}}" class="ps-submit-err-a" bindtap="goCredits">去看余额</text></view>
-      <view class="ps-foot"><text class="ps-foot-note">出图约一分钟，成品可保存或转发。</text><button class="ps-btn" bindtap="submit"><text class="ps-btn-t">{{submitting?'正在发起':'生成成品图'}}</text><view wx:if="{{price!==null}}" class="ps-price"><native-icon name="diamond" tone="white" size="14"></native-icon><text class="ps-btn-c">x{{price}}</text></view></button></view>
+      <view class="ps-foot"><text class="ps-foot-note">出图约一分钟，成品可保存或转发。</text><button class="ps-btn" bindtap="submit"><text class="ps-btn-t">{{submitting?'正在发起':'生成成品图'}}</text><view wx:if="{{price!==null}}" class="ps-price"><native-icon name="diamond" tone="white" size="14"></native-icon><text class="ps-btn-c">x{{premiumOn&&tier==='premium'?premiumPrice:price}}</text></view></button></view>
     </block>
   </view>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

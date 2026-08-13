@@ -1737,6 +1737,16 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(chatWxml, /bindposter="openPoster" bindviewposter="openPosterJob"/);
   assert.match(chat, /openPoster\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?this\._agentKey !== 'poster'[\s\S]*?\/packages\/work\/poster\/index\?/);
   assert.match(chat, /messageId=\$\{encodeURIComponent\(item\.messageId\)\}/);
+
+  // ★ 档位（2026-08-13）：结算按钮上的价格必须跟着**选中的档位**走。
+  //   选了高级（25 钻）按钮却写 x10、扣的却是 25 —— 那是在扣费那一刻说假话。
+  //   判据与 submit 里带 tier 的判据必须逐字同源，两处各写各的迟早对不上。
+  assert.match(posterWxml, /x\{\{premiumOn&&tier==='premium'\?premiumPrice:price\}\}/, '按钮价格要跟随档位');
+  assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard';/, '提交带的档位判据同源');
+  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]{0,400}档位/, '高级档不可用时整块不渲染');
+  // 冷启动（从锦囊直接开工、没有 messageId）不是故障：服务端本来就 422 MESSAGE_ID_REQUIRED，
+  // 弹报错横幅会把一次正常的空白表单说成出了事。
+  assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
   assert.match(chat, /sessionId=\$\{encodeURIComponent\(this\._sessionId\)\}/);
   assert.match(chat, /openPosterJob\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?item\.deliverable && item\.deliverable\.creativeJobId[\s\S]*?\/packages\/work\/posterJob\/index\?jobId=/);
 
