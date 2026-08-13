@@ -30,14 +30,74 @@ import {
 } from './canvasSanitize.js';
 import { renderCanvasPoster } from './renderer.js';
 import { SAFE_ZONE_HINTS, type PosterStyle } from './styleLibrary.js';
+import { critiqueDirective, requestVisualCritique, type VisualCritique } from './visualCritique.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
 
-/** HTML 相关的 LLM 调用上限（生成 1 + 打磨/修复 2）。加上宣言那一次，整单 ≤4 次模型调用。 */
+/**
+ * HTML 相关的 LLM 调用上限（生成 1 + 打磨/修复 2）。
+ *
+ * 曾在 2026-08-12 提到 4，当天预发实测后改回 3：开思考 + 上万 token 产出 + 打磨轮带图，
+ * 单轮挂钟就要 1–2.5 分钟，第 4 轮**在整段预算里根本排不下**。留着它就是一个不会兑现的承诺
+ * （与当初删掉 `_MAX_CONCURRENCY` 同一条教训：旋钮写得出来、跑起来永远到不了）。
+ */
 export const MAX_HTML_CALLS = 3;
-/** 整段预算（含全部 LLM 往返与渲染）。超时即用手上最好的结果，没有就回落模板。 */
-export const AI_ENGINE_BUDGET_MS = 180_000;
-/** 单次 HTML 生成的 token 预算：一页 540×720 的手写 HTML/CSS 约 2–4k token。 */
+/**
+ * 视觉评审（看图）调用上限。它是**顾问**不是闸门，所以单独计数、单独设顶：
+ * 评审失灵最多退化成「没有评审」的老行为，不占 HTML 轮次，也不该把预算烧在看图上。
+ * 2 次 = 首版看一次 + 打磨后再看一次（第二次拿到「达标」就提前收工，省掉最后一轮 HTML）。
+ */
+export const MAX_VISION_CALLS = 2;
+/**
+ * 整段预算（含全部 LLM 往返与渲染）。超时即用手上最好的结果，没有就回落模板。
+ *
+ * ★ 这个数受 `worker.STALE_RUNNING_MS` 约束，不是随手写的：`runAiEngine` 的 `budget()` 从**它自己开始**算，
+ *   所以这一个数同时罩住宣言 + 主视觉生图 + 排版全程；加上上传与结算，一单的挂钟时间要稳稳落在
+ *   sweep 判卡死的阈值内，否则同一单被跑两遍、出两张资产。
+ *
+ *   180s →（08-12 上午）360s →（08-12 下午）480s。两次上调都是被实测顶上来的：
+ *   · 单轮 HTML 开了思考挂钟就要 1–4 分钟（预发实测，端点负载不同波动很大）；
+ *   · 高级档还要先花 30–40s 让 Seedream 出主视觉。
+ *   最坏情况：宣言 40s + 主视觉 40s + 排版 480s + 上传 20s ≈ 580s，落在 `STALE_RUNNING_MS`（15min）内。
+ */
+export const AI_ENGINE_BUDGET_MS = 480_000;
+/**
+ * 单次渲染的下限超时。渲染超时取「后台配的 timeoutMs」与「本引擎剩余预算」的较小值——
+ * 否则运营把渲染超时配到 480s 时，一次渲染就能把整段预算连同 sweep 的 10 分钟一起吃穿。
+ * 给 15s 下限是不让剩余预算见底时传一个 0/负数进去（那等于每次渲染必超时）。
+ */
+const MIN_RENDER_TIMEOUT_MS = 15_000;
+/**
+ * 单次 HTML 生成的挂钟上限，**覆盖全局 `OPENAI_TIMEOUT_MS`（60s）**。
+ *
+ * 2026-08-12 预发实测（`model=dj-claude-4.6-opus`、`thinkingMode=adaptive`）：创作轮勉强压线，
+ * 打磨轮因为输入多了「上一版 HTML + 成品图」直接撞 60s → `completeText` 返回 null →
+ * 引擎判「打磨轮模型调用失败」→ 整单回落模板。**画质最高的那条路径被一个与画质无关的全局旋钮掐死**，
+ * 而且现象是「悄悄变成模板图」，不看 `aiEngineError` 根本发现不了。
+ *
+ * 150s → 240s（同日下午）：影像档的创作轮实测直接顶穿 150s。单轮耗时随端点负载波动很大，
+ * 给窄了的代价是「一次抖动 = 一单失败」，而高级档失败是要退款的。
+ */
+const MAX_LLM_TIMEOUT_MS = 240_000;
+/**
+ * 起新一轮的最低剩余预算。低于它就不再开新一轮——**不是为了省钱，是为了不越过 deadline**：
+ * 单次 LLM 调用的超时被 `min(MAX_LLM_TIMEOUT_MS, 剩余预算)` 夹住，只要开轮时剩余 ≥ 这个数，
+ * 这一轮就一定在 deadline 之前收尾，整单也就不会漂到 sweep 的 10 分钟以外。
+ */
+const MIN_LLM_TIMEOUT_MS = 60_000;
+/** 看图评审的挂钟上限：它只写一行判定 + 几条意见，产出很短，不需要按创作轮那样给。 */
+const CRITIQUE_TIMEOUT_MS = 60_000;
+/**
+ * 单次 HTML 生成的 **净正文** 预算（思考预算由 gateway 的 chatMaxTokens 另行叠加 +7000）。
+ *
+ * 6000 → 12000 → 6000。调大的动机是「一页有密度的 HTML 写不下」，但实测产物只有 11–13k **字符**
+ * （≈3.5–4k token），6000 从来没有截断过它 —— 动机本身站不住，所以收回来。
+ *
+ * ⚠️ 别把这一格与「单轮变慢」联系起来：2026-08-12 预发那次单轮 >240s **不是**这个预算造成的。
+ * 实测证据是「同一份提示词只改 affinityKey 就从 224s 超时变成 41.5s 成功」——慢在 LLM 端点池的
+ * 车道排队上（`rawText` 的 affinityKey = sha1(system+user)，稳定的提示词会被永久粘在同一个端点上，
+ * 那条车道饱和时这类请求就一直排队到放弃）。调这里的数解决不了那个问题。
+ */
 const HTML_MAX_TOKENS = 6000;
 /**
  * 失败留痕里 `lastHtml` 的截断上限。
@@ -89,6 +149,18 @@ function canvasSystemPrompt(photo?: PosterStyle): string {
     '字号敢差出一个量级，字距敢拉开。但无论怎么排——**任何元素都不出画、信息文字之间不互相压字**',
     '（装饰性叠层是允许的，按硬约束 10 声明），每个元素都有呼吸空间。这是专业执行的底线，不可协商。',
     '',
+    // 这一段是**负向清单**，位置在硬约束之前、创作手法之后：它管的不是「合不合规」而是「像不像自动生成的」。
+    // 列的每一条都是机器量不出来、却一眼就露怯的廉价特征——量测器管不到的地方，只能靠提示词与看图打磨。
+    '【别让它看起来像自动生成的（逐条自查）】',
+    '- 不要把每块信息都塞进圆角卡片或描边容器里：卡里套卡是"自动生成感"最强的特征。',
+    '  层级靠字号、位置与留白建立，不靠容器和分割线。',
+    '- 不要均匀铺满：画面要有明确的疏密对比，敢让整片区域什么都不放。留白是构图，不是没画完。',
+    '- 不要处处居中：除非居中本身就是这张的构图立场，否则立一条明确的对齐轴，让元素成组咬住它。',
+    '- 同一个元素不要叠三种强调手法（又加粗又换色又加底又描边）。要强调，只挑一种，做到底。',
+    '- 慎用阴影：要么不用，要么极轻。靠 box-shadow 把一堆卡片"浮起来"是廉价感的头号来源。',
+    '- 纯平色块容易显廉价：需要时给表面一点材质（极细噪点、微渐变、纸纹、网点），但克制到几乎看不见。',
+    '- 数字与英文用同一套字体里合适的字重，不要让它们比中文更抢眼；小字标注宁可再小一点、再淡一点。',
+    '',
     `【硬约束（渲染后会被机器逐条量测，违反即打回重写）】`,
     `1. 画布固定 ${CANVAS_SPEC.width}×${CANVAS_SPEC.height} px（3:4，@${CANVAS_SPEC.scale}x 输出）。`,
     `   根元素必须是 <div class="${CANVAS_CLASS}">，且 width:${CANVAS_SPEC.width}px;height:${CANVAS_SPEC.height}px;`,
@@ -102,6 +174,11 @@ function canvasSystemPrompt(photo?: PosterStyle): string {
     `   衬线：${FONT_SERIF}`,
     '5. 图片只有两种合法来源：下面告知你的占位符，或你自己写的 data:image URI（如内联 SVG）。',
     '   **没告知你的占位符绝对不要写**（写了会留下一个空洞并被判违规）。',
+    // 2026-08-12 三方出图对比里抓到的真缺陷：没给二维码素材时，两版引擎都自己用 SVG/方块
+    // 画了一个"像二维码"的图案。它扫出来什么都没有——一张印着假码的对外物料是信任事故，
+    // 而量测器的 qr_quiet_zone 只认 <img data-role="qr">，手画的方块阵它一条都拦不住。
+    '   **没有给你二维码素材时，绝对不许自己画一个像二维码的东西**（方块阵、定位角、点阵码都不行）：',
+    '   那种图案扫出来是空的，印在对外物料上就是欺骗。此时行动号召只用文字表达。',
     `   二维码 <img> 必须带 data-role="qr"，本体 ≥${L.qrMinPx}px，其父容器 padding ≥${L.qrQuietPx}px 且背景纯白（静区，保证可扫）。`,
     '   Logo <img> 只限高、必须 object-fit:contain（禁拉伸变形）。',
     '6. 文案只能用下面给的原文，**一个字都不许自创、改写或翻译**：不许自己编承诺、数字、时间、地点、联系方式。',
@@ -127,6 +204,11 @@ function canvasSystemPrompt(photo?: PosterStyle): string {
       `   width:${CANVAS_SPEC.width}px;height:${CANVAS_SPEC.height}px;object-fit:cover;object-position:center;z-index:0。`,
       '   不许把它缩成一张卡片、不许加圆角、不许留白边、不许只当装饰小图用——它就是这张海报的主视觉。',
       '   也不要用 transform:scale / 负 margin 去二次裁切：那会把主体或人脸切掉，而画面构图是按整幅算好的。',
+      // 2026-08-12 预发实测：模型守住了"铺底"这一条，却在版面中间又插了一张同源的白边小图
+      //   （占位符被引用了第二次），看上去像一张贴歪的拍立得。约束只说了"必须铺底"，没说"只能用一次"。
+      `   **整份文档里 ${CANVAS_PLACEHOLDER.visual} 只能出现一次**，就是上面那个铺底层。`,
+      '   不许在版面里再放一张同源的小图（缩略图、相框、卡片、圆角小方块都不行）——',
+      '   同一张图出现两次会让画面看起来像贴错了素材，而不是一个设计决定。',
       `12. **文字只能落在安全区**：这张主视觉在生成时就为排版留好了空区 —— ${SAFE_ZONE_HINTS[photo.safeZone]}。`,
       '   所有信息文字（主标题/副标题/卖点/CTA/落款/AI 标识）都必须落在这片区域内，',
       '   **绝不许压在人物面部或主体上**（这一项机器量不出来，只能靠你自己守；打磨轮请专门自查一遍）。',
@@ -248,7 +330,15 @@ function canvasUserPrompt(o: {
 export type CompleteTextFn = (
   system: string,
   user: string,
-  o: { maxChars?: number; maxTokens?: number; temperature?: number },
+  o: {
+    maxChars?: number; maxTokens?: number; temperature?: number;
+    /** 打磨轮把上一版渲染出的成品 PNG 一起发给模型（让它先看图再改代码）。 */
+    images?: { mediaType: string; base64: string }[];
+    /** 是否开思考。海报这条链**恒传 false**，理由见调用处那段实测记录。 */
+    allowThinking?: boolean;
+    /** 单次调用挂钟上限，覆盖全局 OPENAI_TIMEOUT_MS（整页 HTML 跑不进那 60s）。 */
+    timeoutMs?: number;
+  },
 ) => Promise<string | null>;
 
 export interface CanvasRenderFn {
@@ -259,10 +349,20 @@ export interface CanvasRenderFn {
   }>;
 }
 
+export type CritiqueFn = (
+  input: { png: Buffer; brief: NormalizedPosterBrief; manifesto: PosterManifesto; photo?: PosterStyle | null },
+) => Promise<VisualCritique | null>;
+
 export interface CanvasEngineDeps {
   complete?: CompleteTextFn;
   render?: CanvasRenderFn;
   now?: () => number;
+  /**
+   * 视觉评审（看图提意见）。**顾问不是闸门**：返回 null 一律按「本轮没有评审」继续走，
+   * 绝不因为评审不可用而让一单失败。缺省用 requestVisualCritique（走同一个 complete 带图发出去）。
+   * 单测默认不注入 → 走缺省实现 → complete 桩收到带 images 的调用，测试可据此区分两类调用。
+   */
+  critique?: CritiqueFn;
   /**
    * 画面文字的输出侧审核（fail-closed）。brief 文案建单时已审过，但模型可能自创装饰性文字，
    * 那也是印在对外成品上的内容，必须过同一道闸。worker 会带任务上下文注入；缺省用无上下文的
@@ -285,8 +385,12 @@ export interface CanvasPoster {
   height: number;
   /** 最终 HTML（落 CreativeAsset.metadataJson 供排障；不入 CreativeJob 行，太大）。 */
   html: string;
-  /** HTML 相关的 LLM 调用轮数（1=只生成，2=生成+一轮打磨/修复，3=再修一轮）。恒 ≥2：打磨是无条件的。 */
+  /** HTML 相关的 LLM 调用轮数（1=只生成，2=生成+一轮打磨/修复，以此类推）。恒 ≥2：打磨是无条件的。 */
   rounds: number;
+  /** 发生过的视觉评审次数（看图轮）。0 = 评审不可用，本单退化成纯量测闭环。 */
+  visualCritiques: number;
+  /** 最后一次评审判定为「达标」→ 提前收工，而不是被轮次或预算用尽逼停。 */
+  critiquePassed: boolean;
   /** 首轮量出、最终被修掉的违规条数。 */
   violationsFixed: number;
   /** 最终残留违规（成功时必为空数组）。 */
@@ -310,7 +414,17 @@ export type CanvasEngineOutcome =
   };
 
 interface Attempt {
+  /** 渲染用的最终 HTML（占位符已换成真实素材字节）。落资产 metadata 的是这一份。 */
   html: string;
+  /**
+   * **回喂给模型看的那一份**：模型自己写的源码，占位符还是 `{{VISUAL_URL}}` 的形态。
+   *
+   * 为什么必须分开：影像档的主视觉是一段约 200KB 的 base64 data URI，`fillPlaceholders` 之后
+   * `html` 会膨胀到 20 万字符以上，而打磨轮的 user prompt 有 60k 上限 —— 回喂 `html` 的实际效果是
+   * 「模型收到一份从 base64 中间被切断的残片」，既读不懂又把额度全烧在一串它自己写不出的字节上。
+   * 2026-08-12 预发实测到的就是这一格（usr=209720）。回喂源码则既短又正是它下一轮要改的东西。
+   */
+  sourceHtml: string;
   buffer: Buffer;
   width: number;
   height: number;
@@ -355,7 +469,7 @@ async function attemptOnce(
   }
   return {
     attempt: {
-      html, buffer: out.buffer, width: out.width, height: out.height,
+      html, sourceHtml: clean.html, buffer: out.buffer, width: out.width, height: out.height,
       violations: out.violations, aiMarkInjected: injected,
       bodyText: out.bodyText ?? '',
     },
@@ -392,7 +506,23 @@ export async function generateCanvasPoster(
   const now = deps.now ?? (() => Date.now());
   const moderateText = deps.moderateText ?? ((t: string) => moderate('output', t));
   const deadline = now() + (input.budgetMs ?? AI_ENGINE_BUDGET_MS);
-  const outOfTime = (): boolean => now() >= deadline;
+  const remaining = (): number => deadline - now();
+  const outOfTime = (): boolean => remaining() <= 0;
+  /** 单次 LLM 调用的挂钟上限：被剩余预算夹住，保证任何一轮都不会跨过 deadline。 */
+  const llmTimeout = (): number => Math.min(MAX_LLM_TIMEOUT_MS, Math.max(0, remaining()));
+  /**
+   * 本次渲染允许用多久 = min(后台配的渲染超时, 本引擎剩余预算)，下限 MIN_RENDER_TIMEOUT_MS。
+   * 没有这一层的话，运营把渲染超时配到上限 480s 时，单次渲染就能越过本引擎的整段预算，
+   * 进而把一单的挂钟时间顶到 worker 判卡死的 10 分钟以外 → 重新入队、跑两遍、出两张资产。
+   */
+  const renderTimeout = (): number => {
+    const left = deadline - now();
+    const configured = input.timeoutMs ?? left;
+    return Math.max(MIN_RENDER_TIMEOUT_MS, Math.min(configured, left));
+  };
+
+  let visionCalls = 0;
+  let critiquePassed = false;
 
   /** 失败出口的唯一收口：顺手把最后一轮产物截断后带上（有就带，没有就不带这个键）。 */
   const fail = (
@@ -421,45 +551,87 @@ export async function generateCanvasPoster(
       console.warn('[creative] AI 画面文字未过输出侧审核，回落模板路径');
       return fail({ reason: '画面文字未过内容审核', rounds, violations: [], html: a.html });
     }
-    return { ok: true, poster: toPoster(a, rounds, fvc, reverted) };
+    return {
+      ok: true,
+      poster: toPoster(a, {
+        rounds, firstViolationCount: fvc, polishReverted: reverted,
+        visualCritiques: visionCalls, critiquePassed,
+      }),
+    };
   };
 
   const photo = input.photoStyle ?? null;
   const system = canvasSystemPrompt(photo ?? undefined);
   const user = canvasUserPrompt({ ...input, photo });
+  /** 缺省实现走同一个 complete（带图发出去），测试可注入桩绕开真实模型。 */
+  const critique: CritiqueFn = deps.critique
+    ?? ((i) => requestVisualCritique(i, (s, u, o) => complete(s, u, {
+      ...o,
+      timeoutMs: Math.min(CRITIQUE_TIMEOUT_MS, Math.max(0, remaining())),
+    })));
 
   let calls = 0;
   let firstViolationCount = 0;
   let lastClean: Attempt | null = null;
   let current: Attempt | null = null;
-  let pending: PosterViolation[] = [];   // 待回喂的违规（空 = 上一轮干净，本轮做无条件打磨）
+  let pending: PosterViolation[] = [];   // 待回喂的违规（机器闸门：空 = 上一轮量测干净）
+  let notes: string[] = [];              // 待落实的视觉评审意见（人眼顾问：空 = 没有意见可落实）
   let polished = false;                   // 是否已经发生过一次 refine（打磨或修复都算 second pass）
   let reason = '未知原因';
 
   while (calls < MAX_HTML_CALLS) {
-    if (outOfTime()) {
-      reason = `AI 引擎超出 ${input.budgetMs ?? AI_ENGINE_BUDGET_MS}ms 预算`;
+    // 剩余预算不足以完整跑完一轮就别开这一轮：开了也只会在半路被自己的超时掐断，
+    // 白烧一次调用还什么都拿不到（手上若已有干净图，循环外会照常把它交出去）。
+    if (remaining() < MIN_LLM_TIMEOUT_MS) {
+      reason = `AI 引擎剩余预算不足一轮（总预算 ${input.budgetMs ?? AI_ENGINE_BUDGET_MS}ms）`;
       break;
     }
-    // 第一次是「创作」，之后是「修正 + 打磨」或「无条件打磨」。
+    // 第一次是「创作」，之后按手上有什么决定打磨的依据，优先级：
+    //   机器违规 > 艺术总监意见 > 无条件打磨（上游那句 "take a second pass" 的兜底形态）。
+    // 违规优先是因为它是**交付闸门**：带着违规的版面再美也交不出去，先把它修干净再谈审美。
     const sys = calls === 0
       ? system
-      : `${system}\n${pending.length ? fixDirective(pending) : POLISH_DIRECTIVE}`;
+      : `${system}\n${pending.length ? fixDirective(pending) : notes.length ? critiqueDirective(notes) : POLISH_DIRECTIVE}`;
     // 静态审计不过的那一轮没有可用产物（current 仍是上一轮的），此时不附「上一版 HTML」，
     // 让模型按 critique 重写一份完整文档，而不是去改一份它看不到的东西。
+    // 回喂的是**模型自己写的源码**（占位符形态），不是渲染用的那份 —— 后者内联了约 200KB 的
+    // 主视觉 base64，会把 60k 的 user 额度撑爆并被拦腰截断（见 Attempt.sourceHtml 的注释）。
     const usr = calls === 0 || !current
       ? user
-      : `${user}\n\n【上一版 HTML（在它的基础上改，不要从零重写）】\n${current.html}`;
+      : `${user}\n\n【上一版 HTML（在它的基础上改，不要从零重写）】\n${current.sourceHtml}`;
+    // ★ 打磨轮把**上一版渲染出来的成品图**一起发过去：这是本引擎与上游 canvas-design 对齐的关键一步——
+    //   让作者看见自己写的代码画成了什么样，而不是对着一份自己写的 HTML 凭空想象。
+    //   静态审计不过的那轮没有产物可看（current 为空或是更早那版），此时只发文本。
+    const images = calls > 0 && current
+      ? [{ mediaType: 'image/png', base64: current.buffer.toString('base64') }]
+      : null;
 
     calls++;
-    const raw = await complete(sys, usr, { maxChars: 60_000, maxTokens: HTML_MAX_TOKENS, temperature: 0.7 });
+    const raw = await complete(sys, usr, {
+      maxChars: 60_000,
+      maxTokens: HTML_MAX_TOKENS,
+      temperature: 0.7,
+      // ★ 这一轮**不开思考**（2026-08-12 预发实测后定的，别再打开）：
+      //   · 开着时线上是 adaptive 档，思考量由模型自己决定，而 `max_tokens` 管的是「思考 + 正文」总量。
+      //     实测出现过「接口成功返回、正文是空串」——224s 之后拿回一个空字符串，引擎判「模型不可用」
+      //     整单回落模板，全程无异常无日志。gateway 已按 chatMaxTokens 给正文留了 +7000 的净额，
+      //     但 adaptive 的思考照样能越过这个预留，**失败模式消不掉，只能压低概率**。
+      //   · 而它并没有换来质量：同一段提示词实测 思考关 42.6s→9416 字符 / 思考开 37.6s→7724 字符，
+      //     时间相当、产出反而更少。这一轮的设计决策本来就已经由宣言那一轮承载了。
+      //   要再试思考，正确做法是把 thinkingMode 显式覆盖成 enabled + 固定 budget（让预留真的生效），
+      //   而不是把 adaptive 直接放进来。
+      allowThinking: false,
+      // 覆盖全局 60s：整页 HTML 跑不进那个数（见 MAX_LLM_TIMEOUT_MS 的实测记录）。
+      timeoutMs: llmTimeout(),
+      ...(images ? { images } : {}),
+    });
     if (!raw) {
       // 无 live provider（mock/测试）或调用失败。首轮就没有 → 整条 AI 路径走不通。
       reason = calls === 1 ? '模型不可用（未配置真实 provider 或调用失败）' : '打磨轮模型调用失败';
       break;
     }
 
-    const r = await attemptOnce(raw, input, render);
+    const r = await attemptOnce(raw, { ...input, timeoutMs: renderTimeout() }, render);
     if (r.fatal) { reason = r.fatal; break; }   // 渲染/量测本身坏了：模型修不了，去回落
     if (calls === 1) firstViolationCount = r.violations.length;
     if (r.attempt) current = r.attempt;
@@ -467,10 +639,36 @@ export async function generateCanvasPoster(
     // ── 干净 ──
     if (r.attempt && !r.violations.length) {
       lastClean = r.attempt;
-      // ★ 上游 skill 的核心机制：首轮干净也**无条件**再打磨一轮（"take a second pass"）。
-      //   已经打磨过（polished）才收工，否则再走一轮。
-      if (polished) return deliver(r.attempt, calls, firstViolationCount, false);
+      // 量测干净只说明「没排坏」，不说明「好看」。这里请艺术总监看一眼真图再决定收不收工。
+      let verdict: VisualCritique | null = null;
+      // 剩余预算连一次评审都放不下时就别看了：评审的价值全在「看完还能再改一轮」，
+      // 改不动了才去看，纯属白花一次调用。
+      if (visionCalls < MAX_VISION_CALLS && remaining() > CRITIQUE_TIMEOUT_MS) {
+        visionCalls++;
+        try {
+          verdict = await critique({ png: r.attempt.buffer, brief: input.brief, manifesto: input.manifesto, photo });
+        } catch (e) {
+          // 顾问失灵不许弄挂一单。缺省实现自己已经吞了异常，这层是给注入实现兜底的——
+          // 「评审是顾问不是闸门」这条不变式必须与具体实现无关地成立。
+          console.warn('[creative] 视觉评审异常，按未评审继续：', (e as Error).message);
+          verdict = null;
+        }
+      }
+      // 艺术总监还拿得出**具体意见** = 这一版还没到头。
+      const stillWants = !!verdict && !verdict.pass;
+      // ★ 无条件的第二遍仍然是底线（上游 "take a second pass"）：**评审判定不能让打磨轮被跳过**。
+      //   首轮就判达标也照打一轮——真让它在首轮收工，等于用一个宽松的评委把现有行为往回退。
+      //   收工条件因此是「已经打磨过 且（达标 或 评审不可用）」：
+      //   · 达标      → 见好就收，把剩下的轮次省下来（多打磨一轮的期望收益是负的，同不变式②的教训）；
+      //   · 评审不可用 → 退回**老行为**（打磨一轮即交），保证「评审挂了 = 回到 2026-07-29 的表现」。
+      if (polished && !stillWants) {
+        critiquePassed = !!verdict?.pass;
+        return deliver(r.attempt, calls, firstViolationCount, false);
+      }
+      // 轮次或预算已经不够再改一轮了：手上这张是干净的，直接交，别把它耗没了。
+      if (calls >= MAX_HTML_CALLS || outOfTime()) return deliver(r.attempt, calls, firstViolationCount, false);
       pending = [];
+      notes = verdict?.notes ?? [];
       polished = true;
       continue;
     }
@@ -482,6 +680,7 @@ export async function generateCanvasPoster(
       return deliver(lastClean, calls, firstViolationCount, true);
     }
     pending = r.violations;
+    notes = [];   // 违规优先：先把版面修合规，审美意见等下一轮干净了再谈（也免得两套指令打架）
     polished = true;
     reason = `${calls} 轮后仍有 ${pending.length} 条违规：${[...new Set(pending.map((v) => v.code))].join(',')}`;
   }
@@ -491,17 +690,25 @@ export async function generateCanvasPoster(
   return fail({ reason, rounds: calls, violations: pending, html: current?.html });
 }
 
-function toPoster(a: Attempt, rounds: number, firstViolationCount: number, polishReverted: boolean): CanvasPoster {
+function toPoster(a: Attempt, o: {
+  rounds: number;
+  firstViolationCount: number;
+  polishReverted: boolean;
+  visualCritiques: number;
+  critiquePassed: boolean;
+}): CanvasPoster {
   return {
     buffer: a.buffer,
     mimeType: 'image/png',
     width: a.width,
     height: a.height,
     html: a.html,
-    rounds,
-    violationsFixed: Math.max(0, firstViolationCount - a.violations.length),
+    rounds: o.rounds,
+    visualCritiques: o.visualCritiques,
+    critiquePassed: o.critiquePassed,
+    violationsFixed: Math.max(0, o.firstViolationCount - a.violations.length),
     violations: a.violations,
-    polishReverted,
+    polishReverted: o.polishReverted,
     aiMarkInjected: a.aiMarkInjected,
   };
 }

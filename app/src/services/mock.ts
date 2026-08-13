@@ -746,6 +746,7 @@ function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { platform.stor
  * 成品图是内置纯色渐变 PNG 占位（不是真渲染结果），仅供确认页/详情页的版式与交互自测。
  */
 const MOCK_POSTER_PRICE = 10;
+const MOCK_POSTER_PREMIUM_PRICE = 25;
 // 版式清单与服务端 TEMPLATE_CATALOG（config.ts）逐字对齐 —— mock 是前端唯一的离线口径，
 // 描述文案漂一个字，自测出来的界面就跟真机不是同一个产品。真实接口只下发启用中的，mock 恒三套全开。
 const MOCK_POSTER_TEMPLATES: PosterTemplateOption[] = [
@@ -2061,8 +2062,15 @@ export const mock = {
 
   // —— 海报成品图（canvas_design）——
   // mock 恒开、单价 10；不动钻石余额（本地演示不模拟扣退款，避免与 credits 页对不上账）。
+  // 高级档在 mock 里恒可用：本地走查要能看到那个选择器，否则确认页少一整块 UI 没人验得到。
   async creativeStatus(): Promise<CreativeStatusResult> {
-    return delay({ enabled: true, pricePerPoster: MOCK_POSTER_PRICE, templates: MOCK_POSTER_TEMPLATES }, 60);
+    return delay({
+      enabled: true,
+      pricePerPoster: MOCK_POSTER_PRICE,
+      premiumPricePerPoster: MOCK_POSTER_PREMIUM_PRICE,
+      premiumAvailable: true,
+      templates: MOCK_POSTER_TEMPLATES,
+    }, 60);
   },
   async posterBriefDraft(sessionId?: string, messageId?: string): Promise<PosterBriefDraft> {
     const { d } = current();

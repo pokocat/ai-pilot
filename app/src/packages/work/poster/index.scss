@@ -65,6 +65,10 @@
 .ps-tpl-h { display: flex; align-items: center; justify-content: space-between; }
 .ps-tpl-n { font-size: 14px; font-weight: 600; color: var(--ink); }
 .ps-tpl-d { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+/* 档位卡的价格行：钻石走 icon 组件而不是 emoji（emoji 在两端字重与基线都对不齐，
+   原生端 native-weapp.test.mjs 有守卫直接拦 emoji 回退）。 */
+.ps-tpl-cost { display: flex; align-items: center; gap: 4px; margin-top: 5px; }
+.ps-tpl-cost .ps-tpl-d { margin-top: 0; }
 
 /* 肖像确认 */
 .ps-consent {

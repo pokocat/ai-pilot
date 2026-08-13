@@ -432,6 +432,22 @@ export function noteCreativeEngine(skill: string, engine: string): void {
   creativeEngines.inc({ skill, engine: (engine || 'unknown').slice(0, 24) });
 }
 
+// 视觉评审维度（2026-08-12，看图打磨闭环上线）。同样是**独立计数器**，理由与上面那条一致。
+// 三个取值就是这条闭环的全部健康状态：
+//   pass        = 艺术总监判定达标（提前收工，省一轮）
+//   revise      = 给了具体意见，进了打磨轮
+//   unavailable = 调用失败 / 产出解析不出来 → 本单退化成纯量测闭环（老行为）
+// **`unavailable` 的斜率就是「看图打磨在生产悄悄失效」的告警信号**——与 template_fallback 同一类指标：
+// 这条链路失效时画面不会报错，只是悄悄变回没人看过的样子，不埋点就完全不可见。
+const creativeCritiques = new LabeledCounter(
+  'junshi_creative_critique_total',
+  '海报视觉评审判定（verdict=pass|revise|unavailable）',
+  12,
+);
+export function noteCreativeCritique(verdict: 'pass' | 'revise' | 'unavailable'): void {
+  creativeCritiques.inc({ verdict });
+}
+
 /* ──────────────── 支付 ──────────────── */
 
 const payOrdersCreated = new LabeledCounter('junshi_pay_orders_created_total', '微信支付下单成功数');

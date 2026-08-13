@@ -5,7 +5,7 @@
 // 资产归属（assetId 是否属本人）与 MIME 校验在 jobs 层做（要查库，schema 保持纯函数可单测）。
 import { z } from 'zod';
 import { TEMPLATE_KEYS, type TemplateKey } from './config.js';
-import type { PosterBrief, PosterScene } from '../../../../shared/contracts';
+import type { PosterBrief, PosterScene, PosterTier } from '../../../../shared/contracts';
 
 /** 文案长度上限（与确认页提示口径一致；改这里必须同步改小程序提示文案）。 */
 export const LIMITS = {
@@ -59,6 +59,10 @@ const PosterBriefSchema = z.object({
   visualDirection: trimmed(LIMITS.visualDirection, '视觉方向').default(''),
   negativePrompt: trimmed(LIMITS.negativePrompt, '排除项').optional(),
   templateKey: z.string().trim().max(40).optional(),
+  // tier 与 templateKey 同理：**不在 schema 报错**。非法值按标准档处理（老客户端不带这个字段
+  // 也必须照常建单）；「选了高级但高级不可用」是**业务闸门**，由 assertTierAvailable 报 422，
+  // 那里才拿得到运行时配置，也才说得出人话（"高级档暂不可用"而不是 "tier: invalid enum"）。
+  tier: z.string().trim().max(20).optional(),
   ratio: z.string().trim().default('3:4'),
   portraitAssetId: cuidish.optional(),
   logoAssetId: cuidish.optional(),
@@ -66,8 +70,15 @@ const PosterBriefSchema = z.object({
   brandKitVersion: z.number().int().min(1).max(9999).optional(),
 });
 
-/** 已规整的 brief：templateKey 必定是白名单值，ratio 必定是 '3:4'。 */
-export type NormalizedPosterBrief = PosterBrief & { templateKey: TemplateKey; ratio: '3:4' };
+/** 已规整的 brief：templateKey 必定是白名单值，ratio 必定是 '3:4'，tier 必定是两档之一。 */
+export type NormalizedPosterBrief = PosterBrief & {
+  templateKey: TemplateKey; ratio: '3:4'; tier: PosterTier;
+};
+
+/** 档位归一：只认 'premium'，其余（含缺省、脏值、老客户端不带）一律标准档。 */
+export function normalizeTier(v: unknown): PosterTier {
+  return v === 'premium' ? 'premium' : 'standard';
+}
 
 function isTemplateKey(v: unknown): v is TemplateKey {
   return typeof v === 'string' && (TEMPLATE_KEYS as readonly string[]).includes(v);
@@ -121,6 +132,7 @@ export function normalizePosterBrief(
     visualDirection: b.visualDirection,
     ...(b.negativePrompt ? { negativePrompt: b.negativePrompt } : {}),
     templateKey,
+    tier: normalizeTier(b.tier),
     ratio: '3:4',
     ...(b.portraitAssetId ? { portraitAssetId: b.portraitAssetId } : {}),
     ...(b.logoAssetId ? { logoAssetId: b.logoAssetId } : {}),

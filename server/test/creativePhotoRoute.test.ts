@@ -14,7 +14,7 @@ import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 import { grantCredits } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
-import { runJobOnce, type CreativeWorkerDeps } from '../src/services/creative/worker.js';
+import { runJobOnce, MAX_ATTEMPTS, type CreativeWorkerDeps } from '../src/services/creative/worker.js';
 import {
   CREATIVE_FLAG_ID, DEFAULT_AI_MODE, AI_MODES, getCreativeConfig, visualProviderConfigured,
   type CreativeRuntimeConfig,
@@ -308,6 +308,24 @@ describe('影像路线 · 门禁与归一（规则只有一处实现，全部在
     assert.equal(graphic.mode, 'graphic');
   });
 
+  // ★ 高级档：路线由**用户付的钱**定，不由模型自选 —— 用户买的就是那次图片大模型调用。
+  test('高级档：模型自选 graphic 也照样走 photo（付了高级价就不该拿到标准形态）', () => {
+    const r = resolvePosterRoute({
+      aiMode: 'auto', visualConfigured: true, brief: { ...BRIEF, tier: 'premium' },
+      modelMode: 'graphic', modelStyleKey: 'quiet_luxury_grey', modelSubject: SUBJECT,
+    });
+    assert.equal(r.mode, 'photo');
+    assert.match(r.reason, /高级档强制影像路线/, '留痕要能说清"为什么是 photo"');
+  });
+
+  test('高级档不凌驾三条门禁：拼不出 subject 时仍然降 graphic（由 worker 让整单失败退款）', () => {
+    const r = resolvePosterRoute({
+      aiMode: 'auto', visualConfigured: true, brief: { ...BRIEF, tier: 'premium' },
+      modelMode: 'photo', modelSubject: '',
+    });
+    assert.equal(r.mode, 'graphic', '门禁说的是"走不通"，不能因为付了钱就假装走得通');
+  });
+
   test('非法 / 缺失 styleKey → 按 brief.scene 回落默认档，**不作废整条 photo 路线**', () => {
     for (const bogus of ['anthropic_style', '', null, 42]) {
       const r = resolvePosterRoute({
@@ -369,7 +387,11 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
     route: { mode: 'photo', styleKey: 'mono_authority_portrait', subject: SUBJECT },
   };
 
-  /** 跑一轮引擎，回收两轮提示词（stub 渲染恒干净 → 创作 + 无条件打磨共两次调用）。 */
+  /**
+   * 跑一轮引擎，回收两轮提示词（stub 渲染恒干净 → 创作 + 无条件打磨共两次调用）。
+   * 显式关掉视觉评审：这一组钉的是 **photo 变体提示词**本身，评审开着会在中间插一次看图调用，
+   * 把 calls[1] 从「打磨轮」挪成「评审轮」——那测的就不是这里要测的东西了。
+   */
   async function prompts(photo: boolean): Promise<{ system: string; user: string }[]> {
     const calls: { system: string; user: string }[] = [];
     const complete: CompleteTextFn = async (system, user) => { calls.push({ system, user }); return html; };
@@ -381,7 +403,7 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
       manifesto,
       assets: photo ? { visualUrl: 'data:image/png;base64,AAA' } : {},
       ...(photo ? { photoStyle: POSTER_STYLES.mono_authority_portrait } : {}),
-    }, { complete, render, moderateText: async () => true });
+    }, { complete, render, moderateText: async () => true, critique: async () => null });
     assert.equal(r.ok, true, r.ok ? '' : r.reason);
     return calls;
   }
@@ -392,6 +414,10 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
     assert.match(first.system, /object-fit:cover/);
     assert.match(first.system, /不许把它缩成一张卡片/);
     assert.match(first.system, /transform:scale/, '二次裁切会把人脸切掉，必须显式禁止');
+    // 2026-08-12 预发实测：模型守住了"铺底"，却又在版面中间插了一张同源白边小图，像贴歪的拍立得。
+    // "必须铺底" ≠ "只能用一次"，两条都要写。
+    assert.match(first.system, /只能出现一次/, '占位符复用会让画面像贴错素材');
+    assert.match(first.system, /缩略图、相框、卡片/, '把复用的具体形态点名，模型才躲得开');
     assert.ok(polish.system.includes('object-fit:cover'), '打磨轮不许丢掉背景层规则');
     assert.ok(first.user.includes(CANVAS_PLACEHOLDER.visual), '素材清单里要有主视觉');
   });
@@ -590,6 +616,34 @@ describe('影像路线 · worker 三层回落链（photo → graphic 同宣言 �
     const item = (await api('GET', '/api/admin/creative/jobs')).body.items[0];
     assert.equal(item.aiMode, 'graphic');
     assert.ok(String(item.photoError ?? '').length > 0, '降级原因要在任务台可见');
+  });
+
+  // ★ 高级档与标准档在这一格的行为**刻意相反**，不要"统一"它们：
+  //   标准档的承诺是「给你一张海报」，所以降级交付是对的；
+  //   高级档的承诺是「顶级图片模型出的主视觉」，降级交付就是拿了 25 钻交付别的东西。
+  test('高级档：主视觉失败 → 整单失败 + 全额退款（**不降级交付 graphic**）', async () => {
+    const { token } = await posterUser();
+    const jobId = await createJob(token, 'premium-visual-failed', { tier: 'premium' });
+    const before = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(before.creditCost, 25, '建单时按高级价扣的');
+
+    const { deps: d, calls } = deps({ photoVisual: 'submit_failed', composeOk: 'graphic-only' });
+
+    // 第一次失败仍按**可重试**处理（供应商抖动值得再试一次）——但关键是这一轮里
+    // 既没有降级交付 graphic，也没有回落模板。
+    await runOne(jobId, d);
+    const mid = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(mid.status, 'pending', '还有重试次数 → 回队再试');
+    assert.equal(mid.errorCode, 'PREMIUM_VISUAL_FAILED');
+    assert.deepEqual(calls.compose, [], '主视觉都没有，不该再去跑一遍图形版（那是降级交付）');
+    assert.equal(await prisma.creativeAsset.count({ where: { jobId } }), 0, '没有任何成品资产落库');
+
+    // 重试次数耗尽 → 终态失败 + 全额退款。
+    for (let i = 1; i < MAX_ATTEMPTS; i++) await runOne(jobId, d);
+    const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(job.status, 'failed', '拿不到主视觉就不该交付，也不该收这笔钱');
+    assert.ok(job.refundedAt, '★ 必须退款：用户没拿到他买的东西');
+    assert.equal(await prisma.creativeAsset.count({ where: { jobId } }), 0, '全程不产出任何成品');
   });
 
   test('第一层：图片审核不过 → 同样退回 graphic（**不像模板路径那样整单失败退款**）', async () => {

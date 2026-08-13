@@ -6,6 +6,32 @@
 
 ## 变更日志
 
+### 2026-08-12 · 新增高级海报档（图片大模型出主视觉）+ 供应商方言 · 影响面：海报定价与产物形态、图片供应商配置、小程序确认页、运营后台
+
+- 新增**档位** `PosterBrief.tier`（`standard` | `premium`，缺省 standard，老客户端不带这个字段行为一字不变）。高级档先由图片大模型（Seedream / GPT Image）出**全幅无文字主视觉**，再由渲染器排中文/Logo/二维码。**不是**让图片模型把整张海报连字画出来——§4.1 原则未变。
+- 高级档三条不变式：不可用一律 **422 而非静默降标准**（`PREMIUM_UNAVAILABLE`；可用性判断 `premiumTierAvailable()` 一处实现，同时供 `/creative/status` 的 `premiumAvailable` 与建单闸门）；**与本人照片互斥且在建单时就拦**（`PREMIUM_PORTRAIT_CONFLICT`，不先扣钱再退）；**失败不降级交付**——photo 链走不通 / AI 引擎未产出 → 整单失败 + 全额退款（`PREMIUM_VISUAL_FAILED`），与标准档的三层回落链刻意相反。
+- 定价独立：`premiumPricePerPoster` 默认 25 钻（不是倍率——倍率会在改标准价时把高级价带偏），`priceForTier()` 是唯一口径，create/regenerate 共用，revise 不计费不设门禁。
+- **图片供应商方言** `visual.dialect`：`ark_seedream` 强制 `watermark:false`（方舟默认加水印，且该字段刻意不接受 `extraParams` 覆盖）+ 原生 `negative_prompt` + `optimize_prompt:false`；`gpt_image` 绝不发 `response_format`（gpt-image-1 收到直接 400）；`openai` 保持原行为。`buildVisualBody()` 是纯函数，三家差异由单测钉死。
+- **主视觉尺寸写入口校验**（`assertVisualSize`，宽高比须在 0.6–0.9）：⚠️ 生产实况是 `1440x2560`（9:16）而画布是 3:4，**每张影像主导海报都在被上下裁掉一大截且完全静默**（渲染成功、任务全绿、图是坏的）；同时 `extraParams.size='2K'` 从未生效（显式 `size` 覆盖它）。缺省值 `1024x1024` → `1440x1920`。此项需运营在后台改一次，代码不代改线上配置。
+- 三端同步：运营后台加两档单价与方言选择器（含那三条差异的说明）；小程序 H5 与原生确认页加档位选择（`premiumAvailable` 为假时整块隐藏），两端 mock 同契约。
+- 测试：server 1583 例、app 108+103 例、admin 75 例全绿；新增高级档门禁/定价/status 下发、`buildVisualBody` 三方言、`assertVisualSize`、`normalizeTier`、路线强制与「高级档失败不降级交付」等用例。
+- **预发真调 Seedream 验证过的两件事**：① 方言适配器接得通 —— 主视觉 27s、1728×2304、无水印、画面内无文字、顶部留白正好落在排版安全区；② 高级档宣言**不能给模型选路线** —— 实测它会自选 graphic 且 subject 留空，导致一张已付高级价的单在路线归一处直接判失败。已改成 `forcePhoto`：不给选择、只给要求（mode 固定 photo，styleKey/subject 不许空），门禁与失败退款仍是兜底。
+- **HTML 轮关掉思考**（实测后定）：线上是 adaptive 档，`max_tokens` 管的是「思考 + 正文」总量，实测出现「接口成功返回、正文是空串」→ 引擎判「模型不可用」→ 整单回落模板，**全程无异常无日志**。同时 `rawText` 开思考时改用 `chatMaxTokens` 换算净正文预算（provider 的 `maxTokensForThinking` 只在 `enabled` 档加预留，adaptive 原样返回）——海报虽已关思考，这条对未来任何开思考的 raw 调用方仍成立。思考也没换来质量：同一提示词「关 42.6s→9416 字符 / 开 37.6s→7724 字符」。
+- **已按授权订正生产配置**：`visual.size` `1440x2560`（9:16）→ `1728x2304`；删掉从未生效的 `extraParams.size='2K'`（请求体里显式 size 覆盖它），`extraParams.watermark` 保留。生产开关此前已是开启状态、Seedream 也早已配好。
+
+### 2026-08-12 · 海报 AI 排版引擎补上「看图打磨」闭环 · 影响面：成品图画质、创作成本与时延、LLM 网关参数、可观测性
+
+- 补上此前缺失的一环：整条链路**没有任何环节在评审审美**——`canvasMeasure` 量的是越界/重叠/字号这类事故，审美只由模型盲写那一次决定。新增 `services/creative/visualCritique.ts`：把渲染出的 PNG 交回模型做艺术总监评审，产出「判定 + 最多 5 条具体意见」逐条回喂；**打磨轮本身也带着那张图发出去**，让作者看见自己画成了什么样。
+- 评审是**顾问不是闸门**：调用失败或判定解析不出来一律按「没有评审」继续，退回 2026-07-29 的老行为（无条件打磨一轮即交），绝不让一单因评审失灵而失败。评审判定也**不能跳过**那一轮无条件打磨——首轮判达标也照打，否则等于用一个宽松的评委退化既有行为。
+- 预算随之上调：HTML 轮次 3 → 4（`MAX_HTML_CALLS`），看图 ≤2 次（`MAX_VISION_CALLS`，独立计数），整段 180s → 300s（`AI_ENGINE_BUDGET_MS`，仍稳在 `STALE_RUNNING_MS` 10 分钟内），单次 HTML 产出预算 6000 → 12000 token。**单次渲染超时改取 `min(后台 timeoutMs, 引擎剩余预算)`**，堵住「渲染超时配到 480s 就能顶穿 sweep 判卡死阈值 → 同一单跑两遍出两张资产」这条既有隐患。
+- `gateway.completeText` / `rawText` 新增两个**缺省关**的可选参数 `images` 与 `allowThinking`（两端 provider 的 raw 出口本就支持图片，只是网关没透出来）。海报创作与打磨显式开启思考；依赖尾部格式约定的调用方（ask 块那类）不得开启，既有辅助抽取行为一字未变。
+- 创作提示词新增「反廉价清单」负向约束（卡里套卡 / 均匀铺满 / 处处居中 / 强调手法叠加 / box-shadow 浮起来的卡片 / 纯平色块），管的是量测器量不出来、却一眼露怯的那类特征。
+- 新增指标 `junshi_creative_critique_total{verdict=pass|revise|unavailable}`，`unavailable` 的斜率即「看图打磨在生产悄悄失效」的告警信号；留痕另加 `resultJson.visualCritiques` / `critiquePassed`。
+- **预发实测抓出一条既有隐患：海报 LLM 调用此前走全局 `OPENAI_TIMEOUT_MS=60000`**（生产同值），而一整页手写 HTML/CSS 开了思考、上万 token 产出、打磨轮还带一张成品图作输入，根本跑不进 60s → `completeText` 返回 null → 引擎判「模型调用失败」→ 整单回落模板。**画质最高的那条路径被一个与画质无关的全局旋钮悄悄掐死，现象只是「图变模板了」。** 现在 `completeText` 支持按调用方覆盖 `timeoutMs`（缺省不传 = 老行为，不动全局那 60s——它罩着对话等所有链路）：HTML 轮 `min(150s, 剩余预算)`、评审轮 `min(60s, 剩余预算)`，剩余不足 60s 即不再开新一轮，保证任何一轮都不跨过 deadline。
+- 预算随之重算：整段 180s → 360s，HTML 轮次 3 → **3**（曾提到 4，当天实测后改回：单轮挂钟 1–2.5 分钟，第 4 轮在预算里排不下，留着就是不会兑现的承诺），worker 的 `budget()` 下限 30s → 90s（否则 photo 烧穿预算后 graphic 那次重排一轮都开不了，三层回落链的中间那层等于不存在）。最坏 360+90+40+15 ≈ 505s，仍在 `STALE_RUNNING_MS` 10 分钟内。
+- **禁止自画二维码**（三方出图对比实锤）：没给二维码素材时，改动前后两版引擎都自己用 SVG 方块阵画了个「像二维码」的图案，扫出来是空的——对外物料上的假码是信任事故。量测器拦不住（`qr_quiet_zone` 只认 `<img data-role="qr">`），只能在提示词里堵，并加守卫用例。
+- 测试：`server/test/creativeCanvas.test.ts` 增至 70 例（新增视觉评审解析纯函数组 + 看图打磨闭环组，含「评审不可用 → 完全退回老行为」「首轮达标也不许跳过 second pass」「脏图不请艺术总监看」「按评审改坏了照样退回干净图」「每轮 HTML 调用必须自带超时」五条不变式）；全量 `npm test` 1569 例通过。
+- 预发已部署验证（`https://wxapi.aibuzz.cn/api_preprod`）：同一份固定 brief（`test/fixtures/posterBriefs.ts` 的酒店 OTA 场景）跑通旧/新两条闭环并出图对比，新闭环 288s / 3 轮 / 1 次看图，旧闭环 200s / 3 轮。探针为一次性脚本，不建任务、不计费、不入库，跑完已从预发机移除。
 ### 2026-08-12 · IA 重构合入前全量 review 收口：状态覆盖、登录门、死代码与失效文案 · 影响面：小程序五个 tab 页、军令详情、能力目录页、共享构建守卫
 
 前后端各做了一遍审计（服务端 / shared / admin 本次零改动），修掉的是审计确认、且由本次重构造成或放大的问题：

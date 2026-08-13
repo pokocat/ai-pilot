@@ -18,9 +18,13 @@ import {
   CANVAS_PLACEHOLDER,
 } from '../src/services/creative/canvasSanitize.js';
 import {
-  generateCanvasPoster, MAX_HTML_CALLS, MAX_DEBUG_HTML_CHARS,
-  type CompleteTextFn, type CanvasRenderFn,
+  generateCanvasPoster, MAX_HTML_CALLS, MAX_VISION_CALLS, MAX_DEBUG_HTML_CHARS,
+  type CompleteTextFn, type CanvasRenderFn, type CritiqueFn,
 } from '../src/services/creative/canvasEngine.js';
+import {
+  parseCritique, critiqueSystemPrompt, critiqueDirective, MAX_CRITIQUE_NOTES,
+} from '../src/services/creative/visualCritique.js';
+import { POSTER_STYLE_LIST } from '../src/services/creative/styleLibrary.js';
 import { generateManifesto } from '../src/services/creative/manifesto.js';
 import {
   violationsCritique, MEASURE_LIMITS, DECOR_ATTR, posterScanFn, posterScanArg,
@@ -57,10 +61,20 @@ function bigHtml(tag: string): string {
   return okHtml(tag).replace('</div></body>', `<div>${'x'.repeat(30_000)}</div></div></body>`);
 }
 
-function stubComplete(replies: (string | null)[]): { fn: CompleteTextFn; calls: { system: string; user: string }[] } {
-  const calls: { system: string; user: string }[] = [];
-  const fn: CompleteTextFn = async (system, user) => {
-    calls.push({ system, user });
+type StubCall = {
+  system: string; user: string;
+  /** 本轮是否把上一版成品图发了过去（看图打磨的断言锚点）。 */
+  hasImage: boolean;
+  allowThinking: boolean;
+  timeoutMs?: number;
+};
+function stubComplete(replies: (string | null)[]): { fn: CompleteTextFn; calls: StubCall[] } {
+  const calls: StubCall[] = [];
+  const fn: CompleteTextFn = async (system, user, o) => {
+    calls.push({
+      system, user, hasImage: !!o?.images?.length, allowThinking: !!o?.allowThinking,
+      ...(o?.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+    });
     return replies[calls.length - 1] ?? null;
   };
   return { fn, calls };
@@ -88,14 +102,31 @@ const marginViolation: PosterViolation = {
   detail: '文字距画布边仅 4.2px（下限 12px）：「不再靠 OTA 活着」',
 };
 
+/**
+ * 默认注入「视觉评审不可用」（`critique: () => null`）。
+ *
+ * 这不是图省事：本文件里那批 refine 闭环用例钉的是**量测闭环**的契约（无条件打磨、退回干净图、
+ * 违规回喂），而视觉评审是叠在它之上的顾问层。缺省关掉它，这些用例就精确地描述了
+ * 「评审挂了 = 回到 2026-07-29 的老行为」这条兼容性承诺——那正是引擎里那条 `!verdict && polished`
+ * 分支的存在理由。要测评审本身的用例显式传 `critique`（见 ⑤ 组）。
+ */
 async function runEngine(
   complete: CompleteTextFn,
   render: CanvasRenderFn,
-  o: { budgetMs?: number; now?: () => number; moderateText?: (t: string) => Promise<boolean> } = {},
+  o: {
+    budgetMs?: number; now?: () => number; moderateText?: (t: string) => Promise<boolean>;
+    critique?: CritiqueFn;
+  } = {},
 ) {
   return generateCanvasPoster(
     { brief: BRIEF, manifesto: MANIFESTO, assets: {}, ...(o.budgetMs ? { budgetMs: o.budgetMs } : {}) },
-    { complete, render, ...(o.now ? { now: o.now } : {}), ...(o.moderateText ? { moderateText: o.moderateText } : {}) },
+    {
+      complete,
+      render,
+      critique: o.critique ?? (async () => null),
+      ...(o.now ? { now: o.now } : {}),
+      ...(o.moderateText ? { moderateText: o.moderateText } : {}),
+    },
   );
 }
 
@@ -241,6 +272,11 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.match(c.calls[1].system, /不要再加图形/, '移植上游「打磨不是加东西」');
     assert.doesNotMatch(c.calls[1].system, /\[margin\]/, '没有违规就不该出现 critique');
     assert.match(c.calls[1].user, /上一版 HTML/, '打磨轮要带上一版源码，不是从零重写');
+    // ★ 回喂的必须是**占位符形态的源码**，不是渲染用的那份：影像档的 {{VISUAL_URL}} 会被换成
+    //   约 200KB 的 base64，回喂它等于把 60k 的 user 额度烧在一串模型自己写不出的字节上，
+    //   还会被拦腰截断成读不懂的残片（2026-08-12 预发实测 usr=209720）。
+    assert.match(c.calls[1].user, /\{\{VISUAL_URL\}\}|<p>first<\/p>/, '带的是模型自己的源码');
+    assert.doesNotMatch(c.calls[1].user, /base64,[A-Za-z0-9+/]{200}/, '绝不把素材字节回喂给模型');
     assert.ok(c.calls[1].user.includes('first'), '带的是第一轮那份产物');
   });
 
@@ -282,9 +318,12 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.equal(render.htmls.length, 2);
   });
 
+  // 轮数上限是个会变的旋钮（3 → 4，2026-08-12 为看图打磨腾出一轮），所以桩按 MAX_HTML_CALLS 生成，
+  // 不写死。改上限时这两条用例应当自动跟着走，而不是留下一条"名字说 4 轮、其实只喂了 3 轮"的假绿。
   test(`${MAX_HTML_CALLS} 轮仍违规 → 不交付，返回 ok:false 让 worker 回落模板`, async () => {
-    const c = stubComplete([okHtml('a'), okHtml('b'), okHtml('c'), okHtml('never')]);
-    const render = stubRender([[marginViolation], [marginViolation], [marginViolation]]);
+    const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);
+    const c = stubComplete([...labels.map(okHtml), okHtml('never')]);
+    const render = stubRender(labels.map(() => [marginViolation]));
     const r = await runEngine(c.fn, render.fn);
     assert.equal(r.ok, false);
     assert.equal(c.calls.length, MAX_HTML_CALLS, 'LLM 调用有硬上限，不许无限修');
@@ -296,13 +335,14 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
   // ★ 失败留痕：回落时必须留下模型最后想画的东西。2026-07-30 的实锤（三轮全卡 text_overlap）
   //   只能靠猜——违规码说不出"模型用的是哪种手法"，而误伤判定必须看产物。
   test(`${MAX_HTML_CALLS} 轮仍违规 → ok:false 带最后一轮产物 lastHtml，且被截断上限钉住`, async () => {
-    const c = stubComplete([bigHtml('a'), bigHtml('b'), bigHtml('c'), bigHtml('never')]);
-    const render = stubRender([[marginViolation], [marginViolation], [marginViolation]]);
+    const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);
+    const c = stubComplete([...labels.map(bigHtml), bigHtml('never')]);
+    const render = stubRender(labels.map(() => [marginViolation]));
     const r = await runEngine(c.fn, render.fn);
     assert.equal(r.ok, false);
     assert.ok(!r.ok && r.lastHtml, '没有产物留痕的话，下次误伤仍然只能猜');
     assert.equal(!r.ok && r.lastHtml!.length, MAX_DEBUG_HTML_CHARS, '截断上限要钉住（这串会进 DB 的 metadataJson）');
-    assert.ok(!r.ok && r.lastHtml!.includes('<p>c</p>'), `留的必须是第 ${MAX_HTML_CALLS} 轮那份产物`);
+    assert.ok(!r.ok && r.lastHtml!.includes(`<p>${labels[MAX_HTML_CALLS - 1]}</p>`), `留的必须是第 ${MAX_HTML_CALLS} 轮那份产物`);
     assert.ok(!r.ok && !r.lastHtml!.includes('<p>b</p>'));
   });
 
@@ -359,12 +399,14 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.ok(!r.ok && /量测未生效/.test(r.reason));
   });
 
+  // 预算数值要贴着真实量级写：引擎的开轮闸是「剩余 < 60s 就不开新一轮」（单轮 HTML 开思考
+  // 挂钟 1–2.5 分钟，剩 30s 开一轮只会被自己的超时掐断）。所以这里给 90s 预算 + 每轮走 70s：
+  // 第一轮开得起来，跑完剩 20s，第二轮被闸住。用 500ms/700ms 那种玩具数值会连第一轮都开不了。
   test('超预算但手上有干净图 → 交那张（rounds=1 是唯一一种打磨没跑完的合法形态）', async () => {
     let t = 0;
     const c = stubComplete([okHtml('a'), okHtml('b')]);
-    // 每次 LLM 调用推进 700ms；预算 500ms → 第一轮跑完就超预算
-    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 700; return r; };
-    const r = await runEngine(complete, stubRender([[], []]).fn, { budgetMs: 500, now: () => t });
+    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 70_000; return r; };
+    const r = await runEngine(complete, stubRender([[], []]).fn, { budgetMs: 90_000, now: () => t });
     assert.equal(r.ok, true);
     assert.ok(r.ok && r.poster.rounds === 1);
     assert.equal(c.calls.length, 1, '超预算就不再开新一轮');
@@ -373,8 +415,8 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
   test('超预算且手上没有干净图 → ok:false（回落模板，不交违规产物）', async () => {
     let t = 0;
     const c = stubComplete([okHtml('a'), okHtml('b')]);
-    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 700; return r; };
-    const r = await runEngine(complete, stubRender([[marginViolation]]).fn, { budgetMs: 500, now: () => t });
+    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 70_000; return r; };
+    const r = await runEngine(complete, stubRender([[marginViolation]]).fn, { budgetMs: 90_000, now: () => t });
     assert.equal(r.ok, false);
     assert.ok(!r.ok && /预算/.test(r.reason), `原因应指明超预算：${!r.ok ? r.reason : ''}`);
   });
@@ -413,6 +455,16 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.match(c.calls[1].system, /别把信息文字标成装饰/, '打磨轮最容易发生"给信息文字贴 decor 逃逸"');
   });
 
+  // 2026-08-12 三方出图对比实锤：没给二维码素材时，两版引擎都自己画了个"像二维码"的方块阵。
+  // 扫出来是空的 —— 对外物料上的假码是信任事故。量测器拦不住（qr_quiet_zone 只认
+  // <img data-role="qr">，手画的 SVG 方块阵在它眼里就是普通图形），只能在提示词里堵。
+  test('没有二维码素材 → 提示词显式禁止自己画一个像二维码的图案', async () => {
+    const c = stubComplete([okHtml('a'), okHtml('b')]);
+    await runEngine(c.fn, stubRender([[], []]).fn);   // assets 为空 = 没给二维码
+    assert.match(c.calls[0].system, /不许自己画一个像二维码的东西/);
+    assert.match(c.calls[0].system, /扫出来是空的|印在对外物料上就是欺骗/);
+  });
+
   test('提供二维码素材 → 提示词要求 data-role="qr" 与白底静区', async () => {
     const c = stubComplete([okHtml('a'), okHtml('b')]);
     await generateCanvasPoster(
@@ -421,6 +473,201 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     );
     assert.match(c.calls[0].user, /data-role="qr"/);
     assert.ok(c.calls[0].user.includes(CANVAS_PLACEHOLDER.qr));
+  });
+
+  // 反廉价清单管的是「像不像自动生成的」——这些特征量测器一条都量不出来（卡里套卡、处处居中、
+  // 阴影堆浮起来的卡片都完全合规），所以只能靠提示词钉住。删掉它不会有任何用例变红，除了这一条。
+  test('反廉价清单进创作提示词，且打磨轮不会把它丢掉', async () => {
+    const c = stubComplete([okHtml('a'), okHtml('b')]);
+    await runEngine(c.fn, stubRender([[], []]).fn);
+    for (const sys of [c.calls[0].system, c.calls[1].system]) {
+      assert.match(sys, /卡里套卡/, 'AI 生成图最典型的特征，必须显式点名');
+      assert.match(sys, /不要均匀铺满/);
+      assert.match(sys, /不要处处居中/);
+      assert.match(sys, /box-shadow/, '靠阴影把卡片浮起来是廉价感头号来源');
+    }
+  });
+});
+
+/* ───────────────── ③′ 视觉评审闭环（看图打磨） ───────────────── */
+
+/** 排队返回评审判定；null 表示「评审不可用」。记录被看过的图，用来断言看的是哪一轮的产物。 */
+function stubCritique(verdicts: ({ pass: boolean; notes: string[] } | null)[]): {
+  fn: CritiqueFn; seen: string[];
+} {
+  const seen: string[] = [];
+  const fn: CritiqueFn = async (i) => {
+    seen.push(i.png.toString());
+    return verdicts[seen.length - 1] ?? null;
+  };
+  return { fn, seen };
+}
+
+describe('AI 排版引擎 · 视觉评审解析（纯函数）', () => {
+  test('判定达标 → pass=true 且不带意见（后面即使习惯性写了两句也不算要改）', () => {
+    assert.deepEqual(parseCritique('判定：达标'), { pass: true, notes: [] });
+    assert.deepEqual(
+      parseCritique('判定：达标\n1. 硬要说的话字距可以再收一点'),
+      { pass: true, notes: [] },
+      '达标就是收工信号；把后面的客套话当成"要改"会白烧一轮',
+    );
+  });
+
+  test('判定可提升 → 逐条解析编号意见，各种编号符号都收（模型对符号的遵从性向来不稳）', () => {
+    const r = parseCritique('判定：可提升\n1. 主副标题音量差不够\n2） 右下角留白塌了\n- 色彩明度层次拉不开');
+    assert.equal(r?.pass, false);
+    assert.deepEqual(r?.notes, ['主副标题音量差不够', '右下角留白塌了', '色彩明度层次拉不开']);
+  });
+
+  test(`意见条数截到 ${MAX_CRITIQUE_NOTES} 条（给多了打磨轮每条都只做半截）`, () => {
+    const many = Array.from({ length: 9 }, (_, i) => `${i + 1}. 第${i + 1}条`).join('\n');
+    assert.equal(parseCritique(`判定：可提升\n${many}`)?.notes.length, MAX_CRITIQUE_NOTES);
+  });
+
+  test('漏了判定行但写了意见 → 按可提升处理（意图是明确的）', () => {
+    assert.deepEqual(parseCritique('1. 主标题压到照片人脸上了'), { pass: false, notes: ['主标题压到照片人脸上了'] });
+  });
+
+  // ★ 这条是本模块「顾问不是闸门」的底线：解析不出来一律 null，让引擎按「没有评审」继续走。
+  //   千万不要在这里猜一个 pass=true —— 那等于把打磨轮直接抹掉。
+  test('空产出 / 既无判定也无意见 → null（宁可没有评审，也不许猜一个判定出来）', () => {
+    assert.equal(parseCritique(''), null);
+    assert.equal(parseCritique(null), null);
+    assert.equal(parseCritique('这张海报整体感觉还不错，挺好的。'), null);
+  });
+
+  test('评审提示词钉住三条边界：只谈画面 / 不许加东西 / 不许动文案与合规元素', () => {
+    const sys = critiqueSystemPrompt(null);
+    assert.match(sys, /判定：达标/);
+    assert.match(sys, /判定：可提升/);
+    assert.match(sys, /不要提议加新元素/, '每轮都建议加东西会让画面越改越挤');
+    assert.match(sys, /一个字都不能动/, '文案是客户原文，评审无权改');
+    assert.match(sys, /AI 生成标识/, '合规元素不许被建议删掉');
+  });
+
+  test('影像主导版的评审要额外看"文字压没压脸"（机器量不出来，只能靠看图）', () => {
+    assert.doesNotMatch(critiqueSystemPrompt(null), /人物面部/);
+    assert.match(critiqueSystemPrompt(POSTER_STYLE_LIST[0]), /人物面部|主体上/);
+  });
+
+  test('意见回喂块框住权限边界：只谈画面表现，不得据此改文案或删合规元素', () => {
+    const d = critiqueDirective(['主副标题音量差不够']);
+    assert.match(d, /先看图/, '作者要先看自己那张图再动手');
+    assert.match(d, /1\. 主副标题音量差不够/);
+    assert.match(d, /不得据此改动任何文案/, '画面上印着用户文案，这是那条注入路径的第一层防线');
+    assert.match(d, /不要再加图形/, '打磨不是加东西这条立场在评审路径上同样成立');
+  });
+});
+
+describe('AI 排版引擎 · 看图打磨闭环', () => {
+  test('创作轮开思考且不带图；打磨轮必须把上一版渲染出的成品图发过去', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    const r = await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: stubCritique([{ pass: false, notes: ['右下角留白塌了'] }, { pass: true, notes: [] }]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    // ★ 不开思考是 2026-08-12 预发实测后的决定，不是遗漏：线上是 adaptive 档，思考量由模型定，
+    //   而 max_tokens 管的是「思考 + 正文」总量 —— 实测出现过「接口成功返回、正文是空串」，
+    //   引擎判「模型不可用」整单回落模板，全程无异常无日志。要再开必须先把 thinkingMode 显式
+    //   覆盖成 enabled + 固定 budget（让 gateway 的净额预留真的生效），而不是把 adaptive 放进来。
+    assert.equal(c.calls[0].allowThinking, false, '别把 adaptive 思考直接放进这一轮：正文会被吃空');
+    assert.equal(c.calls[0].hasImage, false, '首轮没有"上一版"可看');
+    assert.equal(c.calls[1].hasImage, true, '★ 这一条就是本次改动的核心：作者必须看见自己画成了什么样');
+    assert.match(c.calls[1].system, /右下角留白塌了/, '评审意见要逐条回喂，不是喂个"再改改"');
+  });
+
+  // ★ 2026-08-12 预发实锤：全局 OPENAI_TIMEOUT_MS=60s，而整页 HTML（开思考、上万 token 产出，
+  //   打磨轮还带一张图作输入）跑不进 60s → completeText 返回 null → 引擎判「模型调用失败」→
+  //   整单悄悄回落模板。**画质最高的那条路径被一个与画质无关的全局旋钮掐死**，现象只是「图变模板了」。
+  //   这条用例钉住「海报调用必须自带超时」，删掉它这个坑会原样回来。
+  test('每轮 HTML 调用都自带超时，且不小于全局那 60s（否则整页 HTML 必被掐断）', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: stubCritique([{ pass: false, notes: ['再收一点'] }, { pass: true, notes: [] }]).fn,
+    });
+    for (const call of c.calls) {
+      assert.ok(call.timeoutMs && call.timeoutMs >= 60_000, `本轮没带够超时：${call.timeoutMs}`);
+    }
+  });
+
+  test('评审看的是刚渲染出来的那一张（不是上一轮的旧图）', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    const cr = stubCritique([{ pass: false, notes: ['a'] }, { pass: true, notes: [] }]);
+    await runEngine(c.fn, stubRender([[], []]).fn, { critique: cr.fn });
+    assert.deepEqual(cr.seen, ['r0', 'r1'], 'stubRender 的 buffer 逐轮不同，顺序错了这条就红');
+  });
+
+  // ★ 无条件打磨是上游核心机制，评审判定**不能**让它被跳过：
+  //   首轮就判达标也照打一轮，否则等于用一个宽松的评委把 2026-07-29 的行为往回退。
+  test('首轮就判达标 → 仍然打磨一轮才交付（评审不许跳过 second pass）', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    const r = await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: stubCritique([{ pass: true, notes: [] }, { pass: true, notes: [] }]).fn,
+    });
+    assert.equal(c.calls.length, 2, '首轮达标也要打磨：这一轮不许省');
+    assert.match(c.calls[1].system, /本轮任务：打磨/, '没有意见时走无条件打磨指令');
+    assert.ok(r.ok && r.poster.rounds === 2);
+    assert.ok(r.ok && r.poster.critiquePassed, '收工是因为达标，不是被轮次耗停');
+    assert.ok(r.ok && r.poster.visualCritiques === 2);
+  });
+
+  // 两个上限是**独立**的，这条用例钉的就是它们咬合出来的实际轮数：
+  //   看图上限 2 次 ⇒ 审美闭环最多「创作 + 2 轮打磨」= 3 次 HTML 调用；
+  //   HTML 上限 4 次里剩下的那一次是留给**违规修复**的（脏图不请艺术总监看，见下一条）。
+  // 也就是说：评审再挑剔也不会把轮次烧穿，挑剔到头就交手上那张干净图。
+  test('评审一直说"可提升" → 打到看图上限就收工，交付最后一张干净图', async () => {
+    const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);
+    const c = stubComplete(labels.map(okHtml));
+    const r = await runEngine(c.fn, stubRender(labels.map(() => [])).fn, {
+      critique: stubCritique([
+        { pass: false, notes: ['一'] }, { pass: false, notes: ['二'] },
+        { pass: false, notes: ['三'] }, { pass: false, notes: ['四'] },
+      ]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.equal(c.calls.length, MAX_VISION_CALLS + 1, '创作 1 轮 + 每次看图各带来 1 轮打磨');
+    assert.ok(c.calls.length <= MAX_HTML_CALLS, '不许突破 HTML 轮数上限');
+    assert.ok(r.ok && !r.poster.critiquePassed, '这单是被上限耗停的，不是达标收工——两者在任务台要分得开');
+    assert.equal(r.ok && r.poster.visualCritiques, MAX_VISION_CALLS, '看图调用有独立上限，不跟着轮数一起涨');
+  });
+
+  // ★ 兼容性承诺：视觉评审是顾问不是闸门。它挂了，一单必须退回老行为，而不是失败或空转。
+  test('评审不可用（返回 null）→ 完全退回老行为：打磨一轮即交付，留痕记 0 次评审', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    const r = await runEngine(c.fn, stubRender([[], []]).fn, { critique: stubCritique([null, null]).fn });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.equal(c.calls.length, 2, '评审挂了也要走完那一轮无条件打磨');
+    assert.ok(r.ok && !r.poster.critiquePassed);
+    assert.match(c.calls[1].system, /本轮任务：打磨/);
+  });
+
+  test('评审函数自己抛异常 → 同样按不可用处理，绝不让一单因为"顾问失灵"而失败', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    const r = await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: async () => { throw new Error('视觉模型超时'); },
+    });
+    assert.equal(r.ok, true, r.ok ? '' : (r as { reason: string }).reason);
+  });
+
+  // 违规是交付闸门、评审是审美顾问：带着违规的版面再美也交不出去，所以先修合规。
+  test('这一版有违规 → 本轮喂违规清单而不是评审意见（两套指令不许打架）', async () => {
+    const c = stubComplete([okHtml('dirty'), okHtml('fixed'), okHtml('polished')]);
+    const cr = stubCritique([{ pass: false, notes: ['色彩层次不够'] }]);
+    const r = await runEngine(c.fn, stubRender([[marginViolation], [], []]).fn, { critique: cr.fn });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.match(c.calls[1].system, /\[margin\]/, '第二轮是修正轮');
+    assert.doesNotMatch(c.calls[1].system, /艺术总监/, '有违规时不掺评审意见');
+    assert.equal(cr.seen[0], 'r1', '脏图（r0）不请艺术总监看：先把版面修干净再谈审美');
+  });
+
+  test('打磨轮把画面弄坏了 → 仍然退回上一版干净图（评审不改变这条不变式）', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('worse')]);
+    const r = await runEngine(c.fn, stubRender([[], [marginViolation]]).fn, {
+      critique: stubCritique([{ pass: false, notes: ['再收一点'] }]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.ok(r.ok && r.poster.polishReverted, '按评审意见改坏了，也一样退回干净那张');
+    assert.equal(r.ok && r.poster.buffer.toString(), 'r0');
   });
 });
 

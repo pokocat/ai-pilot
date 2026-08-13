@@ -20,7 +20,10 @@ import { moderate } from '../moderation.js';
 import { recordAudit } from '../audit.js';
 import { noteCreativeJobCreated } from '../metrics.js';
 import { getBrandKit } from '../brandKit.js';
-import { assertCreativeEnabled, visualProviderConfigured, type CreativeRuntimeConfig } from './config.js';
+import {
+  assertCreativeEnabled, visualProviderConfigured, premiumTierAvailable, priceForTier,
+  type CreativeRuntimeConfig,
+} from './config.js';
 import { normalizePosterBrief, briefModerationText, LIMITS, type NormalizedPosterBrief } from './schema.js';
 import { resolveBriefAssets, UploadRejectedError } from './uploads.js';
 import { creativeAssetUrl } from './storage.js';
@@ -383,7 +386,8 @@ async function insertJob(input: {
     brief: input.brief,
     ...(input.sourceVisualAssetId ? { sourceVisualAssetId: input.sourceVisualAssetId } : {}),
   };
-  const nominalCost = input.charge ? cfg.pricePerPoster : 0;
+  // 按档位定价：高级档每单多一次图片大模型调用，成本结构不同（priceForTier 是唯一口径）。
+  const nominalCost = input.charge ? priceForTier(cfg, input.brief.tier) : 0;
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -442,6 +446,31 @@ async function insertJob(input: {
 }
 
 /**
+ * 高级档可用性闸门。**不可用一律 422，绝不静默降标准档。**
+ *
+ * 与「显式请求了被停用的模板 → 422」是同一条口径：用户是为「顶级图片模型出主视觉」付的高级价，
+ * 悄悄给他一张标准图再照常扣钱，就是拿了钱交付别的东西。而且高级档不可用通常正是因为
+ * 供应商出了问题——那种时候更不该继续收钱。
+ *
+ * 正常前端根本走不到这里：`GET /creative/status` 的 `premiumAvailable` 为假时高级档选项整块不显示。
+ * 走到这里说明状态已过期（用户停在确认页时运营关了供应商）或有人直连接口。
+ */
+export function assertTierAvailable(cfg: CreativeRuntimeConfig, brief: NormalizedPosterBrief): void {
+  if (brief.tier !== 'premium') return;
+  // 本人照片与高级档互斥，且**这件事在建单时就知道**，所以在这里拦住而不是等 worker 跑到一半：
+  // 高级档的主视觉是模型画出来的人，和用户自己的照片放同一张海报上必然打架（两张脸、两种光）。
+  // 让它先扣 25 钻再失败退款，是把一次可预见的拒绝做成了一次往返。
+  if (brief.portraitAssetId) {
+    throw new CreativeError(
+      '高级海报的主视觉由图片模型生成，不能同时使用您上传的本人照片；请改用标准海报，或去掉人物照片',
+      'PREMIUM_PORTRAIT_CONFLICT', 422,
+    );
+  }
+  if (premiumTierAvailable(cfg)) return;
+  throw new CreativeError('高级海报暂时不可用，请改用标准海报或稍后再试', 'PREMIUM_UNAVAILABLE', 422);
+}
+
+/**
  * 建海报任务。门禁顺序见文件头。
  * @throws CanvasDisabledError(403) / AgentLockedError(403) / PlanExpiredError(403) /
  *         BriefInvalidError(422) / InsufficientCreditsError(402) / DailyLimitError(429)
@@ -455,6 +484,7 @@ export async function createPosterJob(
   await assertPosterAccess(user.id);                      // ② 智能体已解锁 → 403 AGENT_LOCKED
   await assertPlanActive(user.id);                        // ③ 套餐有效 → 403 PLAN_EXPIRED
   const brief = normalizePosterBrief(rawBrief, cfg.templates); // ④ brief 校验 → 422
+  assertTierAvailable(cfg, brief);                        //    高级档可用性 → 422
   await resolveBriefAssets(user.id, brief);               //    资产归属 + MIME → 422
   const idempotencyKey = normalizeIdempotencyKey(opts.idempotencyKey);
 
@@ -475,7 +505,7 @@ export async function createPosterJob(
   if (cfg.dailyLimit > 0 && (await todayJobCount(user.id)) >= cfg.dailyLimit) throw new DailyLimitError(cfg.dailyLimit);
 
   // ⑧ 余额预检（早于事务给出干净的 402；事务内 chargeCredits 仍是最终裁判）
-  await ensureCredits(user.id, cfg.pricePerPoster);
+  await ensureCredits(user.id, priceForTier(cfg, brief.tier));
 
   const sessionId = opts.messageId
     ? await assertMessageOwnership(opts.messageId, user.id)
@@ -605,13 +635,16 @@ export async function regenerateJob(
     ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
   };
   const brief = normalizePosterBrief(merged, cfg.templates);
+  // 档位从父单继承（...base 带过来的）。重出主视觉**要真的再调一次图片模型**，所以这条路径
+  // 与 create 同门禁同定价；revise 不需要（它不调供应商，只是拿父单的主视觉重排文字）。
+  assertTierAvailable(cfg, brief);
   await resolveBriefAssets(user.id, brief);
   const passed = await moderate('input', briefModerationText(brief), {
     tenantId: user.tenantId, userId: user.id, sessionId: parent.sessionId,
   });
   if (!passed) throw new CreativeError('文案未通过内容审核，调整后再试', 'MODERATION_BLOCKED', 422);
   if (cfg.dailyLimit > 0 && (await todayJobCount(user.id)) >= cfg.dailyLimit) throw new DailyLimitError(cfg.dailyLimit);
-  await ensureCredits(user.id, cfg.pricePerPoster);
+  await ensureCredits(user.id, priceForTier(cfg, brief.tier));
 
   const idempotencyKey = patch.idempotencyKey
     ? normalizeIdempotencyKey(patch.idempotencyKey)

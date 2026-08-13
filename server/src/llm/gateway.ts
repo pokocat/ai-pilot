@@ -29,6 +29,7 @@ import {
   runWithEndpointCapture,
   type EndpointCapture,
 } from '../services/llmPool.js';
+import { chatMaxTokens } from './thinking.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -1036,7 +1037,23 @@ export async function providerInfo() {
 // 那种指定是有意的，不能被辅助档覆盖。
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta },
+  opts?: {
+    allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta;
+    /**
+     * 随本次补全一起发的图片（两端 provider 的 raw 出口都已支持，挂在 user 消息上）。
+     * 目前唯一调用方是海报 AI 排版引擎的「看图打磨」：把上一版渲染出的成品 PNG 交回模型，
+     * 让它像人一样先看画面再改代码。缺省不传 = 纯文本，既有辅助抽取行为零变化。
+     */
+    images?: { mediaType: string; base64: string }[];
+    /**
+     * 缺省 **false**（辅助抽取的既定行为，不动）。只有「产物本身要动脑子」的调用方才开：
+     * 海报的宣言与整页 HTML 创作属于这一类——上游 canvas-design 在 Claude Code 里就是
+     * 长思考之后才动笔的。注意开了之后 Anthropic 会把 temperature 强制为 1（见 thinking.ts），
+     * 所以**只有产出格式本身容错的调用方**能开：HTML 有 `<!DOCTYPE` 起始与围栏剥离兜底，
+     * 而依赖尾部格式约定的调用方（ask 块那类）绝不能开。
+     */
+    allowThinking?: boolean;
+  },
 ): Promise<string> {
   // 未配 aux 路由且未配 AI_AUX_MODEL 时原样返回，下面两行等于无操作（默认行为零变化）。
   const useCfg = opts?.allowAux === false ? cfg : await resolveAuxConfigAsync(cfg);
@@ -1046,15 +1063,27 @@ async function rawText(
   // 用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
   const affinityKey = `aux:${createHash('sha1').update(system).update('\0').update(user).digest('hex').slice(0, 16)}`;
 
+  // 缺省 false = 既有辅助抽取行为一字不变；只有显式要求的调用方（海报创作）才开思考。
+  const allowThinking = opts?.allowThinking === true;
   // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
-  const mt = opts?.maxTokens ? { maxTokens: opts.maxTokens } : {};
+  //
+  // ★ 开思考时必须把 maxTokens 换算成**净正文预算**（chatMaxTokens）：
+  //   `max_tokens` 在 Anthropic 协议里管的是「thinking + 正文」的总量，而 provider 侧的
+  //   `maxTokensForThinking` 只在 thinkingMode='enabled' 时加预留，**adaptive 档原样返回**。
+  //   线上正是 adaptive：于是 12000 全被思考吃掉，接口成功返回但正文是空串 → completeText 返回 null
+  //   → 引擎判「模型不可用」→ 整单回落模板。2026-08-12 预发实测到的就是这一格，
+  //   现象与 chat 路径当年那个「回复未完整结束」是同一个根因（见 thinking.chatMaxTokens 注释）。
+  const mt = opts?.maxTokens
+    ? { maxTokens: allowThinking ? chatMaxTokens(opts.maxTokens, useCfg, true) : opts.maxTokens }
+    : {};
+  const im = opts?.images?.length ? { images: opts.images } : {};
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
+    out = await openaiRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
+    out = await claudeRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
   recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out, opts?.usageMeta);
@@ -1114,6 +1143,12 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
   o: {
     system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
     signal?: AbortSignal; usageMeta?: UsageMeta;
+    /**
+     * 单次请求挂钟超时，覆盖全局 `OPENAI_TIMEOUT_MS`（缺省 60s）。与 completeText 上的同名参数同因：
+     * 长产出（海报宣言 4–6 段中文 + JSON 壳，还开着思考）跑不进 60s → structured 返回 null →
+     * 调用方判「产出不完整」→ 悄悄回落。缺省不传 = 老行为。
+     */
+    timeoutMs?: number;
   },
 ): Promise<StructuredOutcome<z.output<S>>> {
   let attempts = 0;
@@ -1123,8 +1158,13 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     const lp = liveProvider(base);
     if (!lp) return { data: null, attempts: 0, live: false };
     live = true;
-    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
-      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+    const cfg: ResolvedAiConfig = (o.temperature != null || o.model || o.timeoutMs)
+      ? {
+        ...base,
+        ...(o.temperature != null ? { temperature: o.temperature } : {}),
+        ...(o.model ? { model: o.model } : {}),
+        ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+      }
       : base;
     const user = o.user.slice(0, o.maxChars ?? 4000);
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
@@ -1167,7 +1207,7 @@ export async function structured<S extends z.ZodTypeAny>(
   schema: S,
   o: {
     system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
-    signal?: AbortSignal; usageMeta?: UsageMeta;
+    signal?: AbortSignal; usageMeta?: UsageMeta; timeoutMs?: number;
   },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;
@@ -1185,22 +1225,46 @@ export async function structured<S extends z.ZodTypeAny>(
  * 两个刻意的默认值：
  * · `maxTokens` 默认 4000（`rawText`/provider 的辅助档缺省是 700，会把一页 HTML 拦腰截断）；
  * · `allowAux: false` —— 这不是记忆抽取那类辅助任务，切到小模型等于把「画质」这件事交给最弱的模型。
+ *
+ * `images` / `allowThinking` 为海报引擎而加（缺省不传 = 老行为）：前者让模型看见自己上一版渲染出的
+ * 成品图再改，后者让它动笔前先想（两者的取舍见 rawText 上同名参数的注释）。
  */
 export async function completeText(
   system: string,
   user: string,
-  o: { maxChars?: number; maxTokens?: number; temperature?: number; model?: string } = {},
+  o: {
+    maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
+    images?: { mediaType: string; base64: string }[];
+    allowThinking?: boolean;
+    /**
+     * 单次请求的挂钟超时，覆盖全局 `OPENAI_TIMEOUT_MS`（缺省 60s）。
+     *
+     * 为海报而加，2026-08-12 预发实测：一整页手写 HTML/CSS（开思考、上万 token 产出，打磨轮还带一张
+     * 成品图作输入）**跑不进 60s**——`completeText` 超时返回 null，引擎当成「模型不可用」直接回落模板。
+     * 也就是说画质最高的那条路径会被一个与它无关的全局旋钮悄悄掐死。
+     * 不改全局值：那个 60s 罩着对话等所有链路，为海报调宽它等于让别的链路陪着一起等。
+     * cfg 里改了就够——`llmPool.toCfg` 会把 base 整份铺到每个候选端点上。
+     */
+    timeoutMs?: number;
+  } = {},
 ): Promise<string | null> {
   const base = await getAiConfig();
   const live = liveProvider(base);
   if (!live) return null;
-  const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
-    ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+  const cfg: ResolvedAiConfig = (o.temperature != null || o.model || o.timeoutMs)
+    ? {
+      ...base,
+      ...(o.temperature != null ? { temperature: o.temperature } : {}),
+      ...(o.model ? { model: o.model } : {}),
+      ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+    }
     : base;
   try {
     const text = await rawText(cfg, live, system, user.slice(0, o.maxChars ?? 12_000), {
       allowAux: false,
       maxTokens: o.maxTokens ?? 4000,
+      ...(o.images?.length ? { images: o.images } : {}),
+      ...(o.allowThinking ? { allowThinking: true } : {}),
     });
     return text.trim() || null;
   } catch (err) {

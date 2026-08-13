@@ -968,7 +968,17 @@ function prescriptions() {
   return Promise.resolve({ items: isEmptyProfile() ? [] : seedPrescriptions() });
 }
 function prescriptionAction() { return Promise.resolve({ ok: true }); }
-function creativeStatus() { return Promise.resolve({ enabled: true, pricePerPoster: 10, templates: MOCK_POSTER_TEMPLATES }); }
+// 与 H5 mock 同契约（AGENTS.md §「两端各有一份同契约 mock 后端」）：高级档在 mock 里恒可用，
+// 否则原生端确认页少一整块档位 UI，本地走查根本验不到它。
+function creativeStatus() {
+  return Promise.resolve({
+    enabled: true,
+    pricePerPoster: 10,
+    premiumPricePerPoster: 25,
+    premiumAvailable: true,
+    templates: MOCK_POSTER_TEMPLATES,
+  });
+}
 function posterBriefDraft() {
   return Promise.resolve({
     brief: {

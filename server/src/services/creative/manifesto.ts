@@ -19,6 +19,14 @@ import type { BrandKitView } from '../../../../shared/contracts';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * 宣言这一轮的挂钟上限，覆盖全局 `OPENAI_TIMEOUT_MS`（60s）。
+ * 它要写 4–6 段中文长文 + JSON 壳，高级档还多一段影像路线要求；实测 60s 不够，
+ * 而超时的现象是「宣言不可用 → 整条 AI 路径回落模板」，从画面上完全看不出发生了什么。
+ * 120s 是宣言的量级（比整页 HTML 短得多），不必给到创作轮那么宽。
+ */
+const MANIFESTO_TIMEOUT_MS = 120_000;
+
 // 上游 → 本提示词的移植对照（改动这段时保持这层对应关系可查）：
 //   "Write a manifesto for an art movement"                  → 【产物】第一句
 //   "Name the movement (1-2 words)"                          → movement 字段约束
@@ -39,15 +47,25 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
  * （门禁见 posterRoute.ts），给模型一个走不通的选项只会白烧 token，还可能让它按 photo 的思路
  * 写出一篇「主视觉承重」的宣言，然后被强制降级到 graphic —— 那篇宣言与实际路线不匹配，画质更差。
  */
-function photoRouteDirective(): string {
+function photoRouteDirective(forcePhoto = false): string {
   return [
     '',
-    '【本张海报可以走两条路线，你要选一条】',
-    '- graphic（纯图形排印）：没有照片，由排版层用纯 CSS/SVG 作画——几何母题、色域、刻度、排印对比。',
-    '- photo（影像主导）：先由顶级生图模型出一张**全幅无文字主视觉**铺满画布，排版层只做克制的文字叠层。',
-    '  适合「一张脸/一件物就能立住信任」的诉求；不适合信息密度高、需要图表化表达的诉求。',
+    ...(forcePhoto ? [
+      // ★ 高级档（2026-08-12）：路线是**用户付钱买的**，不是这里可以选的。
+      //   实测过一次「给选项」的后果：模型对这份 brief 自选了 graphic 且 subject 留空，
+      //   于是整单在路线归一处降级 → 高级档按设计要整单失败退款。也就是说，只要还给选项，
+      //   高级档就存在一条「模型一句话就把订单否掉」的路径。所以这里不给选择，只给要求。
+      '【本张是高级档，路线已定：影像主导（photo）。不要选 graphic，不要在正文讨论路线。】',
+      '你必须给出 styleKey 与 subject（两者缺一这张海报就做不出来），并按影像主导来写这篇宣言：',
+      '宣言要描述「一张全幅主视觉照片/画作 + 克制文字叠层」的美学，而不是纯图形排印的美学。',
+    ] : [
+      '【本张海报可以走两条路线，你要选一条】',
+      '- graphic（纯图形排印）：没有照片，由排版层用纯 CSS/SVG 作画——几何母题、色域、刻度、排印对比。',
+      '- photo（影像主导）：先由顶级生图模型出一张**全幅无文字主视觉**铺满画布，排版层只做克制的文字叠层。',
+      '  适合「一张脸/一件物就能立住信任」的诉求；不适合信息密度高、需要图表化表达的诉求。',
+    ]),
     '',
-    '选 photo 时必须一起给：',
+    forcePhoto ? '必须一起给：' : '选 photo 时必须一起给：',
     '- styleKey：从下面 12 档风格里选一档（只能用给出的 key，别自造）。',
     '- subject：**一句英文**主体描述，只写「主角是谁/是什么」，不要写光线、镜头、画幅、风格词——',
     '  那些已经写在该档的骨架里了，你再写一遍只会互相打架（尤其**不要写景别**：close-up / medium shot /',
@@ -59,7 +77,9 @@ function photoRouteDirective(): string {
     '【12 档风格】',
     styleCatalogDigest(),
     '',
-    '选 graphic 时 styleKey 与 subject 留空字符串即可。',
+    ...(forcePhoto
+      ? ['**styleKey 与 subject 都不许留空**，mode 固定填 "photo"。']
+      : ['选 graphic 时 styleKey 与 subject 留空字符串即可。']),
   ].join('\n');
 }
 
@@ -105,7 +125,7 @@ const MANIFESTO_SYS_BASE = [
  * 拼系统提示词。`allowPhoto` 为假时**完全不提** photo 这个词（见 photoRouteDirective 的注释）。
  * 两种形态的 JSON 契约不同：不给 photo 选项时就不要求它输出 mode/styleKey/subject 三个字段。
  */
-function manifestoSystem(allowPhoto: boolean): string {
+function manifestoSystem(allowPhoto: boolean, forcePhoto = false): string {
   const tail = allowPhoto
     ? [
       '',
@@ -118,7 +138,7 @@ function manifestoSystem(allowPhoto: boolean): string {
       '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":""}',
       '全部用中文，克制、具体、不说空话。',
     ].join('\n');
-  return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective() : ''}${tail}`;
+  return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective(forcePhoto) : ''}${tail}`;
 }
 
 /** 模板选择只作气质提示（AI 引擎不套模板，但用户挑的那套版式表达了他要的音量）。 */
@@ -215,17 +235,27 @@ export async function generateManifesto(opts: {
    * 缺省 false：调用方没显式开就不给选项 —— 宁可少一条路线，也不要让模型选个走不通的（白烧 token）。
    */
   allowPhoto?: boolean;
+  /**
+   * 高级档：**不给模型选路线的机会**，直接要求 photo + 必给 styleKey/subject。
+   * 只在 allowPhoto 为真时有意义（allowPhoto 为假说明门禁本来就不允许影像路线，
+   * 那时"强制"是句空话——真正的处置在 worker：高级档路线没落到 photo 就整单失败退款）。
+   */
+  forcePhoto?: boolean;
 }): Promise<PosterManifesto | null> {
   let ai: z.infer<typeof ManifestoSchema> | null = null;
   try {
     ai = await structured(ManifestoSchema, {
-      system: manifestoSystem(!!opts.allowPhoto),
+      system: manifestoSystem(!!opts.allowPhoto, !!opts.forcePhoto),
       user: digest(opts.brief, opts.brandKit),
       maxChars: 4000,
       // ★ 必须显式给产出预算：provider 辅助档缺省 700 token，而 4-6 段中文宣言 + JSON 壳
       //   远超 700 —— 2026-07-30 生产实锤被拦腰截断，首轮与纠错轮一起截，structured 恒 null，
       //   AI 排版引擎 100% 静默回落模板（错误话术只说「产出不完整」，实际是这里）。
       maxTokens: 2600,
+      // 同 canvasEngine 的理由：全局 OPENAI_TIMEOUT_MS 是 60s，而这一轮要产出 4–6 段中文宣言
+      // （高级档还多一段影像路线要求），实测跑不进 60s → structured 返回 null → 整条 AI 路径
+      // 判「宣言不可用」→ 悄悄回落模板。这条超时只作用于本次调用，不动全局。
+      timeoutMs: MANIFESTO_TIMEOUT_MS,
     });
   } catch (err) {
     console.warn('[creative] 宣言生成失败：', (err as Error).message);
