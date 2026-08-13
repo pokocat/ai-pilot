@@ -18,9 +18,11 @@ test('5xx 带已知业务 code → 用该 code 的专属文案，不再说「服
   assert.ok(!info.message.includes('军师服务暂时不可用'));
 });
 
-test('供应商容量类错误不得把用户引向充值——实测充了钱也没用', () => {
-  const info = httpErrorInfo(409, { code: 'CLIP_ENGINE_CAPACITY_FULL', error: '可保存数量已达上限' }, '提交');
-  assert.ok(!info.message.includes('充值'), `不该提充值：${info.message}`);
+test('供应商权益类错误既不提充值也不提删除——两者实测都无效', () => {
+  const info = httpErrorInfo(409, { code: 'CLIP_ENGINE_CAPACITY_FULL', error: '克隆权益不足' }, '提交');
+  assert.ok(!info.message.includes('充值'), `充点数没用，不该这么写：${info.message}`);
+  assert.ok(!info.message.includes('删掉') && !info.message.includes('删除'), `删旧对象也没用：${info.message}`);
+  assert.match(info.message, /运营/);
 });
 
 test('没关联声音要拦住并让用户去选，不能替他挑一条', () => {
