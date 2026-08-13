@@ -69,7 +69,7 @@
           <scroll-view class="cl-voice-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
             <view class="cl-voice-options">
               <view class="cl-voice-option {{!selectedVoiceId ? 'on' : ''}}" data-id="" bindtap="chooseExistingVoice"><text class="name">视频原声</text><text class="meta">自动提取</text></view>
-              <view wx:for="{{voices}}" wx:key="id" class="cl-voice-option {{selectedVoiceId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="chooseExistingVoice"><text class="name">{{item.name}}</text><text class="meta">已有声音</text></view>
+              <view wx:for="{{voices}}" wx:key="id" class="cl-voice-option {{selectedVoiceId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="chooseExistingVoice"><text class="name">{{item.name}}</text><text class="meta">{{item.source === 'video' ? '来自视频' : '单独录制'}}</text></view>
             </view>
           </scroll-view>
           <text class="cl-profile-note">选择已有声音后会直接关联；不选则从这段视频里尽力生成基础声音。</text>

@@ -441,12 +441,22 @@ export async function videoRoutes(app: FastifyInstance) {
       await assertVideoUploadContent(buffer, mimeType, identityOf(user));
       return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, mimeType), mimeType }, {
         kind,
+        // 声音来源的显式意图：'video' = 只从本次视频提取，服务端据此禁止回退到旧声音。
+        voiceSource: String(fields?.voiceSource?.value ?? ''),
         avatarId: String(fields?.avatarId?.value ?? ''),
         voiceId: String(fields?.voiceId?.value ?? ''),
         name: String(fields?.name?.value ?? ''),
       });
     } catch (e) { return sendErr(reply, e, 422); }
   });
+  app.patch<{ Params: { id: string }; Body: { name?: string } }>('/video/voices/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      return await aidramaJson(`/api/me/clip/voices/${enc(req.params.id)}`, identityOf(user), { method: 'PATCH', body: { name: req.body?.name ?? '' } });
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+
   app.get('/video/avatar/consents', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try { return await aidramaJson('/api/me/clip/avatar/consents', identityOf(user)); }

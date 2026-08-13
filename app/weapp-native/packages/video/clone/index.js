@@ -338,7 +338,14 @@ Page({
     if (!this.data.agreed) { host.toast('请先确认素材使用权'); return; }
     if (this.data.submitting) return;
     this.setData({ submitting: true });
-    api.startClone('avatar', { filePath: this.data.faceFile.path, avatarId: this.data.avatarId, voiceId: this.data.selectedVoiceId, name: this.data.avatarName })
+    api.startClone('avatar', {
+      filePath: this.data.faceFile.path,
+      avatarId: this.data.avatarId,
+      voiceId: this.data.selectedVoiceId,
+      // 没选已有声音 = 用户选的是「视频原声」。显式传，服务端才不会回退到该形象原先关联的声音。
+      voiceSource: this.data.selectedVoiceId ? 'existing' : 'video',
+      name: this.data.avatarName,
+    })
       .then((result) => { if (result && result.avatarId) this.setData({ avatarId: result.avatarId }); this.enterTraining(); })
       .catch((error) => {
         this.setData({ submitting: false });

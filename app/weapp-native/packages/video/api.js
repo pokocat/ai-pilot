@@ -95,6 +95,9 @@ const api = {
   avatars: () => (useMock() ? mock.avatars() : call('/avatars')),
   avatarById: (id) => (useMock() ? mock.avatars().then((rows) => rows.find((item) => item.id === id) || null) : call(`/avatars/${q(id)}`)),
   voices: () => (useMock() ? mock.voices() : call('/voices')),
+  renameVoice: (id, name) => (useMock()
+    ? Promise.resolve({ id, name })
+    : call(`/voices/${q(id)}`, { method: 'PATCH', data: { name } })),
   avatarRequirements: () => (useMock() ? mock.avatarRequirements() : call('/avatar/requirements')),
   startConsent: (payload) => {
     if (useMock()) return mock.startConsent(payload);
@@ -109,6 +112,8 @@ const api = {
     if (!filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
     return host.httpUpload(`${config.BFF_PREFIX}/avatar/clone`, filePath, {
       kind,
+      // 显式告诉服务端「用户选的是视频原声」，不能靠空 voiceId 猜 —— 猜的结果是回退旧声音。
+      voiceSource: payload.voiceSource || '',
       avatarId: payload.avatarId || '',
       voiceId: payload.voiceId || '',
       name: payload.name || '',
