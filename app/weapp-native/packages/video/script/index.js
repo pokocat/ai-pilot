@@ -22,6 +22,15 @@ Page({
     editingSeconds: 0,
     /** 最近一次成功试听对应的文本；提交时完全相同才保留真实时长。 */
     previewedText: null,
+    /**
+     * 编辑模式。'line' 逐句微调；'bulk' 整段编辑 —— 用户拿着写好的稿子过来时，
+     * 一句句抠是折磨，整段模式让他直接粘一整篇（一行一句）。
+     */
+    editMode: 'line',
+    bulkText: '',
+    /** 整段模式下的实时统计，让用户粘贴前就知道会影响几句、丢几个已配画面。 */
+    bulkStats: null,
+    bulkSaving: false,
     rewriting: false,
     previewing: false,
     chatting: false,
@@ -241,6 +250,69 @@ Page({
         this.setData({ chatting: false, chatMessages: this.data.project.scriptChat || [], chatInput: message });
         host.toast(error && error.message ? error.message : 'AI 暂时没接上，请重试');
       });
+  },
+
+  /* ── 整段编辑 ────────────────────────────────────────────────────── */
+
+  enterBulk() {
+    const project = this.data.project;
+    if (!project) return;
+    // 进整段模式前先把逐句的未提交编辑冲掉，否则用户会看到一份不含刚改内容的旧稿
+    if (this.data.editingNo != null) this.commitEdit();
+    this.setData({
+      editMode: 'bulk',
+      bulkText: model.scriptToText(this.data.project.segments),
+      bulkStats: null,
+      editingNo: null,
+    });
+  },
+
+  exitBulk() {
+    this.setData({ editMode: 'line', bulkStats: null });
+    this.recompute(this.data.project.segments);
+  },
+
+  inputBulk(event) {
+    const bulkText = String(event.detail.value || '');
+    const project = this.data.project;
+    const preview = model.applyBulkScript(project.segments, project.shots, bulkText);
+    this.setData({ bulkText, bulkStats: preview.stats });
+  },
+
+  applyBulk() {
+    const project = this.data.project;
+    if (!project || this.data.bulkSaving) return;
+    const result = model.applyBulkScript(project.segments, project.shots, this.data.bulkText);
+
+    if (result.stats.empty) { host.toast('文案不能是空的'); return; }
+
+    const commit = () => {
+      this.setData({
+        bulkSaving: false,
+        editMode: 'line',
+        bulkStats: null,
+        previewedText: null,
+        project: Object.assign({}, project, { segments: result.segments, shots: result.shots }),
+      });
+      this.recompute(result.segments);
+      this.scheduleSave();
+      host.toast(`已更新 ${result.stats.after} 句`, 'success');
+    };
+
+    // 丢画面是不可逆的（素材本身还在素材库，但这一句上的绑定没了），必须先说清楚
+    if (result.stats.droppedAssets > 0) {
+      this.setData({ bulkSaving: true });
+      host.confirm({
+        title: '有画面会被清掉',
+        content: `改动会让 ${result.stats.droppedAssets} 句已配好的画面失效（素材还在素材库，只是要重新配）。继续吗？`,
+        confirmText: '继续',
+      }).then((ok) => {
+        if (!ok) { this.setData({ bulkSaving: false }); return; }
+        commit();
+      });
+      return;
+    }
+    commit();
   },
 
   restoreTemplate() {

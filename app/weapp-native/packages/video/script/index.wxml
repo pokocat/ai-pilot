@@ -24,9 +24,44 @@
         <text class="st-count">{{rows.length}} 段</text>
       </view>
 
+      <!-- 整段编辑：拿着写好的稿子过来时，一句句抠是折磨；这里可以整篇粘贴。 -->
+      <block wx:if="{{editMode === 'bulk'}}">
+        <view class="sb-head">
+          <view><text class="sb-kicker">整段编辑</text><text class="sb-title">一行一句</text></view>
+          <text class="sb-help" bindtap="exitBulk">返回逐句</text>
+        </view>
+
+        <textarea
+          class="bulk-input"
+          value="{{bulkText}}"
+          bindinput="inputBulk"
+          placeholder="把整篇口播文案粘进来，一行一句。空行会自动忽略。"
+          maxlength="-1"
+          auto-height
+          show-confirm-bar="{{false}}"
+          adjust-position="{{true}}"
+        />
+
+        <view wx:if="{{bulkStats}}" class="bulk-stats {{bulkStats.droppedAssets ? 'warn' : ''}}">
+          <text class="bs-line">原来 {{bulkStats.before}} 段，改后 {{bulkStats.after}} 段</text>
+          <text wx:if="{{bulkStats.droppedAssets}}" class="bs-warn">有 {{bulkStats.droppedAssets}} 句已配的画面会失效，需要重新配</text>
+          <text wx:elif="{{bulkStats.changed}}" class="bs-line dim">已配的画面不受影响</text>
+          <text wx:else class="bs-line dim">还没有改动</text>
+        </view>
+
+        <view class="bulk-acts">
+          <view class="vd-btn ghost" bindtap="exitBulk">取消</view>
+          <view class="vd-btn {{bulkSaving ? 'disabled' : ''}}" style="flex:1" bindtap="applyBulk">用这份文案</view>
+        </view>
+      </block>
+
+      <block wx:else>
       <view class="sb-head">
         <view><text class="sb-kicker">当前成稿</text><text class="sb-title">口播文案</text></view>
-        <text class="sb-help">点任一段即可细改</text>
+        <view class="sb-actions">
+          <text class="sb-help">点任一段即可细改</text>
+          <text class="sb-bulk" bindtap="enterBulk">整段编辑</text>
+        </view>
       </view>
 
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
@@ -61,12 +96,14 @@
           </view>
         </block>
       </view>
+      </block>
 
       <view class="vd-footer-space"></view>
     </view>
   </scroll-view>
 
-  <view class="vd-footer">
+  <!-- 整段模式自带提交动作，底部主按钮与 AI 悬浮球都要让位，否则一屏出现三个主按钮 -->
+  <view wx:if="{{editMode !== 'bulk'}}" class="vd-footer">
     <view class="foot-stat">
       <text class="fs-num">预计 {{totalText}}</text>
       <text class="fs-sub">读完全文的时长</text>
@@ -74,7 +111,7 @@
     <view class="vd-btn" style="flex:1" bindtap="next">下一步 · 配画面</view>
   </view>
 
-  <view wx:if="{{!aiOpen}}" class="ai-fab" bindtap="openAi">
+  <view wx:if="{{!aiOpen && editMode !== 'bulk'}}" class="ai-fab" bindtap="openAi">
     <native-icon name="pen" tone="white" size="22"></native-icon>
     <text>AI 改稿</text>
     <view wx:if="{{chatMessages.length}}" class="ai-fab-dot"></view>

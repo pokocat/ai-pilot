@@ -16,7 +16,9 @@
   box-shadow: var(--vd-shadow);
   margin-bottom: 12px;
 }
-.banner-art { display: block; width: 100%; height: 168px; }
+// 190px：宣传图是 4:3 左右的深色影像稿，裁进 350×190（约 1.84:1）会切掉上下留白，
+// 正好保住中央那张高亮的口播卡。再矮就把主体也切了，再高就吃掉首屏。
+.banner-art { display: block; width: 100%; height: 190px; background: #16130F; }
 .banner-fallback { background-color: var(--vd-canvas); }
 .banner-copy {
   padding: 14px 16px 16px;

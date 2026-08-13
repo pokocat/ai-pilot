@@ -337,6 +337,103 @@ function commitSegmentText(segments, no, nextText, previewedText) {
     : segment));
 }
 
+/* ── 整段改写 ──────────────────────────────────────────────────────────
+   逐句编辑适合微调，但用户拿着一份写好的稿子过来时，一句句抠是折磨。
+   整段模式让他直接粘一整篇，一行一句。难点不在切分，在于**别把已配的画面弄丢**：
+   assetId 是为"那一句"选的，句子变了绑定就不再成立。 */
+
+/** 段落 → 可编辑文本（只出正文，固定尾段不进编辑区）。 */
+function scriptToText(segments) {
+  return (Array.isArray(segments) ? segments : [])
+    .filter((segment) => segment.role !== ROLE.TAIL)
+    .map((segment) => String(segment.text || '').trim())
+    .join('\n');
+}
+
+/**
+ * 整段文本 → 段落。返回 { segments, shots, stats }，**不做任何提示**，
+ * 由调用方拿 stats 决定要不要二次确认。
+ *
+ * ⚠️ 已配的画面绑在 **shots 层**，不在 segments 上（segments.assetId 恒为 null，
+ * 那是镜头层引入之前的遗留字段）。所以「会丢几个画面」必须数 shots，
+ * 数 segments 会恒得 0 —— 安全闸永远不触发，用户在毫不知情的情况下丢掉全部配图。
+ *
+ * 继承规则：
+ *   · role  —— 按位置继承。出镜/配画面是编排节奏，跟具体文字弱相关；
+ *              超出旧稿长度的新句默认「配画面」（便宜的那个，不偷偷加钱）。
+ *   · shots —— 句数没变时保留分组，但**成员文字变过的镜头要清掉素材**
+ *              （画面是为那几句选的）；句数变了则整体作废，交回 defaultShots 重算，
+ *              因为 startNo/endNo 已经指向别的句子了。
+ *   · actualDurationSec —— 只在该位置文字没变时继承，试听时长属于旧文字。
+ *   · 固定尾段 —— 原样保留并重新编号，永远不进编辑区、不可被粘贴内容顶掉。
+ */
+function applyBulkScript(segments, shots, rawText) {
+  const source = Array.isArray(segments) ? segments : [];
+  const body = source.filter((segment) => segment.role !== ROLE.TAIL);
+  const tails = source.filter((segment) => segment.role === ROLE.TAIL);
+  const lines = String(rawText == null ? '' : rawText)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const sameTextAt = (index) => Boolean(body[index])
+    && String(body[index].text || '').trim() === lines[index];
+
+  const next = lines.map((text, index) => {
+    const prev = body[index];
+    const unchanged = sameTextAt(index);
+    return {
+      no: index + 1,
+      text,
+      role: prev ? prev.role : ROLE.BROLL,
+      hint: unchanged ? (prev.hint || null) : null,
+      assetId: null,
+      assetLabel: null,
+      brollSource: null,
+      actualDurationSec: unchanged ? Number(prev.actualDurationSec || 0) : 0,
+    };
+  });
+
+  tails.forEach((tail, index) => {
+    next.push(Object.assign({}, tail, { no: lines.length + index + 1 }));
+  });
+
+  const prevShots = ensureShots(source, shots);
+  const withAssets = prevShots.filter((shot) => shot.assetId);
+  const lineCountSame = lines.length === body.length;
+
+  let nextShots = null;
+  let droppedAssets = withAssets.length;
+
+  if (lineCountSame) {
+    // 句数没变 → 分组仍然对得上位置，逐个镜头判断它覆盖的句子有没有被改过
+    let kept = 0;
+    nextShots = prevShots.map((shot) => {
+      const touched = lines.some((_, index) => {
+        const no = index + 1;
+        return no >= shot.startNo && no <= shot.endNo && !sameTextAt(index);
+      });
+      if (!touched) { if (shot.assetId) kept += 1; return Object.assign({}, shot); }
+      return Object.assign({}, shot, { assetId: null, assetLabel: null, brollSource: null });
+    });
+    droppedAssets = withAssets.length - kept;
+  }
+
+  const structureChanged = !lineCountSame || lines.some((_, index) => !sameTextAt(index));
+
+  return {
+    segments: next,
+    shots: nextShots,
+    stats: {
+      before: body.length,
+      after: lines.length,
+      droppedAssets,
+      changed: structureChanged,
+      empty: lines.length === 0,
+    },
+  };
+}
+
 /**
  * 出片前置校验（对应方案 §8.0「提交前 preflight，不 hold 不建单」）。
  * 端上先拦一道，服务端仍要再校验一次 —— 端上校验只为省一次往返，不是安全边界。
@@ -399,6 +496,7 @@ module.exports = {
   ROLE, STAGES,
   estimateSeconds, segmentSeconds, formatDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
+  scriptToText, applyBulkScript,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
   regroupShotSelection, mergeAdjacentShots,
 };

@@ -1,0 +1,54 @@
+// 端上错误文案映射。
+//
+// 专门钉住一条回归：5xx 曾经无条件返回「军师服务暂时不可用」，把服务端特意写好的
+// 业务原因（如石榴额度耗尽）全丢掉，用户以为是我们系统坏了，排查得上服务器翻日志。
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(path.join(APP_ROOT, 'package.json'));
+const { httpErrorInfo } = require(path.join(APP_ROOT, 'weapp-native/services/api-error.js'));
+
+test('5xx 带已知业务 code → 用该 code 的专属文案，不再说「服务暂不可用」', () => {
+  const info = httpErrorInfo(502, { code: 'CLIP_ENGINE_BALANCE_INSUFFICIENT', error: '数字人服务额度不足，请联系运营处理' }, '提交');
+  assert.equal(info.message, '数字人服务的额度用完了，请联系运营充值后再试。');
+  assert.ok(!info.message.includes('军师服务暂时不可用'));
+});
+
+test('5xx 带未知 code 但服务端给了可读中文原因 → 保留该原因', () => {
+  const info = httpErrorInfo(502, { code: 'CLIP_ENGINE_CALL_FAILED', error: '石榴 AI 未受理任务：账户权益不足，无法进行声音克隆' }, '提交');
+  // CLIP_ENGINE_CALL_FAILED 在映射表里，优先用表里的文案
+  assert.match(info.message, /数字人服务没有受理这次任务/);
+});
+
+test('5xx 未知 code + 未知中文原因 → 仍然保留服务端原因', () => {
+  const info = httpErrorInfo(503, { code: 'SOME_NEW_CODE', error: '第三方语音服务正在维护，预计一小时后恢复' }, '提交');
+  assert.equal(info.message, '第三方语音服务正在维护，预计一小时后恢复');
+});
+
+test('5xx 原文是堆栈/英文技术细节 → 不外露，回落通用文案', () => {
+  for (const raw of ['Error: connect ECONNREFUSED 127.0.0.1:8081', 'PrismaClientKnownRequestError: P2002', '']) {
+    const info = httpErrorInfo(500, { error: raw }, '提交');
+    assert.equal(info.message, '军师服务暂时不可用，请稍后重试。', `原文「${raw}」不该外露`);
+    assert.ok(info.technicalMessage, '技术原文仍要留在 technicalMessage 供排查');
+  }
+});
+
+test('5xx 含中文但夹带技术标识 → 判为不可读，不外露', () => {
+  const info = httpErrorInfo(500, { error: '数据库写入失败 PrismaClientKnownRequestError' }, '提交');
+  assert.equal(info.message, '军师服务暂时不可用，请稍后重试。');
+});
+
+test('超时与限流仍走各自的专属文案，不被上面的改动影响', () => {
+  assert.match(httpErrorInfo(504, {}, '提交').message, /响应超时/);
+  assert.match(httpErrorInfo(429, {}, '提交').message, /有点频繁/);
+});
+
+test('4xx 行为不变：优先 code 表，其次服务端中文原因', () => {
+  assert.equal(httpErrorInfo(409, { code: 'CLIP_ENGINE_SPEAKER_NOT_FOUND' }, '提交').message,
+    '声音模型不存在了，请重新采集声音。');
+  assert.equal(httpErrorInfo(422, { error: '录音太短了' }, '提交').message, '录音太短了');
+});

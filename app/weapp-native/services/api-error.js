@@ -8,6 +8,21 @@ const USER_MESSAGES = {
   PAYMENT_REQUIRED: '这项操作需要有效方案，请先查看方案与权益。',
   AGENT_LOCKED: '这位军师尚未启用，请先到锦囊中查看。',
   AGENT_NOT_FOUND: '这位军师暂时不可用，请换一位再试。',
+  // 快出片 · 数字人引擎（石榴）的供应商侧错误。这些不是用户操作错误，也不是我们服务故障，
+  // 说成「军师服务暂不可用」会把运营该处理的事（充值/换密钥）伪装成系统故障。
+  CLIP_ENGINE_BALANCE_INSUFFICIENT: '数字人服务的额度用完了，请联系运营充值后再试。',
+  CLIP_ENGINE_CREDENTIAL_INVALID: '数字人服务鉴权失效了，请联系运营处理。',
+  CLIP_ENGINE_NOT_CONFIGURED: '数字人服务还没配置好，请联系运营。',
+  CLIP_ENGINE_CALL_FAILED: '数字人服务没有受理这次任务，请稍后重试或联系运营。',
+  CLIP_ENGINE_AUDIO_TOO_SHORT: '录音太短了，完整念一遍采集文案再提交。',
+  CLIP_ENGINE_AUDIO_UNREADABLE: '这段录音读不出来，请重新录一段。',
+  CLIP_ENGINE_SPEECH_UNCLEAR: '没听清人声，换个安静的地方重录一段。',
+  CLIP_ENGINE_VOICE_REJECTED: '这段声音没通过声纹安全检查，请确认是本人录制。',
+  CLIP_ENGINE_VIDEO_UNREADABLE: '这段视频读不出来，请重新录一段。',
+  CLIP_ENGINE_SPEAKER_NOT_FOUND: '声音模型不存在了，请重新采集声音。',
+  CLIP_UPSTREAM_TIMEOUT: '视频服务响应超时，请稍后重试。',
+  CLIP_UPSTREAM_UNAVAILABLE: '视频服务暂时连不上，请稍后重试。',
+  CLIP_MEDIA_MODERATION_NOT_CONFIGURED: '素材审核能力还没配置好，请联系运营。',
   SKU_REQUIRED: '这项专项能力尚未启用。',
   FEATURE_DISABLED: '这项能力暂未开放。',
   MODERATION_BLOCK: '这条内容暂时无法处理，请调整后重新发送。',
@@ -86,6 +101,11 @@ function rawMessage(error) {
 function readableBusinessMessage(message) {
   if (!message || !/[\u3400-\u9fff]/.test(message)) return '';
   if (/\b(?:Error|Exception|Prisma|Fastify|SQL|stack|undefined|null)\b/i.test(message)) return '';
+  // \u4e0a\u9762\u90a3\u6761\u7528\u4e86 \b \u8bcd\u8fb9\u754c\uff0c\u6321\u4e0d\u4f4f\u9a7c\u5cf0\u6807\u8bc6\u7b26\uff1a`PrismaClientKnownRequestError` \u91cc
+  // `Prisma` \u540e\u9762\u7d27\u8ddf `C`\uff0c\u4e24\u8fb9\u90fd\u662f\u8bcd\u5b57\u7b26\uff0c\u6ca1\u6709\u8fb9\u754c\uff0c\u4e8e\u662f\u6574\u6761\u5f02\u5e38\u540d\u88ab\u5f53\u6210"\u53ef\u8bfb\u4e2d\u6587\u539f\u56e0"
+  // \u6f0f\u7ed9\u7528\u6237\u3002\u9a7c\u5cf0\u9a7c\u5cf0\uff08\u5c0f\u5199\u7d27\u8ddf\u5927\u5199\uff09\u662f\u6807\u8bc6\u7b26\u7684\u7279\u5f81\uff0c\u6b63\u5e38\u6587\u6848\u4e0d\u4f1a\u6709\uff1b
+  // \u800c WAV / MP3 / AAC / H.264 \u8fd9\u7c7b\u5168\u5927\u5199\u7f29\u5199\u4e0d\u542b\u9a7c\u5cf0\uff0c\u4e0d\u4f1a\u8bef\u4f24\u3002
+  if (/[a-z][A-Z]/.test(message)) return '';
   return message;
 }
 
@@ -95,7 +115,20 @@ function httpErrorInfo(statusCode, data, noun) {
   const technical = body.error || `HTTP ${statusCode}`;
   if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code, technicalMessage: technical };
   if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code, technicalMessage: technical };
-  if (statusCode >= 500) return { message: '军师服务暂时不可用，请稍后重试。', code, technicalMessage: technical };
+  if (statusCode >= 500) {
+    // 5xx 默认不外露服务端原文（多半是堆栈/内部细节），但**服务端特意给了业务 code
+    // 或可读中文原因时，那就是写给用户看的**，不该丢。
+    //
+    // 起因：石榴余额耗尽时 AIStar 回 502 + code=CLIP_ENGINE_CALL_FAILED +
+    // 「石榴 AI 未受理任务：账户权益不足，无法进行声音克隆」，BFF 一路透传到端上，
+    // 却在这里被压成「军师服务暂时不可用」—— 用户以为是我们系统坏了，排查得上服务器翻日志。
+    // readableBusinessMessage 已经挡掉了含 Error/Exception/Prisma/SQL/stack 的文本
+    // 并要求必须有中文，所以拿它兜底不会把内部细节漏出去。
+    // technicalMessage 只进日志/排查，不显示给用户，所以 5xx 一律保留 —— 别为了"文案更好看"
+    // 把排查线索也一起丢了。
+    const explained = USER_MESSAGES[code] || readableBusinessMessage(body.error);
+    return { message: explained || '军师服务暂时不可用，请稍后重试。', code, technicalMessage: technical };
+  }
   const fallback = `${noun || '请求'}未能完成，请检查后再试。`;
   return { message: USER_MESSAGES[code] || readableBusinessMessage(body.error) || fallback, code, technicalMessage: readableBusinessMessage(body.error) ? undefined : technical };
 }

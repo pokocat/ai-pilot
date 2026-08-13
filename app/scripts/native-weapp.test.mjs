@@ -83,7 +83,8 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
     assert.ok(hasDedicated, `路由缺少独立原生四件套：${route}`);
   }
   // 2026-08-12 IA 重排：+1 = pages/pouch（锦囊作品页）。studio 降为过渡跳转页但仍注册（接老分享卡）。
-  assert.equal(routes.length, 50, '路由数量变化时必须同步审计原生迁移覆盖');
+  // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
+  assert.equal(routes.length, 51, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -113,8 +114,14 @@ test('数字人主链是上传视频后直接训练，单独声音采集只是�
   assert.match(cloneWxml, /一段视频即可创建/);
   assert.match(avatarWxml, /voiceBadgeText/);
   assert.match(avatarWxml, /av-primary/);
-  assert.match(homeWxml, /avatar\.imageStatus === 'ready'/);
-  assert.doesNotMatch(homeWxml, /avatar\.imageStatus === 'ready' && avatar\.voiceStatus === 'ready'/);
+  // 「形象 ready 即可用、不要求 voice 也 ready」这条规则还在，只是首页重排成落地页后
+  // 判定从 wxml 挪进了 JS 的 resolveAvatarState（四态：ready/training/missing/failed），
+  // wxml 只消费派生出来的 avatarState。规则本身照旧钉住：
+  const homeJs = read(sourceRoot, 'packages/video/home/index.js');
+  assert.match(homeJs, /item\.imageStatus === 'ready'/);
+  assert.doesNotMatch(homeJs, /imageStatus === 'ready' && .*voiceStatus === 'ready'/);
+  assert.doesNotMatch(homeWxml, /avatar\.voiceStatus/, '首页不得把声音就绪也当成开拍前置');
+  assert.match(homeWxml, /avatarState === 'ready'/);
 });
 
 test('专属声音明确展示来源、训练进度和完成结果，并在页面内轮询', () => {
@@ -413,8 +420,8 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.safe-title-wrap\s*\{[^}]*text-align:\s*left;/s);
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
-  // 主包/既有分包 36 页 + 快出片分包 11 页，全部复用同一套胶囊几何。
-  assert.equal(navRoots.length, 47);
+  // 主包/既有分包 36 页 + 快出片分包 12 页（+templates 模板专区），全部复用同一套胶囊几何。
+  assert.equal(navRoots.length, 48);
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {

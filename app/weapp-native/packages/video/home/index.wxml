@@ -17,16 +17,16 @@
         <image
           wx:if="{{!bannerFailed}}"
           class="banner-art"
-          src="/assets/video/promo-banner.png"
+          src="/assets/video/promo-banner.jpg"
           mode="aspectFill"
           lazy-load="{{false}}"
           binderror="onBannerError"
         ></image>
         <view wx:else class="banner-art banner-fallback vd-grain"></view>
         <view class="banner-copy">
-          <text class="banner-kicker">数字分身口播视频</text>
-          <text class="banner-title">你的店，值得被看见</text>
-          <text class="banner-sub">克隆一次形象和声音，之后每条片子三步出完，不用再出镜拍摄。</text>
+          <text class="banner-kicker">数字人 · 模板出片</text>
+          <text class="banner-title">不用出镜，也能条条更新</text>
+          <text class="banner-sub">克隆一次你的形象和声音，挑一套现成模板改几句文案，数字人替你把片子讲完。</text>
         </view>
       </view>
 

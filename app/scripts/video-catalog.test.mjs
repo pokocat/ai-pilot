@@ -12,10 +12,13 @@ const mock = require('../weapp-native/packages/video/mock.js');
 const here = path.dirname(fileURLToPath(import.meta.url));
 const videoRoot = path.resolve(here, '../weapp-native/packages/video');
 
-test('快出片内置三套可独立制作的模板', () => {
+// 2026-08-12：模板从三套收敛为《为实体发声》一套。原三套共用同一个虚构主体
+// （巷口修鞋铺·张姐），对用户是三个壳子一个故事，反而稀释了首页的主行动。
+// 在售清单由 catalog.OFFERED_TEMPLATE_IDS 决定，上架新模板改那里即可。
+test('快出片在售模板只保留《为实体发声》，且脚本自洽', () => {
   const templates = catalog.listBuiltInTemplates();
-  assert.equal(templates.length, 3);
-  assert.deepEqual(templates.map((item) => item.id), ['ct_shiti', 'ct_kaimen', 'ct_shouyi']);
+  assert.deepEqual(templates.map((item) => item.id), ['ct_shiti']);
+  assert.deepEqual(catalog.OFFERED_TEMPLATE_IDS, ['ct_shiti']);
 
   const scripts = templates.map((template) => {
     const seed = catalog.getBuiltInProjectSeed(template.id);
@@ -32,12 +35,36 @@ test('快出片内置三套可独立制作的模板', () => {
 });
 
 test('快出片模板目录返回防御性副本', () => {
-  const first = catalog.getBuiltInProjectSeed('ct_kaimen');
+  const first = catalog.getBuiltInProjectSeed('ct_shiti');
   first.segments[0].text = '被调用方修改';
   first.variables.shopName = '被调用方修改';
-  const second = catalog.getBuiltInProjectSeed('ct_kaimen');
+  const second = catalog.getBuiltInProjectSeed('ct_shiti');
   assert.notEqual(second.segments[0].text, first.segments[0].text);
   assert.notEqual(second.variables.shopName, first.variables.shopName);
+});
+
+test('已下架模板不再对外可见，服务端仍返回时端上兜底过滤', () => {
+  // AIStar 的 ClipOfficialTemplateSeeder 仍种着 ct_kaimen / ct_shouyi，
+  // 服务端 /templates 还会返回它们；下架不依赖服务端改动，端上是最后一道闸。
+  assert.equal(catalog.getBuiltInTemplate('ct_kaimen'), null);
+  assert.deepEqual(
+    catalog.filterOffered([{ id: 'ct_shiti' }, { id: 'ct_kaimen' }, { id: 'ct_shouyi' }]).map((item) => item.id),
+    ['ct_shiti'],
+  );
+  assert.deepEqual(catalog.filterOffered(null), [], '非数组输入不得抛异常');
+});
+
+test('模板的时长/出镜/积分全部由 segments 推导，三个数字必须自洽', () => {
+  // 曾经 estDurationSec 是算出来的（84 秒），avatarSecHint=38 / creditHint=68 却是
+  // 设计稿 2:42 版本的硬编码残留，首页主卡出现「成片 1:24，其中出镜 38 秒」。
+  for (const template of catalog.listBuiltInTemplates()) {
+    const seed = catalog.getBuiltInProjectSeed(template.id);
+    const summary = model.summarize(seed.segments);
+    assert.equal(template.estDurationSec, summary.totalSec);
+    assert.equal(template.avatarSecHint, summary.avatarSec);
+    assert.equal(template.creditHint, model.estimateCredits(seed.segments).total);
+    assert.ok(template.avatarSecHint <= template.estDurationSec, '出镜秒数不可能超过成片总时长');
+  }
 });
 
 test('快出片纯 mock 会话自带可跑完整出片链路的演示额度', () => {
@@ -85,7 +112,8 @@ test('快出片所有页面只占一层原生导航高度', () => {
   const pages = fs.readdirSync(videoRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(videoRoot, entry.name, 'index.wxml')))
     .map((entry) => path.join(videoRoot, entry.name, 'index.wxml'));
-  assert.equal(pages.length, 11);
+  // 12 = 原 11 页 + templates（模板专区，从首页拆出来，便于后续上新模板）
+  assert.equal(pages.length, 12);
   pages.forEach((file) => {
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /--native-nav-inset:\{\{navInset\}\}px/);
@@ -117,10 +145,18 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
   assert.match(tokens, /--vd-shadow:/);
   assert.match(tokens, /\.vd-back\s*\{[\s\S]*width: 44px; height: 44px;/);
   assert.match(tokens, /\.vd-btn\s*\{[\s\S]*height: 56px;/);
-  assert.ok(home.indexOf('<!-- 数字分身是开拍前置条件') < home.indexOf('<!-- 模板精选：横向浏览'),
-    '数字分身门槛必须先于模板，避免用户进入制作后才发现不能出片');
-  assert.match(home, /class="home-tools"/);
-  assert.match(home, /class="tpl-scroll" scroll-x/);
+  // 2026-08-12 IA 重排：首页从「模板即首页」改为落地页，模板拆去 templates/ 专区。
+  //
+  // 原规则「分身门槛必须先于模板」写于模板还是首页主卡的时代。现在首页主 CTA 通向的是
+  // 模板专区（浏览），真正的制作入口在模板详情的「开始制作」，硬闸就在那里
+  // （templateJs 的 imageStatus !== 'ready'）。所以规则的**意图**——不让用户进入制作
+  // 之后才发现不能出片——依然成立，只是闸挪到了它该在的位置；落地页保留门槛卡做前置告知。
+  assert.match(home, /class="gate gate-\{\{avatarState\}\}"/, '落地页必须常驻分身门槛状态');
+  assert.match(home, /class="primary-cta"/, '落地页只该有一个主行动');
+  assert.ok(home.indexOf('class="banner"') < home.indexOf('class="primary-cta"'),
+    '宣传横幅讲清价值之后才给主行动');
+  assert.ok(home.indexOf('class="gate gate-') < home.indexOf('class="entries"'),
+    '分身门槛必须排在次级入口之前');
   assert.doesNotMatch(home, /class="vd-headact" bindtap="openWorks"/, '作品入口不能继续藏在导航角落');
   assert.match(templateJs, /avatar\.imageStatus !== 'ready'/);
   assert.match(templateJs, /先创建数字分身，再开始出片/);

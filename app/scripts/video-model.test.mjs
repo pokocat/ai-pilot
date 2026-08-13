@@ -135,3 +135,95 @@ test('多句镜头按镜头计画面段数，并按合计时长限制分身出�
   const toggled = model.toggleShotRole(segments, shots, shots[0].id);
   assert.match(toggled.error, /超过单次分身出镜上限/);
 });
+
+/* ── 整段改写 ────────────────────────────────────────────────────────
+   逐句编辑适合微调；用户拿着写好的稿子过来时要能整篇粘贴。
+   ⚠️ 已配画面绑在 shots 层，segments.assetId 恒为 null（镜头层引入前的遗留字段）。
+   这批用例照真实数据形状写：素材放在 shots 上。 */
+
+const bodyOf = (...texts) => texts.map((text, index) => ({
+  no: index + 1, text, role: index === 0 ? model.ROLE.AVATAR : model.ROLE.BROLL,
+}));
+
+test('整段导出只出正文，固定尾段不进编辑区', () => {
+  const segments = bodyOf('第一句', '第二句').concat([{ no: 3, text: '结尾：集体发声', role: model.ROLE.TAIL, durationSec: 22 }]);
+  assert.equal(model.scriptToText(segments), '第一句\n第二句');
+});
+
+test('整段粘贴按行切分，空行忽略，前后空格去掉', () => {
+  const { segments } = model.applyBulkScript(bodyOf('旧'), null, '  甲  \n\n乙\n \n丙');
+  assert.deepEqual(segments.map((s) => s.text), ['甲', '乙', '丙']);
+  assert.deepEqual(segments.map((s) => s.no), [1, 2, 3]);
+});
+
+test('固定尾段永远保留并重新编号，不会被粘贴内容顶掉', () => {
+  const before = bodyOf('甲').concat([{ no: 2, text: '结尾', role: model.ROLE.TAIL, durationSec: 22 }]);
+  const { segments } = model.applyBulkScript(before, null, '一\n二\n三');
+  const tail = segments.at(-1);
+  assert.equal(tail.role, model.ROLE.TAIL);
+  assert.equal(tail.no, 4);
+  assert.equal(tail.durationSec, 22);
+  assert.equal(segments.filter((s) => s.role === model.ROLE.TAIL).length, 1);
+});
+
+test('角色按位置继承；新增的句子默认配画面，不偷偷加钱', () => {
+  const { segments } = model.applyBulkScript(bodyOf('甲', '乙'), null, '甲改\n乙改\n丙新增');
+  assert.deepEqual(segments.map((s) => s.role), [model.ROLE.AVATAR, model.ROLE.BROLL, model.ROLE.BROLL]);
+});
+
+test('丢画面按 shots 计数——数 segments 会恒得 0，安全闸永远不触发', () => {
+  const before = bodyOf('甲', '乙', '丙');
+  const shots = [
+    { id: 's1', startNo: 1, endNo: 1, role: model.ROLE.AVATAR, assetId: null },
+    { id: 's2', startNo: 2, endNo: 3, role: model.ROLE.BROLL, assetId: 'ca_1', assetLabel: '门头' },
+  ];
+  const { stats } = model.applyBulkScript(before, shots, '甲\n乙改了\n丙');
+  assert.equal(stats.droppedAssets, 1, '第 2 句被改，覆盖它的镜头素材失效');
+});
+
+test('只改没配画面的那句，已配的画面要保住', () => {
+  const before = bodyOf('甲', '乙', '丙');
+  const shots = [
+    { id: 's1', startNo: 1, endNo: 1, role: model.ROLE.AVATAR, assetId: null },
+    { id: 's2', startNo: 2, endNo: 3, role: model.ROLE.BROLL, assetId: 'ca_1', assetLabel: '门头' },
+  ];
+  const { shots: next, stats } = model.applyBulkScript(before, shots, '甲改了\n乙\n丙');
+  assert.equal(stats.droppedAssets, 0, '改的是第 1 句，第 2 镜头不该受牵连');
+  assert.equal(next.find((s) => s.id === 's2').assetId, 'ca_1');
+});
+
+test('句数变了，分组整体作废重算，全部已配画面计入丢失', () => {
+  const before = bodyOf('甲', '乙', '丙');
+  const shots = [
+    { id: 's1', startNo: 1, endNo: 1, role: model.ROLE.AVATAR, assetId: 'ca_a' },
+    { id: 's2', startNo: 2, endNo: 3, role: model.ROLE.BROLL, assetId: 'ca_b' },
+  ];
+  const { shots: next, stats } = model.applyBulkScript(before, shots, '甲');
+  assert.equal(next, null, 'startNo/endNo 已指向别的句子，必须交回 defaultShots');
+  assert.equal(stats.droppedAssets, 2);
+});
+
+test('一字未改时不判为变化，画面与试听时长全部保留', () => {
+  const before = [
+    { no: 1, text: '甲', role: model.ROLE.AVATAR, actualDurationSec: 5 },
+    { no: 2, text: '乙', role: model.ROLE.BROLL },
+  ];
+  const shots = [{ id: 's1', startNo: 1, endNo: 2, role: model.ROLE.BROLL, assetId: 'ca_1' }];
+  const { segments, shots: next, stats } = model.applyBulkScript(before, shots, '甲\n乙');
+  assert.equal(stats.changed, false);
+  assert.equal(stats.droppedAssets, 0);
+  assert.equal(segments[0].actualDurationSec, 5);
+  assert.equal(next[0].assetId, 'ca_1');
+});
+
+test('文字改了就丢掉该位置的试听时长', () => {
+  const before = [{ no: 1, text: '甲', role: model.ROLE.AVATAR, actualDurationSec: 5 }];
+  const { segments } = model.applyBulkScript(before, null, '甲改了');
+  assert.equal(segments[0].actualDurationSec, 0, '试听时长属于旧文字');
+});
+
+test('清空文本是合法输入，标记 empty 由调用方拦，不在这里抛', () => {
+  const { segments, stats } = model.applyBulkScript(bodyOf('甲'), null, '   \n\n  ');
+  assert.deepEqual(segments, []);
+  assert.equal(stats.empty, true);
+});

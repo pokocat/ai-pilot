@@ -15,11 +15,15 @@ const host = require('../host');
 const api = require('../api');
 const { ensureShots } = require('../model');
 
-/** 三步流程说明。落地页只讲流程，不讲参数。 */
+/**
+ * 三步流程说明。落地页只讲流程，不讲参数。
+ * 第三步点名「数字人开口」——落地页要让用户看懂片子是靠什么出来的（模板 + 数字人），
+ * 只写「自动合成」等于把产品的核心机制藏起来了。
+ */
 const STEPS = [
-  { key: 'script', name: '聊文案', desc: '跟 AI 对着改' },
+  { key: 'script', name: '改文案', desc: '套模板改几句' },
   { key: 'shots', name: '配画面', desc: '拍或选素材' },
-  { key: 'render', name: '出片', desc: '自动合成' },
+  { key: 'render', name: '出片', desc: '数字人开口' },
 ];
 
 Page({
