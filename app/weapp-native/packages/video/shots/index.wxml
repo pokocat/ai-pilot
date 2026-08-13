@@ -49,16 +49,18 @@
           <view class="row-ctl">
             <view class="vd-tag {{item.roleClass}} {{item.switchable ? 'tappable' : ''}}" data-id="{{item.id}}" data-switchable="{{item.switchable}}" bindtap="toggleRole">
               <text class="sq"></text><text>{{item.roleLabel}}</text>
+              <native-icon wx:if="{{item.switchable}}" class="tag-swap" name="swap" tone="{{item.roleClass === 'avatar' ? 'accent' : 'blue'}}" color-key="{{colorKey}}" size="12"></native-icon>
             </view>
             <text class="row-meta">{{item.metaText}}</text>
           </view>
           <view wx:if="{{item.roleClass === 'broll' && !item.hasAsset}}" class="row-pick" data-id="{{item.id}}" bindtap="pickAsset">
-            <native-icon class="rp-plus" name="plus" tone="neutral" size="23"></native-icon><text class="rp-text">为这 {{item.sentenceCount}} 句选一个画面</text>
+            <native-icon class="rp-plus" name="plus" tone="neutral" size="23"></native-icon>
+            <view class="rp-copy"><text class="rp-text">为这 {{item.sentenceCount}} 句选一个画面</text><text class="rp-need">这段要念 {{item.seconds}} 秒，素材最好不短于它</text></view>
           </view>
           <view wx:elif="{{item.roleClass === 'broll' && item.hasAsset}}" class="row-asset">
             <view class="ra-open" data-asset-id="{{item.assetId}}" bindtap="previewSelectedAsset">
               <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">{{item.assetTypeText === '视频素材' ? '播放' : '预览'}}</text></view>
-              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · 点开预览</text></view>
+              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · 点开预览</text><text wx:if="{{item.assetTooShort}}" class="ra-short">素材 {{item.assetSeconds}} 秒，短于本段 {{item.seconds}} 秒，画面会重复播放</text></view>
             </view>
             <text class="ra-change" data-id="{{item.id}}" bindtap="pickAsset">更换</text>
           </view>
@@ -66,7 +68,7 @@
             <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">播放</text></view>
             <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">固定视频 · {{item.seconds}} 秒 · 点开预览</text></view>
           </view>
-          <view wx:elif="{{item.roleClass === 'avatar'}}" class="row-avatar" bindtap="openAvatarPicker"><view class="ra-face"><image wx:if="{{avatarPreviewUrl}}" src="{{avatarPreviewUrl}}" mode="aspectFill"></image></view><view class="ra-avatar-copy"><text class="ra-label">{{selectedAvatar ? selectedAvatar.name : '选择数字人'}}</text><text class="ra-sub">这 {{item.sentenceCount}} 句连续出镜 · 点按可更换</text></view></view>
+          <view wx:elif="{{item.roleClass === 'avatar'}}" class="row-avatar" bindtap="openAvatarPicker"><view class="ra-face"><image wx:if="{{avatarPreviewUrl}}" src="{{avatarPreviewUrl}}" mode="aspectFill"></image></view><view class="ra-avatar-copy"><text class="ra-label">{{selectedAvatar ? selectedAvatar.name : '选择数字人'}}</text><text wx:if="{{item.avatarSpanText}}" class="ra-sub">{{item.avatarSpanText}}</text></view><view class="ra-avatar-swap"><native-icon name="swap" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text>换数字人</text></view></view>
         </view>
       </view>
       <view class="vd-footer-space"></view>

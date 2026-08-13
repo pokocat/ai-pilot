@@ -266,5 +266,6 @@
 /* ── 空态 ───────────────────────────────────────────────────────────── */
 
 .vd-empty { padding: 60px 32px; text-align: center; }
-.vd-empty .t { font-family: var(--vd-serif); font-size: 18px; font-weight: 600; margin-bottom: 8px; }
-.vd-empty .s { font-size: 14px; line-height: 1.7; color: var(--vd-muted); }
+// <text> 默认 inline，不给 block 的话标题和副文会挤在同一行（空态实测）。
+.vd-empty .t { display: block; font-family: var(--vd-serif); font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+.vd-empty .s { display: block; font-size: 14px; line-height: 1.7; color: var(--vd-muted); }

@@ -122,13 +122,21 @@ Page({
       roleLabel: isTail ? '固定片段' : (isAvatar ? '分身出镜' : '配画面'),
       metaText: isTail
         ? `${shot.durationSec} 秒 · 可整段替换`
-        : (isAvatar ? `出镜 ${seconds} 秒 · 你的脸和声音`
+        : (isAvatar ? `出镜 ${seconds} 秒`
           : (shot.assetId ? `${seconds} 秒 · 画面已选` : (shot.hint || '还没配画面'))),
       assetDisplayLabel,
       assetTypeText: assetKind === 'image' ? '图片素材' : '视频素材',
+      // 素材短于本段口播时，合成端会用 -stream_loop 正向循环把它铺满 —— 播到底跳回开头，
+      // 硬跳在横摇/推镜素材上很像倒带。与其让用户出片后才发现，不如在这里就说清。
+      // 图片没有时长概念，不参与判定。
+      assetSeconds: assetKind === 'image' ? 0 : Math.round(Number(asset && asset.durationSec) || 0),
+      assetTooShort: assetKind !== 'image'
+        && Number(asset && asset.durationSec) > 0
+        && Math.round(Number(asset.durationSec)) < seconds,
       assetPreviewUrl: asset && asset.previewUrl ? asset.previewUrl : '',
       framePreviewUrl: isAvatar ? this.data.avatarPreviewUrl : (asset && asset.previewUrl ? asset.previewUrl : ''),
       previewMeta: isTail ? '固定片段' : (isAvatar ? '分身出镜' : (assetKind === 'image' ? '已选图片素材' : '已选视频素材')),
+      avatarSpanText: count > 1 ? `连续 ${count} 句出镜` : '',
       hasAsset: Boolean(shot.assetId), switchable: !isTail,
       canMergeNext: !isTail && Boolean(following && following.role !== ROLE.TAIL),
     });

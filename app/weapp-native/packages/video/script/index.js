@@ -28,6 +28,8 @@ Page({
      */
     editMode: 'line',
     bulkText: '',
+    /** 进入整段模式时的原文；用来判断用户改过没有，改过就不能默默丢掉。 */
+    bulkOriginal: '',
     /** 整段模式下的实时统计，让用户粘贴前就知道会影响几句、丢几个已配画面。 */
     bulkStats: null,
     bulkSaving: false,
@@ -259,17 +261,44 @@ Page({
     if (!project) return;
     // 进整段模式前先把逐句的未提交编辑冲掉，否则用户会看到一份不含刚改内容的旧稿
     if (this.data.editingNo != null) this.commitEdit();
+    const text = model.scriptToText(this.data.project.segments);
     this.setData({
       editMode: 'bulk',
-      bulkText: model.scriptToText(this.data.project.segments),
+      bulkText: text,
+      bulkOriginal: text,
       bulkStats: null,
       editingNo: null,
     });
   },
 
   exitBulk() {
-    this.setData({ editMode: 'line', bulkStats: null });
+    // 用户可能刚粘完一整篇稿子，直接丢弃是不可接受的
+    if (String(this.data.bulkText || '') !== String(this.data.bulkOriginal || '')) {
+      host.confirm({
+        title: '放弃这次修改？',
+        content: '你在整段编辑里改的内容还没应用，返回就没了。',
+        confirmText: '放弃',
+        cancelText: '继续编辑',
+      }).then((ok) => { if (ok) this.doExitBulk(); });
+      return;
+    }
+    this.doExitBulk();
+  },
+
+  doExitBulk() {
+    this.setData({ editMode: 'line', bulkStats: null, bulkOriginal: '' });
     this.recompute(this.data.project.segments);
+  },
+
+  /** 自动分段：按句末标点切，碎句并进上一段，超长段在次级标点断开。 */
+  autoSplit() {
+    const pieces = model.splitScriptText(this.data.bulkText);
+    if (!pieces.length) { host.toast('先粘贴一段文案'); return; }
+    const bulkText = pieces.join('\n');
+    if (bulkText === this.data.bulkText) { host.toast('已经是分好段的了'); return; }
+    const project = this.data.project;
+    this.setData({ bulkText, bulkStats: model.applyBulkScript(project.segments, project.shots, bulkText).stats });
+    host.toast(`分成 ${pieces.length} 段`, 'success');
   },
 
   inputBulk(event) {

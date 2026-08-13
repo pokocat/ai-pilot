@@ -200,3 +200,26 @@
 .ap-check { width: 24px; height: 24px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--vd-avatar); }
 .ap-row:not(.selected) .ap-check { border: 1px solid var(--vd-line); background: transparent; }
 .ap-new { min-height: 48px; margin-top: 8px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--vd-avatar-line); border-radius: 14px; font-size: 13px; font-weight: 700; color: var(--vd-avatar-deep); }
+
+/* ── 可切换的可供性 ────────────────────────────────────────────────
+   实测反馈：用户不知道角色标签和数字人行是可以点的。图标 + 一句明示，两处都补。 */
+
+.tag-swap { margin-left: 2px; opacity: 0.8; }
+
+/* 选画面入口：把"这段要念多少秒"摆出来，避免选了过短素材出片才发现 */
+.rp-copy { display: flex; flex-direction: column; gap: 2px; }
+.rp-need { font-size: 11px; color: var(--vd-broll); }
+
+/* 已选素材短于本段时的告警 */
+.ra-short {
+  display: block; margin-top: 3px;
+  font-size: 11px; line-height: 1.45; color: var(--vd-avatar-deep);
+}
+
+/* 数字人行的换人入口 */
+.ra-avatar-swap {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px; border-radius: var(--vd-r-chip);
+  background: var(--vd-avatar-soft);
+  font-size: 11px; font-weight: 600; color: var(--vd-avatar-deep);
+}

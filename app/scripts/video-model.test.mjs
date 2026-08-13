@@ -227,3 +227,39 @@ test('清空文本是合法输入，标记 empty 由调用方拦，不在这里�
   assert.deepEqual(segments, []);
   assert.equal(stats.empty, true);
 });
+
+/* ── 自动分段 ────────────────────────────────────────────────────────
+   走本地规则而非 AI 端点：中文口播稿自带句末标点，规则切分即时、免费、离线、结果确定。 */
+
+test('按句末标点切分，标点跟着前一句走', () => {
+  const out = model.splitScriptText('大家好，我是张姐。我修了十二年鞋。有需要随时来！');
+  assert.deepEqual(out, ['大家好，我是张姐。', '我修了十二年鞋。', '有需要随时来！']);
+});
+
+test('用户自己分好的行优先，不擅自合并他的意图', () => {
+  assert.deepEqual(model.splitScriptText('第一行没有标点\n第二行也没有'), ['第一行没有标点', '第二行也没有']);
+});
+
+test('碎句并进上一段——单独一个「好。」既难配画面又白占一次出镜计费', () => {
+  const out = model.splitScriptText('我在这条街开了十二年店。好。来的都是熟客。');
+  assert.ok(!out.includes('好。'), `碎句不该单独成段：${JSON.stringify(out)}`);
+  assert.ok(out.some((s) => s.includes('好。')), '碎句要并进相邻段而不是被丢掉');
+});
+
+test('超长段在次级标点处断开，不留一段念半分钟', () => {
+  const long = '每天早上七点卷闸门一拉开这条街才算醒了，来的都是熟客一双鞋修好能再穿两年，这些年店越来越少招牌一块块褪了色';
+  const out = model.splitScriptText(long, { maxChars: 30 });
+  assert.ok(out.length > 1, '超长段必须被拆开');
+  out.forEach((s) => assert.ok(s.length <= 46, `拆完仍过长：${s}`));
+});
+
+test('空白输入返回空数组，不抛', () => {
+  assert.deepEqual(model.splitScriptText('   \n\n  '), []);
+  assert.deepEqual(model.splitScriptText(null), []);
+});
+
+test('分段结果可直接喂给 applyBulkScript', () => {
+  const pieces = model.splitScriptText('第一句。第二句。第三句。');
+  const { segments } = model.applyBulkScript([{ no: 1, text: '旧', role: model.ROLE.AVATAR }], null, pieces.join('\n'));
+  assert.deepEqual(segments.map((s) => s.text), ['第一句。', '第二句。', '第三句。']);
+});

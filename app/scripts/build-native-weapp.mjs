@@ -75,6 +75,8 @@ const LUCIDE_ICON_MAP = {
   chart: 'chart-no-axes-column-increasing',
   clock: 'clock',
   flow: 'git-branch',
+  // 「这里可以切换」的可供性图标：角色标签、数字人行都要用它明示可点。
+  swap: 'arrow-left-right',
   bolt: 'zap',
   shield: 'shield-check',
   crown: 'crown',

@@ -42,6 +42,11 @@
           adjust-position="{{true}}"
         />
 
+        <view class="bulk-helper">
+          <view class="bh-btn" bindtap="autoSplit"><native-icon name="layers" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text>自动分段</text></view>
+          <text class="bh-tip">整篇粘进来后点它，按句子自动分好段</text>
+        </view>
+
         <view wx:if="{{bulkStats}}" class="bulk-stats {{bulkStats.droppedAssets ? 'warn' : ''}}">
           <text class="bs-line">原来 {{bulkStats.before}} 段，改后 {{bulkStats.after}} 段</text>
           <text wx:if="{{bulkStats.droppedAssets}}" class="bs-warn">有 {{bulkStats.droppedAssets}} 句已配的画面会失效，需要重新配</text>

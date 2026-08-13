@@ -342,6 +342,71 @@ function commitSegmentText(segments, no, nextText, previewedText) {
    整段模式让他直接粘一整篇，一行一句。难点不在切分，在于**别把已配的画面弄丢**：
    assetId 是为"那一句"选的，句子变了绑定就不再成立。 */
 
+/**
+ * 把一整段文案切成语义段。
+ *
+ * 为什么不走 AI 端点：中文口播稿自带句末标点，规则切分即时、免费、离线、结果确定，
+ * 粘贴时就能出结果；而语义重组（合并观点、调整顺序）已经有「AI 改稿」在做，
+ * 再为切分开一条跨仓库端点是重复投入，还多一次网络往返和一次失败可能。
+ *
+ * 规则：
+ *   1. 先按换行切（用户自己分好的行优先，不要擅自合并他的意图）
+ *   2. 行内按句末标点（。！？!?…）切，标点跟着前一句走
+ *   3. 太短的碎句并进上一段 —— 「好。」单独成段既难配画面又浪费一次出镜计费
+ *   4. 太长的段按次级标点（，、；,;）就近断开，避免一段念半分钟
+ */
+function splitScriptText(rawText, options) {
+  // 4 = 只把 ≤3 字的应答碎句（「好。」「对。」）并进上一段。
+  // 再高会误伤「第一句。」这类正常短句，极端情况下把整篇并成一段。
+  const minChars = (options && options.minChars) || 4;
+  const maxChars = (options && options.maxChars) || 46;
+  const lines = String(rawText == null ? '' : rawText).split('\n');
+  const out = [];
+
+  const cutLong = (text) => {
+    if (text.length <= maxChars) return [text];
+    const parts = [];
+    let rest = text;
+    while (rest.length > maxChars) {
+      // 在上限附近找最靠后的次级标点，找不到就硬断
+      const window = rest.slice(0, maxChars);
+      const at = Math.max(window.lastIndexOf('，'), window.lastIndexOf('、'),
+        window.lastIndexOf('；'), window.lastIndexOf(','), window.lastIndexOf(';'));
+      const cut = at > minChars ? at + 1 : maxChars;
+      parts.push(rest.slice(0, cut).trim());
+      rest = rest.slice(cut);
+    }
+    if (rest.trim()) parts.push(rest.trim());
+    return parts;
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    // 逐行独立处理：**绝不跨行合并**。用户敲的换行是他自己的分段意图，
+    // 哪怕某行只有两个字，也不该被并进上一行。碎句合并只在行内进行。
+    const inLine = [];
+    trimmed.split(/(?<=[。！？!?…])/).forEach((sentence) => {
+      cutLong(sentence.trim()).forEach((piece) => {
+        const text = piece.trim();
+        if (!text) return;
+        const prev = inLine[inLine.length - 1];
+        // 碎句（「好。」「对。」这种）并进同一行的上一段：单独成段既难配画面，
+        // 又白占一次出镜计费。上一段已经接近上限时不再并，避免越并越长。
+        if (prev && text.replace(/\s/g, '').length < minChars && prev.length + text.length <= maxChars) {
+          inLine[inLine.length - 1] = prev + text;
+          return;
+        }
+        inLine.push(text);
+      });
+    });
+    out.push(...inLine);
+  });
+
+  return out;
+}
+
 /** 段落 → 可编辑文本（只出正文，固定尾段不进编辑区）。 */
 function scriptToText(segments) {
   return (Array.isArray(segments) ? segments : [])
@@ -496,7 +561,7 @@ module.exports = {
   ROLE, STAGES,
   estimateSeconds, segmentSeconds, formatDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
-  scriptToText, applyBulkScript,
+  scriptToText, applyBulkScript, splitScriptText,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
   regroupShotSelection, mergeAdjacentShots,
 };

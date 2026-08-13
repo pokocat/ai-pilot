@@ -115,3 +115,13 @@
 // 取消给固定宽度：.vd-btn.ghost 本身不带 flex，跟 flex:1 的主按钮并排会被压成一条。
 .bulk-acts { display: flex; gap: 10px; margin-top: 14px; margin-bottom: 8px; }
 .bulk-acts .vd-btn.ghost { width: 96px; flex: none; }
+
+/* 自动分段：整篇粘贴后一键切成语义段（本地规则，不走网络） */
+.bulk-helper { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.bh-btn {
+  flex: none; display: flex; align-items: center; gap: 5px;
+  padding: 8px 14px; border-radius: var(--vd-r-chip);
+  background: var(--vd-avatar-soft); color: var(--vd-avatar-deep);
+  font-size: 13px; font-weight: 600;
+}
+.bh-tip { font-size: 11px; line-height: 1.5; color: var(--vd-muted); flex: 1; }
