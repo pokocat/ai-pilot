@@ -272,6 +272,11 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.match(c.calls[1].system, /不要再加图形/, '移植上游「打磨不是加东西」');
     assert.doesNotMatch(c.calls[1].system, /\[margin\]/, '没有违规就不该出现 critique');
     assert.match(c.calls[1].user, /上一版 HTML/, '打磨轮要带上一版源码，不是从零重写');
+    // ★ 回喂的必须是**占位符形态的源码**，不是渲染用的那份：影像档的 {{VISUAL_URL}} 会被换成
+    //   约 200KB 的 base64，回喂它等于把 60k 的 user 额度烧在一串模型自己写不出的字节上，
+    //   还会被拦腰截断成读不懂的残片（2026-08-12 预发实测 usr=209720）。
+    assert.match(c.calls[1].user, /\{\{VISUAL_URL\}\}|<p>first<\/p>/, '带的是模型自己的源码');
+    assert.doesNotMatch(c.calls[1].user, /base64,[A-Za-z0-9+/]{200}/, '绝不把素材字节回喂给模型');
     assert.ok(c.calls[1].user.includes('first'), '带的是第一轮那份产物');
   });
 

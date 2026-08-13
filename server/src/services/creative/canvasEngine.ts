@@ -409,7 +409,17 @@ export type CanvasEngineOutcome =
   };
 
 interface Attempt {
+  /** 渲染用的最终 HTML（占位符已换成真实素材字节）。落资产 metadata 的是这一份。 */
   html: string;
+  /**
+   * **回喂给模型看的那一份**：模型自己写的源码，占位符还是 `{{VISUAL_URL}}` 的形态。
+   *
+   * 为什么必须分开：影像档的主视觉是一段约 200KB 的 base64 data URI，`fillPlaceholders` 之后
+   * `html` 会膨胀到 20 万字符以上，而打磨轮的 user prompt 有 60k 上限 —— 回喂 `html` 的实际效果是
+   * 「模型收到一份从 base64 中间被切断的残片」，既读不懂又把额度全烧在一串它自己写不出的字节上。
+   * 2026-08-12 预发实测到的就是这一格（usr=209720）。回喂源码则既短又正是它下一轮要改的东西。
+   */
+  sourceHtml: string;
   buffer: Buffer;
   width: number;
   height: number;
@@ -454,7 +464,7 @@ async function attemptOnce(
   }
   return {
     attempt: {
-      html, buffer: out.buffer, width: out.width, height: out.height,
+      html, sourceHtml: clean.html, buffer: out.buffer, width: out.width, height: out.height,
       violations: out.violations, aiMarkInjected: injected,
       bodyText: out.bodyText ?? '',
     },
@@ -579,9 +589,11 @@ export async function generateCanvasPoster(
       : `${system}\n${pending.length ? fixDirective(pending) : notes.length ? critiqueDirective(notes) : POLISH_DIRECTIVE}`;
     // 静态审计不过的那一轮没有可用产物（current 仍是上一轮的），此时不附「上一版 HTML」，
     // 让模型按 critique 重写一份完整文档，而不是去改一份它看不到的东西。
+    // 回喂的是**模型自己写的源码**（占位符形态），不是渲染用的那份 —— 后者内联了约 200KB 的
+    // 主视觉 base64，会把 60k 的 user 额度撑爆并被拦腰截断（见 Attempt.sourceHtml 的注释）。
     const usr = calls === 0 || !current
       ? user
-      : `${user}\n\n【上一版 HTML（在它的基础上改，不要从零重写）】\n${current.html}`;
+      : `${user}\n\n【上一版 HTML（在它的基础上改，不要从零重写）】\n${current.sourceHtml}`;
     // ★ 打磨轮把**上一版渲染出来的成品图**一起发过去：这是本引擎与上游 canvas-design 对齐的关键一步——
     //   让作者看见自己写的代码画成了什么样，而不是对着一份自己写的 HTML 凭空想象。
     //   静态审计不过的那轮没有产物可看（current 为空或是更早那版），此时只发文本。
