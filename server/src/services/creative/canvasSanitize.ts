@@ -82,12 +82,40 @@ function resourceUrls(html: string): { where: string; value: string }[] {
   return out;
 }
 
+/**
+ * 内联 SVG 的 data URI 里是否藏着可执行内容。
+ *
+ * 非 base64 形态的 SVG 是**百分号编码**的，`<script>` 在原文里长成 `%3Cscript`，
+ * 文档级那条 `<script>` 正则完全看不见它。所以这里先解码再查一遍。
+ * 解码失败（畸形转义）按「有问题」处理：读不懂的东西不放行。
+ *
+ * 注：浏览器对「作为图片引用的 SVG」本来就是 restricted mode（不执行脚本、不发外链），
+ * 渲染层还压着 `javaScriptEnabled:false` 与请求拦截白名单。这一层是第三道，
+ * 挡的是「哪天有人把它改成 <object>/<iframe> 引用」这种未来的脚下一空。
+ */
+function svgDataUriLooksExecutable(v: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(v);
+  } catch {
+    return true;
+  }
+  return /<\s*script|\bon[a-z]+\s*=|javascript:|<\s*foreignObject/i.test(decoded);
+}
+
 /** 地址是否允许：占位符 / data:image / 页内锚点（svg 引用）。其余（含 http、协议相对、相对路径）全拒。 */
 function allowedUrl(value: string): boolean {
   const v = value.trim();
   if (!v) return true;                              // src="" 只是难看，不是安全问题（量测器会抓到空图）
   if (PLACEHOLDER_RE.test(v)) return true;
-  if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);/i.test(v)) return true;
+  // ★ 媒体类型后面既可以是 `;`（`;base64,`）也可以直接是 `,`（RFC 2397 里 `;base64` 是可选的）。
+  //   这里原先只认 `;`，于是 `data:image/svg+xml,%3Csvg...`——**内联 SVG 最常用的写法**，
+  //   比 base64 更短、CSS 里随处可见——被整份打回。而系统提示词恰恰写着「你自己写的
+  //   data:image URI（如内联 SVG）」是合法来源：模型照做，然后连挂三轮回落模板，全程静默。
+  //   2026-08-12 预发实测 5 次标准档有 2 次死在这一条上。
+  if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml)[;,]/i.test(v)) {
+    return !/^data:image\/svg\+xml/i.test(v) || !svgDataUriLooksExecutable(v);
+  }
   if (v.startsWith('#')) return true;
   return false;
 }

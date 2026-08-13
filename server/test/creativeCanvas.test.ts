@@ -159,6 +159,34 @@ describe('AI 排版引擎 · 静态审计（LLM 写的 HTML 是不可信输入�
     assert.equal(r.ok, true, r.ok ? '' : r.issues.join('；'));
   });
 
+  // ★ 2026-08-12 预发实测：5 次标准档有 2 次死在这一条上，症状是「三轮全被拒 → 回落模板」，
+  //   而系统提示词恰恰写着「你自己写的 data:image URI（如内联 SVG）」合法。原因是允许规则里
+  //   媒体类型后面钉死了 `;`，而 RFC 2397 的 `;base64` 是可选的 —— 非 base64 的内联 SVG
+  //   （CSS 里最常见的写法，比 base64 更短）走的是 `,`。
+  test('非 base64 的内联 SVG data URI 放行（`;base64` 是可选的，别只认分号）', () => {
+    const svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E"
+      + "%3Ccircle cx='4' cy='4' r='3' fill='%23c9a227'/%3E%3C/svg%3E";
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">`
+      + `<style>.${CANVAS_CLASS}{width:540px;height:720px;overflow:hidden;position:relative;`
+      + `background-image:url("${svg}")}</style></head>`
+      + `<body><div class="${CANVAS_CLASS}"><h1>${BRIEF.headline}</h1>`
+      + `<div>${AI_MARK_TEXT}</div></div></body></html>`;
+    const r = sanitizeCanvasHtml(html);
+    assert.equal(r.ok, true, r.ok ? '' : r.issues.join('；'));
+  });
+
+  // 放行非 base64 SVG 的同时补的那道闸：百分号编码会把 `<script>` 藏成 `%3Cscript`，
+  // 文档级的 `<script>` 正则根本看不见它 —— 必须先解码再查一遍。
+  test('内联 SVG 里藏脚本（百分号编码的 %3Cscript）仍然整份打回', () => {
+    const evil = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E"
+      + "%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E";
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">`
+      + `<style>.${CANVAS_CLASS}{width:540px;height:720px;background-image:url("${evil}")}</style></head>`
+      + `<body><div class="${CANVAS_CLASS}"><h1>${BRIEF.headline}</h1></div></body></html>`;
+    const r = sanitizeCanvasHtml(html);
+    assert.equal(r.ok, false, '编码过的脚本不能因为"看起来是张图"就放行');
+  });
+
   const rejected: [string, string, RegExp][] = [
     ['内联脚本', '<script>alert(1)</script>', /禁止使用 <script>/],
     ['事件属性', '<div onload="x()">x</div>', /on\* 事件属性/],
