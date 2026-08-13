@@ -142,15 +142,21 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // 阈值口径：450 RPS 稳态下 P95 ≈ 40ms → 在途约 18 个；越过悬崖后 P95 6.23s → 在途约 3000 个。
   // 默认 200 落在两者之间（对正常态有 10 倍余量，又能在排队刚形成时就介入）。设 0 关闭。
   //
-  // 不计入的两类：
+  // 不计入的三类：
   //   ① 探活——被限流挡住或被过载计数误伤，会让健康实例被摘掉，正好帮倒忙。
   //   ② 长耗时 LLM 路径（SSE 的 /api/generate、同步的 /api/generate-sync、
   //      /api/brand-kit/generate、/api/me/dossier/generate）——它们一挂就是几十秒到几分钟，
   //      算进一个 200 的在途预算会瞬间占满，让这道闸对真正要防的「快接口排队」失去意义。
   //      这类请求的并发由 services/llmGate.ts 按上游配额单独管，本闸不重复管。
+  //   ③ 外部 BFF 代理（/api/video/*）——同步等 aidrama，上游预算 AIDRAMA_CLIP_TIMEOUT_MS
+  //      （生产 60s）。它与 ② 同性质：耗时由外部系统决定，不是本服务排队的信号。
+  //      2026-08-12 补入：小程序把作品页升成一级 tab 后，每次进入都会打一次 /api/video/works，
+  //      上游一慢就能把 200 个在途槽位耗在等外部上，把无关的快接口一起打成 503。
+  //      这类请求的超时由网关层自己的预算兜，不靠本闸限流。
   const maxInFlight = envNum('MAX_IN_FLIGHT', 200);
   if (maxInFlight > 0 && !isAiTestMode()) {
-    const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream');
+    const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream')
+      || url.startsWith('/api/video/');
     app.addHook('onRequest', async (req, reply) => {
       if (isLongRunning(req.url) || req.url.startsWith('/api/health') || req.url.startsWith('/api/metrics')) return;
       if (gateInFlightNow() >= maxInFlight) {

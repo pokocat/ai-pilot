@@ -272,9 +272,12 @@ export async function videoRoutes(app: FastifyInstance) {
     catch (e) { return sendErr(reply, e, 404); }
   });
 
+  // 作品列表是读类快接口，且小程序作品页（锦囊）是一级 tab、每次进入都会打一次。
+  // 上限 10s：端上默认 30s 断开，服务端必须先于端上放手，否则槽位一直被占（见 aidramaGateway 注释）。
+  const WORKS_TIMEOUT_CAP_MS = 10000;
   app.get('/video/works', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson<ClipWork[]>('/api/me/clip/works', identityOf(user)); }
+    try { return await aidramaJson<ClipWork[]>('/api/me/clip/works', identityOf(user), { timeoutCapMs: WORKS_TIMEOUT_CAP_MS }); }
     catch (e) { return sendErr(reply, e, 502); }
   });
   app.get<{ Params: { id: string } }>('/video/works/:id', async (req, reply) => {

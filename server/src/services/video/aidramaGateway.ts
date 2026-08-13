@@ -74,7 +74,13 @@ function headers(identity: VideoGatewayIdentity, token: string, extra?: Construc
   return result;
 }
 
-async function gatewayFetch(path: string, identity: VideoGatewayIdentity, init: RequestInit): Promise<unknown> {
+/**
+ * 单次调用的超时上限（毫秒）。不传就用全局 AIDRAMA_CLIP_TIMEOUT_MS（生产 60s）。
+ * 用途：**读类快接口**（作品列表等）不该吃提交类请求的长预算——2026-08-12 起小程序作品页是
+ * 一级 tab，每次进入都会打一次列表；上游慢时若按 60s 等，端上早已断开（默认 30s），
+ * 服务端却还在等，在途槽位不释放。给这类调用一个短上限，让服务端先于端上放手。
+ */
+async function gatewayFetch(path: string, identity: VideoGatewayIdentity, init: RequestInit, timeoutCapMs?: number): Promise<unknown> {
   const cfg = config();
   if (!cfg.baseUrl || !cfg.serviceToken) {
     throw new VideoGatewayError('视频服务尚未配置', 503, 'CLIP_GATEWAY_NOT_CONFIGURED');
@@ -82,7 +88,8 @@ async function gatewayFetch(path: string, identity: VideoGatewayIdentity, init: 
   const base = await assertAidramaGatewayUrl(cfg.baseUrl, cfg.allowPrivate);
   const url = upstreamPath(base, path);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  const budget = timeoutCapMs ? Math.min(cfg.timeoutMs, Math.max(1000, timeoutCapMs)) : cfg.timeoutMs;
+  const timer = setTimeout(() => ctrl.abort(), budget);
   try {
     const res = await fetch(url, {
       ...init,
@@ -109,13 +116,13 @@ async function gatewayFetch(path: string, identity: VideoGatewayIdentity, init: 
 export async function aidramaJson<T>(
   path: string,
   identity: VideoGatewayIdentity,
-  opts: { method?: string; body?: unknown } = {},
+  opts: { method?: string; body?: unknown; timeoutCapMs?: number } = {},
 ): Promise<T> {
   const hasBody = opts.body !== undefined;
   return gatewayFetch(path, identity, {
     method: opts.method ?? 'GET',
     ...(hasBody ? { body: JSON.stringify(opts.body), headers: { 'Content-Type': 'application/json' } } : {}),
-  }) as Promise<T>;
+  }, opts.timeoutCapMs) as Promise<T>;
 }
 
 export async function aidramaUpload<T>(
