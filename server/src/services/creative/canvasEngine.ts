@@ -329,7 +329,7 @@ export type CompleteTextFn = (
     maxChars?: number; maxTokens?: number; temperature?: number;
     /** 打磨轮把上一版渲染出的成品 PNG 一起发给模型（让它先看图再改代码）。 */
     images?: { mediaType: string; base64: string }[];
-    /** 创作与打磨轮开思考（上游 canvas-design 也是想清楚才动笔）。 */
+    /** 是否开思考。海报这条链**恒传 false**，理由见调用处那段实测记录。 */
     allowThinking?: boolean;
     /** 单次调用挂钟上限，覆盖全局 OPENAI_TIMEOUT_MS（整页 HTML 跑不进那 60s）。 */
     timeoutMs?: number;
@@ -594,9 +594,16 @@ export async function generateCanvasPoster(
       maxChars: 60_000,
       maxTokens: HTML_MAX_TOKENS,
       temperature: 0.7,
-      // 动笔前先想：上游 canvas-design 在 Claude Code 里就是长思考之后才写第一行代码的。
-      // HTML 的产出格式容错（有 <!DOCTYPE 起始 + 围栏剥离兜底），不怕 thinking 把格式约定带偏。
-      allowThinking: true,
+      // ★ 这一轮**不开思考**（2026-08-12 预发实测后定的，别再打开）：
+      //   · 开着时线上是 adaptive 档，思考量由模型自己决定，而 `max_tokens` 管的是「思考 + 正文」总量。
+      //     实测出现过「接口成功返回、正文是空串」——224s 之后拿回一个空字符串，引擎判「模型不可用」
+      //     整单回落模板，全程无异常无日志。gateway 已按 chatMaxTokens 给正文留了 +7000 的净额，
+      //     但 adaptive 的思考照样能越过这个预留，**失败模式消不掉，只能压低概率**。
+      //   · 而它并没有换来质量：同一段提示词实测 思考关 42.6s→9416 字符 / 思考开 37.6s→7724 字符，
+      //     时间相当、产出反而更少。这一轮的设计决策本来就已经由宣言那一轮承载了。
+      //   要再试思考，正确做法是把 thinkingMode 显式覆盖成 enabled + 固定 budget（让预留真的生效），
+      //   而不是把 adaptive 直接放进来。
+      allowThinking: false,
       // 覆盖全局 60s：整页 HTML 跑不进那个数（见 MAX_LLM_TIMEOUT_MS 的实测记录）。
       timeoutMs: llmTimeout(),
       ...(images ? { images } : {}),

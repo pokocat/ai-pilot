@@ -561,7 +561,11 @@ describe('AI 排版引擎 · 看图打磨闭环', () => {
       critique: stubCritique([{ pass: false, notes: ['右下角留白塌了'] }, { pass: true, notes: [] }]).fn,
     });
     assert.equal(r.ok, true, r.ok ? '' : r.reason);
-    assert.equal(c.calls[0].allowThinking, true, '动笔前先想：上游 canvas-design 就是长思考之后才写第一行');
+    // ★ 不开思考是 2026-08-12 预发实测后的决定，不是遗漏：线上是 adaptive 档，思考量由模型定，
+    //   而 max_tokens 管的是「思考 + 正文」总量 —— 实测出现过「接口成功返回、正文是空串」，
+    //   引擎判「模型不可用」整单回落模板，全程无异常无日志。要再开必须先把 thinkingMode 显式
+    //   覆盖成 enabled + 固定 budget（让 gateway 的净额预留真的生效），而不是把 adaptive 放进来。
+    assert.equal(c.calls[0].allowThinking, false, '别把 adaptive 思考直接放进这一轮：正文会被吃空');
     assert.equal(c.calls[0].hasImage, false, '首轮没有"上一版"可看');
     assert.equal(c.calls[1].hasImage, true, '★ 这一条就是本次改动的核心：作者必须看见自己画成了什么样');
     assert.match(c.calls[1].system, /右下角留白塌了/, '评审意见要逐条回喂，不是喂个"再改改"');
