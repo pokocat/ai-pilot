@@ -147,18 +147,29 @@ Page({
   requestRecordPermission() {
     const begin = () => this.startRecorder();
     if (typeof wx.getSetting !== 'function' || typeof wx.authorize !== 'function') { begin(); return; }
-    wx.getSetting({
-      success: (result) => {
-        const state = result && result.authSetting && result.authSetting['scope.record'];
-        if (state === true) { begin(); return; }
-        if (state === false) { this.openRecordSettings(); return; }
-        wx.authorize({
-          scope: 'scope.record',
-          success: begin,
-          fail: () => this.openRecordSettings(),
-        });
-      },
-      fail: () => host.toast('无法读取麦克风权限，请稍后重试'),
+    // 微信隐私新规：scope.record 属于隐私接口。小程序后台配了「用户隐私保护指引」之后，
+    // 未先过 requirePrivacyAuthorize 就调 authorize/录音，在部分基础库上会直接失败且不弹窗
+    // —— 表现就是「点了没反应」。本方法在旧基础库上不存在，必须特性检测后再调。
+    const afterPrivacy = () => {
+      wx.getSetting({
+        success: (result) => {
+          const state = result && result.authSetting && result.authSetting['scope.record'];
+          if (state === true) { begin(); return; }
+          if (state === false) { this.openRecordSettings(); return; }
+          wx.authorize({
+            scope: 'scope.record',
+            success: begin,
+            fail: () => this.openRecordSettings(),
+          });
+        },
+        fail: () => host.toast('无法读取麦克风权限，请稍后重试'),
+      });
+    };
+    if (typeof wx.requirePrivacyAuthorize !== 'function') { afterPrivacy(); return; }
+    wx.requirePrivacyAuthorize({
+      success: afterPrivacy,
+      // 用户拒绝隐私协议：不是错误，静默回到未录音态即可
+      fail: () => host.toast('需要同意隐私协议后才能录音'),
     });
   },
 
@@ -176,13 +187,18 @@ Page({
       });
   },
 
-  startRecorder() {
+  /**
+   * 绑定录音回调。**只绑一次**。
+   *
+   * `wx.getRecorderManager()` 返回全局单例，且 RecorderManager **没有 offStart/offStop/offError**
+   * （文档里只有 on* 系列）。原先每次 startRecorder 都 on 一遍，等于不断往同一个单例上叠监听器：
+   * 录第二段时 onStop 会触发两次，第三段三次，后面的回调拿着过期的 this.data 互相覆盖。
+   * 改成绑一次 + 通过实例字段分发。
+   */
+  ensureRecorderBound() {
+    if (this.recorder) return this.recorder;
     const manager = wx.getRecorderManager();
     this.recorder = manager;
-    this.setData({ startingRecord: true });
-    if (typeof manager.offStart === 'function') manager.offStart();
-    if (typeof manager.offStop === 'function') manager.offStop();
-    if (typeof manager.offError === 'function') manager.offError();
     manager.onStart(() => {
       this.stopRecordStartTimer();
       this.setData({ startingRecord: false, recording: true, recordSeconds: 0, voiceFile: null, voiceSubmitted: false });
@@ -201,12 +217,23 @@ Page({
       this.stopRecordTimer();
       this.setData({ startingRecord: false, recording: false });
       const message = String(error && (error.errMsg || error.message) || '');
-      if (/auth|deny|permission/i.test(message)) {
-        this.openRecordSettings();
-        return;
-      }
+      if (/auth|deny|permission|privacy/i.test(message)) { this.openRecordSettings(); return; }
       host.toast(message ? `录音失败：${message.slice(0, 40)}` : '录音失败，请重试');
     });
+    // 来电/切后台会中断录音，不处理的话 UI 会一直停在「正在录」
+    if (typeof manager.onInterruptionBegin === 'function') {
+      manager.onInterruptionBegin(() => {
+        this.stopRecordTimer();
+        this.setData({ startingRecord: false, recording: false });
+        host.toast('录音被系统打断了，请重新录一段');
+      });
+    }
+    return manager;
+  },
+
+  startRecorder() {
+    const manager = this.ensureRecorderBound();
+    this.setData({ startingRecord: true });
     this.stopRecordStartTimer();
     this.recordStartTimer = setTimeout(() => {
       if (!this.data.startingRecord) return;
@@ -214,7 +241,18 @@ Page({
       host.toast('麦克风启动超时，请检查权限后重试');
     }, 5000);
     try {
-      manager.start({ duration: Math.min(120, this.captureRule('voice').maxDurationSec) * 1000, format: 'mp3', sampleRate: 44100, numberOfChannels: 1 });
+      manager.start({
+        duration: Math.min(120, this.captureRule('voice').maxDurationSec) * 1000,
+        // aac 是 RecorderManager 的默认且各端最稳的格式；mp3 在部分 iOS 基础库上录不出东西。
+        // 服务端白名单已含 audio/aac 与 audio/mp4(m4a)，且改为按魔数判型，不依赖扩展名。
+        format: 'aac',
+        sampleRate: 44100,
+        numberOfChannels: 1,
+        // 必须显式给码率。微信的合法 encodeBitRate 区间**由 sampleRate 决定**，
+        // 44100 对应 64000–320000；而不传时的默认值是 48000，低于下限 —— 直接
+        // 报 `invalid encodeBitRate "48000"`，录音根本起不来（预发实测到的就是这条）。
+        encodeBitRate: 96000,
+      });
     } catch (error) {
       this.stopRecordStartTimer();
       this.setData({ startingRecord: false, recording: false });

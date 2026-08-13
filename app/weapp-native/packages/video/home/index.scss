@@ -2,82 +2,139 @@
 
 .vd-home { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
-.vd-body { padding: 8px 20px 0; }
+.vd-body { padding: 4px 20px 0; }
 
-/* 首屏高频入口：两个独立 44px+ 命中区，作品不再藏在导航角落。 */
-.home-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-.home-tool {
-  min-width: 0; min-height: 64px; box-sizing: border-box; padding: 10px 11px;
-  display: flex; align-items: center; gap: 8px; border-radius: 18px;
-  background: var(--vd-surface); border: 1px solid var(--vd-line-soft); box-shadow: var(--vd-shadow-soft);
+/* ── ① 宣传横幅 ───────────────────────────────────────────────────────
+   落地页门面。插画是氛围，文字是价值主张 —— 文字不烧进图里，方便改文案。
+   高度按 750×460 的图裁到 168px：横幅只负责定调，不该吃掉半屏。 */
+
+.banner {
+  position: relative;
+  border-radius: var(--vd-r-card);
+  overflow: hidden;
+  background: var(--vd-canvas);
+  box-shadow: var(--vd-shadow);
+  margin-bottom: 12px;
 }
-.ht-icon { width: 36px; height: 36px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: var(--vd-avatar-soft); }
-.ht-icon.blue { background: var(--vd-broll-soft); }
-.ht-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ht-title { font-size: 13px; font-weight: 700; white-space: nowrap; }
-.ht-sub { font-size: 9px; color: var(--vd-muted); white-space: nowrap; }
-
-/* 开拍门槛先于内容选择：用户进入页面第一眼就知道能不能开始。 */
-.avatar-gate {
-  min-height: 100px; box-sizing: border-box; padding: 14px; display: flex; align-items: center; gap: 12px;
-  border-radius: 22px; border: 1px solid var(--vd-avatar-line); background: linear-gradient(135deg, #FFF7F2 0%, #FFF 78%);
-  box-shadow: 0 12px 28px rgba(80, 54, 38, .09); margin-bottom: 12px;
+.banner-art { display: block; width: 100%; height: 168px; }
+.banner-fallback { background-color: var(--vd-canvas); }
+.banner-copy {
+  padding: 14px 16px 16px;
+  background: var(--vd-surface);
 }
-.avatar-gate.ready { border-color: rgba(47,125,91,.22); background: linear-gradient(135deg, #F0F8F4 0%, #FFF 78%); }
-.avatar-gate.training { background: linear-gradient(135deg, #FFF7ED 0%, #FFF 78%); }
-.ag-visual { width: 58px; height: 58px; flex: none; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 18px; background: rgba(255,255,255,.78); border: 1px solid rgba(199,74,28,.14); }
-.avatar-gate.ready .ag-visual { border-color: rgba(47,125,91,.18); }
-.ag-photo { width: 100%; height: 100%; display: block; }
-.ag-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ag-kicker { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: var(--vd-avatar-deep); }
-.avatar-gate.ready .ag-kicker { color: var(--vd-success); }
-.ag-title { font-size: 16px; font-weight: 700; }
-.ag-sub { font-size: 11px; color: var(--vd-muted); line-height: 1.45; }
-.ag-action { min-width: 58px; min-height: 40px; box-sizing: border-box; padding: 0 10px; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: var(--vd-avatar); color: #FFF; font-size: 11px; font-weight: 700; }
-.ag-action.quiet { color: var(--vd-avatar-deep); background: rgba(255,255,255,.84); border: 1px solid var(--vd-avatar-line); }
-.avatar-gate.ready .ag-action.quiet { color: var(--vd-success); border-color: rgba(47,125,91,.2); }
+.banner-kicker {
+  display: block; font-size: 11px; font-weight: 600;
+  color: var(--vd-avatar-deep); letter-spacing: 0.06em;
+}
+.banner-title {
+  display: block; margin: 5px 0 6px;
+  font-family: var(--vd-serif); font-size: 22px; font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.banner-sub { display: block; font-size: 12px; line-height: 1.65; color: var(--vd-ink-3); }
 
-/* 草稿只承担“恢复任务”，不重复展示大封面。 */
-.resume-card { display: flex; align-items: center; gap: 10px; padding: 12px; margin-bottom: 12px; border-radius: 18px; background: var(--vd-surface); border: 1px solid var(--vd-line-soft); box-shadow: var(--vd-shadow-soft); }
-.resume-icon { width: 40px; height: 40px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 13px; color: #FFF; background: var(--vd-avatar); font-size: 13px; font-weight: 700; }
-.resume-body { flex: 1; min-width: 0; }
-.resume-top, .resume-progress-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.resume-title { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
-.resume-step { font-size: 9px; color: var(--vd-avatar-deep); }
-.resume-progress-row { margin-top: 5px; font-size: 9px; color: var(--vd-muted); }
-.resume-percent { color: var(--vd-avatar-deep); font-weight: 700; }
-.resume-bar { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: var(--vd-sunken); }
-.resume-bar .fill { display: block; height: 100%; border-radius: inherit; background: var(--vd-avatar); }
-.resume-go { min-width: 44px; min-height: 44px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 2px; color: var(--vd-avatar-deep); font-size: 11px; font-weight: 700; }
+/* 主 CTA：落地页只该有一个主行动。 */
+.primary-cta {
+  height: 50px; border-radius: var(--vd-r-field);
+  background: var(--vd-avatar);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 16px; font-weight: 700; color: #FFF;
+  box-shadow: 0 8px 18px -10px var(--vd-avatar);
+  margin-bottom: 12px;
+}
 
-/* 产品承诺压成一张轻量横卡，不再占据完整首屏。 */
-.home-intro { position: relative; overflow: hidden; min-height: 94px; box-sizing: border-box; padding: 16px 18px; display: flex; align-items: center; gap: 14px; border-radius: 22px; color: #FFF; background: linear-gradient(135deg, #25282A 0%, #34302E 58%, #70402D 100%); box-shadow: 0 12px 28px rgba(49,38,31,.14); }
-.hi-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.hi-kicker { font-size: 9px; font-weight: 700; letter-spacing: .14em; color: rgba(255,255,255,.58); }
-.hi-title { margin-top: 6px; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
-.hi-sub { margin-top: 4px; font-size: 10px; color: rgba(255,255,255,.66); }
-.hi-mark { width: 54px; height: 54px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); font-family: var(--vd-serif); font-size: 21px; }
-.hi-mark .small { margin-top: -2px; font-family: sans-serif; font-size: 8px; color: rgba(255,255,255,.62); }
+/* ── ② 继续上次 ─────────────────────────────────────────────────────
+   压成一条：顶部进度线 + 一行文字。不再用整块橙卡跟横幅抢视觉。 */
 
-.sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 22px 0 12px; }
-.sec-copy { display: flex; flex-direction: column; gap: 2px; }
-.sec-kicker { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--vd-avatar-deep); }
-.sec-title { font-family: var(--vd-serif); font-size: 19px; font-weight: 600; }
-.sec-tip { font-size: 10px; color: var(--vd-faint); }
+.resume {
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-avatar-line);
+  border-radius: var(--vd-r-field);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.resume-bar { height: 3px; background: var(--vd-avatar-soft); }
+.resume-bar .fill { display: block; height: 100%; background: var(--vd-avatar); }
+.resume-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; gap: 10px; }
+.resume-left { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.resume-kicker { flex: none; font-size: 11px; font-weight: 600; color: var(--vd-avatar-deep); }
+.resume-title {
+  font-size: 14px; font-weight: 600; color: var(--vd-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.resume-right { flex: none; display: flex; align-items: center; gap: 4px; }
+.resume-step { font-size: 11px; color: var(--vd-muted); }
 
-/* 横滑模板：每张卡只占半屏高度，三张不再纵向铺满页面。 */
-.tpl-scroll { width: calc(100% + 20px); margin-right: -20px; }
-.tpl-list { display: inline-flex; align-items: stretch; gap: 10px; padding-right: 20px; }
-.tpl-card { width: 242px; min-height: 142px; box-sizing: border-box; padding: 10px; display: flex; gap: 11px; border-radius: 20px; background: var(--vd-surface); border: 1px solid var(--vd-line-soft); box-shadow: var(--vd-shadow-soft); }
-.tpl-card:active { transform: scale(.985); }
-.tpl-thumb { width: 68px; height: 121px; padding-bottom: 0; flex: none; border-radius: 14px; }
-.tpl-glow { position: absolute; width: 76px; height: 76px; right: -26px; top: -24px; border-radius: 50%; background: rgba(255,255,255,.28); filter: blur(10px); }
-.tpl-serial { position: absolute; left: 9px; top: 8px; font-size: 17px; font-weight: 700; color: rgba(255,255,255,.78); }
-.tpl-dur { position: absolute; left: 7px; bottom: 7px; z-index: 1; padding: 3px 5px; border-radius: 999px; background: rgba(255,255,255,.86); color: var(--vd-ink-2); font-size: 8px; }
-.tpl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 2px 0; }
-.tpl-industry { font-size: 9px; color: var(--vd-broll); font-weight: 700; }
-.tpl-name { margin-top: 6px; font-family: var(--vd-serif); font-size: 17px; font-weight: 600; }
-.tpl-desc { margin-top: 4px; font-size: 10px; line-height: 1.5; color: var(--vd-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tpl-meta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 9px; color: var(--vd-faint); }
-.tpl-go { width: 28px; height: 28px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--vd-avatar); }
-.tpl-end { width: 82px; min-height: 142px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px dashed var(--vd-line); border-radius: 20px; color: var(--vd-faint); font-size: 10px; }
+/* ── ③ 三步流程 ─────────────────────────────────────────────────────
+   等宽三格，只讲流程。序号用淡橙圆点，不用大号数字占高度。 */
+
+.steps {
+  display: flex;
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-line-soft);
+  border-radius: var(--vd-r-field);
+  padding: 12px 0;
+  margin-bottom: 12px;
+}
+.step {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border-left: 1px solid var(--vd-line-soft);
+}
+.step:first-child { border-left: 0; }
+.step-no {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--vd-avatar-soft); color: var(--vd-avatar-deep);
+  font-size: 10px; font-weight: 700;
+  text-align: center; line-height: 18px;
+}
+.step-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
+.step-desc { font-size: 10px; color: var(--vd-muted); }
+
+/* ── ④ 开拍前置条件 ─────────────────────────────────────────────────── */
+
+.gate {
+  display: flex; align-items: center; gap: 10px;
+  border-radius: var(--vd-r-field);
+  padding: 11px 13px;
+  margin-bottom: 12px;
+  border: 1px solid var(--vd-line-soft);
+  background: var(--vd-surface);
+}
+.gate-missing { background: var(--vd-avatar-soft); border-color: var(--vd-avatar-line); }
+.gate-training { background: var(--vd-broll-soft); border-color: var(--vd-broll-line); }
+.gate-failed { background: var(--vd-danger-soft); border-color: rgba(185, 75, 60, 0.24); }
+
+.gate-visual {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--vd-sunken);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.gate-ready .gate-visual { background: var(--vd-success-soft); }
+.gate-photo { width: 100%; height: 100%; }
+.gate-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gate-title { font-size: 13px; font-weight: 600; }
+.gate-sub { font-size: 11px; line-height: 1.45; color: var(--vd-muted); }
+.gate-action {
+  flex: none; font-size: 12px; font-weight: 600;
+  color: var(--vd-avatar-deep);
+  padding: 5px 11px; border-radius: var(--vd-r-chip);
+  background: rgba(255, 255, 255, 0.75);
+}
+.gate-ready .gate-action { color: var(--vd-ink-3); background: var(--vd-sunken); }
+.gate-training .gate-action { color: var(--vd-broll); }
+.gate-failed .gate-action { color: var(--vd-danger); }
+
+/* ── ⑤ 次级入口：三格等宽，只有图标 + 名字。 ── */
+
+.entries { display: flex; gap: 8px; }
+.entry {
+  flex: 1; min-width: 0;
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-line-soft);
+  border-radius: var(--vd-r-field);
+  padding: 13px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.entry-title { font-size: 12px; font-weight: 600; }

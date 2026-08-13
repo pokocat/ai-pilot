@@ -42,6 +42,75 @@ function rewriteBody(body: unknown) {
 const VIDEO_CAPTURE_MIMES = new Set(['video/mp4', 'video/quicktime']);
 const VOICE_CAPTURE_MIMES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a']);
 
+/**
+ * 按魔数判采集文件的真实容器格式。
+ *
+ * 为什么不能信 multipart 声明的 MIME：`wx.uploadFile` **不允许调用方设置 part 的 Content-Type**，
+ * 微信按临时文件扩展名自己推断，而录音管理器产出的 `wxfile://tmp_xxx` 常常没有可识别扩展名，
+ * 于是整包被标成 `application/octet-stream` —— 白名单直接拒，用户看到「声音只支持 WAV、MP3…」，
+ * 但文件本身完全合法。这就是预发上「上传音频提示报错」的成因。
+ *
+ * 口径与 services/creative/visualProvider.ts 的 sniffImageMime 一致：不信上游 content-type，按魔数判。
+ * 真正的深度校验（H.264、采样率、真实时长）在 AIStar 侧 ffprobe 做，这一层只负责别误杀。
+ */
+export function sniffCaptureMime(buf: Buffer): string | null {
+  if (!buf || buf.length < 12) return null;
+  const ascii = (start: number, end: number) => buf.toString('latin1', start, end);
+
+  // ID3 标签头 或 MPEG 帧同步（11 个 1）→ MP3
+  if (ascii(0, 3) === 'ID3') return 'audio/mpeg';
+  if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
+    // ADTS AAC 的同步字是 0xFFF1 / 0xFFF9，其余 0xFFEx/0xFFFx 归 MP3
+    if (buf[1] === 0xf1 || buf[1] === 0xf9) return 'audio/aac';
+    return 'audio/mpeg';
+  }
+  if (ascii(0, 4) === 'OggS') return 'audio/ogg';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WAVE') return 'audio/wav';
+
+  // 图片（b-roll 素材可以是图）
+  if (buf[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (ascii(0, 4) === 'GIF8') return 'image/gif';
+
+  // ISO BMFF（MP4 家族）：第 4 字节起是 'ftyp'，紧跟 4 字节 major brand
+  if (ascii(4, 8) === 'ftyp') {
+    const brand = ascii(8, 12).trim().toLowerCase();
+    if (brand.startsWith('qt')) return 'video/quicktime';
+    if (brand.startsWith('m4a') || brand.startsWith('m4b')) return 'audio/mp4';
+    // isom / mp42 / avc1 / iso5 等既可能是视频也可能是纯音频 MP4，
+    // 交给调用方按 kind 决定，这里返回中性标记
+    return 'application/mp4';
+  }
+  return null;
+}
+
+/**
+ * b-roll 素材的 MIME 纠正。素材可以是图或视频，没有固定白名单（真正的门在 AIStar 侧），
+ * 这里只解决「声明成 octet-stream 导致 clipMediaKind() 返回 null、审核层直接判媒体类型不支持」。
+ */
+function resolveAssetMime(declared: string, buf: Buffer): string {
+  const lower = String(declared || '').toLowerCase();
+  if (/^(image|video|audio)\//.test(lower)) return lower;
+  const sniffed = sniffCaptureMime(buf);
+  if (!sniffed) return lower;
+  return sniffed === 'application/mp4' ? 'video/mp4' : sniffed;
+}
+
+/** 声明 MIME 不可信时（缺失 / octet-stream / 与魔数矛盾），以魔数为准。 */
+function resolveCaptureMime(kind: 'consent' | 'avatar' | 'voice', declared: string, buf: Buffer): string {
+  const voice = kind === 'voice';
+  const allowed = voice ? VOICE_CAPTURE_MIMES : VIDEO_CAPTURE_MIMES;
+  const lower = String(declared || '').toLowerCase();
+  if (allowed.has(lower)) return lower;
+
+  const sniffed = sniffCaptureMime(buf);
+  if (!sniffed) return lower;
+  // ftyp 的中性结果按 kind 落位：语音归 audio/mp4（m4a），视频归 video/mp4
+  if (sniffed === 'application/mp4') return voice ? 'audio/mp4' : 'video/mp4';
+  return sniffed;
+}
+
 function assertCaptureUpload(kind: 'consent' | 'avatar' | 'voice', mimeType: string, bytes: number, truncated: boolean) {
   const voice = kind === 'voice';
   const maxBytes = voice ? 20 * 1024 * 1024 : 100 * 1024 * 1024;
@@ -251,12 +320,14 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到素材', code: 'CLIP_ASSET_REQUIRED' });
-      await assertVideoMediaModerationReady(data.mimetype);
       const buffer = await data.toBuffer();
+      // 必须先读完 buffer 才能按魔数判型，所以审核就绪检查挪到取 buffer 之后。
+      const mimeType = resolveAssetMime(data.mimetype, buffer);
+      await assertVideoMediaModerationReady(mimeType);
       if (data.file.truncated || buffer.length > 100 * 1024 * 1024) return reply.code(413).send({ error: '素材超过 100MB', code: 'CLIP_ASSET_TOO_LARGE' });
-      await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
+      await assertVideoUploadContent(buffer, mimeType, identityOf(user));
       const fields = Object.fromEntries(Object.entries(data.fields as Record<string, { value?: unknown }>).map(([key, value]) => [key, String(value?.value ?? '')]));
-      return await aidramaUpload<ClipAsset>('/api/me/clip/assets', identityOf(user), { buffer, fileName: data.filename || 'asset', mimeType: data.mimetype }, fields);
+      return await aidramaUpload<ClipAsset>('/api/me/clip/assets', identityOf(user), { buffer, fileName: data.filename || 'asset', mimeType }, fields);
     } catch (e) { return sendErr(reply, e, 422); }
   });
 
@@ -332,15 +403,17 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到本人授权视频', code: 'CLIP_CONSENT_VIDEO_REQUIRED' });
-      await assertVideoMediaModerationReady(data.mimetype);
       const buffer = await data.toBuffer();
-      assertCaptureUpload('consent', data.mimetype, buffer.length, data.file.truncated);
-      await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
+      // 先按魔数定真实类型，再拿它去做审核与白名单校验：wx.uploadFile 声明的 MIME 不可信。
+      const mimeType = resolveCaptureMime('consent', data.mimetype, buffer);
+      await assertVideoMediaModerationReady(mimeType);
+      assertCaptureUpload('consent', mimeType, buffer.length, data.file.truncated);
+      await assertVideoUploadContent(buffer, mimeType, identityOf(user));
       const rawText = (data.fields as Record<string, { value?: unknown }> | undefined)?.text?.value;
       const text = String(rawText ?? '').trim();
       if (!text || text.length > 300) throw Object.assign(new Error('授权口令无效'), { statusCode: 422, code: 'CLIP_CONSENT_TEXT_REQUIRED' });
       return await aidramaUpload<ClipConsentResult>('/api/me/clip/avatar/consent', identityOf(user),
-        { buffer, fileName: captureFileName('consent', data.filename, data.mimetype), mimeType: data.mimetype }, { text });
+        { buffer, fileName: captureFileName('consent', data.filename, mimeType), mimeType }, { text });
     }
     catch (e) { return sendErr(reply, e, 422); }
   });
@@ -354,10 +427,12 @@ export async function videoRoutes(app: FastifyInstance) {
       const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
       if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
-      assertCaptureUpload(kind as 'avatar' | 'voice', data.mimetype, buffer.length, data.file.truncated);
-      await assertVideoMediaModerationReady(data.mimetype);
-      await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
-      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, data.mimetype), mimeType: data.mimetype }, {
+      // 同 consent：录音临时文件常被 wx.uploadFile 标成 octet-stream，必须按魔数纠正后再校验。
+      const mimeType = resolveCaptureMime(kind as 'avatar' | 'voice', data.mimetype, buffer);
+      assertCaptureUpload(kind as 'avatar' | 'voice', mimeType, buffer.length, data.file.truncated);
+      await assertVideoMediaModerationReady(mimeType);
+      await assertVideoUploadContent(buffer, mimeType, identityOf(user));
+      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, mimeType), mimeType }, {
         kind,
         avatarId: String(fields?.avatarId?.value ?? ''),
         voiceId: String(fields?.voiceId?.value ?? ''),

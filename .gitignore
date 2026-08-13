@@ -71,3 +71,6 @@ coverage/
 
 loadtest
 ui-review/
+
+# 快出片分包的 e2e 截图（本地验收产物，不入库）
+app/dist-native-e2e-shots/

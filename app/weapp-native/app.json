@@ -25,7 +25,7 @@
     {
       "root": "packages/video",
       "pages": [
-        "home/index", "template/index", "clone/index",
+        "home/index", "templates/index", "template/index", "clone/index",
         "script/index", "shots/index", "confirm/index", "rendering/index",
         "work/index", "works/index", "assets/index", "avatar/index"
       ]

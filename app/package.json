@@ -19,6 +19,7 @@
     "clean:build": "node -e \"require('fs').rmSync('dist-native',{recursive:true,force:true});require('fs').rmSync('dist-h5',{recursive:true,force:true});require('fs').rmSync('dist-pc',{recursive:true,force:true});require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})\"",
     "build:weapp:server": "node scripts/build-native-weapp.mjs --mode server --api https://wxapi.aibuzz.cn/api",
     "build:weapp:preprod": "node scripts/build-native-weapp.mjs --mode server --api https://wxapi.aibuzz.cn/api_preprod",
+    "e2e:weapp": "node scripts/video-e2e.mjs",
     "release:weapp": "node scripts/weapp-release.mjs",
     "upload:weapp": "node scripts/weapp-upload.mjs",
     "serve:h5": "node scripts/serve-h5.mjs",

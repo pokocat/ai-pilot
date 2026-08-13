@@ -1,0 +1,8 @@
+{
+  "navigationStyle": "custom",
+  "disableScroll": false,
+  "usingComponents": {
+    "native-icon": "/components/native-icon/index",
+    "login-sheet": "/components/login-sheet/index"
+  }
+}

@@ -1,0 +1,50 @@
+@use "../styles/tokens.scss";
+
+.vd-templates { display: flex; flex-direction: column; height: 100vh; }
+.vd-scroll { flex: 1; min-height: 0; }
+.tl-body { padding: 0 20px; }
+
+.tl-lead { display: block; font-size: 13px; line-height: 1.7; color: var(--vd-ink-3); margin-bottom: 14px; }
+
+.tl-list { display: flex; flex-direction: column; gap: 10px; }
+
+/* 横向卡：缩略图 + 内容 + 箭头。比首页主卡紧凑，一屏能看到三四套。 */
+.tl-card {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-line-soft);
+  border-radius: var(--vd-r-card);
+  padding: 12px;
+  box-shadow: var(--vd-shadow-soft);
+}
+
+.tc-thumb { position: relative; width: 68px; height: 96px; border-radius: 12px; flex: none; }
+.tc-dur {
+  position: absolute; left: 5px; bottom: 5px;
+  font-size: 10px; color: rgba(36, 30, 26, 0.72);
+  background: rgba(251, 247, 242, 0.82);
+  padding: 2px 5px; border-radius: 4px;
+}
+
+.tc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tc-industry { font-size: 11px; color: var(--vd-broll); font-weight: 600; }
+.tc-name { font-family: var(--vd-serif); font-size: 17px; font-weight: 600; }
+.tc-desc {
+  font-size: 12px; line-height: 1.55; color: var(--vd-ink-3);
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.tc-facts { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.tc-fact { font-size: 11px; color: var(--vd-ink-2); }
+.tc-fact .k { color: var(--vd-muted); margin-right: 3px; }
+.tc-dot { color: var(--vd-faint); font-size: 11px; }
+
+.tl-more { display: block; text-align: center; font-size: 11px; color: var(--vd-faint); padding: 16px 0 4px; }
+.tl-retry { margin: 20px auto 0; width: 140px; }
+
+/* 骨架 */
+.tl-card.skeleton { box-shadow: none; }
+.tc-thumb.sk { background: var(--vd-sunken); }
+.sk-line { height: 12px; border-radius: 6px; background: var(--vd-sunken); margin-bottom: 8px; }
+.sk-line.wide { width: 70%; }
+.sk-line:last-child { width: 45%; margin-bottom: 0; }
