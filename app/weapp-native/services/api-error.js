@@ -10,7 +10,10 @@ const USER_MESSAGES = {
   AGENT_NOT_FOUND: '这位军师暂时不可用，请换一位再试。',
   // 快出片 · 数字人引擎（石榴）的供应商侧错误。这些不是用户操作错误，也不是我们服务故障，
   // 说成「军师服务暂不可用」会把运营该处理的事（充值/换密钥）伪装成系统故障。
-  CLIP_ENGINE_BALANCE_INSUFFICIENT: '数字人服务的额度用完了，请联系运营充值后再试。',
+  // 实测：石榴的「账户权益不足」其实是可保存数量占满，不是余额不够。按真因给文案，
+  // 否则用户/运营会去充值，钱花了问题还在。
+  CLIP_ENGINE_CAPACITY_FULL: '数字人形象或声音的保存数量已满，删掉不用的再创建。',
+  CLIP_ENGINE_BALANCE_INSUFFICIENT: '数字人服务的额度用完了，请联系运营处理。',
   CLIP_ENGINE_CREDENTIAL_INVALID: '数字人服务鉴权失效了，请联系运营处理。',
   CLIP_ENGINE_NOT_CONFIGURED: '数字人服务还没配置好，请联系运营。',
   CLIP_ENGINE_CALL_FAILED: '数字人服务没有受理这次任务，请稍后重试或联系运营。',
@@ -20,6 +23,9 @@ const USER_MESSAGES = {
   CLIP_ENGINE_VOICE_REJECTED: '这段声音没通过声纹安全检查，请确认是本人录制。',
   CLIP_ENGINE_VIDEO_UNREADABLE: '这段视频读不出来，请重新录一段。',
   CLIP_ENGINE_SPEAKER_NOT_FOUND: '声音模型不存在了，请重新采集声音。',
+  // 「这个形象用谁的声音」必须由用户决定 —— 曾经服务端会静默挑一条最近的，
+  // 结果成片里男声女声错位而用户毫不知情。现在宁可拦住也不猜。
+  CLIP_VOICE_NOT_SELECTED: '这个数字人还没有关联声音，先去分身管理里选一个或采集一个。',
   CLIP_UPSTREAM_TIMEOUT: '视频服务响应超时，请稍后重试。',
   CLIP_UPSTREAM_UNAVAILABLE: '视频服务暂时连不上，请稍后重试。',
   CLIP_MEDIA_MODERATION_NOT_CONFIGURED: '素材审核能力还没配置好，请联系运营。',

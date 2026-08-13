@@ -13,9 +13,20 @@ const require = createRequire(path.join(APP_ROOT, 'package.json'));
 const { httpErrorInfo } = require(path.join(APP_ROOT, 'weapp-native/services/api-error.js'));
 
 test('5xx 带已知业务 code → 用该 code 的专属文案，不再说「服务暂不可用」', () => {
-  const info = httpErrorInfo(502, { code: 'CLIP_ENGINE_BALANCE_INSUFFICIENT', error: '数字人服务额度不足，请联系运营处理' }, '提交');
-  assert.equal(info.message, '数字人服务的额度用完了，请联系运营充值后再试。');
+  const info = httpErrorInfo(502, { code: 'CLIP_ENGINE_BALANCE_INSUFFICIENT', error: '数字人服务额度不足' }, '提交');
+  assert.equal(info.message, '数字人服务的额度用完了，请联系运营处理。');
   assert.ok(!info.message.includes('军师服务暂时不可用'));
+});
+
+test('供应商容量类错误不得把用户引向充值——实测充了钱也没用', () => {
+  const info = httpErrorInfo(409, { code: 'CLIP_ENGINE_CAPACITY_FULL', error: '可保存数量已达上限' }, '提交');
+  assert.ok(!info.message.includes('充值'), `不该提充值：${info.message}`);
+});
+
+test('没关联声音要拦住并让用户去选，不能替他挑一条', () => {
+  const info = httpErrorInfo(409, { code: 'CLIP_VOICE_NOT_SELECTED' }, '出片');
+  assert.match(info.message, /还没有关联声音/);
+  assert.match(info.message, /选一个|采集/);
 });
 
 test('5xx 带未知 code 但服务端给了可读中文原因 → 保留该原因', () => {
