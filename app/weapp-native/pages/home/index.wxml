@@ -48,7 +48,7 @@
           <view class="task-b">
             <text class="task-t serif {{item.done?'struck':''}}">{{item.text}}</text>
             <text class="task-meta-info">{{item.done?(item.resultNote?'回填：'+item.resultNote:'已办 · 长按删除'):('来自 '+(item.from||'案卷')+' · 优先级 '+item.no)}}</text>
-            <view wx:if="{{item.weapon}}" class="task-weapon" data-id="{{item.weapon.id}}" catchtap="openPrescription"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.playbook}}</text></text><view class="tw-go"><text>带我做</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
+            <view wx:if="{{item.weapon}}" class="task-weapon" data-index="{{index}}" catchtap="openWeapon"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.name}}</text> {{item.weapon.line}}</text><view class="tw-go"><text>带我做</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
             <!-- 次级动词：未完成的军令可以直接找 IP 军师把它写成可发的脚本。
                  与兵器条并列——兵器是军师配的，写脚本是随手要的，都长在军令现场。 -->
             <view wx:if="{{!item.done}}" class="task-verbs"><view class="task-verb" data-text="{{item.text}}" catchtap="makeScript"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text>帮我写脚本</text></view></view>

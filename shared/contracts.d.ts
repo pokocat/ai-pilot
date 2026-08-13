@@ -2275,6 +2275,27 @@ export interface BattleCommitResult {
 
 /* ── V7-05：军令结构化字段（挂 DossierOrder / 服务端军令视图，全部可选，缺省不渲染） ── */
 export type OrderActionType = 'upload' | 'backfill' | 'review' | 'topics' | 'none';
+
+/**
+ * 军令上的「兵器」（2026-08-12）：这条军令能由哪个工具承接。
+ *
+ * 产生方式：拆军令的那一次 LLM 调用顺带从【可开方工具表】里选一个 toolKey——**同一次调用既写出军令
+ * 文案又选工具，绑定天生 1:1**，不靠事后按下标或按位置对齐（此前端上是按位置拼的，属展示层凑数）。
+ * 展示物料（name/line/跳转方式）一律由服务端读运营目录填充，模型只发 key：文案与定价口径归运营，
+ * 且工具停用后立刻不再下发（resolve 不到就是 null，端上自然不渲染）。
+ */
+export interface OrderWeapon {
+  /** 运营目录里的 key：启用的 Agent.key 或启用的 EcoTool.id。端上只用于埋点，不据它决定文案。 */
+  key: string;
+  /** 展示名，服务端从目录取。 */
+  name: string;
+  /** 一句「能替你干什么」。 */
+  line: string;
+  /** agent = 进这位军师的对话；external = 跳外部小程序（appId/path）。 */
+  kind: 'agent' | 'external';
+  appId?: string | null;
+  path?: string | null;
+}
 export interface OrderMetric { label: string; value: string; }
 export interface OrderStructuredFields {
   ownerName?: string | null;
@@ -2286,6 +2307,8 @@ export interface OrderStructuredFields {
   actionType?: OrderActionType;
   /** 完成回填：用户打卡后录入的完成情况（如「邀约发出 30 条 / 到店 12 人」），复盘与后续建议据此分析。 */
   resultNote?: string | null;
+  /** 这条军令配的兵器；没配、或配的工具已停用则为 null（端上不渲染兵器条）。 */
+  weapon?: OrderWeapon | null;
 }
 
 /* ── V7-06：智库三段式资料整理管道 ── */

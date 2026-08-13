@@ -1139,6 +1139,12 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   assert.match(home, /api\.prescriptionAction\(id, 'clicked'\)\.catch/);
   assert.match(home, /\/packages\/work\/market\/index\?from=prescription&pid=/);
   assert.match(homeWxml, /item\.weapon/, '兵器条必须挂在军令卡内（主分发位）');
+  // 兵器绑定必须来自服务端 order.weapon（拆军令那一轮 LLM 选的 toolKey，1:1）。
+  // 端上一度按位置拼（第 N 条处方贴第 N 条军令），处方讲的问题和军令可能毫不相干——不许回退。
+  assert.doesNotMatch(home, /weapon: weapons\[index\]/, '不得按位置把处方拼到军令上');
+  assert.match(home, /this\._pendingWithWeapons = pendingOrders;/, '军令的兵器只认服务端下发的字段');
+  assert.match(home, /weapon\.kind === 'external'/, 'external 兵器要走 navigateToMiniProgram');
+  assert.match(home, /onOrder\.has\(item\.toolKey\)/, '已作为军令兵器出现的工具不再重复列成独立兵器条');
   assert.match(homeWxml, /wx:for="\{\{leftoverWeapons\}\}"/, '未挂上军令的处方以独立兵器条陈列');
   assert.match(homeWxml, /native-icon name="bolt"/);
   assert.match(homeScss, /\.rx-item\s*\{/);

@@ -258,18 +258,23 @@ Page({
     const pendingOrders = orders.filter((item) => !item.done).map((item, index) => Object.assign({}, item, { no: index + 1 }));
     const doneOrders = orders.filter((item) => item.done);
     const orderDone = doneOrders.length;
-    // 兵器挂在军令上（设计稿 ③）：处方按顺序贴到待执行军令；多出来的以独立兵器条排在军令之后。
-    // 服务端 order.weapon 字段是下一期（AGENTS §13），先用处方做展示层挂接，点击行为不变。
+    // 兵器挂在军令上（设计稿 ③）：**用服务端下发的 order.weapon**——拆军令那一轮 LLM 顺带选的工具，
+    // 绑定 1:1。此前是「处方按位置贴到第 N 条军令」，那是展示层凑数：处方讲的问题和军令可能毫不相干。
+    // 处方仍然有用，但只作为军令之后的独立兵器条（问题导向，不冒充某条军令的配套）。
     const weapons = prescriptionsResult.status === 'fulfilled' ? activePrescriptions(prescriptionsResult.value) : [];
     // 已办军令：当天的照常展示但限量，超出的与历史日期的收进归档行（评审意见 2026-08-12
     // 「当天的可以展示，但也要限制数量，历史的收起来」）。展开/收起只切本地视图，不重新取数——
     // 派生素材存在 this 上，由 applyOrderView 单点组装。
-    this._pendingWithWeapons = pendingOrders.map((item, index) => Object.assign({}, item, { weapon: weapons[index] || null }));
+    // order.weapon 由服务端给（未配 / 工具已停用则为 null），端上不再自己配对。
+    this._pendingWithWeapons = pendingOrders;
     this._doneOrders = doneOrders;
-    // 兵器只挂在军令上。没有军令时一条都不单列——否则「还没有军令」的引导卡下面紧跟两张
-    // 兵器卡，页面既在说没事可做又在推工具（用户反馈「两个配了军旗的卡片」）；
-    // 有军令时最多补 2 张，不让富余处方堆成第四个货架。
-    const leftoverWeapons = pendingOrders.length ? weapons.slice(pendingOrders.length, pendingOrders.length + 2) : [];
+    // 独立兵器条（处方）：没有军令时一条都不列——否则「还没有军令」的引导卡下面紧跟兵器卡，
+    // 页面既说没事可做又在推工具（用户反馈「两个配了军旗的卡片」）。
+    // 已经作为某条军令兵器出现过的工具不再重复列，最多 2 张，不让富余处方堆成第四个货架。
+    const onOrder = new Set(pendingOrders.map((item) => item.weapon && item.weapon.key).filter(Boolean));
+    const leftoverWeapons = pendingOrders.length
+      ? weapons.filter((item) => !onOrder.has(item.toolKey)).slice(0, 2)
+      : [];
     const backfill = dossier && dossier.backfill ? dossier.backfill[today()] || null : null;
     this.setData({
       summary, questions, forces, fortuneOn, chart, cited,
@@ -392,6 +397,27 @@ Page({
     finally { this.setData({ committing: false }); }
   },
   // —— 处方条（军师配了兵器） ——
+  /**
+   * 军令上的兵器：agent 类进这位军师的对话（带上军令原文当开场），external 类跳外部小程序。
+   * 展示物料与跳转参数都来自服务端解析出的 order.weapon，端上不认 key、不拼文案。
+   */
+  openWeapon(event) {
+    if (!this.requireLogin()) return;
+    const order = this.data.displayOrders[Number(event.currentTarget.dataset.index)];
+    const weapon = order && order.weapon;
+    if (!weapon) return;
+    if (weapon.kind === 'external') {
+      if (!weapon.appId) { wx.showToast({ title: '这个兵器还没配好，稍后再试', icon: 'none' }); return; }
+      wx.navigateToMiniProgram({
+        appId: weapon.appId,
+        path: weapon.path || '',
+        fail: () => wx.showToast({ title: '没能打开这个兵器', icon: 'none' }),
+      });
+      return;
+    }
+    const send = encodeURIComponent(`就这条军令「${String(order.text || '').slice(0, 60)}」，你替我做。`);
+    navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(weapon.key)}&continue=1&send=${send}`);
+  },
   openPrescription(event) {
     const id = String(event.currentTarget.dataset.id || '');
     if (!id) return;

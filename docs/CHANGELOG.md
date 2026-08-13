@@ -6,6 +6,18 @@
 
 ## 变更日志
 
+### 2026-08-12 · 兵器挂军令：绑定改由拆军令那一轮 LLM 产生（1:1，不再按位置凑） · 影响面：shared 契约、CasefileOrder 表、拆军令提示词、战局页兵器条
+
+评审确认「按方案 A 做」。核心变化是**绑定的产生时机**：
+
+- **为什么不能在方案轮绑**：军令文案不是方案里的 `orders[]` 原文——`structureOrders` 会再跑一轮 LLM 把方案重新拆成军令并改写文案。所以「处方指向 orders 下标」这条路对不上号。改为在**拆军令的同一轮**里让模型顺带从【可开方工具表】选一个 `toolKey`：同一次调用既产出军令文案又选工具，绑定天生 1:1。
+- **契约（SSOT 先行）**：`shared/contracts.d.ts` 新增 `OrderWeapon`（key/name/line/kind/appId/path），`OrderStructuredFields.weapon?`。展示物料一律服务端填、模型只发 key——文案与定价口径归运营，工具停用后立刻不再下发。
+- **服务端**：`CasefileOrder.toolKey` 新列（nullable，`db push` 加列）；`ordersSystem()` 按 `toolMenuLines()` 注入工具表（与开处方共用同一份白名单，两处不许各自维护）；落库前过 `toolWhitelist()`，表外 key 丢弃；`casefileView` 读时 `resolveWeapons()` 解析——停用/改名立刻生效，`external` 缺 `appId` 不下发（免得端上出一个点了没反应的卡）。
+- **端上**：战局页兵器条改认 `order.weapon`，删掉「第 N 条处方贴第 N 条军令」的位置拼接（那是展示层凑数：处方讲的问题和军令可能毫不相干）。点击按 `weapon.kind` 分流——`agent` 进这位军师的对话并带上军令原文当开场，`external` 走 `navigateToMiniProgram`。处方仍保留为军令之后的独立兵器条（问题导向），且已作为某条军令兵器出现的工具不再重复列。mock 同步给出 `weapon` 字段，否则本地永远走不到这条分支。
+- 守护测试：server 新增 `test/orderWeapon.test.ts`（5 例：agent/external 解析、停用与缺配置不下发、表外 key 丢弃、工具表注入）；小程序侧新增四条断言挡「按位置拼」回退。
+- 验证：server 全量 1590/1590（带 `.env.test`）、`tsc --noEmit`；小程序 64 条守护测试全绿、mock 编译通过。
+- 仍未做：对话兵器卡 `ChatReply.weapon`（下一期，注意不能走尾部围栏，会被 ask 的兜底解析截住）。
+
 ### 2026-08-12 · 按重构 review 评审补做：时运回主流程、写脚本、已办限量、复盘红点、过载闸豁免 · 影响面：战局页、store 角标、server 过载闸与 aidrama 网关
 
 评审意见来自飞书 review 文档的 9 条评论，逐条落地：

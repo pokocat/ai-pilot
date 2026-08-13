@@ -1724,6 +1724,9 @@ model CasefileOrder {
   stepsJson   Json? // string[]：三步骤（准备/处理/回写）
   metricsJson Json? // { label, value }[]：指标对
   actionType  String? // upload | backfill | review | topics | none：下一步动作类型
+  // 兵器（2026-08-12）：拆军令那一次 LLM 调用选出的工具 key（白名单 = 启用 Agent.key ∪ 启用 EcoTool.id）。
+  // 只存 key，展示物料读时从目录解析——工具改名/停用立刻生效，不留过期快照。
+  toolKey     String?
   done        Boolean   @default(false)
   doneAt      DateTime?
   resultNote  String?   @db.Text // 完成后就地回填「做完了多少」——一句话战果，复盘据此校准

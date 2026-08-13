@@ -7,7 +7,7 @@ import { prisma } from '../db.js';
 import { now, dateKey } from './clock.js';
 import { structured } from '../llm/gateway.js';
 import { cardSection } from './deliverableSection.js';
-import type { OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
+import type { OrderActionType, OrderMetric, GoalLadder, OrderWeapon } from '../../../shared/contracts';
 import type { DeliverableSection } from '../llm/schema.js';
 
 export interface DeliverableSectionInput {
@@ -52,6 +52,7 @@ export interface CasefileOrderView {
   ownerName: string | null; dueAt: string | null; etaMinutes: number | null;
   sourceQuote: string | null; steps: string[]; metrics: OrderMetric[]; actionType: OrderActionType;
   resultNote: string | null; // 完成后就地回填的一句话战果
+  weapon: OrderWeapon | null; // 这条军令配的兵器（读时从运营目录解析；停用则为 null）
 }
 
 /** 案卷对外形状 —— 与小程序端 services/dossier.ts 的 Dossier 契约一致（页面口径不变）。 */
@@ -153,6 +154,8 @@ function actionTypeFor(text: string, tag: string): OrderActionType {
 export interface StructuredOrder {
   text: string; owner: string | null; due: string | null; eta: number | null;
   actionType: OrderActionType; steps: string[]; metrics: OrderMetric[]; sourceQuote: string | null; aligned: boolean;
+  /** 兵器 key（模型从工具表选，可空）；白名单过滤与展示解析在落库/读取时做。 */
+  toolKey: string | null;
 }
 
 const OrderZ = z.object({
@@ -165,6 +168,7 @@ const OrderZ = z.object({
   metrics: z.array(z.object({ label: z.string(), value: z.string() })).nullish(),
   sourceQuote: z.string().nullish(),
   aligned: z.boolean().nullish(),
+  toolKey: z.string().nullish(),
 }).transform((o): StructuredOrder => ({
   text: o.text.trim().slice(0, 200),
   owner: o.owner?.trim().slice(0, 20) || null,
@@ -175,17 +179,36 @@ const OrderZ = z.object({
   metrics: (o.metrics ?? []).slice(0, 3).map((m) => ({ label: String(m.label).slice(0, 12), value: String(m.value).slice(0, 24) })),
   sourceQuote: o.sourceQuote?.trim().slice(0, 300) || null,
   aligned: o.aligned ?? true,
+  // 兵器：模型从注入的【可开方工具表】里选一个 key；白名单过滤在落库时做（表外一律丢）。
+  toolKey: o.toolKey?.trim().slice(0, 60) || null,
 })).refine((o) => o.text.length > 0).nullable().catch(null);
 
 const OrdersResultZ = z.object({
   orders: z.preprocess((v) => (Array.isArray(v) ? v : []), z.array(OrderZ)).transform((a) => a.filter((x): x is StructuredOrder => x !== null).slice(0, 3)),
 });
 
-const ORDERS_SYS = `你是「军师参谋部」的执行拆解官。把已认可的方案拆成不超过 3 条今日/本周可执行军令。
+const ORDERS_SYS_BASE = `你是「军师参谋部」的执行拆解官。把已认可的方案拆成不超过 3 条今日/本周可执行军令。
 每条给：text(动作，≤20字)、owner(负责人称呼，可空)、due(截止标签，如"18:00"/"今日"/"本周")、eta(预计耗时分钟数，整数)、
 actionType(upload=补资料/backfill=回填数据/review=复盘反馈/topics=内容选题/none)、steps(准备/处理/回写三步，各≤30字)、
 metrics(≤3组{label,value}指标对)、sourceQuote(来源引用，方案里的依据一句)、aligned(是否对齐主要矛盾 true/false)。
 只输出 JSON：{"orders":[{"text":"…","owner":"…","due":"…","eta":30,"actionType":"upload","steps":["…"],"metrics":[{"label":"…","value":"…"}],"sourceQuote":"…","aligned":true}]}。无则空数组，禁止编造。`;
+
+/**
+ * 兵器选菜（2026-08-12）：拆军令的同一轮里，给「确实需要一个工具来干」的军令配 toolKey。
+ * 放这一轮而不是方案轮，是因为**军令文案由这一轮产出**——同一次调用既写动作又选工具，绑定天生 1:1；
+ * 放别处就只能事后按下标/位置对齐，那是假的（此前端上就是按位置拼的）。不确定就不填：错配比不配更糟。
+ */
+function ordersSystem(menu: string[]): string {
+  if (!menu.length) return ORDERS_SYS_BASE;
+  return [
+    ORDERS_SYS_BASE,
+    '',
+    '【可开方工具表】（格式：key · 名称 · 场景）',
+    ...menu,
+    '若某条军令正好该由表里某个工具来干，就在该条上多给一个 toolKey 字段（取表中的 key）；',
+    '表里没有合适的、或这条军令用不上工具，就不要写 toolKey。宁缺勿滥，一条军令最多一个。',
+  ].join('\n');
+}
 
 // 喂给 LLM 的成果全文：拍平所有类型化组件字段（phases.actions/gantt 行/quads 等），不然类型化报告在这里只剩标题。
 function deliverableText(d: DeliverableInput): string {
@@ -201,10 +224,12 @@ function withBudget<T>(p: Promise<T | null>, ms = ACCEPT_LLM_BUDGET_MS): Promise
 
 /** 结构化拆军令：LLM 可用则走 structured()（限时预算），否则退回启发式 extractOrders + 确定性缺省。 */
 export async function structureOrders(d: DeliverableInput, opts: { userName: string; agentName: string }): Promise<StructuredOrder[]> {
-  const parsed = await withBudget(structured(OrdersResultZ, { system: ORDERS_SYS, user: deliverableText(d), maxChars: 3000 }).catch(() => null));
+  // 工具表取不到（库挂 / 无启用项）不能拦住拆军令：退回不带兵器的基础提示词。
+  const menu = await import('./prescription.js').then((m) => m.toolMenuLines()).catch(() => [] as string[]);
+  const parsed = await withBudget(structured(OrdersResultZ, { system: ordersSystem(menu), user: deliverableText(d), maxChars: 3000 }).catch(() => null));
   if (parsed?.orders?.length) return parsed.orders.map((o) => ({ ...o, owner: o.owner ?? opts.userName }));
   return extractOrders(d).map((text) => ({
-    text, owner: opts.userName, due: null, eta: null,
+    text, owner: opts.userName, due: null, eta: null, toolKey: null,
     actionType: actionTypeFor(text, `军令 · ${opts.agentName}`), steps: [], metrics: [], sourceQuote: null, aligned: true,
   }));
 }
@@ -263,6 +288,11 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
     seenOrders.add(key);
     return true;
   });
+  // 兵器读时解析：只存了 key，展示物料现取——工具改名/停用立刻生效，不留过期快照。
+  // 解析不到（停用/删除/external 缺 appId）就没有这一项，端上不渲染兵器条。
+  const weapons = await import('./prescription.js')
+    .then((m) => m.resolveWeapons(orders.map((o) => o.toolKey || '').filter(Boolean)))
+    .catch(() => new Map<string, OrderWeapon>());
   const backfill: CasefileView['backfill'] = {};
   metrics.forEach((m) => {
     backfill[m.date] = { leads: String(m.leads || ''), consults: String(m.consults || ''), deals: String(m.deals || ''), savedAt: m.savedAt.toISOString() };
@@ -282,6 +312,7 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
       sourceQuote: o.sourceQuote ?? null, steps: (o.stepsJson as string[] | null) ?? [],
       metrics: (o.metricsJson as OrderMetric[] | null) ?? [], actionType: (o.actionType as OrderActionType | null) ?? 'none',
       resultNote: o.resultNote ?? null,
+      weapon: (o.toolKey && weapons.get(o.toolKey)) || null,
     })),
     backfill,
   };
@@ -343,6 +374,13 @@ export async function acceptDeliverable(args: {
     return true;
   });
 
+  // 兵器落库：模型选的 key 必须过服务端白名单（启用 Agent ∪ 启用 EcoTool），表外一律丢。
+  // 与开处方共用同一份白名单，两处不许各自维护。
+  const rxMod = await import('./prescription.js');
+  const toolAllow = newOrders.some((o) => o.toolKey)
+    ? await rxMod.toolWhitelist().catch(() => new Set<string>())
+    : new Set<string>();
+
   if (newOrders.length) {
     await prisma.casefileOrder.createMany({
       data: newOrders.map((o) => ({
@@ -361,6 +399,7 @@ export async function acceptDeliverable(args: {
         stepsJson: o.steps as Prisma.InputJsonValue,
         metricsJson: o.metrics as unknown as Prisma.InputJsonValue,
         actionType: o.actionType,
+        toolKey: o.toolKey && toolAllow.has(o.toolKey) ? o.toolKey : null,
       })),
     });
   }

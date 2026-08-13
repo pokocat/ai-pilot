@@ -1187,8 +1187,10 @@ function seedCasefile() {
     // 周计划的七日打卡条要能同时展示全办完 / 办一半 / 有令未动 / 当天没出令四种态，
     // 只种今天的话六格全是虚线，等于看不见打卡机制（2026-08-12 走查发现）。
     orders: [
-      { id: 'mock-order-full-1', text: '发一条到店体验的口播视频，挂门店位置', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: false },
-      { id: 'mock-order-full-2', text: '把三条老客见证整理成朋友圈素材', from: '海报设计师', tag: '军令 · 海报设计师', date: day, done: false },
+      { id: 'mock-order-full-1', text: '发一条到店体验的口播视频，挂门店位置', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: false,
+        weapon: { key: 'ip', name: '企业IP打造官', line: '你的分身替你出镜，念完稿就是一条能发的片', kind: 'agent' } },
+      { id: 'mock-order-full-2', text: '把三条老客见证整理成朋友圈素材', from: '海报设计师', tag: '军令 · 海报设计师', date: day, done: false,
+        weapon: { key: 'poster', name: '海报设计师', line: '一句主张进去，一张能贴出去的海报出来', kind: 'agent' } },
       { id: 'mock-order-full-3', text: '给上周留资的 20 位客人逐个回访，约到店', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: true, resultNote: '接通 9 · 约到店 4' },
       // 昨天：全办完（实心）
       { id: 'mock-order-d1-1', text: '门口立牌换成到店礼的新文案', from: '海报设计师', tag: '军令 · 海报设计师', date: daysAgo(1), done: true, resultNote: '立牌已换' },

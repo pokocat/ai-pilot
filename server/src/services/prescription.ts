@@ -3,7 +3,7 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 import { now } from './clock.js';
-import type { PrescriptionView, AdminPrescriptionFunnelRow } from '../../../shared/contracts';
+import type { PrescriptionView, AdminPrescriptionFunnelRow, OrderWeapon } from '../../../shared/contracts';
 
 /**
  * 可开方白名单构成（D-3-7）：启用的 Agent.key（内部智能体）∪ 启用的 EcoTool.id（外部小程序跳转位）。
@@ -22,6 +22,42 @@ export async function toolClassification(): Promise<{ agentKeys: Set<string>; ec
 /** 可开方工具白名单（enabled agents ∪ enabled EcoTool）。表外 toolKey 丢弃。 */
 export async function toolWhitelist(): Promise<Set<string>> {
   return (await toolClassification()).whitelist;
+}
+
+/**
+ * 可开方工具表的注入文本（key · 名称 · 一句话场景），给「拆军令」那一轮当选菜清单用。
+ * 与开处方共用同一份白名单——两处不许各自维护一张表。
+ */
+export async function toolMenuLines(): Promise<string[]> {
+  const [agents, ecos] = await Promise.all([
+    prisma.agent.findMany({ where: { enabled: true }, select: { key: true, name: true, role: true } }),
+    prisma.ecoTool.findMany({ where: { enabled: true }, select: { id: true, name: true, desc: true } }),
+  ]);
+  return [
+    ...agents.map((a) => `${a.key} · ${a.name} · ${a.role}`),
+    ...ecos.map((e) => `${e.id} · ${e.name} · ${e.desc.slice(0, 60)}`),
+  ];
+}
+
+/**
+ * 把 toolKey 解析成军令上要渲染的兵器（展示物料读时取，不落快照）。
+ * 停用或已删的 key 解析不到 → 不返回该项，端上自然不渲染兵器条。
+ */
+export async function resolveWeapons(keys: string[]): Promise<Map<string, OrderWeapon>> {
+  const wanted = [...new Set(keys.map((k) => String(k || '').trim()).filter(Boolean))];
+  if (!wanted.length) return new Map();
+  const [agents, ecos] = await Promise.all([
+    prisma.agent.findMany({ where: { enabled: true, key: { in: wanted } }, select: { key: true, name: true, role: true } }),
+    prisma.ecoTool.findMany({ where: { enabled: true, id: { in: wanted } }, select: { id: true, name: true, desc: true, appId: true, path: true } }),
+  ]);
+  const out = new Map<string, OrderWeapon>();
+  for (const a of agents) out.set(a.key, { key: a.key, name: a.name, line: a.role, kind: 'agent' });
+  for (const e of ecos) {
+    // external 兵器必须有 appId 才跳得动；缺配置时不下发，免得端上出一个点了没反应的卡。
+    if (!e.appId) continue;
+    out.set(e.id, { key: e.id, name: e.name, line: e.desc.slice(0, 60), kind: 'external', appId: e.appId, path: e.path || null });
+  }
+  return out;
 }
 
 interface RawRx { problem?: unknown; playbook?: unknown; toolKey?: unknown }
