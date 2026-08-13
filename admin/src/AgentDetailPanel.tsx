@@ -169,7 +169,10 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
       if (billing !== data.billing) { patch.billing = billing; patch.gift = billing === 'free'; }
       const nextPrice = billing === 'free' ? 0 : Math.max(0, Math.trunc(price));
       if (nextPrice !== data.price) patch.price = nextPrice;
-      const nextRatio = meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1;
+      // 2026-08-13 计费改造：对话一律扣 token 额度，倍率对所有智能体都生效。
+      // 旧逻辑在 meterUnit==='image' 时把倍率强制写回 1 —— 那会让「海报对话设成 5 倍」这类
+      // 配置在保存的瞬间被悄悄抹掉（库里仍是 image 的 poster/ip 正好中招）。
+      const nextRatio = Math.max(0.1, billingRatio);
       if (nextRatio !== data.billingRatio) patch.billingRatio = nextRatio;
       if (meterUnit !== data.meterUnit) patch.meterUnit = meterUnit;
       if (prompt !== data.systemPrompt) patch.systemPrompt = prompt;
@@ -312,17 +315,23 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
             </div>
           )}
           <div className="ai-field">
-            <div className="ai-fl">计费单位</div>
+            <div className="ai-fl">计费单位（已废弃 · 不再影响计费）</div>
             <div className="bill-seg">
               <div className={`bill-opt ${meterUnit === 'text' ? 'on' : ''}`} onClick={() => setMeterUnit('text')}>
-                <div className="bo-t">文本 · token 额度</div><div className="bo-d">产出按 token×比例 扣本月额度</div>
+                <div className="bo-t">文本 · token 额度</div><div className="bo-d">对话扣 token×倍率（当前唯一口径）</div>
               </div>
               <div className={`bill-opt ${meterUnit === 'image' ? 'on' : ''}`} onClick={() => setMeterUnit('image')}>
-                <div className="bo-t">图片 · 按张钻石</div><div className="bo-d">每次产出按张扣钻石</div>
+                <div className="bo-t">图片 · 按张钻石</div><div className="bo-d">旧口径，已停用</div>
               </div>
             </div>
+            <div className="ai-note">
+              2026-08-13 起<b>这一项不再参与计费判定</b>：对话一律扣月度 token 额度 × 下方倍率；
+              钻石只在产出物（成品图 / 成片）那条链路上，按「技能 × 规格」的价目表结算
+              —— 海报的标准档 / 高级档就是在那张表里定价的，不在这里。
+              旧值留着只为可追溯，建议把仍是「图片」的智能体改回「文本」，免得下一个人误以为还在按张扣钻。
+            </div>
           </div>
-          {meterUnit === 'text' && (
+          {(
             <div className="ai-field">
               <div className="ai-fl">定价档位 / 计费比例 —— 调教越好倍率越高卖越贵（当前：{tierName(billingRatio)} ×{billingRatio}）</div>
               <div className="bill-seg" style={{ marginBottom: 8 }}>

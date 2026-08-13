@@ -6,7 +6,7 @@
     <view class="chat-safe"></view>
     <view class="chat-headrow">
       <view class="back-hit" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view>
-      <view class="chat-id"><text class="chat-title serif">{{title}}</text><text wx:if="{{alias}}" class="chat-alias">{{alias}}</text></view>
+      <view class="chat-id"><text class="chat-title serif">{{title}}</text><text wx:if="{{alias}}" class="chat-alias">{{alias}}</text><text wx:if="{{quotaRatio}}" class="chat-ratio">额度 {{quotaRatio}} 倍</text></view>
       <view class="chat-head-spacer" bindtap="openChatMenu"><native-icon name="more" tone="ink" size="22"></native-icon></view>
     </view>
   </view>

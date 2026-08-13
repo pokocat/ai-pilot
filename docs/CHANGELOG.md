@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-13 · 计费拆成两条轴：对话走 token、产出物按「技能×规格」走钻石 · 影响面：全部智能体的对话计费、海报定价存放位置、运营后台计费编辑、对话页计费提示
+
+- **对话轴**：所有对话一律扣月度 token 额度 × `Agent.billingRatio`。`Agent.meterUnit` 就此**不再参与任何计费判定**（三处扣费点：`sessions.ts` 同步与流式、`generationRequest.ts`）。旧行为是 `meterUnit='image'` 的智能体按**对话轮次**扣钻——线上 poster 8 钻/轮、ip 3 钻/轮且完全不吃 token，聊 5 轮 40 钻，而成品图在另一条链路上另收一次。`diamondCost` 恒为 0；`reserveCredits(…0…)` 在 credits.ts 里是显式空操作，下游结算/退款/余额回显形状不变。
+- **产出轴**：新增 `services/artifactPricing.ts`，钻石价按 **`技能 key × 规格`** 存（FeatureFlag 行 `artifact-pricing`）。刻意不挂 agent：同一个 `canvas_design` 被多个军师用时，价必须是同一个，否则同一张海报在不同入口卖不同价。
+- **回退链三层**：产出物价格表 → `creative-poster` 旧价字段 → 代码默认常量；后台改价**只写价格表**，旧字段只读不写（迁移期安全绳，跟着写就等于没有）。`artifactPrice()` 未配置返回 `null` 不是 `0`，回退用 `??` 不用 `||`——0 是"免费"的明确业务含义。
+- **后台修掉一个挡住需求的 bug**：`AgentDetailPanel` 保存时 `nextRatio = meterUnit === 'text' ? ratio : 1`，即只要计费单位是「图片」，倍率在保存的瞬间被强制打回 1——而 poster/ip 正好都是 image，**「海报对话设成 5 倍」在旧代码下根本存不进去**。现在倍率对所有智能体生效，「计费单位」标注为已废弃并写清新口径。
+- **计费提示**：对话页标题行显示「额度 N 倍」（只在 >1 时出现）。刻意不放锦囊卡面——那条「不卖、不标价」的分发铁律不破；H5 智库页的倍率提示去掉了 `meterUnit !== 'image'` 这个过滤（否则库里仍是 image 的军师会把自己的倍率藏起来）。
+- **待运营执行**（代码已不读 meterUnit，但库里的值会误导下一个人）：poster/ip 改 `free / price=0 / meterUnit=text` 并设好 `billingRatio`；copy/promo/shortvideo 的 unlock 解锁费按「启用不收费」改成 free。
+- 测试：新增 `server/test/billingArtifactPricing.test.ts`（25 条：价格表纯函数、三层回退、配 0 不被打回、改价不动旧字段、durable 建单里 `creditReserved=0`/`quotaReserved>0` 的字段级证据）；`integration.test.ts` 的 V7 从断言旧行为改为断言新行为并加强（补「单价非零」前提 + `tokenQuota` 非空）。server 1624 全绿，app 140 + native 103 + admin build 通过。
+
 ### 2026-08-13 · 内联 SVG 的 data URI 被静态审计误杀（标准档回落模板的主因） · 影响面：AI 排版引擎成品率与画面密度
 
 - `canvasSanitize.allowedUrl` 的允许规则写成 `^data:image/(...);`，媒体类型后面**钉死了分号**。RFC 2397 里 `;base64` 是可选的，非 base64 的内联 SVG（`data:image/svg+xml,%3Csvg...`，CSS 里最常见、比 base64 短得多）走的是逗号，于是被整份打回。改成 `[;,]`。

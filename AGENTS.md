@@ -400,6 +400,20 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
 - `services/sessionTitle.ts`（★ 2026-08-08 改口径）：**会话标题 = 首轮问答的 ≤12 字提炼**，不是首问硬截断。建会话时仍先落 `text.slice(0,18)` 占位（`sessions.ts` / `generationJobs.ts` 同口径，常量 `TITLE_PLACEHOLDER_CHARS`），等**首轮回复真的落库**后由 `maybeGenerateTitle(sessionId)` 换掉——标题要拿问 + 答一起提炼，很多开场是「帮我看看」这种没信息量的一句，只喂 user 文本会拟出与内容无关的标题。四条口径：① **只在首轮改**（会话内 user 消息恰好一条 + 其后已有 assistant/report），后续轮次一律不动，一个每聊几句就自己变一次的历史列表比截断更难用；② **幂等靠「标题还是占位吗」判，不另建标记列**——占位只有三种形状（`'新对话'` / 首条 user 文本前 18 字 / **主动消息注入会话的模板文本前 18 字**），不是这三种说明已生成过或被用户改过，直接跳过；③ **即发即忘**，挂在所有完成路径上（持久任务的 `title` post-effect + 内联 `/generate-sync`、`/generate` 的八个落库点，后者经 `sessions.ts` 的 `bumpSessionTitle`），调用方一律 `void ... .catch()`，函数自身也整体 try/catch，**绝不阻塞回复链路**；④ 无真实 provider（测试 / 未配 key 的 mock 降级）走 `fallbackSessionTitle` 确定性兜底（去开场虚词 → 取首个语义片段 → 12 字），真实模型在位却失败则**静默保留现状**，不拿兜底顶替真结果。gateway 侧 `summarizeSessionTitle(userText, assistantText)` 走 rawText/rawJson 辅助档，预算固定 `SESSION_TITLE_MAX_TOKENS=200`（十来个字的产出不该再向上游多要配额），归一化 `normalizeSessionTitle` 剥引号/书名号/句末标点要**剥到不动为止**（`《…》。` 的书名号被句号挡在里面）。
 - `services/sms.ts`（★）：短信验证码发放/校验；发码限频在同手机号同场景事务锁内完成，校验用条件更新消费，确保并发下同一验证码只能成功一次。
+- **计费两条轴（2026-08-13 定，别再把它们混成一条）**：
+  - **对话轴 = agent 属性**：所有对话一律扣**月度 token 额度 × `Agent.billingRatio`**（`reserveQuota`）。
+    `Agent.meterUnit` **已废弃、不再参与任何计费判定**——旧行为是 `meterUnit='image'` 的智能体
+    按**对话轮次**扣钻（线上 poster 8 钻/轮、ip 3 钻/轮，且完全不吃 token），等于"聊天按张卖"：
+    用户还没拿到任何产出物就在掉钻，聊 5 轮 40 钻，而真正的成品图在另一条链路上另收一次。
+    库里的 `meterUnit` 值留着只为可追溯，后台已标废弃；**新增计费逻辑不许再读它**。
+  - **产出轴 = 产出物属性**：钻石只在产出物落地时扣，价格按 **`技能 key × 规格`** 存在
+    `services/artifactPricing.ts`（FeatureFlag 行 `artifact-pricing`，如
+    `{"canvas_design":{"standard":10,"premium":25}}`）。**刻意不挂 agent**：等名片/易拉宝设计师
+    都用上 `canvas_design`，价挂 agent 会变成"同一张海报在不同入口卖不同价"。
+  - `artifactPrice()` 未配置返回 **`null` 而不是 0**，回退链一律用 `??` 不用 `||`
+    ——0 是"免费"这个明确的业务含义，用 `||` 会把一次免费改价悄悄打回付费（守卫用例钉住了这条）。
+  - 海报价的三层回退：**产出物价格表 → `creative-poster` 的旧价字段 → 代码默认常量**。
+    后台改价**只写价格表**，旧字段只读不写——它是迁移期的安全绳，跟着一起写就等于没有。
 - `services/credits.ts`（★）：钻石计量——`ensureCredits`（只读预检）/`reserveCredits`（已知费用产出前原子预扣）/`chargeCredits`/`refundCredits`/`grantCredits`/`getBalance`；同一用户的 `CreditLedger` 写入用 Postgres advisory lock 串行，避免并发双花或充值丢失。图片/按张类产出在 `sessions.ts` 同步与 SSE 路由中先预扣，异常自动退款；**`CreditReservation.refund` 自身幂等**（对齐 `tokenQuota.QuotaReservation` 的 `done` 标志）——同一次预扣重复调用只落一条正向流水、返回首次退款后的余额，因为路由里降级退款与 catch 兜底退款会叠在一起（守卫用例 `test/creditReservation.test.ts`）；退款失败不置位，后续路径仍可重试。`/agents/:key/purchase` 在同一事务内完成扣费与开通；套餐发放通过 `applyPlanPurchase` 同事务更新套餐、钻石流水与 token 钱包。企业版(creditsPerMonth<0)不限量不扣减。
 - `services/entitlements.ts`（★）：智能体权益——`assertAgentAccess` 拦截未解锁 `unlock` 智能体（403 `AGENT_LOCKED`）、`agentCost` 统一 `free/unlock/metered` 的产出计费、`publicOwned` 给前台展示可用状态。
 - `services/adminAuth.ts`（★）：运营后台鉴权——`/api/admin/*` 统一要求 `ADMIN_TOKEN`（`x-admin-token` 或 `Authorization: Bearer`）或 `role=admin` 用户；普通小程序用户访问返回 403，无凭证返回 401。

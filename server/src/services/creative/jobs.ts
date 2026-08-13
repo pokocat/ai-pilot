@@ -22,7 +22,7 @@ import { noteCreativeJobCreated } from '../metrics.js';
 import { getBrandKit } from '../brandKit.js';
 import {
   assertCreativeEnabled, visualProviderConfigured, premiumTierAvailable, priceForTier,
-  type CreativeRuntimeConfig,
+  POSTER_SKILL_KEY, type CreativeRuntimeConfig,
 } from './config.js';
 import { normalizePosterBrief, briefModerationText, LIMITS, type NormalizedPosterBrief } from './schema.js';
 import { resolveBriefAssets, UploadRejectedError } from './uploads.js';
@@ -33,7 +33,9 @@ import type {
   CreativePosterListItem, CreativePosterListResult,
 } from '../../../../shared/contracts';
 
-export const POSTER_SKILL_KEY = 'canvas_design';
+// 技能 key 的定义在 config.ts（价格表按技能存，config 读价要用它；放这里会绕成循环 import）。
+// 这里再导出一次，让既有的 `from './jobs.js'` 引用零改动。
+export { POSTER_SKILL_KEY } from './config.js';
 export const POSTER_AGENT_KEY = 'poster';
 export const POSTER_JOB_KIND = 'poster';
 /**

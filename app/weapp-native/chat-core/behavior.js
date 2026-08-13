@@ -560,6 +560,10 @@ const methods = {
     this.safeSetData({
       title: agent ? agent.name : '总军师', alias: ALIASES[this._agentKey] || '', agentKey: this._agentKey,
       advisorAvatar: avatarFor(this._agentKey),
+      // 对话额度倍率（2026-08-13 计费改造）：对话一律扣月度 token 额度 × 这个倍率。
+      // 只在 >1 时给一句提示——1 倍是常态，标出来只是噪音；而 5 倍不说，用户会觉得额度掉得莫名其妙。
+      // 刻意放在对话页而不是锦囊卡面：锦囊那条铁律是「不卖、不标价」，这里才是真正发生消耗的地方。
+      quotaRatio: agent && Number(agent.billingRatio) > 1 ? Number(agent.billingRatio) : 0,
       themeClass: snapshot.themeClass, colorKey: snapshot.colorKey,
     });
     this.loadCreativeStatus(epoch);
