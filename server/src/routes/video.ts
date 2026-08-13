@@ -315,6 +315,13 @@ export async function videoRoutes(app: FastifyInstance) {
     catch (e) { return sendErr(reply, e, 502); }
   });
 
+  // 素材库容量：端上据此显示容量条，并在满之前就提示，而不是等上传被拒。
+  app.get('/video/assets/storage', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return await aidramaJson('/api/me/clip/assets/storage', identityOf(user)); }
+    catch (e) { return sendErr(reply, e, 502); }
+  });
+
   app.post('/video/assets', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {

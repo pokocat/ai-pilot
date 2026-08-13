@@ -79,6 +79,24 @@ function materializeShots(segments, shots) {
   });
 }
 
+/** 字节 → 人读大小。素材动辄几十 MB，KB 级精度没意义，统一到 1 位小数。 */
+function formatBytes(bytes) {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (value >= 1024 * 1024) return `${Math.round(value / 1024 / 1024)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+/** 素材时长 → 卡片角标。不足 1 秒按 1 秒显示，避免出现「0 秒」。 */
+function formatAssetDuration(durationSec) {
+  const sec = Number(durationSec) || 0;
+  if (sec <= 0) return '';
+  const rounded = Math.max(1, Math.round(sec));
+  if (rounded < 60) return `${rounded}″`;
+  return `${Math.floor(rounded / 60)}′${String(rounded % 60).padStart(2, '0')}″`;
+}
+
 /** 秒 → mm:ss。 */
 function formatDuration(totalSec) {
   const sec = Math.max(0, Math.round(Number(totalSec) || 0));
@@ -559,7 +577,7 @@ function stageRows(stage, progress) {
 
 module.exports = {
   ROLE, STAGES,
-  estimateSeconds, segmentSeconds, formatDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
+  estimateSeconds, segmentSeconds, formatDuration, formatBytes, formatAssetDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   scriptToText, applyBulkScript, splitScriptText,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,

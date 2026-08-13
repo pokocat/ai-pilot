@@ -5,6 +5,7 @@
 //   · 挑选态（从「配画面」那屏进，带 pick=1&no=N）：点一张就回填到那一句，自动返回。
 const host = require('../host');
 const api = require('../api');
+const { formatBytes, formatAssetDuration } = require('../model');
 
 Page({
   data: host.hostBaseData({
@@ -12,6 +13,8 @@ Page({
     assets: [],
     visible: [],
     tags: [],
+    /** 素材库容量。null = 还没读到，不显示容量条而不是显示 0（读失败 ≠ 没占用）。 */
+    storage: null,
     activeTag: '',
     /** 挑选态 */
     picking: false,
@@ -42,10 +45,37 @@ Page({
       .then((assets) => {
         const tags = [];
         assets.forEach((item) => { if (item.tag && tags.indexOf(item.tag) < 0) tags.push(item.tag); });
-        this.setData({ loading: false, assets, tags });
+        this.setData({ loading: false, assets: assets.map((item) => this.decorate(item)), tags });
         this.applyFilter();
       })
       .catch(() => this.setData({ loading: false }));
+    this.loadStorage();
+  },
+
+  /** 容量单独拉：它失败不该让整页素材也看不到。 */
+  loadStorage() {
+    api.assetStorage()
+      .then((storage) => {
+        if (!storage || typeof storage.limitBytes !== 'number' || storage.limitBytes <= 0) return;
+        const percent = Math.min(100, Math.round((storage.usedBytes / storage.limitBytes) * 100));
+        this.setData({
+          storage: Object.assign({}, storage, {
+            percent,
+            usedText: formatBytes(storage.usedBytes),
+            limitText: formatBytes(storage.limitBytes),
+            // 90% 起变红：等真正满了才提示，用户已经白拍了一段素材
+            nearFull: percent >= 90,
+          }),
+        });
+      })
+      .catch(() => { /* 容量读不到就不显示容量条，不显示 0 —— 读失败不等于没占用 */ });
+  },
+
+  decorate(item) {
+    return Object.assign({}, item, {
+      durationText: item.kind === 'video' ? formatAssetDuration(item.durationSec) : '',
+      sizeText: item.bytes ? formatBytes(item.bytes) : '',
+    });
   },
 
   applyFilter() {
@@ -131,6 +161,12 @@ Page({
     this.setData({ tags });
   },
 
+  /** 可见的删除入口。长按菜单不好发现，卡片上直接给一个删除按钮。 */
+  deleteFromCard(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    if (id) this.removeAsset(id);
+  },
+
   removeAsset(id) {
     host.confirm({ title: '删除素材', content: '删了之后用过它的成片不受影响，但新片子就选不到了。' })
       .then((ok) => {
@@ -139,6 +175,7 @@ Page({
           .then(() => {
             this.setData({ assets: this.data.assets.filter((item) => item.id !== id) });
             this.applyFilter();
+            this.loadStorage();
           })
           .catch((error) => host.toast(error && error.message ? error.message : '删除失败'));
       });
@@ -159,11 +196,23 @@ Page({
         api.uploadAsset(file.tempFilePath, { kind: file.fileType || 'video' })
           .then((asset) => {
             host.hideLoading();
-            this.setData({ assets: [asset].concat(this.data.assets) });
+            this.setData({ assets: [this.decorate(asset)].concat(this.data.assets) });
             this.applyFilter();
+            this.loadStorage();
           })
           .catch((error) => {
             host.hideLoading();
+            if (error && error.code === 'CLIP_ASSET_QUOTA_EXCEEDED') {
+              // 容量满了要给出口：告诉他删什么最省地方，而不是干报一句失败
+              host.confirm({
+                title: '素材库满了',
+                content: '空间不够放这条素材了。删掉一些用不上的旧素材就能继续传。',
+                confirmText: '知道了',
+                cancelText: '取消',
+              });
+              this.loadStorage();
+              return;
+            }
             host.toast(error && error.message ? error.message : '上传失败');
           });
       },

@@ -263,3 +263,28 @@ test('分段结果可直接喂给 applyBulkScript', () => {
   const { segments } = model.applyBulkScript([{ no: 1, text: '旧', role: model.ROLE.AVATAR }], null, pieces.join('\n'));
   assert.deepEqual(segments.map((s) => s.text), ['第一句。', '第二句。', '第三句。']);
 });
+
+/* ── 素材库容量与时长展示 ─────────────────────────────────────────── */
+
+test('字节格式化：素材动辄几十 MB，不给 KB 级噪声', () => {
+  assert.equal(model.formatBytes(0), '0 B');
+  assert.equal(model.formatBytes(900), '900 B');
+  assert.equal(model.formatBytes(512 * 1024), '512 KB');
+  assert.equal(model.formatBytes(412 * 1024 * 1024), '412 MB');
+  assert.equal(model.formatBytes(2 * 1024 * 1024 * 1024), '2.0 GB');
+});
+
+test('字节格式化：脏输入不炸也不出负数', () => {
+  assert.equal(model.formatBytes(null), '0 B');
+  assert.equal(model.formatBytes(-100), '0 B');
+  assert.equal(model.formatBytes('abc'), '0 B');
+});
+
+test('素材时长：不足一秒按 1 秒显示，不出现「0 秒」', () => {
+  assert.equal(model.formatAssetDuration(0), '', '没有时长就不显示角标');
+  assert.equal(model.formatAssetDuration(0.4), '1″', '拍到半秒也是有内容的，不能标 0');
+  assert.equal(model.formatAssetDuration(8), '8″');
+  assert.equal(model.formatAssetDuration(59), '59″');
+  assert.equal(model.formatAssetDuration(60), '1′00″');
+  assert.equal(model.formatAssetDuration(125), '2′05″');
+});

@@ -9,6 +9,13 @@
 
     <text class="as-note">{{picking ? '点一下，就会配到刚才选中的画面段。' : '你拍过的店铺画面都存在这里，任何模板都能直接用。'}}</text>
 
+    <!-- 容量条：读不到时整块不渲染（storage=null），而不是显示 0 —— 读失败不等于没占用 -->
+    <view wx:if="{{storage && !picking}}" class="as-storage {{storage.nearFull ? 'warn' : ''}}">
+      <view class="ast-line"><text class="ast-text">已用 {{storage.usedText}} / {{storage.limitText}}</text><text class="ast-count">{{storage.count}} 条</text></view>
+      <view class="ast-bar"><view class="fill" style="width:{{storage.percent}}%"></view></view>
+      <text wx:if="{{storage.nearFull}}" class="ast-warn">快满了，删掉用不上的素材再传新的</text>
+    </view>
+
     <scroll-view class="as-tags" scroll-x enable-flex>
       <view class="as-tagrow">
         <view class="as-tag {{!activeTag ? 'on' : ''}}" data-tag="" bindtap="selectTag">全部 {{assets.length}}</view>
@@ -49,10 +56,12 @@
         >
           <view class="ac-thumb {{item.previewUrl ? '' : 'vd-grain'}} {{item.tone}}">
             <image wx:if="{{item.previewUrl}}" class="ac-thumb-image" src="{{item.previewUrl}}" mode="aspectFill"></image>
+            <text wx:if="{{item.durationText}}" class="ac-dur">{{item.durationText}}</text>
+            <view wx:if="{{!picking}}" class="ac-del" data-id="{{item.id}}" catchtap="deleteFromCard"><native-icon name="trash" tone="white" size="13"></native-icon></view>
             <view class="ac-preview" data-id="{{item.id}}" catchtap="previewAsset">{{item.kind === 'video' ? '播放' : '预览'}}</view>
           </view>
           <text class="ac-label">{{item.label}}</text>
-          <text class="ac-used">{{item.usedCount ? '用过 ' + item.usedCount + ' 次' : '没用过'}}</text>
+          <text class="ac-used">{{item.sizeText ? item.sizeText + ' · ' : ''}}{{item.usedCount ? '用过 ' + item.usedCount + ' 次' : '没用过'}}</text>
         </view>
       </view>
 

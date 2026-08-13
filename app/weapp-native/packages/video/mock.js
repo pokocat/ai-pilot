@@ -251,6 +251,7 @@ module.exports = {
     assets[index] = Object.assign({}, assets[index], clone(patch || {}));
     return delay(clone(assets[index]));
   },
+  assetStorage: () => delay({ usedBytes: 412 * 1024 * 1024, limitBytes: 2 * 1024 * 1024 * 1024, count: 5 }),
   deleteAsset: (id) => {
     assets = assets.filter((item) => item.id !== id);
     return delay({ ok: true });

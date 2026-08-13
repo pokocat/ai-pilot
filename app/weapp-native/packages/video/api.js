@@ -75,6 +75,7 @@ const api = {
   updateAsset: (id, patch) => (useMock()
     ? mock.updateAsset(id, patch)
     : call(`/assets/${q(id)}`, { method: 'PATCH', data: patch || {} })),
+  assetStorage: () => (useMock() ? mock.assetStorage() : call('/assets/storage')),
   deleteAsset: (id) => (useMock()
     ? mock.deleteAsset(id)
     : call(`/assets/${q(id)}`, { method: 'DELETE' })),
