@@ -100,5 +100,11 @@ Page({
     if (jobId) navTo(`/packages/work/posterJob/index?jobId=${encodeURIComponent(jobId)}`);
   },
   goLibrary() { navTo('/packages/work/library/index'); },
-  goPosterDesigner() { wx.switchTab({ url: '/pages/pouch/index' }); },
+  /**
+   * 空态 CTA。原先 `switchTab` 回锦囊 —— 而锦囊的海报格当时又指回本页，
+   * 零作品的人在「锦囊 → 空作品库 → 去锦囊挑手艺 → 锦囊」里打转，全站没有一个按钮
+   * 能把他带到真正开工的地方；空态**文案**还写着「在对话里让海报设计师出方案」，
+   * 说的和按钮做的是两件事。现在直接进确认页（与锦囊海报格同一个落点）。
+   */
+  goPosterDesigner() { navTo('/packages/work/poster/index'); },
 });

@@ -55,7 +55,7 @@
           <view class="pch-art"><image class="pch-art-img" src="{{item.art}}" mode="aspectFill" lazy-load></image></view>
           <text class="pch-c-name serif">{{item.name}}</text>
           <text class="pch-c-role">{{item.roleLine}}</text>
-          <text wx:if="{{authed || item.locked}}" class="pch-c-meta">{{item.metaLine}}</text>
+          <text wx:if="{{authed || item.locked}}" class="pch-c-meta {{item.worksRoute?'pch-c-meta-link':''}}" data-index="{{index}}" catchtap="openWorks">{{item.metaLine}}</text>
         </view>
       </view>
 

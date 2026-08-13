@@ -1181,6 +1181,20 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   assert.doesNotMatch(pouchWxml, /costText|item\.price|\bx\{\{/, '手艺卡不得渲染价格（分发铁律：货架不标价）');
   assert.doesNotMatch(pouch, /costText|priceText/, '卡面 data 不得带价格字段');
 
+  // 2026-08-13「锦囊是能力大全」：已启用的手艺格点了要能**一步开工**，不再先绕作品库。
+  // 改动前的实况是三个问题叠在一起：① 固定格恒 locked:false，海报设计师没启用也能点，
+  // 点进去是个空作品库；② 作品库空态的按钮又 switchTab 回锦囊，零作品用户在这里打转出不去；
+  // ③「海报快印」和「海报设计师」并排两格，同一件事两个名字两个落点。
+  assert.match(pouch, /agentKey: 'poster',\s*\n\s*route: '\/packages\/work\/poster\/index'/,
+    '海报格必须直达确认页（快捷入口），不是作品库');
+  assert.match(pouch, /worksRoute: '\/packages\/work\/gallery\/index'/, '作品库改由作品数那行进');
+  assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
+    '带 agentKey 的固定格必须跟着那位军师的启用状态置灰');
+  assert.match(pouch, /covered\.has\(text\(agent\.key\)\)/, '被固定格覆盖的军师不许再出一格');
+  assert.match(pouchWxml, /catchtap="openWorks"/, '作品数那行是独立点击区，不能冒泡给整卡');
+  // 目录读不到时**不许**当成已启用：放行会让人点进确认页、提交时才撞 403，那时已经在扣费路径上。
+  assert.match(pouch, /Boolean\(agent && \(agent\.owned/, '查不到 agent 时按未启用处理');
+
   // 日 / 周两段是打卡机制的两半：日计划做今天，周计划看连续性。删掉任一半都会削弱「别断」。
   assert.match(home, /segments: \['今日军令', '本周'\]/, '战局必须保留日/周两段');
   assert.match(home, /function weekStrip\(orders\)/, '七日打卡条是连续性可视化的唯一载体');

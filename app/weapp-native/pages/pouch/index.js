@@ -1,7 +1,13 @@
 // 锦囊 · 作品页（IA 重构第三刀，2026-08）。
 //
-// 分发铁律「第一次归军师，第二次起归锦囊」：本页**只放你已经有的**，不卖、不标价、不促销。
+// 分发铁律「第一次归军师，第二次起归锦囊」：本页不卖、不标价、不促销。
 // 结构：①「最近做的」跨来源混排横滑流（检索职能）②「手艺」两列宫格（一门手艺一格）。
+//
+// 2026-08-13 修订（拍板：**锦囊是能力大全**）：本页不再只是「你已经有的」的陈列架 ——
+// 用户就是想做张海报时，这里要能一步开工。所以**已启用**的手艺格点击直接进"做一件"的入口，
+// 不再先绕作品库。铁律的另一半没动：**未启用**的手艺仍然置灰、仍然把人交回军师
+// （启用层 → 军师对话 → 军师带着做第一次），价格也仍然不出现在卡面上。
+// 一句话：改的是「已经会了的怎么快速再做一次」，没改「第一次由谁带」，也没把这里变成货架。
 //
 // 宫格由两份数据长出来，端上零写死类别清单：
 //   - 固定子应用格（快出片 / 海报快印 / 方案报告）——作品数来自三条作品通道；
@@ -26,6 +32,19 @@ const TYPES = {
 /**
  * 固定子应用三格。插画（src/assets/craft/*.jpg，随 ASSET_ROOT 拷进产物，与头像同一条路子）
  * 只承担识别，卡体一律暖纸白卡；countKey 对应 load() 里三条通道的归一化结果。
+ *
+ * ── `agentKey` / `worksRoute` 的由来（2026-08-13 拍板：锦囊是能力大全，要有快捷入口）──
+ *
+ * 带 `agentKey` 的格子（目前只有海报）与那位创意军师是**同一件事**，因此：
+ *   · 该军师**未启用** → 本格置灰，点击开启用层 → 启用后由 agentUnlocked 带进他的对话。
+ *     「第一次归军师」这条没变：没一起做过的手艺，仍然是军师带着做第一次。
+ *   · 该军师**已启用** → 点击**直接进"做一张"的入口**（不再先经过作品库）。用户就是想做张海报时，
+ *     锦囊要能一步开工，这是本页作为「能力大全」的职责。
+ *   · 作品库不因此丢失入口：作品数那行（`metaLine`）是独立点击区，走 `worksRoute`。
+ * 动态 agents 那边会把已被本表覆盖的 key 过滤掉，否则「海报快印」和「海报设计师」会并排出现两格。
+ *
+ * 没有 `agentKey` 的两格（快出片 / 方案报告）行为一字不变：它们本来就不是单个军师驱动的
+ * ——成片走独立的 video 包，方案是任何军师对话都能产出的东西，硬绑一位军师是错的。
  */
 const CRAFT_APPS = [
   {
@@ -36,7 +55,9 @@ const CRAFT_APPS = [
   {
     key: 'app-poster', name: '海报快印', art: '/assets/craft/poster.jpg', countKey: 'poster',
     roleLine: '一句主张进去，一张能贴出去的海报出来',
-    route: '/packages/work/gallery/index',
+    agentKey: 'poster',
+    route: '/packages/work/poster/index',
+    worksRoute: '/packages/work/gallery/index',
   },
   {
     key: 'app-report', name: '方案报告', art: '/assets/craft/report.jpg', countKey: 'report',
@@ -217,13 +238,38 @@ Page({
     const agents = safeList(settled(agentsResult) || store.snapshot().agents);
     // 原始 agent 留一份索引给启用层用（价格只在 agent-unlock 那一刻出现，不进卡面 data）。
     this._agentsByKey = Object.fromEntries(agents.filter((item) => item && text(item.key)).map((item) => [text(item.key), item]));
+    // 被固定格覆盖的军师不再另出一格：否则「海报快印」和「海报设计师」并排出现，
+    // 名字不同、落点不同，用户分不清哪个是"做一张海报"。
+    const covered = new Set(CRAFT_APPS.map((app) => app.agentKey).filter(Boolean));
     const crafts = CRAFT_APPS
-      .map((app) => ({
-        key: app.key, name: app.name, art: app.art,
-        locked: false, roleLine: app.roleLine, metaLine: countLine(counts[app.countKey]),
-        route: app.route,
-      }))
-      .concat(agents.filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key)).map(craftFromAgent));
+      .map((app) => {
+        const agent = app.agentKey ? this._agentsByKey[app.agentKey] : null;
+        // 没有 agentKey 的格子恒可用（快出片 / 方案报告，本来就不由单个军师驱动）。
+        // 有 agentKey 却在目录里查不到（/agents 挂了）→ **按未启用处理**，不臆断成已启用：
+        // 直接放行会让人点进确认页，提交时才撞 403 AGENT_LOCKED，那时钻石已经在扣费路径上了。
+        const unlocked = !app.agentKey
+          || Boolean(agent && (agent.owned || text(agent.billing) !== 'unlock'));
+        if (!unlocked) {
+          return {
+            key: app.key, name: app.name, art: app.art, locked: true, agentKey: app.agentKey,
+            roleLine: '还没一起用过', metaLine: '让军师带你做一次', route: '', worksRoute: '',
+          };
+        }
+        // 一件作品都没有时作品数那行点了没意义（进去是个空库），不做成入口。
+        const worksRoute = counts[app.countKey] > 0 ? (app.worksRoute || '') : '';
+        return {
+          key: app.key, name: app.name, art: app.art,
+          locked: false, roleLine: app.roleLine,
+          // 这行是入口时，文案本身要说清它会带你去哪 —— 同一张卡上有两个落点（主体做新的、
+          // 这行看旧的），只靠下划线区分不够；符号箭头又过不了图标守卫（符号必须走 Lucide）。
+          metaLine: worksRoute ? `看 ${countLine(counts[app.countKey])}` : countLine(counts[app.countKey]),
+          route: app.route,
+          worksRoute,
+        };
+      })
+      .concat(agents
+        .filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key) && !covered.has(text(agent.key)))
+        .map(craftFromAgent));
 
     // 只有真取到过数才记时间戳：失败不算「刚刷过」，否则 90 秒内都拿不到重试机会。
     this._loadedAt = loadFailed ? 0 : Date.now();
@@ -274,6 +320,17 @@ Page({
       return;
     }
     if (item.route) navTo(item.route);
+  },
+  /**
+   * 作品数那行的独立点击区（catchtap，不冒泡给 openCraft）。
+   * 手艺格主体改成"做一件"之后，作品库就靠这行进——没有 worksRoute 的格子（没作品、
+   * 或压根没配作品库）落回主体行为，不能让用户点了一行没反应。
+   */
+  openWorks(event) {
+    const item = this.data.crafts[Number(event.currentTarget.dataset.index)];
+    if (!item) return;
+    if (item.worksRoute) { navTo(item.worksRoute); return; }
+    this.openCraft(event);
   },
   closeUnlock() { this.setData({ unlockAgent: null }); },
   agentUnlocked(event) {

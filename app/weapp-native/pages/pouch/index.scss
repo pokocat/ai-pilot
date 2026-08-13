@@ -121,6 +121,9 @@
   display: block; margin-top: 7px;
   font-size: 11.5px; font-weight: 600; color: var(--accent); line-height: 1.3;
 }
+/* 作品数那行是独立点击区（主体点了做新的，这行点了进作品库）——加下划线让"这里还能点"看得见，
+   否则同一张卡上两个落点完全无从区分。没有 worksRoute 的格子不带这个类，样式一字不变。 */
+.pch-c-meta-link { text-decoration: underline; text-underline-offset: 2px; }
 
 /* 置灰格：不显示价格、不放开通按钮——教育归军师，本页不卖。
    插画同步去饱和，让「还没点亮」一眼可辨，但结构与正常格完全一致。 */
