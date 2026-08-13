@@ -16,6 +16,17 @@
    尺寸铁律（product-ui-completeness · long content）：卡片宽高全部写死，
    标题单行截断、角色行两行截断——文案再长都不许把卡撑变形或溢出容器。 */
 
+/* —— 游客态一屏：说清「这是你的私产、登录后才有」，不摆空架子 —— */
+.pouch-guest { display: flex; flex-direction: column; gap: 10px; padding: 30px 20px; }
+.pouch-guest .pg-t { font-size: 18px; font-weight: 600; color: var(--ink); }
+.pouch-guest .pg-d { font-size: 13px; color: var(--ink-2); line-height: 1.75; }
+.pouch-guest .pg-go {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 46px; margin-top: 8px; border-radius: 13px;
+  background: var(--accent); color: #FBFAF6; font-size: 15px; font-weight: 600;
+}
+.pouch-guest .pg-go:active { opacity: .9; }
+
 /* —— 失败重试条：三条通道全塌才出现，只塌一条时各格显示「—」不打扰 —— */
 .pch-retry {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

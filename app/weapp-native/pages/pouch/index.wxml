@@ -5,6 +5,18 @@
     <view class="pad pouch">
       <tab-header title="锦囊" kicker="军师替你出的妙计" glyph="计"></tab-header>
 
+      <!-- 游客态：锦囊装的是你自己的成品，游客本来只能看到一排空架子。
+           与图籍同一口径（个人私产页要登录）；主线仍留给游客——问策本地开场、战局有游客引导。 -->
+      <block wx:if="{{!authed}}">
+        <view class="pouch-guest card">
+          <text class="pg-t serif">锦囊要登录后才看得见</text>
+          <text class="pg-d">方案、海报、成片都是军师替你出的成品，属于你的账号私产。登录后这里会按时间列出你做过的每一件，随时翻出来分享或照着再来一件。</text>
+          <view class="pg-go" bindtap="askLogin"><native-icon name="user" tone="white" size="16"></native-icon><text>登录后打开锦囊</text></view>
+        </view>
+        <view class="tabbar-space"></view>
+      </block>
+
+      <block wx:else>
       <view wx:if="{{loadFailed}}" class="pch-retry card" bindtap="retry">
         <text class="pch-retry-t">作品没读出来，网络不畅或服务端在忙</text>
         <text class="pch-retry-go">重试</text>
@@ -48,6 +60,7 @@
       </view>
 
       <view class="tabbar-space"></view>
+      </block>
     </view>
   </scroll-view>
   <view class="native-bottom-fade"></view>

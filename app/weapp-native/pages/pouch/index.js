@@ -184,6 +184,8 @@ Page({
    */
   async load(options) {
     if (this.data.loading) return;
+    // 游客态整页只出一屏登录引导，不取任何数（连 /agents 都不用——宫格根本不渲染）。
+    if (!store.isAuthed()) { this.setData({ authed: false, recent: [], crafts: [], loadFailed: false }); return; }
     const force = Boolean(options && options.force);
     const fresh = this._loadedAt && (Date.now() - this._loadedAt) < 90000;
     if (!force && fresh && this.data.recent.length) return;
@@ -228,6 +230,7 @@ Page({
     this.setData({ authed, recent, crafts, loadFailed, loading: false });
   },
   retry() { this.setData({ loadFailed: false }); this.load({ force: true }); },
+  askLogin() { this.requireLogin(); },
 
   /** 真实成品图取不到（签名过期 / 已清理）时换成该类型插画，不留破图。 */
   onThumbError(event) {
