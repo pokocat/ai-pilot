@@ -1185,8 +1185,14 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   // 改动前的实况是三个问题叠在一起：① 固定格恒 locked:false，海报设计师没启用也能点，
   // 点进去是个空作品库；② 作品库空态的按钮又 switchTab 回锦囊，零作品用户在这里打转出不去；
   // ③「海报快印」和「海报设计师」并排两格，同一件事两个名字两个落点。
-  assert.match(pouch, /agentKey: 'poster',\s*\n\s*route: '\/packages\/work\/poster\/index'/,
-    '海报格必须直达确认页（快捷入口），不是作品库');
+  // 2026-08-13 二次修订：海报格落到**海报设计师的对话**，不是空白需求单 ——
+  // 一张海报要成立至少得知道「为什么出、给谁看」，那两件事只能问出来；空表单等于把用户
+  // 找军师的理由原样退回给他。需求单仍在，由成果卡带着预填进去。
+  assert.match(pouch, /route: '\/packages\/main\/chat\/index\?agentKey=poster&continue=1'/,
+    '海报格落到军师对话，不是空白需求单');
+  assert.doesNotMatch(pouch, /route: '\/packages\/work\/poster\/index'/, '手艺格不许直接甩空表单');
+  assert.match(pouch, /packages\/work\/posterJob\/index\?jobId=/,
+    '「再来一张」落到那张海报的详情页（改文字/换风格都带上下文）');
   assert.match(pouch, /worksRoute: '\/packages\/work\/gallery\/index'/, '作品库改由作品数那行进');
   assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
     '带 agentKey 的固定格必须跟着那位军师的启用状态置灰');
@@ -1747,6 +1753,15 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 冷启动（从锦囊直接开工、没有 messageId）不是故障：服务端本来就 422 MESSAGE_ID_REQUIRED，
   // 弹报错横幅会把一次正常的空白表单说成出了事。
   assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
+  // ★ normalizeStatus 是白名单：没显式搬过去的字段会被整层吃掉。档位上线时就漏了这两个，
+  //   于是 premiumOn 恒 false、选择器一次都没渲染出来（页面/契约/服务端全对，中间层吃了字段）。
+  const creativeLib = fs.readFileSync(path.join(sourceRoot, 'packages/work/poster/creative.js'), 'utf8');
+  assert.match(creativeLib, /premiumPricePerPoster: num\(status\.premiumPricePerPoster\)/, 'status 归一必须搬高级档单价');
+  assert.match(creativeLib, /premiumAvailable: status\.premiumAvailable === true/, '缺省不可用：没说可用就别露出来');
+  // 详情页「换风格」按本单档位定价（regenerate 继承父单 tier、按 priceForTier 扣费）。
+  const posterJob = fs.readFileSync(path.join(sourceRoot, 'packages/work/posterJob/index.js'), 'utf8');
+  assert.match(posterJob, /applyTierPrice\(\)/, '详情页必须按档位定价');
+  assert.match(posterJob, /this\.data\.job && this\.data\.job\.tier === 'premium'/, '档位来自任务详情，不是猜的');
   assert.match(chat, /sessionId=\$\{encodeURIComponent\(this\._sessionId\)\}/);
   assert.match(chat, /openPosterJob\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?item\.deliverable && item\.deliverable\.creativeJobId[\s\S]*?\/packages\/work\/posterJob\/index\?jobId=/);
 

@@ -711,6 +711,13 @@ export interface CreativeJobView {
   completedAt?: string;
   assets: CreativeAssetView[];
   parentJobId?: string;         // 版本链：revise/regenerate 产生的新任务指向来源任务
+  /**
+   * 本单档位（读 brief.tier）。**详情页的「换风格」必须按它显示价格**：
+   * regenerate 继承父单档位、按 `priceForTier` 扣费，而那个面板此前写死标准价 ——
+   * 高级单在那里显示 10、实扣 25，是在扣费那一刻说假话。
+   * 档位上线前的老任务没有这个字段（按 standard 显示）。
+   */
+  tier?: PosterTier;
   actions: Array<'revise' | 'regenerate' | 'cancel'>; // 当前状态下前端可展示的操作
 }
 /** 源素材上传返回（先传后建任务，故此时还没有 jobId）。 */

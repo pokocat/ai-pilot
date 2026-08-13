@@ -63,7 +63,10 @@ Page({
   async loadStatus() {
     try {
       const status = normalizeStatus(await api.creativeStatus());
-      this.setData({ price: status.pricePerPoster, templates: status.templates });
+      // 两档单价都留着：本单是哪一档要等任务详情回来才知道（见 applyTierPrice）。
+      this._prices = { standard: status.pricePerPoster, premium: status.premiumPricePerPoster };
+      this.setData({ templates: status.templates });
+      this.applyTierPrice();
     } catch (_) { /* 状态失败不阻断任务回看 */ }
   },
 
@@ -87,6 +90,8 @@ Page({
       assetMissingText: job.assets.length ? '成品图链接已过期，点重试获取新链接。' : '本地演示任务没有图片文件，连接服务端后可查看真实成品。',
       canCancel: job.actions.includes('cancel'), canRevise: job.actions.includes('revise'), canRegenerate: job.actions.includes('regenerate'),
     });
+    // 档位现在才知道 → 重算「换风格」的价格（loadStatus 可能早于详情返回）。
+    this.applyTierPrice();
     return job;
   },
 
@@ -194,6 +199,21 @@ Page({
     proofs[index] = Object.assign({}, proofs[index], { value, count: state.text, over: state.over, err: '' });
     this.setData({ proofs, 'errors.form': '' });
   },
+  /**
+   * 「换风格」面板的价格 = **本单档位**的单价。
+   *
+   * regenerate 继承父单的 tier、服务端按 priceForTier 扣费，而这里此前写死 pricePerPoster：
+   * 高级单在面板上显示 10、实扣 25 —— 在扣费那一刻说了假话。tier 由 GET /creative/jobs/:id
+   * 下发（老任务没有这个字段 → 按 standard）。状态或详情任一没到齐就先不显示价格，
+   * 宁可空着也不显示一个可能是错的数。
+   */
+  applyTierPrice() {
+    const prices = this._prices;
+    if (!prices) return;
+    const premium = this.data.job && this.data.job.tier === 'premium';
+    this.setData({ price: premium ? prices.premium : prices.standard });
+  },
+
   chooseTemplate(event) {
     const key = String(event.currentTarget.dataset.key || '');
     this.setData({ templateKey: key === this.data.templateKey ? '' : key });
@@ -202,7 +222,9 @@ Page({
   async refreshTemplates() {
     try {
       const status = normalizeStatus(await api.creativeStatus());
-      this.setData({ templates: status.templates, templateKey: status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : '', price: status.pricePerPoster });
+      this._prices = { standard: status.pricePerPoster, premium: status.premiumPricePerPoster };
+      this.setData({ templates: status.templates, templateKey: status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : '' });
+      this.applyTierPrice();
     } catch (_) { /* 当前错误已展示 */ }
   },
 

@@ -56,7 +56,12 @@ const CRAFT_APPS = [
     key: 'app-poster', name: '海报快印', art: '/assets/craft/poster.jpg', countKey: 'poster',
     roleLine: '一句主张进去，一张能贴出去的海报出来',
     agentKey: 'poster',
-    route: '/packages/work/poster/index',
+    // 落到**海报设计师的对话**，不是空白需求单。
+    // 一张海报要成立，至少得知道「为什么出、给谁看」——这两件事只有问出来，问不出来的表单
+    // 只能靠用户自己写商业目标和客群，而那正是他找军师的原因。所以快捷入口的"快"是
+    // 「少点几下就能开口说需求」，不是「直接甩一张空表」。需求单仍然存在，由军师的成果卡带着
+    // 预填进去（那条链路一直是这么设计的）。
+    route: '/packages/main/chat/index?agentKey=poster&continue=1',
     worksRoute: '/packages/work/gallery/index',
   },
   {
@@ -107,7 +112,10 @@ function posterWorks(payload) {
     .map((row) => normalize(
       'poster', text(row.jobId), text(row.headline),
       at(row.completedAt || row.createdAt), '海报快印',
-      '/packages/work/poster/index',
+      // 「再来一张」落到**这张海报的详情页**，不是空白需求单：那里的「改文字」（不扣钻）与
+      // 「换风格」（重出主视觉、按本单档位再扣一次）都带着上一版的完整上下文，
+      // 而空白需求单等于让用户把刚做过的一张从头再描述一遍。
+      `/packages/work/posterJob/index?jobId=${encodeURIComponent(text(row.jobId))}`,
       text(row.poster && row.poster.previewUrl),
     ));
 }

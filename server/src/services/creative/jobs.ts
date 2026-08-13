@@ -139,6 +139,9 @@ function toView(job: JobRow, assets: Parameters<typeof assetView>[0][]): Creativ
     // 只对外暴露成品与主视觉；源素材是用户自己传的，不必在任务视图里回显。
     assets: assets.filter((a) => a.kind !== 'source').map(assetView),
     ...(job.parentJobId ? { parentJobId: job.parentJobId } : {}),
+    // 档位：详情页的「换风格」按它显示价格（regenerate 继承父单档位、按 priceForTier 扣费）。
+    // 老任务 requestJson 里没有这个字段 → 不带，前端按 standard 显示。
+    ...(requestOf(job).brief?.tier === 'premium' ? { tier: 'premium' as const } : {}),
     actions: actionsFor(job.status),
   };
 }

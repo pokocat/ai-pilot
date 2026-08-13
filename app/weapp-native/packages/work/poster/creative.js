@@ -53,11 +53,21 @@ function normalizeJob(raw) {
   });
 }
 
+/**
+ * ⚠️ 这个函数是**白名单**：没在这里显式搬过去的字段会被整个丢掉。
+ * 2026-08-13 的教训：档位上线时只改了页面去读 `premiumAvailable` / `premiumPricePerPoster`，
+ * 忘了这一层 —— 于是 `premiumOn` 恒为 false，原生端的档位选择器**一次都没渲染出来**，
+ * 页面、契约、服务端全是对的，唯独中间这层悄悄把字段吃了。新增 status 字段必须同步改这里。
+ */
 function normalizeStatus(raw) {
   const status = raw || {};
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
   return {
     enabled: status.enabled !== false,
-    pricePerPoster: Number.isFinite(Number(status.pricePerPoster)) ? Number(status.pricePerPoster) : null,
+    pricePerPoster: num(status.pricePerPoster),
+    premiumPricePerPoster: num(status.premiumPricePerPoster),
+    // 缺省 false：服务端没说可用就当不可用（露出一个必然 422 的选项比不露更糟）。
+    premiumAvailable: status.premiumAvailable === true,
     templates: Array.isArray(status.templates) ? status.templates : [],
   };
 }
