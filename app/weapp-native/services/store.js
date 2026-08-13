@@ -15,6 +15,10 @@ const state = {
   agents: DEFAULT_AGENTS,
   me: null,
   unread: 0,
+  // 待复盘红点用：reviewedDate = 账本里最新一条复盘日期（空 = 没有记录）；
+  // reviewLoaded = 取到过一次才敢亮红点，避免冷启动 / 断网误报。
+  reviewedDate: '',
+  reviewLoaded: false,
   overlay: false,
 };
 
@@ -168,6 +172,43 @@ function syncUnread(list) {
   state.unread = (list || []).reduce((sum, item) => sum + (Number(item.unreadCount) || 0), 0);
 }
 
+// —— 战局 tab 的待复盘红点（2026-08-12 补产出方）——
+// 此前 custom-tab-bar 一直在消费 reviewDue，但小程序侧没有任何地方产出它，红点从来不亮
+// （只有 H5 的 store.ts 有实现）。判据与 H5 同源：复盘账本取到过 + 今日无复盘记录 + 已过 21:00。
+// 时点即时判定、不缓存布尔值，跨过 21:00 不需要额外刷新就会亮。
+const REVIEW_DUE_HOUR = 21;
+const REVIEW_THROTTLE_MS = 15000;
+let reviewFetchedAt = 0;
+let reviewInFlight = null;
+
+function todayKey() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+function reviewDue() {
+  return state.reviewLoaded && state.reviewedDate !== todayKey() && new Date().getHours() >= REVIEW_DUE_HOUR;
+}
+/** 拉复盘账本判红点：未登录直接返回；15 秒节流 + 单飞去重；失败静默（角标不为自己弹错）。 */
+async function loadReviewBadge(options) {
+  if (!getToken()) return;
+  if (reviewInFlight) { await reviewInFlight; return; }
+  const force = Boolean(options && options.force);
+  if (!force && Date.now() - reviewFetchedAt < REVIEW_THROTTLE_MS) return;
+  const job = (async () => {
+    try {
+      const { api } = require('./api');
+      const result = await api.reviews();
+      const items = result && Array.isArray(result.items) ? result.items : [];
+      // day / week / month 任一层级算今日做过复盘，与 H5 判据一致。
+      state.reviewedDate = items.reduce((max, item) => (item && item.date && item.date > max ? item.date : max), '');
+      state.reviewLoaded = true;
+      reviewFetchedAt = Date.now();
+    } catch (_) { /* 角标是附属信息，失败不外溢；不记时点，下次调用立即重试 */ }
+  })();
+  reviewInFlight = job.then(() => { reviewInFlight = null; }, () => { reviewInFlight = null; });
+  await reviewInFlight;
+}
+
 function snapshot() {
   return {
     colorKey: state.colorKey,
@@ -177,6 +218,7 @@ function snapshot() {
     agents: state.agents,
     me: state.me,
     unread: state.unread,
+    reviewDue: reviewDue(),
     overlay: state.overlay,
     authed: Boolean(getToken()),
     mock: isMock(),
@@ -185,6 +227,6 @@ function snapshot() {
 
 module.exports = {
   bootstrap, snapshot, isAuthed: () => Boolean(getToken()), loadAgents, loadMe,
-  afterLogin, syncUnread, handleApiError, resetAuth, setColor, completeOnboarding, setOverlay,
+  afterLogin, syncUnread, loadReviewBadge, handleApiError, resetAuth, setColor, completeOnboarding, setOverlay,
   planRequired, promptPlanRequired,
 };

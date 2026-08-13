@@ -27,6 +27,15 @@
         <view wx:if="{{forces.length}}" class="force-grid bf-compact" bindtap="openForces"><view wx:for="{{forces}}" wx:key="kind" class="force card"><text class="force-tag">{{item.name}} · {{item.levelLabel}}</text><text class="force-concl serif">{{item.conclusion}}</text><view class="force-bar"><view class="force-fill {{item.kind}}" style="width:{{item.strength}}%"></view></view></view></view>
         <view wx:elif="{{!loading}}" class="force-empty card" bindtap="ask"><text class="fe-t serif">三势还没断</text><text class="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</text><view class="fe-go"><text>去对话</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
 
+        <!-- 时运条：命理回主流程（主公菜单里藏太深）。紧贴三势之下，与天势呼应——天势本来就参命盘。
+             只给节奏（本月攻守 + 拐点月），不给经营结论；主公菜单的命盘/天时两行保留，两个入口并存。 -->
+        <view wx:if="{{fortuneOn}}" class="fate-strip card" bindtap="openCalendar">
+          <text class="fs-k">天 时</text>
+          <text wx:if="{{chart}}" class="fs-line">{{chart.briefLine}}</text>
+          <text wx:else class="fs-line muted">录生辰，让军师参天时定节奏</text>
+          <view class="fs-go" catchtap="openMingpan"><text>命盘</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view>
+        </view>
+
         <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="neutral" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
 
         <!-- ③ 军令区：兵器挂在军令上——AI 应用的主分发位。 -->
@@ -40,9 +49,17 @@
             <text class="task-t serif {{item.done?'struck':''}}">{{item.text}}</text>
             <text class="task-meta-info">{{item.done?(item.resultNote?'回填：'+item.resultNote:'已办 · 长按删除'):('来自 '+(item.from||'案卷')+' · 优先级 '+item.no)}}</text>
             <view wx:if="{{item.weapon}}" class="task-weapon" data-id="{{item.weapon.id}}" catchtap="openPrescription"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.playbook}}</text></text><view class="tw-go"><text>带我做</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
+            <!-- 次级动词：未完成的军令可以直接找 IP 军师把它写成可发的脚本。
+                 与兵器条并列——兵器是军师配的，写脚本是随手要的，都长在军令现场。 -->
+            <view wx:if="{{!item.done}}" class="task-verbs"><view class="task-verb" data-text="{{item.text}}" catchtap="makeScript"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text>帮我写脚本</text></view></view>
             <view wx:if="{{fillingOrderId===item.id}}" class="task-fill" catchtap="stop"><text class="tf-k">数 据 回 填 · 做完了多少？</text><view class="tf-row"><input class="tf-input native-result-input" value="{{fillingOrderText}}" maxlength="200" placeholder="如：发 8 条 / 见 3 个客户 / 回款 2 万" bindinput="inputOrderResult" bindconfirm="saveOrderResult"/><view class="tf-btn {{savingOrderResult?'busy':''}}" bindtap="saveOrderResult"><text>{{savingOrderResult?'保存中…':'回填'}}</text></view></view></view>
           </view>
           <view class="task-check" data-id="{{item.id}}" catchtap="toggleOrder"><native-icon wx:if="{{item.done}}" name="check" tone="white" size="15"></native-icon></view>
+        </view>
+        <!-- 已办超量与历史日期的军令收在这里；周段那一屏仍按天列全部。 -->
+        <view wx:if="{{doneHidden || showDoneArchive}}" class="done-more" bindtap="toggleDoneArchive">
+          <text>{{showDoneArchive ? '收起已办' : '还有 '+doneHidden+' 条已办 · 展开'}}</text>
+          <native-icon name="{{showDoneArchive?'collapse':'chevron'}}" tone="neutral" size="13"></native-icon>
         </view>
         <view wx:for="{{leftoverWeapons}}" wx:key="id" class="rx-item card" data-id="{{item.id}}" bindtap="openPrescription"><view class="rx-main"><text class="rx-for">为「{{item.problem}}」</text><text class="rx-play">{{item.playbook}}</text></view><view class="rx-cta"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>军师配了兵器</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
         <!-- 手动加令走 showModal 输入：这条 input 原本嵌在长滚动页里，点一下键盘顶起页面、

@@ -21,6 +21,9 @@ function chartView(chart) {
   return {
     monthLine: `${pattern.name || '格局待判'} · 本月宜${phase}${current && current.turning ? ' · 拐点月' : ''}`,
     turning: turning.length ? `${turning.join('/')}月` : '无',
+    // 战局页时运条用的紧凑口径：一行说完「本月怎么走 + 拐点在几月」。
+    // 命理只调节奏，不参与经营结论——这条只给节奏，不给判断（AGENTS §7 口径）。
+    briefLine: `本月宜${phase}${turning.length ? ` · 拐点月 ${turning.join('/')}月` : ''}`,
   };
 }
 
@@ -168,7 +171,7 @@ Page({
     // 日 / 周两段：日计划做今天，周计划看连续性——打卡机制的两半，缺一半就没有「别断」的压力。
     segments: ['今日军令', '本周'], segment: 0,
     weekGroups: [], weekStrip: [], weekDone: 0, weekTotal: 0,
-    orders: [], displayOrders: [], leftoverWeapons: [], backfill: null, savingBackfill: false,
+    orders: [], displayOrders: [], leftoverWeapons: [], doneHidden: 0, showDoneArchive: false, backfill: null, savingBackfill: false,
     orderDone: 0, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
     goalRows: goalRows(null), goalEdit: null, goalDraft: '', savingGoal: false,
     battleForces: [], pendingDecision: null, verifying: false,
@@ -187,6 +190,8 @@ Page({
       onboardingKnown: state.onboardingKnown,
     });
     syncTabBar(this, 1);
+    // 拉一次复盘账本判红点（15 秒节流、失败静默），拿到后再同步一遍底栏。
+    store.loadReviewBadge().then(() => syncTabBar(this, 1)).catch(() => {});
     this.load();
   },
   async load() {
@@ -256,9 +261,11 @@ Page({
     // 兵器挂在军令上（设计稿 ③）：处方按顺序贴到待执行军令；多出来的以独立兵器条排在军令之后。
     // 服务端 order.weapon 字段是下一期（AGENTS §13），先用处方做展示层挂接，点击行为不变。
     const weapons = prescriptionsResult.status === 'fulfilled' ? activePrescriptions(prescriptionsResult.value) : [];
-    const displayOrders = pendingOrders
-      .map((item, index) => Object.assign({}, item, { weapon: weapons[index] || null }))
-      .concat(doneOrders);
+    // 已办军令：当天的照常展示但限量，超出的与历史日期的收进归档行（评审意见 2026-08-12
+    // 「当天的可以展示，但也要限制数量，历史的收起来」）。展开/收起只切本地视图，不重新取数——
+    // 派生素材存在 this 上，由 applyOrderView 单点组装。
+    this._pendingWithWeapons = pendingOrders.map((item, index) => Object.assign({}, item, { weapon: weapons[index] || null }));
+    this._doneOrders = doneOrders;
     // 兵器只挂在军令上。没有军令时一条都不单列——否则「还没有军令」的引导卡下面紧跟两张
     // 兵器卡，页面既在说没事可做又在推工具（用户反馈「两个配了军旗的卡片」）；
     // 有军令时最多补 2 张，不让富余处方堆成第四个货架。
@@ -291,11 +298,22 @@ Page({
       reminders: remindersView.items || [], streak: Number(reviews.streak) || 0,
       pendingDecision: decision, battleForces,
       bizItems, bizSaved: Boolean(savedMetrics), bizEditing: false, hasDossier: Boolean(dossier),
-      orders, displayOrders, leftoverWeapons, orderDone,
+      orders, leftoverWeapons, orderDone,
       weekGroups: recentOrderGroups(allOrders), weekStrip: weekStrip(allOrders),
       weekDone: weekOrders.filter((item) => item.done).length, weekTotal: weekOrders.length,
       goalRows: goalRows(dossier && dossier.goals), backfill,
       loading: false,
+    });
+    this.applyOrderView();
+  },
+  /** 军令视图单点组装：待执行（带兵器）+ 已办（限量，其余进归档行）。展开/收起只走这里。 */
+  applyOrderView() {
+    const DONE_INLINE_MAX = 3;
+    const done = this._doneOrders || [];
+    const inline = this.data.showDoneArchive ? done : done.slice(0, DONE_INLINE_MAX);
+    this.setData({
+      displayOrders: (this._pendingWithWeapons || []).concat(inline),
+      doneHidden: Math.max(0, done.length - inline.length),
     });
   },
   selectSegment(event) { this.setData({ segment: Number(event.currentTarget.dataset.index) }); },
@@ -326,6 +344,7 @@ Page({
   },
   ask() { navTo('/packages/main/chat/index?agentKey=general&continue=1'); },
   openCalendar() { navTo('/packages/work/calendar/index'); },
+  openMingpan() { navTo('/packages/work/mingpan/index'); },
   openLedger() { if (this.requireLogin()) navTo('/packages/work/ledger/index'); },
   tapEvidence(event) {
     const item = this.data.cited[Number(event.currentTarget.dataset.index)];
@@ -384,6 +403,16 @@ Page({
   // —— 军令区（原点兵逻辑按设计稿收敛后迁入） ——
   makeCommand() { if (this.requireLogin()) navTo('/packages/main/chat/index?agentKey=general&continue=1&send=' + encodeURIComponent('按我们最近定下的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。')); },
   makeGoalPlan() { if (this.requireLogin()) navTo('/packages/main/chat/index?agentKey=strat&continue=1&send=' + encodeURIComponent('帮我把目标拆成阶梯：本周、季度、年度、3-5 年各一句话，并给出关键指标。')); },
+  // 「帮我写脚本」：从一条具体军令直接找 IP 军师产出可用脚本（原点兵横滑卡组上的动作，
+  // 随卡组一起被砍掉，2026-08-12 按评审意见补回，改挂在军令卡上——它本就该长在军令现场）。
+  makeScript(event) {
+    if (!this.requireLogin()) return;
+    const text = String(event.currentTarget.dataset.text || '').trim();
+    const prompt = text
+      ? `围绕这条军令帮我产出可直接使用的内容脚本：「${text}」。`
+      : '按我们最近定下的方案，帮我写今天要发布的内容脚本。';
+    navTo(`/packages/main/chat/index?agentKey=ip&continue=1&send=${encodeURIComponent(prompt)}`);
+  },
   openReminders() { if (this.requireLogin()) navTo('/packages/work/reminders/index'); },
   openDaily() { if (this.requireLogin()) navTo('/packages/work/daily/index'); },
   chooseForce(event) {
@@ -472,6 +501,7 @@ Page({
     } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '回填未成，稍后再试' }); }
     finally { this.setData({ savingOrderResult: false }); }
   },
+  toggleDoneArchive() { this.setData({ showDoneArchive: !this.data.showDoneArchive }, () => this.applyOrderView()); },
   openOrder(event) { const id = event.currentTarget.dataset.id; if (id) navTo(`/packages/work/command/index?id=${encodeURIComponent(id)}`); },
   removeOrder(event) { const id = event.currentTarget.dataset.id; const text = event.currentTarget.dataset.text || '这条军令'; wx.showModal({ title: '删除军令', content: `确认删除「${text}」？`, confirmText: '删除', success: async (result) => { if (!result.confirm) return; await api.removeOrder(id).catch((error) => wx.showToast({ title: error.message || '删除失败', icon: 'none' })); await this.load(); } }); },
   inputBackfill(event) { this._backfill[event.currentTarget.dataset.field] = event.detail.value; },

@@ -44,7 +44,9 @@ function syncTabBar(page, selected) {
   const tabbar = page && page.getTabBar && page.getTabBar();
   if (tabbar && tabbar.setData) {
     const snapshot = store.snapshot();
-    const next = { selected, themeClass: snapshot.themeClass, unread: snapshot.unread, overlay: snapshot.overlay };
+    // reviewDue 是战局 tab 的待复盘红点（store 里按「账本取到过 + 今日未复盘 + 过 21:00」判定）。
+    // 此前这里不下发，底栏消费的永远是组件默认的 false —— 红点从来不亮。
+    const next = { selected, themeClass: snapshot.themeClass, unread: snapshot.unread, reviewDue: snapshot.reviewDue, overlay: snapshot.overlay };
     if (typeof tabbar.syncState === 'function') tabbar.syncState(next);
     else tabbar.setData(next);
   }
