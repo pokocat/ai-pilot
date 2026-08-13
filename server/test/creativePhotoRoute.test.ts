@@ -414,6 +414,10 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
     assert.match(first.system, /object-fit:cover/);
     assert.match(first.system, /不许把它缩成一张卡片/);
     assert.match(first.system, /transform:scale/, '二次裁切会把人脸切掉，必须显式禁止');
+    // 2026-08-12 预发实测：模型守住了"铺底"，却又在版面中间插了一张同源白边小图，像贴歪的拍立得。
+    // "必须铺底" ≠ "只能用一次"，两条都要写。
+    assert.match(first.system, /只能出现一次/, '占位符复用会让画面像贴错素材');
+    assert.match(first.system, /缩略图、相框、卡片/, '把复用的具体形态点名，模型才躲得开');
     assert.ok(polish.system.includes('object-fit:cover'), '打磨轮不许丢掉背景层规则');
     assert.ok(first.user.includes(CANVAS_PLACEHOLDER.visual), '素材清单里要有主视觉');
   });
