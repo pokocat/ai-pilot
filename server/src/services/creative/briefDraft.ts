@@ -1,10 +1,12 @@
-// GET /creative/posters/brief-draft 的实现：从「海报设计师」的成果消息 + 已确认 BrandKit 预填 PosterBrief 草稿。
+// GET /creative/posters/brief-draft 的实现：从**客户与海报设计师的整段对话** + 已确认 BrandKit
+// 预填 PosterBrief 草稿，并写一段给客户看的「设计说明」（designNote）。
 //
-// 为什么要预填：让用户在确认页只做增删改，而不是对着空表单从零手填（方案 §5.3）。
+// 为什么要预填：用户刚跟设计师聊完，再让他对着空表把刚说过的话重打一遍，
+// 是把他找军师的理由原样退回给他。确认页的主视图是 designNote，表单收在「改一改」里。
 // 三层兜底，任一层失败都还能给出可用草稿：
-//   ① LLM 结构化抽取（zod 约束）→ 拿到文案 + templateKey + templateReason；
-//   ② 提示词里让设计师直出的「成品图版式推荐：xxx（key）—— 理由」行 → 正则兜住 templateKey/理由；
-//   ③ 全失败：headline=成果标题、scene 按 agent 推断、templateKey 按 scene 默认。
+//   ① LLM 结构化抽取（zod 约束）→ 文案 + templateKey + templateReason + designNote；
+//   ② 老会话里若还留着「成品图版式推荐：xxx（key）—— 理由」行 → 正则兜住 templateKey/理由；
+//   ③ 全失败：字段留空、scene 按 agent 推断、templateKey 按 scene 默认，designNote 不下发。
 // BrandKit 只在 approvedAt 非空时合并（与 BrandKit 现有口径一致：生态产品只读 approved 的资产包）。
 import { z } from 'zod';
 import { prisma } from '../../db.js';
@@ -35,6 +37,7 @@ const DraftSchema = z.object({
   visualDirection: z.string().catch('').default(''),
   templateKey: z.string().catch('').default(''),
   templateReason: z.string().catch('').default(''),
+  designNote: z.string().catch('').default(''),
 });
 
 const DRAFT_SYS = [
@@ -56,7 +59,20 @@ const DRAFT_SYS = [
   '  （不出现参数、模型、渲染、模板 key 之类技术说法）；',
   '- 抽不出的字段留空字符串，不要编造。',
   '',
-  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","templateKey":"","templateReason":""}',
+  '【designNote：写给客户看的设计说明，2–3 句，确认页会把它放在最上面】',
+  '用人话讲清这张海报会长什么样，让客户**不用看下面的表格**就知道对不对。要说到：',
+  '① 这张讲的是什么（主题）；② 画面上会放哪些内容（主标题、几条卖点、行动号召、有没有二维码）；',
+  '③ 什么气质与配色；④ 为什么用这个版式（一句话）。',
+  '按海报的通用设计原则来描述，别写成参数清单：',
+  '- 对齐：元素咬住同一条轴，不是各摆各的；',
+  '- 分组：相关的信息贴在一起、不相关的拉开，间距本身在表达从属关系；',
+  '- 识别性：主标题一眼可读，层级靠字号与位置拉开；',
+  '- 颜色搭配：一主色一辅色一强调色，强调色只用在最该被看见的那一处；',
+  '- 风格统一：整张图只有一套形状语言（圆角、线宽、字体族保持一致）。',
+  '不要出现「渲染」「模板」「参数」「模型」这类技术说法，也不要复述客户原话。',
+  '对话太短、信息不足以描述画面时，designNote 留空字符串——**宁可不写，也不要编一个看起来很像的**。',
+  '',
+  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","templateKey":"","templateReason":"","designNote":""}',
 ].join('\n');
 
 function isTemplateKey(v: unknown): v is TemplateKey {
@@ -224,5 +240,12 @@ export async function buildPosterBriefDraft(opts: {
     if (kit) brief = mergeBrandKit(brief, kit);
   }
 
-  return { brief, ...(templateReason ? { templateReason } : {}) };
+  // designNote 只有真抽出来才下发：抽不出时确认页退回表单打头，
+  // 而不是显示一句模型编的、看起来很像但跟这张海报无关的话。
+  const designNote = clip(ai?.designNote ?? '', 240);
+  return {
+    brief,
+    ...(templateReason ? { templateReason } : {}),
+    ...(designNote ? { designNote } : {}),
+  };
 }

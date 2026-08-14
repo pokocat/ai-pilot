@@ -8,6 +8,24 @@
 .form-title { font-size: 16px; font-weight: 600; }
 .ps-pad { padding-top: 10px; }
 .ps-reason { border-color: var(--accent); }
+/* 设计说明卡：本页主视图。用左侧一道重点色竖线而不是整块底色 ——
+   底色一铺就会跟下面的档位卡抢，而这块要的是"先读我"，不是"我最花哨"。 */
+.ps-note-card {
+  margin: 4px 0 14px; padding: 12px 14px;
+  border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0;
+  background: var(--surface-2);
+}
+.ps-note-k { display: block; font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
+.ps-note-b { display: block; margin-top: 6px; font-size: 14px; line-height: 1.7; color: var(--ink-1); }
+
+/* 「这些细节要改吗」：表单的开关。做成一行弱化的文字 + 箭头，不做成按钮 ——
+   它是逃生口不是主动作，主动作是底部那个「生成成品图」。 */
+.ps-more {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  margin: 2px 0 12px; padding: 9px 0;
+}
+.ps-more-t { font-size: 13px; color: var(--ink-3); }
+
 /* 档位示意图：固定模板图，横躺在卡片顶部说明两档差异。
    16:9 而不是海报本身的 3:4——这里要的是"一眼看出差别"，不是还原成品比例；
    3:4 会把卡片撑得很高，两档并排时用户还得滚动才能对比。 */

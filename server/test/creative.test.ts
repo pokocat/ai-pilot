@@ -6,7 +6,7 @@
 //      cleanBusiness() 每例都把它删了，所以每个 describe 的 beforeEach 都要 enableCreative()。
 //   ② featureFlag 读有 60s 内存缓存，而 cleanBusiness() 只删库不清缓存，setFeatureFlag 也只清
 //      enabled 那半边 → 改完开关/payload 一律补一次 __clearFeatureCache()。
-import { test, describe, before, after, beforeEach } from 'node:test';
+import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
@@ -21,6 +21,11 @@ import { STALE_RUNNING_MS } from '../src/services/creative/worker.js';
 import { parseTemplateRecommendation } from '../src/services/creative/briefDraft.js';
 import { normalizePosterBrief, normalizeTier } from '../src/services/creative/schema.js';
 import { buildVisualBody } from '../src/services/creative/visualProvider.js';
+// designNote 抽取分支守卫（见文末新增 describe）：默认测试环境无 live provider，
+// 240 截断 / DRAFT_SYS 是否撑爆抽取分支这两条必须真的走到「AI 吐出了 designNote」这条分支才验证得到，
+// 用 AI_ALLOW_REAL_PROVIDER=1 + globalThis.fetch 打桩放行 provider 代码路径（不出网）——
+// 与 test/structuredBilling.test.ts、test/gatewayProvider.test.ts 同一手法（见 src/env.ts isAiTestMode 注释）。
+import { configurePurpose, __wipeAiV2 } from '../src/services/aiV2Admin.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
@@ -561,6 +566,18 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.ok(r.body.templateReason && r.body.templateReason.length > 0, '带一句给客户看的理由');
   });
 
+  // 2026-08-14 新增：designNote 是确认页的主视图，「抽不出来」与「抽出来是空串」对前端是
+  // 两种不同行为（showForm 的初值 = !draftNote）。必须钉死「键整个不存在」，不是「值为假」——
+  // 用 assert.ok(!('designNote' in body)) 而不是 assert.ok(!body.designNote)，
+  // 否则哪天有人手滑把 `designNote: ''` 也下发了，这条用例还是绿的。
+  test('brief-draft：无 provider 时 designNote 键不下发（不是空串，是键都不存在）', async () => {
+    const { token, tenantId } = await posterUser();
+    const messageId = await reportMessage(token, tenantId);
+    const r = await api('GET', `/api/creative/posters/brief-draft?messageId=${messageId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok(!('designNote' in r.body), '抽不出说明时确认页要退回表单打头，键必须整个不存在');
+  });
+
   test('brief-draft：无推荐行时按 scene 默认模板兜底', async () => {
     const { token, tenantId } = await posterUser();
     const messageId = await reportMessage(token, tenantId, {
@@ -571,6 +588,7 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.brief.scene, 'event', 'promo agent → event');
     assert.equal(r.body.brief.templateKey, 'business_launch', 'event 的默认模板');
+    assert.ok(!('designNote' in r.body), '这条也是无 provider 路径，同样不该带 designNote 键');
   });
 
   // 2026-08-13 改造前：越权/缺参分别报 404 MESSAGE_NOT_FOUND / 422 MESSAGE_ID_REQUIRED——
@@ -617,6 +635,7 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     const own = await api('GET', `/api/creative/posters/brief-draft?sessionId=${victimSession.id}`, { token: victim });
     assert.equal(own.status, 200, JSON.stringify(own.body));
     assert.equal(own.body.brief.templateKey, 'person_hero', '本人能读到自己会话里的版式推荐');
+    assert.ok(!('designNote' in own.body), '无 provider 时本人读自己的会话也不该带 designNote 键');
   });
 
   // 下面三条是任务点名要核实的 loadConversationText 边界：空会话 / 只有 user 消息 / 超长会话，
@@ -630,6 +649,7 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.brief.scene, 'personal_brand', '空会话按 agentKey 兜底 scene，不炸');
     assert.equal(r.body.brief.templateKey, 'person_hero', 'scene 默认模板兜底');
+    assert.ok(!('designNote' in r.body), '空会话没有素材可抽，designNote 键不该出现');
   });
 
   test('brief-draft：只有 user 消息（设计师还没回）不炸', async () => {
@@ -643,6 +663,7 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.brief.scene, 'personal_brand');
+    assert.ok(!('designNote' in r.body), '设计师还没回、且无 provider，designNote 键不该出现');
   });
 
   test('brief-draft：超长会话（消息数超上限 + 单条超长文本）不炸，尾部推荐行仍留在截取窗口内', async () => {
@@ -671,6 +692,7 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.brief.scene, 'personal_brand');
     assert.equal(r.body.brief.templateKey, 'person_hero', '超长文本尾部的推荐行仍在保留的字数窗口内，没被切没');
+    assert.ok(!('designNote' in r.body), '无 provider 时即便会话很长也不该带 designNote 键');
   });
 
   test('建单挂越权 messageId → 404 MESSAGE_NOT_FOUND，不扣费', async () => {
@@ -957,5 +979,146 @@ describe('海报成品图 · 纯函数单测', () => {
     assert.equal(body.prompt, 'p\n【排除】q');
     assert.equal('negative_prompt' in body, false);
     assert.equal('watermark' in body, false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// designNote 抽取分支（打桩 provider）
+//
+// 上面所有 brief-draft 用例都在默认测试环境下跑（isAiTestMode()=true → structured() 恒回 null），
+// 只覆盖得到「抽不出说明」这一侧。240 字截断、以及 DRAFT_SYS 加长后会不会把 structured() 的
+// 输入撑爆/把结尾的 JSON 格式约定挤掉，这两条必须真的走到「AI 吐出了 designNote」这条分支才验证得到。
+//
+// 用 AI_ALLOW_REAL_PROVIDER=1 只放行 provider **代码路径**（isAiTestMode 短路判断），
+// globalThis.fetch 仍打桩、绝不出网——与 test/structuredBilling.test.ts、test/gatewayProvider.test.ts
+// 同一手法（该手法本身记在 src/env.ts 的 isAiTestMode 注释里，不是本次新发明）。
+// structured() 内部走 getAiConfig() 读的是全局 'chat' purpose 路由（未传 purpose/agentKey），
+// 与 gatewayProvider.test.ts 那种「配单个 agent 的 providerMode」不是同一层，
+// 必须用 aiV2Admin.configurePurpose('chat', …) 才配得到 structured() 真正读取的那份配置。
+describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provider）', () => {
+  const CHAT_URL = '/chat/completions';
+  const realFetch = globalThis.fetch;
+
+  /**
+   * 打桩一次「合法 OpenAI 兼容响应」，content 是 DraftSchema 形状的 JSON。
+   * onRequest 可读到本次真实发出的 system 文本与累计调用次数——
+   * 用来验证 DRAFT_SYS 有没有被截断、以及是否只用了一轮（未触发校验失败后的回喂修复）。
+   */
+  function stubDraftJson(
+    payload: Record<string, unknown>,
+    onRequest?: (systemContent: string, callCount: number) => void,
+  ): void {
+    let calls = 0;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+      calls++;
+      const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: { role?: string; content?: unknown }[] };
+      const sys = body.messages?.find((m) => m.role === 'system')?.content;
+      onRequest?.(typeof sys === 'string' ? sys : '', calls);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify(payload) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+  }
+
+  /** 造一个有真实对话内容的会话给抽取分支读（内容本身不重要——fetch 已打桩，模型响应由用例指定）。 */
+  async function conversationSession(userId: string, tenantId: string): Promise<string> {
+    const session = await prisma.session.create({
+      data: { tenantId, userId, agentKey: 'poster', title: '打桩抽取会话' },
+    });
+    await prisma.message.create({
+      data: { sessionId: session.id, role: 'user', contentJson: { text: '帮我做张招生海报，主打信任感' } },
+    });
+    await prisma.message.create({
+      data: { sessionId: session.id, role: 'assistant', contentJson: { text: '好的，我们聊聊细节……' } },
+    });
+    return session.id;
+  }
+
+  before(async () => {
+    process.env.AI_ALLOW_REAL_PROVIDER = '1'; // 只放行 provider 代码路径；fetch 仍打桩，不出网
+    await __wipeAiV2();
+    await configurePurpose('chat', {
+      label: 'brief-draft 抽取打桩', provider: 'openai',
+      baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123',
+    });
+  });
+  after(async () => {
+    delete process.env.AI_ALLOW_REAL_PROVIDER;
+    globalThis.fetch = realFetch;
+    await __wipeAiV2(); // 恢复现场：不把打桩用的假路由留在库里给后面的文件添麻烦
+  });
+  beforeEach(async () => {
+    await cleanBusiness();
+    await seedBaseline();
+    await enableCreative();
+  });
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  test('designNote 超 240 字被截断到 240（真实抽取分支，不是兜底空值）', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩截断用户');
+    const sessionId = await conversationSession(token, tenantId);
+    const longNote = 'A'.repeat(400);
+    stubDraftJson({
+      scene: 'personal_brand', goal: '测试目标', audience: '测试受众',
+      headline: '标题', subheadline: '副标题', proofPoints: ['卖点一'],
+      cta: '立即咨询', visualDirection: '深色背景', templateKey: 'person_hero',
+      templateReason: '理由', designNote: longNote,
+    });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.ok('designNote' in r.body, '真抽出来了就必须下发这个键');
+    assert.equal(r.body.designNote.length, 240, '超过上限必须截断到 240，不是原样透传也不是清空');
+    assert.equal(r.body.designNote, longNote.slice(0, 240), '截断取前 240 个字符，不做省略号处理');
+  });
+
+  test('designNote 未超 240 字原样下发，不做多余处理', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩正常用户');
+    const sessionId = await conversationSession(token, tenantId);
+    const shortNote = '这张海报主打信任感，主标题居中，配色克制，二维码放右下角。';
+    stubDraftJson({ designNote: shortNote });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.designNote, shortNote, '未超限不截断、不改写');
+  });
+
+  // 任务点名担心的点：DRAFT_SYS 加了一整段「五条设计原则」后变长了，会不会把 structured() 的
+  // 输入撑爆、或把结尾的「只输出 JSON」格式约定挤掉。用真实（未改写）的当前 DRAFT_SYS 走一次
+  // 打桩抽取：①断言请求里确实带着完整的五条原则与格式约定发了出去（没被裁剪/顶掉）；
+  // ②首轮就拿到结构化结果（未触发「校验失败 → 回喂一轮修复」），证明当前长度没有压垮这条链路。
+  // 声明范围：这只验证「代码没有在长 system prompt 下自己出故障」（长度/解析/schema 都过关）；
+  // 真实模型面对这么长的 system prompt 会不会分心、遵从度下降，这件事本身在打桩环境里
+  // 无法验证——fetch 是我们自己接管的，模型从未真正读过这段提示词。
+  test('DRAFT_SYS 变长后仍完整送达且首轮抽取成功——排查"是否把 structured() 输入撑爆"', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩长提示词用户');
+    const sessionId = await conversationSession(token, tenantId);
+    let capturedSystem = '';
+    let callCount = 0;
+    stubDraftJson(
+      { scene: 'personal_brand', headline: '标题', designNote: '一段合法的设计说明。' },
+      (sys, calls) => { capturedSystem = sys; callCount = calls; },
+    );
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+
+    // 五条设计原则一条不少地送到了模型面前（没有被任何截断逻辑吃掉中间一段）。
+    for (const marker of ['对齐', '分组', '识别性', '颜色搭配', '风格统一']) {
+      assert.ok(capturedSystem.includes(marker), `DRAFT_SYS 里的「${marker}」原则丢失或被截断`);
+    }
+    // 结尾的 JSON 格式约定仍在尾部完整在场（没被前面新增的大段文字挤出窗口）。
+    assert.ok(capturedSystem.includes('只输出 JSON'), 'JSON 输出格式约定被淹没/顶掉');
+    assert.ok(capturedSystem.slice(-200).includes('"designNote":""}'), 'designNote 没有出现在 JSON 壳的既定位置——格式约定被改写');
+    // 首轮（1 次调用）就通过了 schema 校验；若为 2 说明触发了「回喂修复」轮，
+    // 意味着模型首轮输出没通过 zod 校验——即便这里是打桩、必过 schema，也该恒为 1。
+    assert.equal(callCount, 1, '首轮即应通过 schema 校验；为 2 则说明抽取分支已经不稳定（触发了修复轮）');
+    assert.equal(r.body.brief.headline, '标题', '确认拿到的是真结构化结果，不是解析失败后的兜底空值');
   });
 });
