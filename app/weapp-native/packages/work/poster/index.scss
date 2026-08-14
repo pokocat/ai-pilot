@@ -8,7 +8,17 @@
 .form-title { font-size: 16px; font-weight: 600; }
 .ps-pad { padding-top: 10px; }
 .ps-reason { border-color: var(--accent); }
-.ps-tpl.on { border-color: var(--accent); }
+/* 档位示意图：固定模板图，横躺在卡片顶部说明两档差异。
+   16:9 而不是海报本身的 3:4——这里要的是"一眼看出差别"，不是还原成品比例；
+   3:4 会把卡片撑得很高，两档并排时用户还得滚动才能对比。 */
+.ps-tier-art {
+  display: block; width: 100%; height: 96px;
+  border-radius: 8px; margin-bottom: 9px; background: var(--surface-2);
+}
+
+/* 选中态不靠背景色（理由见 app/src 同名文件的注释）：重点色只落在描边与标题上。 */
+.ps-tpl.on { border-color: var(--accent); border-width: 2px; margin: -1px; }
+.ps-tpl.on .ps-tpl-n { color: var(--accent); }
 .ps-check.on { background: var(--accent); border-color: var(--accent); }
 .ps-thumb-x { display: flex; align-items: center; justify-content: center; }
 .ps-submit-err-a { color: var(--accent); }

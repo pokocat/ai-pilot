@@ -1741,8 +1741,19 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(chat, /status && status\.enabled && Number\.isFinite\(price\)/);
   assert.match(chatWxml, /poster-enabled="\{\{item\.reportReady&&posterEnabled\}\}"/);
   assert.match(chatWxml, /bindposter="openPoster" bindviewposter="openPosterJob"/);
-  assert.match(chat, /openPoster\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?this\._agentKey !== 'poster'[\s\S]*?\/packages\/work\/poster\/index\?/);
-  assert.match(chat, /messageId=\$\{encodeURIComponent\(item\.messageId\)\}/);
+  // 2026-08-13 改造：海报设计师**不再产出方案报告**（deliverableKey 置空），报告卡这个宿主没了。
+  // 出图入口改为海报会话内常驻一条，判据从「这条消息是成果卡」换成「这是海报会话 + 能力开着 + 有会话」。
+  // 旧断言钉的正是被拿掉的那条链（reportReady + messageId），删掉不是放松而是跟着契约走。
+  assert.match(chat, /openPoster\(\)[\s\S]*?this\._agentKey !== 'poster' \|\| !this\.data\.posterEnabled[\s\S]*?\/packages\/work\/poster\/index\?sessionId=/,
+    '出图入口判据 = 海报会话 + 能力开着');
+  assert.match(chat, /if \(!this\._sessionId\)[\s\S]{0,160}先跟设计师说说/,
+    '还没开口就点出图 → 抽出来必然是张空表，先拦住');
+  assert.doesNotMatch(chat, /openPoster[\s\S]{0,400}messageId=/,
+    '需求单改由整段对话抽取，不再挂在某一条成果消息上');
+  assert.match(chatWxml, /class="chat-poster-bar"[\s\S]*?bindtap="openPoster"/, '常驻入口条要在');
+  assert.match(chatWxml, /wx:if="\{\{posterEnabled&&!showLogin\}\}"/, '能力关着或未登录时不露出这条');
+  // （原「出图链路要带 messageId」的断言随 2026-08-13 改造一并作废：需求单改从整段对话抽，
+  //   openPoster 只带 sessionId。上面的 doesNotMatch 已经把"不许再挂回某条消息"钉死。）
 
   // ★ 档位（2026-08-13）：结算按钮上的价格必须跟着**选中的档位**走。
   //   选了高级（25 钻）按钮却写 x10、扣的却是 25 —— 那是在扣费那一刻说假话。
@@ -1750,7 +1761,7 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(posterWxml, /x\{\{premiumOn&&tier==='premium'\?premiumPrice:price\}\}/, '按钮价格要跟随档位');
   assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard';/, '提交带的档位判据同源');
   assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]{0,400}档位/, '高级档不可用时整块不渲染');
-  // 冷启动（从锦囊直接开工、没有 messageId）不是故障：服务端本来就 422 MESSAGE_ID_REQUIRED，
+  // 冷启动（没有对话上下文）不是故障：服务端现在回空草稿（2026-08-13 前是 422 MESSAGE_ID_REQUIRED），
   // 弹报错横幅会把一次正常的空白表单说成出了事。
   assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
   // ★ normalizeStatus 是白名单：没显式搬过去的字段会被整层吃掉。档位上线时就漏了这两个，

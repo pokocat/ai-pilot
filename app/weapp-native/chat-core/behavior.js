@@ -1810,13 +1810,17 @@ const methods = {
     } catch (error) { wx.hideLoading(); store.handleApiError(error, { fallbackTitle: error.message || 'PDF 生成失败' }); }
     finally { this.safeSetData({ reportBusy: '' }); }
   },
-  openPoster(event) {
-    const item = this.reportMessage(event.currentTarget.dataset.index);
-    if (!item || !item.reportReady || !isReportReady(item.messageId, item.deliverable)) return;
-    if (this._agentKey !== 'poster' || !this.data.posterEnabled || !item.messageId) return;
-    const query = [`messageId=${encodeURIComponent(item.messageId)}`];
-    if (this._sessionId) query.push(`sessionId=${encodeURIComponent(this._sessionId)}`);
-    if (!navTo(`/packages/work/poster/index?${query.join('&')}`)) wx.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  /**
+   * 去出图。**判据从「这条消息是成果卡」改成「这是海报会话且能力开着」**（2026-08-13）：
+   * 海报设计师不再产出方案报告，报告卡这个宿主没了，入口改为会话内常驻一条。
+   * 需求单由服务端从**整段对话**里抽（briefDraft.loadConversationText），所以只带 sessionId；
+   * 没有 sessionId（还没发过第一句）就先不放行——那时对话是空的，抽出来必然是张空表。
+   */
+  openPoster() {
+    if (this._agentKey !== 'poster' || !this.data.posterEnabled) return;
+    if (!this._sessionId) { wx.showToast({ title: '先跟设计师说说这张海报要做什么', icon: 'none' }); return; }
+    const url = `/packages/work/poster/index?sessionId=${encodeURIComponent(this._sessionId)}`;
+    if (!navTo(url)) wx.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
   },
   openPosterJob(event) {
     const item = this.reportMessage(event.currentTarget.dataset.index);

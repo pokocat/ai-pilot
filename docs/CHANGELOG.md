@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-13 · 海报设计师不再产出方案报告：改成短对话问需求，brief 从整段对话抽 · 影响面：海报设计师提示词与产出形态、出图入口、需求单预填、确认页配色
+
+- **拿掉方案报告**：poster 的 `deliverableKey` 置空。此前它配着 `'海报设计'` 且 `skillsConfig` 没写 `deliverableMode:'on-demand'`，于是 `willDeliver` 恒为真——用户第一句「帮我做个营销海报」就吐出一整份带「军师 敬上」「下一步 save_to_library / export_pdf」的结构化报告卡，跟总军师一模一样。海报是**图**不是文档。⚠️ 别再配回去：`outputIntent` 的 `OUTPUT_NOUN` 白名单含「海报」，哪怕改成 on-demand，「帮我做个海报」也会命中报告意图照样出卡。
+- **提示词重写**（`POSTER_DESIGNER_PROMPT`，不再走 `creativePrompt()` 模板）：砍掉总军师的通用商业顾问前缀与报告式产出要求；改成只问四件事（要促成什么 / 给谁看 / 最大那句话 / 行动那句话）、一次最多问两个、客户答不上来时替他拟选项、视觉气质由设计师提议而不是反问客户。手艺判断（层级 / 留白 / 克制 / 密度 / 文字即图形）移植自 `creative/canvas-design/SKILL.upstream.md`，与服务端出图链路同源。
+- **brief 改从整段对话抽**：`buildPosterBriefDraft` 不再要求 `messageId` + `role='report'`，改为 `resolveDraftSession` + `loadConversationText`（末尾 24 条、6000 字上限、按时间正序）。抽取提示词补两条口径：客户改过主意以**最后一次**为准；设计师替客户拟的措辞若无反对视为已确认。无上下文 → 回空草稿 `{brief:{}}`，不再 422。**归属校验对 sessionId 与 messageId 两个分支都做**（越权用例带对照组钉死）。
+- **出图入口换宿主**：报告卡没了，改为海报会话内输入框上方常驻一条；只带 sessionId。还没发过第一句时拦住——那时对话是空的，抽出来必然是空表。
+- **确认页配色**：档位/版式的选中态原先只把背景换成 `--surface-2`，与米白页面底明度差极小，叠上 accent 描边后重点色与背景糊成一片。改为**不用背景色**：2px 重点色描边 + 标题转重点色，重点色只落在线与字上。
+- **档位对比图位**：两档各留一张**固定模板图**（`/assets/tier/{standard,premium}.jpg`），说明两档差异，不是每次生成的预览。图未就位时 `binderror` 收起该图退化成纯文字，不留破图框；补图进包即生效，代码不用再动。
+- 测试：server 1628 全绿（新增跨用户越权 sessionId + 空会话 / 只有 user 消息 / 超长会话三条边界）；app 140 + native 103 全绿。两条钉死旧契约的用例已改为钉新契约（headline 不再兜成果标题、越权与缺参一律 200 + 空草稿并用 deepEqual 兜住字段泄漏）。
+
 ### 2026-08-13 · 计费拆成两条轴：对话走 token、产出物按「技能×规格」走钻石 · 影响面：全部智能体的对话计费、海报定价存放位置、运营后台计费编辑、对话页计费提示
 
 - **对话轴**：所有对话一律扣月度 token 额度 × `Agent.billingRatio`。`Agent.meterUnit` 就此**不再参与任何计费判定**（三处扣费点：`sessions.ts` 同步与流式、`generationRequest.ts`）。旧行为是 `meterUnit='image'` 的智能体按**对话轮次**扣钻——线上 poster 8 钻/轮、ip 3 钻/轮且完全不吃 token，聊 5 轮 40 钻，而成品图在另一条链路上另收一次。`diamondCost` 恒为 0；`reserveCredits(…0…)` 在 credits.ts 里是显式空操作，下游结算/退款/余额回显形状不变。

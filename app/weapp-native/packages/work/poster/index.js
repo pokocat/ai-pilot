@@ -50,6 +50,10 @@ Page({
     proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
     // 档位：premiumOn 为假时整块不渲染（供应商没配好时露出一个必然 422 的选项比不露更糟）。
     tier: 'standard', premiumPrice: 0, premiumOn: false,
+    // 档位示意图是**固定模板图**（说明两档差异，不是每次生成的预览）。
+    // 图还没放进包里时 binderror 会把对应项置 false，卡片退化成纯文字——
+    // 缺图不留破图框（product-ui-completeness：missing media 必须有兜底）。
+    tierArt: { standard: true, premium: true },
     assets: [
       { role: 'portrait', label: ROLE_LABEL.portrait, assetId: '', path: '', uploading: false },
       { role: 'logo', label: ROLE_LABEL.logo, assetId: '', path: '', uploading: false },
@@ -152,6 +156,13 @@ Page({
   },
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
+  /** 示意图加载失败（还没补图 / 路径错）→ 只收起这一张，不影响另一档，也不报错打扰用户。 */
+  tierArtError(event) {
+    const key = String(event.currentTarget.dataset.tier || '');
+    if (key !== 'standard' && key !== 'premium') return;
+    if (!this.data.tierArt[key]) return;
+    this.setData({ [`tierArt.${key}`]: false });
+  },
   chooseTier(event) { this.setData({ tier: String(event.currentTarget.dataset.key || 'standard') }); },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },
 

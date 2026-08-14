@@ -552,8 +552,11 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.brief.ratio, '3:4');
     assert.equal(r.body.brief.scene, 'personal_brand', 'poster agent → personal_brand');
-    assert.ok(r.body.brief.headline, 'headline 至少兜到成果标题');
-    // 兜底层②：从成果原文的「成品图版式推荐」行解析
+    // 2026-08-13 改造：headline 抽不出就留空，不再兜底成果标题——那是方案报告时代的产物，
+    // 海报设计师现在不出报告（见 briefDraft.ts buildPosterBriefDraft 的注释）。无 provider
+    // 时结构化抽取必失败，headline 因此确定性地是空串，不是"至少有点什么"。
+    assert.equal(r.body.brief.headline, '', 'AI 不可用时 headline 留空，不再兜底成果标题');
+    // 兜底层②：从成果原文的「成品图版式推荐」行解析——这条不依赖 provider，AI 抽取失败也照样拿到。
     assert.equal(r.body.brief.templateKey, 'person_hero');
     assert.ok(r.body.templateReason && r.body.templateReason.length > 0, '带一句给客户看的理由');
   });
@@ -570,18 +573,104 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.body.brief.templateKey, 'business_launch', 'event 的默认模板');
   });
 
-  test('brief-draft：越权 messageId → 404；缺 messageId → 422', async () => {
+  // 2026-08-13 改造前：越权/缺参分别报 404 MESSAGE_NOT_FOUND / 422 MESSAGE_ID_REQUIRED——
+  // 那是「brief-draft 必须锚定一条 report 成果消息」时代的校验。现在 brief-draft 只是「读得到
+  // 会话就抽、读不到就给空表单」的预填助手，缺参＝没线索、越权＝没权限，两者都不算错误，
+  // 统一回 200 + 空 brief（见 briefDraft.ts buildPosterBriefDraft/resolveDraftSession 的注释）。
+  test('brief-draft：越权 messageId 与缺 messageId 都不报错，统一回空草稿（不泄漏也不 4xx）', async () => {
     const { token } = await posterUser(100, '本人');
     const { token: other, tenantId: otherTenant } = await posterUser(100, '别人');
     const foreign = await reportMessage(other, otherTenant);
 
     const stolen = await api('GET', `/api/creative/posters/brief-draft?messageId=${foreign}`, { token });
-    assert.equal(stolen.status, 404, JSON.stringify(stolen.body));
-    assert.equal(stolen.body.code, 'MESSAGE_NOT_FOUND');
+    assert.equal(stolen.status, 200, JSON.stringify(stolen.body));
+    assert.deepEqual(stolen.body, { brief: {} }, '越权 messageId 拿不到对方任何字段，也不该用 404 探测资源是否存在');
 
     const missing = await api('GET', '/api/creative/posters/brief-draft', { token });
-    assert.equal(missing.status, 422);
-    assert.equal(missing.body.code, 'MESSAGE_ID_REQUIRED');
+    assert.equal(missing.status, 200, JSON.stringify(missing.body));
+    assert.deepEqual(missing.body, { brief: {} }, '缺 messageId 不再是校验错误，前端渲染空表单即可');
+  });
+
+  // 任务要求专门补的一条：resolveDraftSession 的 sessionId 分支和 messageId 分支是两段独立查询，
+  // 各自都要卡权限——此前所有用例都只走 messageId，sessionId 分支的跨用户场景完全没覆盖过。
+  test('TC-G brief-draft：跨用户越权 sessionId 拿不到对方内容', async () => {
+    const { token: mine } = await posterUser(100, '本人3');
+    const { token: victim, tenantId: victimTenant } = await posterUser(100, '受害者');
+    // 受害者会话里塞一条实打实能抽出版式推荐的消息，确保下面「拿不到」不是因为这个会话本来就是空的。
+    const victimSession = await prisma.session.create({
+      data: { tenantId: victimTenant, userId: victim, agentKey: 'poster', title: '受害者的海报会话' },
+    });
+    await prisma.message.create({
+      data: {
+        sessionId: victimSession.id,
+        role: 'assistant',
+        contentJson: { text: '够了，去出图吧。成品图版式推荐：人物主视觉（person_hero）—— 你的信任感来自本人出镜' },
+      },
+    });
+
+    const stolen = await api('GET', `/api/creative/posters/brief-draft?sessionId=${victimSession.id}`, { token: mine });
+    assert.equal(stolen.status, 200, JSON.stringify(stolen.body));
+    assert.deepEqual(stolen.body, { brief: {} }, 'A 拿 B 的 sessionId 必须拿不到任何字段，尤其不能拿到 person_hero 推荐');
+
+    // 对照组：受害者本人用同一个 sessionId 读得到东西——证明上面的「拿不到」是权限拦的，
+    // 不是 sessionId 分支本身失灵才恰好返回空。
+    const own = await api('GET', `/api/creative/posters/brief-draft?sessionId=${victimSession.id}`, { token: victim });
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    assert.equal(own.body.brief.templateKey, 'person_hero', '本人能读到自己会话里的版式推荐');
+  });
+
+  // 下面三条是任务点名要核实的 loadConversationText 边界：空会话 / 只有 user 消息 / 超长会话，
+  // 都必须不炸（不是必须抽出多少内容，是不能 500）。
+  test('brief-draft：空会话（0 条消息）不炸，按 agent 兜底出可用草稿', async () => {
+    const { token, tenantId } = await posterUser(100, '空会话用户');
+    const session = await prisma.session.create({
+      data: { tenantId, userId: token, agentKey: 'poster', title: '还没聊过' },
+    });
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.brief.scene, 'personal_brand', '空会话按 agentKey 兜底 scene，不炸');
+    assert.equal(r.body.brief.templateKey, 'person_hero', 'scene 默认模板兜底');
+  });
+
+  test('brief-draft：只有 user 消息（设计师还没回）不炸', async () => {
+    const { token, tenantId } = await posterUser(100, '只发了一句的用户');
+    const session = await prisma.session.create({
+      data: { tenantId, userId: token, agentKey: 'poster', title: '刚开口' },
+    });
+    await prisma.message.create({
+      data: { sessionId: session.id, role: 'user', contentJson: { text: '帮我做个招生海报' } },
+    });
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.brief.scene, 'personal_brand');
+  });
+
+  test('brief-draft：超长会话（消息数超上限 + 单条超长文本）不炸，尾部推荐行仍留在截取窗口内', async () => {
+    const { token, tenantId } = await posterUser(100, '话痨用户');
+    const session = await prisma.session.create({
+      data: { tenantId, userId: token, agentKey: 'poster', title: '聊了很久' },
+    });
+    // 30 条早期噪音消息：超过素材读取条数上限，验证消息量大不炸、且不影响"取最后几条"的语义。
+    for (let i = 0; i < 30; i++) {
+      await prisma.message.create({
+        data: { sessionId: session.id, role: i % 2 === 0 ? 'user' : 'assistant', contentJson: { text: `早期闲聊第 ${i} 句` } },
+      });
+    }
+    // 最后一条单条就超过素材字数上限（约 8000 字），且推荐行在文本末尾——
+    // 验证「取末尾若干字」不会把这一行反而切没。
+    const longPrefix = '很长的补充说明。'.repeat(1000);
+    await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role: 'assistant',
+        contentJson: { text: `${longPrefix}够了，去出图吧。成品图版式推荐：人物主视觉（person_hero）—— 你的信任感来自本人出镜` },
+      },
+    });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.brief.scene, 'personal_brand');
+    assert.equal(r.body.brief.templateKey, 'person_hero', '超长文本尾部的推荐行仍在保留的字数窗口内，没被切没');
   });
 
   test('建单挂越权 messageId → 404 MESSAGE_NOT_FOUND，不扣费', async () => {
