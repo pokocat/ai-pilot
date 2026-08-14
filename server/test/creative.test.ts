@@ -36,7 +36,7 @@ const PREMIUM_PRICE = DEFAULT_PREMIUM_PRICE_PER_POSTER; // 25 钻/张
 function visualCfg(dialect: VisualDialect, extraParams: Record<string, unknown> = {}): CreativeRuntimeConfig {
   return {
     enabled: true, pricePerPoster: PRICE, premiumPricePerPoster: PREMIUM_PRICE, dailyLimit: 0,
-    timeoutMs: 180_000, layoutEngine: 'ai', aiMode: 'auto',
+    timeoutMs: 180_000, layoutEngine: 'ai',
     templates: { person_hero: true, editorial: true, business_launch: true },
     visual: {
       enabled: true, dialect, baseUrl: 'https://example.com/v1', model: 'm', apiKey: 'k',
@@ -190,6 +190,31 @@ describe('海报成品图 · 建单门禁与校验', () => {
     });
     const stolen = await api('GET', `/api/creative/assets/${asset.id}/file`, { token: other });
     assert.equal(stolen.status, 404, '别人的资产一律 404');
+  });
+
+  // 详情页「换方向」只能按 tier 过滤时，会给没传照片的单摆出「本人形象」——选中提交必 422，
+  // 而那页没有上传入口。视图必须下发这个布尔事实，且**只下发布尔**：素材本体照旧不进 assets。
+  test('任务视图下发 hasPortrait（只回布尔事实，素材本体仍不进 assets）', async () => {
+    const { token, tenantId } = await posterUser(100, '有照片的人');
+    const portrait = await prisma.creativeAsset.create({
+      data: { tenantId, userId: token, jobId: null, kind: 'source', ossKey: 'creative/p/_loose/me.png', mimeType: 'image/png' },
+    });
+    const withIt = await api('POST', '/api/creative/posters', {
+      token,
+      body: { brief: brief({ portraitAssetId: portrait.id, directionKey: 'graphic_portrait' }), idempotencyKey: 'hp-yes' },
+    });
+    assert.equal(withIt.status, 201, JSON.stringify(withIt.body));
+    const withView = await api('GET', `/api/creative/jobs/${withIt.body.jobId}`, { token });
+    assert.equal(withView.body.hasPortrait, true, '带了照片就得说有，否则详情页永远露不出「本人形象」');
+    assert.ok(
+      !(withView.body.assets as Array<{ kind: string }>).some((a) => a.kind === 'source'),
+      '只多一个布尔，素材本体不许跟着进视图',
+    );
+
+    const without = await api('POST', '/api/creative/posters', { token, body: { brief: brief(), idempotencyKey: 'hp-no' } });
+    assert.equal(without.status, 201, JSON.stringify(without.body));
+    const withoutView = await api('GET', `/api/creative/jobs/${without.body.jobId}`, { token });
+    assert.equal(withoutView.body.hasPortrait, false, '没照片必须是 false —— 摆出一个必 422 的方向比不摆更糟');
   });
 
   test('未登录 → 401（所有 creative 端点）', async () => {
@@ -366,14 +391,12 @@ describe('海报成品图 · 幂等与计费', () => {
     const on = await api('GET', '/api/creative/status', { token });
     assert.equal(on.body.premiumAvailable, true);
 
-    // 运营把 aiMode 锁成 graphic = 全局禁用影像路线（供应商出事故时的熔断闸）→ 高级档必须一起关掉，
-    // 否则会出现「收了高级价、却必然产出标准形态」的单。
+    // 图片供应商熔断只看 visual.enabled；退役的 aiMode 不再参与路线裁决。
     await setPayload({
-      aiMode: 'graphic',
-      visual: { enabled: true, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
+      visual: { enabled: false, baseUrl: 'https://ark.example.com/api/v3', model: 'doubao-seedream', dialect: 'ark_seedream' },
     });
     const locked = await api('GET', '/api/creative/status', { token });
-    assert.equal(locked.body.premiumAvailable, false, 'aiMode=graphic 时高级档不可下单');
+    assert.equal(locked.body.premiumAvailable, false, 'visual.enabled=false 时高级档不可下单');
   });
 
   test('同 (userId, idempotencyKey) 重复创建：只 1 个任务、只扣一次 10 钻', async () => {
@@ -790,6 +813,28 @@ describe('海报成品图 · 运营后台配置与任务台', () => {
     const denied = await api('POST', '/api/creative/posters', { token, body: { brief: brief(), idempotencyKey: 'k-still-off' } });
     assert.equal(denied.status, 403, JSON.stringify(denied.body));
     assert.equal(denied.body.code, 'CANVAS_DISABLED');
+  });
+
+  // aiMode 已从代码里退役，但**生产 payload 里可能还留着运营当年拉下的那把熔断锁**
+  // （旧版 premiumTierAvailable 要求 aiMode !== 'graphic'，运营就是拿它停高级档的）。
+  // 新版不读它 = 发版当天高级档静默重开，这条钉住迁移兼容。
+  test('旧 aiMode=graphic 迁移兼容：视同图片供应商关闭 → 高级档不可用', async () => {
+    await setPayload({
+      aiMode: 'graphic',
+      visual: { enabled: true, baseUrl: 'https://example.invalid/v1/images', model: 'demo-model' },
+    });
+    const locked = await getCreativeConfig({ fresh: true });
+    assert.equal(locked.visual.enabled, false, '旧锁必须在归一后的 cfg 上生效，不是只在某个判断里特判');
+    assert.equal(premiumTierAvailable(locked), false, '不认这把旧锁就是把运营停掉的档位悄悄开回来');
+    assert.equal((await api('GET', '/api/admin/creative/config')).body.visual.enabled, false, '后台看到的也是关');
+
+    // 运营下次保存创作配置时，新 payload 不含 aiMode → 本兼容分支自然失活
+    const put = await api('PUT', '/api/admin/creative/config', { body: { visual: { enabled: true } } });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    __clearFeatureCache();
+    const stored = (await prisma.featureFlag.findUniqueOrThrow({ where: { id: CREATIVE_FLAG_ID } })).payload as Record<string, unknown>;
+    assert.equal(stored.aiMode, undefined, '旧字段被 updateCreativeConfig 丢弃');
+    assert.equal(premiumTierAvailable(await getCreativeConfig({ fresh: true })), true);
   });
 
   // D4：渲染超时上限必须收在 sweep 的卡死阈值以内，否则正常长渲染会被 sweep 抢回队列跑第二遍。

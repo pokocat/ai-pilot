@@ -33,6 +33,12 @@ import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit, maskAuditPhone } from '../services/audit.js';
 import { getCreativeConfig, updateCreativeConfig, publicCreativeConfig } from '../services/creative/config.js';
 import { dryRunVisualProvider } from '../services/creative/visualProvider.js';
+import {
+  createDirectionSampleFromJob,
+  getDirectionSampleFileForAdmin,
+  listDirectionSamples,
+  publishDirectionSample,
+} from '../services/creative/directionSamples.js';
 import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
 import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
@@ -66,6 +72,7 @@ import type {
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
+  AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
   AdminClonePricing, AdminClonePricingUpdate,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
@@ -1146,6 +1153,56 @@ export async function adminRoutes(app: FastifyInstance) {
     const r = await dryRunVisualProvider();
     await recordAudit({ action: 'admin.creative.provider.dryRun', payload: { by: actorName(actor), ok: r.ok, ms: r.ms } });
     return r;
+  });
+
+  app.get('/admin/creative/direction-samples', async (): Promise<AdminCreativeDirectionSample[]> => {
+    return listDirectionSamples();
+  });
+
+  // 后台样例预览取图（含未发布草稿）。鉴权靠本插件的全局 requireAdmin。
+  // 未配 OSS 的环境（本地/测试）才会用到：配了 OSS 时 previewUrl 是签名 URL，不经过服务端。
+  // 审核动线要看的恰恰是草稿，而 C 端那条无鉴权路由只发已发布 → 草稿必须有这条自己的出口。
+  app.get<{ Params: { id: string } }>('/admin/creative/direction-samples/:id/file', async (req, reply) => {
+    const file = await getDirectionSampleFileForAdmin(req.params.id);
+    if (!file) return reply.code(404).send({ error: '样例不存在', code: 'NOT_FOUND' });
+    return reply
+      .header('content-type', file.mimeType)
+      .header('cache-control', 'private, max-age=0, no-store')
+      .send(file.buffer);
+  });
+
+  app.post<{ Body: CreateCreativeDirectionSampleRequest }>('/admin/creative/direction-samples', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    try {
+      const sample = await createDirectionSampleFromJob({
+        directionKey: req.body?.directionKey,
+        sourceJobId: String(req.body?.sourceJobId ?? '').trim(),
+        createdBy: actorName(actor),
+      });
+      await recordAudit({
+        action: 'admin.creative.directionSample.create',
+        payload: { by: actorName(actor), sampleId: sample.id, directionKey: sample.directionKey, sourceJobId: sample.sourceJobId },
+      });
+      return sample;
+    } catch (e) {
+      return sendErr(reply, e, 422);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/admin/creative/direction-samples/:id/publish', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    try {
+      const sample = await publishDirectionSample(req.params.id);
+      await recordAudit({
+        action: 'admin.creative.directionSample.publish',
+        payload: { by: actorName(actor), sampleId: sample.id, directionKey: sample.directionKey },
+      });
+      return sample;
+    } catch (e) {
+      return sendErr(reply, e, 422);
+    }
   });
 
   // 任务列表（含用户脱敏标识、成本、错误、是否已退款、是否降级、视觉哲学快照）。

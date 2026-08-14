@@ -13,11 +13,17 @@ import { registerJob } from '../scheduler.js';
 import { noteCreativeJobSucceeded, noteCreativeJobFailed, noteCreativeEngine } from '../metrics.js';
 import { notifyPosterReady } from '../wechatSubscribe.js';
 import { PdfUnavailableError } from '../reportPdf.js';
-import { getCreativeConfig, visualProviderConfigured, type CreativeRuntimeConfig } from './config.js';
+import { getCreativeConfig, type CreativeRuntimeConfig } from './config.js';
 import { generatePhilosophy, philosophyText, composeVisualPrompt, type VisualPhilosophy } from './philosophy.js';
 import { generateManifesto, manifestoText, type PosterManifesto } from './manifesto.js';
 import { generateCanvasPoster, AI_ENGINE_BUDGET_MS, type CanvasPoster } from './canvasEngine.js';
-import { photoRouteAllowedFor, resolvePosterRouteFor, isPremiumTier, type ResolvedPosterRoute } from './posterRoute.js';
+import {
+  photoRouteAllowedFor,
+  resolvePosterRouteFor,
+  resolveReusedPhotoRoute,
+  isPremiumTier,
+  type ResolvedPosterRoute,
+} from './posterRoute.js';
 import { assembleImagePrompt } from './imagePrompt.js';
 import { renderPoster, PosterRenderError } from './renderer.js';
 import { resolveVisualProvider } from './visualProvider.js';
@@ -248,7 +254,7 @@ interface RunOutcome {
  *
  * 为什么需要它：AI 引擎的价值在「几条子路、什么时候退回哪一条」这套编排，而它在测试环境里根本跑不到 ——
  * `completeText` 无 live provider 恒 null，于是宣言就地失败、photo 子路一次也不会被走到。
- * 没有这个缝，「photo 失败 → graphic 同宣言重试 → 仍败 → 模板」这条三层回落链就只能靠人肉在生产上验证。
+ * 没有这个缝，档位门禁、主视觉复用与高级档失败退款只能靠人肉在生产上验证。
  * 口径与 canvasEngine.CanvasEngineDeps 一致：缺省即真实实现，绝不允许「没注入就跳过某一步」。
  */
 export interface CreativeWorkerDeps {
@@ -263,6 +269,15 @@ export interface CreativeWorkerDeps {
 }
 
 /**
+ * 免费单（沿版本链的子单，且从未扣费）。这类单的全部产出必须由复用得来，
+ * 任何一次图片供应商调用都是白花的成本。判据取 job 行本身（parentJobId + chargedAt），
+ * 不取 brief —— brief 是建单时的快照，历史单的 tier/来源字段都可能对不上现在的口径。
+ */
+function freeReviseJob(input: JobExecutionInput): boolean {
+  return !!input.job.parentJobId && !input.job.chargedAt;
+}
+
+/**
  * 管线总入口。**两条排版路径 + 一条回落边**：
  *
  *   layoutEngine='ai'（默认）
@@ -270,14 +285,30 @@ export interface CreativeWorkerDeps {
  *     └─ 任一步走不通（模型不可用/宣言不完整/三轮仍违规/渲染或量测异常/超预算）
  *          → **回落模板路径的完整逻辑**                                    → engine='template_fallback'
  *   layoutEngine='template'
- *     └─ 三套白名单模板（含图片供应商主视觉）                              → engine='template'
+ *     └─ 三套白名单模板（主视觉仍严格服从 tier）                            → engine='template'
  *
- * 回落**复用同一个 runTemplatePipeline**（不复制一份）：图片供应商调用、降级留痕（degraded/visualError）、
+ * 回落**复用同一个 runTemplatePipeline**（不复制一份）：档位门禁、主视觉复用、
  * 弹性版面契约、溢出闸这些教训全在那条路径上，抄一份就等于把它们全部作废一次。
  */
 async function runPipeline(input: JobExecutionInput, deps: CreativeWorkerDeps = {}): Promise<RunOutcome> {
   const { job, brief } = input;
   const cfg = await getCreativeConfig();
+
+  // ── 免费单硬闸：一分钱没收的单不许调图片供应商 ──
+  // 位置刻意选在两条排版路径之前（AI 的 runPhotoVisual 与模板路径的生图分支同时被它覆盖）。
+  // **为什么闸门必须在 worker，而不能只信建单侧**：建单时 revise 会校验父单主视觉可复用，
+  // 但在途单与历史数据从来没经过那次校验 —— 改造前建的 premium revise 单可能
+  // sourceVisualAssetId 与 chargedAt 双双为空，它们进 worker 时建单闸门早已成为过去。
+  // 放行的代价是真调供应商出图、还按重试策略调三次，而这单收费为 0。
+  // 有 sourceVisualAssetId 就照常复用（下面两条路径本就复用）；没有则以既有 SOURCE_VISUAL_MISSING
+  // 口径整单失败（creditCost=0，refundJob 抢占后无流水可退）。
+  if (freeReviseJob(input) && isPremiumTier(brief) && !input.sourceVisualAssetId) {
+    return {
+      status: 'failed',
+      code: 'SOURCE_VISUAL_MISSING',
+      message: '原主视觉已不可用，无法免费改文字',
+    };
+  }
 
   // ── 阶段 1：视觉哲学（永不抛错，失败自动回退确定性哲学）──
   // 两条路径都要它：模板路径整套版式靠它，AI 路径拿它的色板作宣言色板的兜底，
@@ -333,7 +364,7 @@ interface CanvasAttempt {
 }
 
 /**
- * AI 排版引擎路径。**永不让整单失败**：拿不到产物就返回 error，由 runPipeline 回落模板。
+ * AI 排版引擎路径。拿不到产物就返回 error：standard 由 runPipeline 回落模板，premium 失败退款。
  * 唯一会往外抛的是 JobCancelled（用户取消必须原样冒到 runJobOnce，不能被当成"AI 引擎失败"吞掉）。
  *
  * ── 两条子路 + 一条**内部**回落边（2026-07-30 影像主导模式）──
@@ -343,14 +374,11 @@ interface CanvasAttempt {
  *        → 排版层（photo 变体提示词：全幅铺底 + 安全区叠层）→ 量测/打磨/交付闸门照旧
  *   graphic（纯图形排印，上一代 AI 引擎行为，一字不改）
  *
- * **photo 链任一步失败 → 退回 graphic 复用同一篇宣言**（不重新生成宣言，省一次 LLM 调用；
- * 而且那篇宣言本身是过审过的、与本单商业目标匹配的，重新生成只会换来一篇不一定更好的）。
- * graphic 也失败才把 error 交给 runPipeline 去回落模板。三层回落链的单测在
- * server/test/creativePhotoRoute.test.ts 钉住。
+ * tier 是商品契约：standard 只走 graphic；premium 只走 photo，任一步失败都整单失败退款。
+ * 历史 standard 单若已有主视觉，免费 revise 会原样复用它，不重新调用供应商。
  *
- * 时间预算：photo 与 graphic 两次排版**共享**同一个 AI_ENGINE_BUDGET_MS（deadline 从本函数开始算），
- * 所以 photo 烧掉大半预算后 graphic 只拿到 30s 下限（够跑一轮创作，多半没有打磨轮）。
- * 这是刻意取舍：宁可交一张没打磨的图，也不要让一单在 running 里耗到被 sweep 判卡死（那会重跑 + 两张资产）。
+ * 历史上 photo 失败会再跑 graphic；tier 权威契约上线后两条路线不再串行回落，
+ * AI_ENGINE_BUDGET_MS 只约束本单所选路线的排版轮次。
  */
 async function runAiEngine(
   input: JobExecutionInput,
@@ -366,8 +394,15 @@ async function runAiEngine(
   await setProgress(job.id, 'render');
   await checkpoint(job.id);
 
-  // 门禁在**调宣言之前**先判一次：不满足就不给模型 photo 选项（省 token，也免得它选个走不通的）。
-  const allowPhoto = photoRouteAllowedFor(cfg, brief);
+  // 免费改字有主视觉时强制复用，并恢复父版本风格上下文；供应商熔断也不影响改字。
+  const reusedRoute = input.sourceVisualAssetId
+    ? resolveReusedPhotoRoute(brief, {
+      styleKey: input.sourceVisualStyleKey,
+      subject: input.sourceVisualSubject,
+    })
+    : null;
+  // 新单的 photo 资格只由 premium tier + 三条门禁决定；standard 永远拿不到 photo 选项。
+  const allowPhoto = !!reusedRoute || photoRouteAllowedFor(cfg, brief);
 
   let manifesto: PosterManifesto | null;
   try {
@@ -376,7 +411,10 @@ async function runAiEngine(
       tenantId: job.tenantId, userId: job.userId, allowPhoto,
       // 高级档不给模型选路线的机会：给了选项它就可能选 graphic 且不给 subject，
       // 而那会让一张已经付了高级价的单在路线归一处直接判失败（预发实测过一次）。
-      forcePhoto: isPremiumTier(brief),
+      forcePhoto: !!reusedRoute || isPremiumTier(brief),
+      ...(reusedRoute ? {
+        fixedPhotoRoute: { styleKey: reusedRoute.styleKey, subject: reusedRoute.subject },
+      } : {}),
     });
   } catch (e) {
     if (e instanceof JobCancelled) throw e;
@@ -386,15 +424,15 @@ async function runAiEngine(
   // 收成 const：下面两个闭包要用它，而 let 在闭包里不会被 TS 收窄成非空。
   const doc: PosterManifesto = manifesto;
   const movement = doc.movement;
-  const route = resolvePosterRouteFor(cfg, brief, doc.route);
+  const route = reusedRoute ?? resolvePosterRouteFor(cfg, brief, doc.route);
   // 高级档但路线没能落到 photo：只可能是宣言没给出可用的 subject（供应商未配 / 本人照片这两条
   // 建单时就拦掉了）。同样**不降级交付**——整单失败 + 全额退款，用户可以重试。
   if (isPremiumTier(brief) && route.mode !== 'photo') {
-    return { error: `高级海报未能确定影像主体：${route.reason}` };
+    return { error: `「主视觉大片」未能确定影像主体：${route.reason}` };
   }
 
   // 宣言进 promptSnapshot（覆盖阶段 1 写的六维度；六维度仍拼在后面，回落排障要看得到两份）。
-  // 路线裁定结论也写进去：「模型想走 photo 但被门禁降级」这件事只有这里看得见。
+  // 路线裁定结论也写进去，方便对账 tier 与实际产物。
   await prisma.creativeJob.updateMany({
     where: { id: job.id, status: 'running' },
     data: {
@@ -407,11 +445,7 @@ async function runAiEngine(
   const moderateText = (t: string): Promise<boolean> =>
     // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
     moderate('output', t, { tenantId: job.tenantId, userId: job.userId });
-  // 预算扣掉已花的时间，且至少留 90s。
-  // 这个下限 2026-08-12 从 30s 提到 90s：引擎侧现在要求「剩余 < 60s 就不开新一轮」
-  // （单轮 HTML 开了思考挂钟就要 1–2.5 分钟），30s 的余量意味着 photo 烧穿预算后
-  // graphic 那次重排**一轮都开不了**，三层回落链的中间那层等于不存在。
-  // 最坏情况仍在 sweep 的 10 分钟内：360s 排版 + 90s 下限 + 宣言约 40s + 上传约 15s ≈ 505s。
+  // 预算扣掉已花的时间，且至少留 90s；单轮 HTML 开了思考挂钟就要 1–2.5 分钟。
   const budget = (): number => Math.max(90_000, AI_ENGINE_BUDGET_MS - (Date.now() - startedAt));
 
   const compose = async (assets: TemplateAssets, photoStyle: ResolvedPosterRoute['style'] | null): Promise<CanvasAttempt> => {
@@ -459,6 +493,7 @@ async function runAiEngine(
         critiquePassed: o.poster.critiquePassed,
         violationsFixed: o.poster.violationsFixed,
         polishReverted: o.poster.polishReverted,
+        rebuildTriggered: o.poster.rebuildTriggered,
         aiMarkInjected: o.poster.aiMarkInjected,
         ...(o.aiMode === 'photo' ? { styleKey: route.styleKey, subject: route.subject } : {}),
         // 最终 HTML 只存在资产 metadata 里（排障用）；不进 CreativeJob 行，那张表要保持轻。
@@ -468,18 +503,19 @@ async function runAiEngine(
         engine: 'ai',
         // 档位进 resultJson：任务台要能把「收了高级价」与「真的走了影像」对上账。
         tier: brief.tier,
-        // 实际路线（不是配置意图）：photo 静默降级成 graphic 时任务台必须看得出来，
-        // 否则「影像路线名义上开着、其实全在出图形版」又只存在于日志里（degraded 那次的教训）。
+        // 实际路线（不是配置意图）；必须与 tier 契约一致，异常时任务台可直接对账。
         aiMode: o.aiMode,
         ...(o.aiMode === 'photo' ? { styleKey: route.styleKey } : {}),
         rounds: o.poster.rounds,
         violationsFixed: o.poster.violationsFixed,
         ...(o.poster.polishReverted ? { polishReverted: true } : {}),
+        ...(o.poster.rebuildTriggered ? { rebuildTriggered: true } : {}),
+        directionKey: brief.directionKey,
         movement,
         philosophySource: philosophy.source,
         visualAssetId: o.visualAssetId,
         degraded: false,
-        // photo 尝试过但没走通（本单实际是 graphic）：原因落库，任务台展示。
+        // 历史兼容字段；新 tier 契约不会把 photo 失败交成 graphic。
         ...(o.photoError ? { photoError: o.photoError.slice(0, 300) } : {}),
       },
     });
@@ -489,7 +525,19 @@ async function runAiEngine(
   let photoError: string | null = null;
   let photoDebug: { violations: string[]; lastHtml?: string } | undefined;
   if (route.mode === 'photo') {
-    const visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route);
+    let visual: PhotoVisualResult;
+    if (input.sourceVisualAssetId) {
+      const reusedAssets = await resolveTemplateAssets(input, input.sourceVisualAssetId);
+      visual = reusedAssets.visualUrl
+        ? {
+          assetId: input.sourceVisualAssetId,
+          providerLabel: 'reused',
+          dataUri: reusedAssets.visualUrl,
+        }
+        : { error: '原主视觉文件已不可用，无法免费改文字' };
+    } else {
+      visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route);
+    }
     if (visual.assetId && visual.dataUri) {
       // 主视觉走**手上的字节**直接拼 data URI，不再从 OSS 读回：字节已经在内存里，读回只是多一次
       // 往返和多一条「落库了却读不回」的失败分支。其它素材（logo/qr）照旧走 resolveTemplateAssets。
@@ -512,19 +560,19 @@ async function runAiEngine(
     } else {
       photoError = visual.error ?? '主视觉未产出';
     }
-    // ★ 高级档到此为止：**不退回 graphic**。
+    // ★ photo 契约到此为止：**不退回 graphic**。
     //   用户为「顶级图片模型出主视觉」付了高级价，交一张纯图形海报就是货不对板；
     //   而且影像链走不通通常正是供应商在出问题，那种时候更不该继续收这笔钱。
     //   返回 error → runJobOnce 走整单失败 + 全额退款（既有幂等退款路径，不新造部分退款）。
-    //   标准档的三层回落链一字不动 —— 它的承诺本来就是「给你一张海报」，不是「给你一张影像海报」。
-    if (isPremiumTier(brief)) {
-      console.warn('[creative] 高级档影像路线失败，整单失败并退款（不降级交付）：', job.id, photoError);
-      return { error: `高级海报未能生成主视觉：${photoError}`, ...(photoDebug ? { debug: photoDebug } : {}) };
-    }
-    console.warn('[creative] 影像主导路线未走通，退回纯图形路线（复用同一篇宣言）：', job.id, photoError);
+    //   免费 revise 复用失败同样不能悄悄换画面；让任务失败并给出明确原因。
+    console.warn('[creative] 影像路线失败，不跨档降级交付：', job.id, photoError);
+    return {
+      error: `${input.sourceVisualAssetId ? '原主视觉复用失败' : '「主视觉大片」未能生成主视觉'}：${photoError}`,
+      ...(photoDebug ? { debug: photoDebug } : {}),
+    };
   }
 
-  // ── 子路 B：纯图形排印（photo 的回落边，也是默认路线）──
+  // ── 子路 B：standard 的纯图形排印路线 ──
   const assets = await resolveTemplateAssets(input, null);
   const g = await compose(assets, null);
   if (!g.poster) {
@@ -548,9 +596,7 @@ async function runAiEngine(
 /**
  * photo 子路的第一步：拼 prompt → 供应商出图 → 图片审核 → 存 kind='visual' 资产。
  *
- * **一律不抛**：任何一步走不通都回 `{ error }`，由 runAiEngine 退回 graphic。
- * 特别注意图片审核不过这一格：模板路径上它是 `IMAGE_MODERATION_BLOCKED`（整单失败 + 退款），
- * 但在这里**只是这条子路不通** —— graphic 子路的画面完全不含那张图，没有理由让用户为此拿不到海报。
+ * **一律不抛**：任何一步走不通都回 `{ error }`，由 runAiEngine 按 premium 契约失败退款。
  */
 async function runPhotoVisual(
   input: JobExecutionInput,
@@ -558,6 +604,9 @@ async function runPhotoVisual(
   route: ResolvedPosterRoute,
 ): Promise<PhotoVisualResult> {
   const { job, brief } = input;
+  // 免费单闸门的第二道（runPipeline 已挡过一次）：这两处是全链仅有的供应商入口，
+  // 守在这里意味着以后新增任何绕过 runPipeline 的调用方也拿不到供应商。
+  if (freeReviseJob(input)) return { error: '免费改字任务不得调用图片供应商' };
   await setProgress(job.id, 'visual');
   await checkpoint(job.id);
   const provider = await resolveVisualProvider(cfg);
@@ -601,7 +650,7 @@ async function runPhotoVisual(
   }
 }
 
-/** 模板路径（既有逻辑原样保留）。`aiError` 非空表示这是 AI 引擎失败后的回落，需留痕。 */
+/** 模板排版路径。`aiError` 非空表示这是标准档 AI 排版失败后的回落，需留痕。 */
 async function runTemplatePipeline(
   input: JobExecutionInput,
   cfg: CreativeRuntimeConfig,
@@ -610,18 +659,22 @@ async function runTemplatePipeline(
 ): Promise<RunOutcome> {
   const { job, brief } = input;
 
-  // ── 阶段 2：主视觉（未配供应商 / 复用父任务资产 → 跳过，不报错）──
-  //
-  // 降级要留痕（D7）：供应商挂掉时这里只 console.warn 过，而 CreativeJob.provider 是**建单时**
-  // 的快照 'configured'、metrics 也用它 —— 结果供应商挂一整天，任务台全绿、监控全绿，
-  // 用户拿到的却全是"无主视觉"版。所以把结论写进 resultJson.degraded + visualError，任务台展示。
+  // ── 阶段 2：主视觉 ──
+  // standard 新单永不调图片供应商；premium 新单必须成功拿到主视觉；revise 只复用父资产。
   let visualAssetId = input.sourceVisualAssetId;
   let providerLabel = visualAssetId ? 'reused' : 'none';
   let visualError: string | null = null;
-  if (!visualAssetId && visualProviderConfigured(cfg)) {
+  if (!visualAssetId && isPremiumTier(brief)) {
+    // 同一道免费单闸门（模板路径的生图分支也必须被它覆盖，别只堵 AI 路径）。
+    if (freeReviseJob(input)) {
+      return { status: 'failed', code: 'SOURCE_VISUAL_MISSING', message: '原主视觉已不可用，无法免费改文字' };
+    }
     await setProgress(job.id, 'visual');
     await checkpoint(job.id);
     const provider = await resolveVisualProvider(cfg);
+    if (!provider) {
+      return { status: 'failed', code: 'PREMIUM_VISUAL_FAILED', message: '图片供应商不可用' };
+    }
     if (provider) {
       try {
         // 止血（2026-07-29）：原先只发一句 ≤80 字的 visualPrompt，palette/构图/材质全没传 →
@@ -645,28 +698,29 @@ async function runTemplatePipeline(
           });
           visualAssetId = saved.id;
           providerLabel = provider.name;
-        } else {
-          visualError = '主视觉未生成，本张为纯排版版式';
-          console.warn('[creative] 图片供应商未产出主视觉，走纯排版路径：', job.id, submitted.error ?? '');
-        }
+        } else return {
+          status: 'failed',
+          code: 'PREMIUM_VISUAL_FAILED',
+          message: `主视觉未生成：${submitted.error ?? '供应商未返回图片'}`,
+        };
       } catch (e) {
-        // 供应商失败**不**让整个任务失败：纯排版模板本身就是完整可交付的产物（方案 §7 拍板）。
-        visualError = '主视觉生成失败，本张为纯排版版式';
-        console.warn('[creative] 主视觉生成失败，降级为纯排版：', job.id, (e as Error).message);
+        return { status: 'failed', code: 'PREMIUM_VISUAL_FAILED', message: `主视觉生成失败：${(e as Error).message}` };
       }
     }
-    // 配了供应商却没拿到图 = 降级。未配供应商是既定形态（纯排版路径），不算降级。
-    if (!visualAssetId) {
-      providerLabel = 'degraded';
-      visualError ??= '主视觉未生成，本张为纯排版版式';
-    }
+    if (!visualAssetId) return { status: 'failed', code: 'PREMIUM_VISUAL_FAILED', message: '主视觉未产出' };
   }
-  const degraded = providerLabel === 'degraded';
+  const degraded = false;
 
   // ── 阶段 3：渲染 ──
   await setProgress(job.id, 'render');
   await checkpoint(job.id);
   const assets = await resolveTemplateAssets(input, visualAssetId);
+  if (input.sourceVisualAssetId && !assets.visualUrl) {
+    return { status: 'failed', code: 'SOURCE_VISUAL_MISSING', message: '原主视觉文件已不可用，无法免费改文字' };
+  }
+  if (isPremiumTier(brief) && !assets.visualUrl) {
+    return { status: 'failed', code: 'PREMIUM_VISUAL_FAILED', message: '「主视觉大片」的主视觉不可用' };
+  }
   let rendered;
   try {
     rendered = await renderPoster({ brief, philosophy, assets }, { timeoutMs: cfg.timeoutMs });
@@ -684,12 +738,14 @@ async function runTemplatePipeline(
     assetMetadata: {
       engine: aiError ? 'template_fallback' : 'template',
       templateKey: brief.templateKey,
+      directionKey: brief.directionKey,
       movement: philosophy.movement,
       philosophySource: philosophy.source,
     },
     result: {
       engine: aiError ? 'template_fallback' : 'template',
       templateKey: brief.templateKey,
+      directionKey: brief.directionKey,
       movement: philosophy.movement,
       philosophySource: philosophy.source,
       visualAssetId: visualAssetId ?? null,

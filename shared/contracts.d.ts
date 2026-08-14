@@ -624,9 +624,8 @@ export interface BrandKitView {
 }
 
 /* ────────────── 海报成品图（canvas_design：产物型技能 kind='artifact'） ────────────── */
-// 「海报设计师」出方案（文本成果）→ 用户确认需求单 PosterBrief → 服务端建异步创作任务 → 出 PNG 成品图。
-// 方案见 docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md §5。约束：图片模型只出主视觉，
-// 全部中文文案/Logo/二维码/AI 标识由服务端确定性渲染器排版（§4.1）。
+// 「海报设计师」短对话确认需求 → 用户选择生成路线与路线内创作方向 → 服务端异步出 PNG 成品图。
+// 约束：图片模型只出 premium 的无文字主视觉；中文/Logo/二维码/AI 标识都在服务端排版层叠加。
 
 /** 海报场景（决定默认模板与文案骨架）。 */
 export type PosterScene = 'personal_brand' | 'event' | 'service' | 'product';
@@ -639,15 +638,37 @@ export type PosterRatio = '3:4';
 /**
  * 海报档位（2026-08-12）。**由用户在确认页选，不是运营的全局开关**——两档的产物形态与价格都不同。
  *
- * · `standard`（标准）：模型用纯 CSS/SVG 写整张海报，不调图片模型。
- * · `premium`（高级）：先由顶级图片模型（Seedream / GPT Image）出一张**全幅无文字主视觉**，
- *   再由服务端确定性渲染器把中文、Logo、二维码排在上面。
+ * · `standard`（图形排版）：模型用 CSS/SVG 与用户上传素材写整张海报，
+ *   **任何成功/回落路径都不得调图片生成模型**。
+ * · `premium`（主视觉创作）：先由图片模型（Seedream / GPT Image）出一张**全幅无文字主视觉**，
+ *   再由排版模型生成 HTML/CSS 叠层，服务端静态审计、Chromium 渲染并逐项量测。
  *
- * ⚠️ 高级档**不是**「让图片模型把整张海报连字一起画出来」。中文仍然由渲染器排——
- * 这是方案 §4.1 的既定原则：图片模型写出来的中文是不可校验的（量测器只能量自己排的字），
+ * ⚠️ 高级档**不是**「让图片模型把整张海报连字一起画出来」。中文来自用户确认的 brief，
+ * 排版由 LLM 生成、由服务端审计与量测，不得误称为「完全确定性排版」。
+ * 原则不变：图片模型写出来的中文是不可校验的（量测器只能量自己排的字），
  * 一张主标题里有个错字的成品图是信任事故，而它恰恰是最难被自动发现的那类。
  */
 export type PosterTier = 'standard' | 'premium';
+/** 用户可理解的创作方向；key 同时决定正向 Art Direction，不是仅供展示的标签。 */
+export type PosterDirectionKey =
+  | 'graphic_bold_type'
+  | 'graphic_symbol'
+  | 'graphic_portrait'
+  | 'photo_character'
+  | 'photo_product'
+  | 'photo_scene';
+export interface PosterDirectionOption {
+  key: PosterDirectionKey;
+  tier: PosterTier;
+  name: string;
+  desc: string;
+  /** 已发布的真实样例短签地址；未发布时不下发，前端显示中性占位。 */
+  previewUrl?: string;
+  /** 本人形象方向必须先上传肖像素材。 */
+  requiresPortrait?: boolean;
+  /** 例如「AI 演绎人物，不是本人」；必须与缩略图一起展示。 */
+  note?: string;
+}
 /** 模板白名单（服务端 TEMPLATE_KEYS 同口径；启用中的清单由 GET /creative/status 下发）。 */
 export type PosterTemplateKey = 'person_hero' | 'editorial' | 'business_launch';
 /** 一套可选版式（status 只下发**启用中的**，前端照它渲染选择器，不要再硬编码本地目录）。 */
@@ -676,6 +697,8 @@ export interface PosterBrief {
    * （与"显式请求了被停用的模板 → 422"同一条口径）。
    */
   tier?: PosterTier;
+  /** 路线内的创作方向；缺省按 scene/素材选择兼容默认值。 */
+  directionKey?: PosterDirectionKey;
   ratio: PosterRatio;
   portraitAssetId?: string;  // 人物照（kind='source' 的 CreativeAsset，须属本人）
   logoAssetId?: string;
@@ -722,12 +745,21 @@ export interface CreativeJobView {
   assets: CreativeAssetView[];
   parentJobId?: string;         // 版本链：revise/regenerate 产生的新任务指向来源任务
   /**
-   * 本单档位（读 brief.tier）。**详情页的「换风格」必须按它显示价格**：
+   * 本单路线（读 brief.tier）。**详情页的「换方向」必须按它显示价格**：
    * regenerate 继承父单档位、按 `priceForTier` 扣费，而那个面板此前写死标准价 ——
    * 高级单在那里显示 10、实扣 25，是在扣费那一刻说假话。
    * 档位上线前的老任务没有这个字段（按 standard 显示）。
    */
   tier?: PosterTier;
+  /**
+   * 本单建单时是否带了本人照片。**只下发这一个布尔事实，不下发 assetId，素材本体仍不进 assets**
+   * （assets 只回成品与主视觉）。
+   *
+   * 用途只有一个：详情页「换方向」面板据它过滤 `requiresPortrait` 的方向。没有它时，那个面板
+   * 只按 tier 过滤，于是给无照片的单也摆出「本人形象」—— 选中提交，服务端必 422
+   * 「「本人形象」需要先上传本人照片」，而详情页压根没有上传入口，用户在那儿无路可走。
+   */
+  hasPortrait: boolean;
   actions: Array<'revise' | 'regenerate' | 'cancel'>; // 当前状态下前端可展示的操作
 }
 /** 源素材上传返回（先传后建任务，故此时还没有 jobId）。 */
@@ -737,7 +769,7 @@ export interface CreativeUploadResult { assetId: string; }
  * 作品库列表项（GET /creative/posters）。
  *
  * 刻意**不含** brief 全文、creditCost 与 actions：列表只回答「我那张图在哪」，
- * 点进详情页由 GET /creative/jobs/:id 给全量视图（改文字 / 换风格 / 版本链都在那边）。
+ * 点进详情页由 GET /creative/jobs/:id 给全量视图（改文字 / 换方向 / 版本链都在那边）。
  * 也不含 failed / cancelled —— 那些任务没有可看的成品，摆进作品库只是一格永久的破图。
  */
 export interface CreativePosterListItem {
@@ -773,17 +805,19 @@ export interface CreativePosterListResult {
  */
 export interface CreativeStatusResult {
   enabled: boolean;
-  pricePerPoster: number; // 标准档单价（钻石），供前端展示 💎x；后台可改，默认 10
+  pricePerPoster: number; // 创意排版单价（钻石），由运营价格表下发
   /**
    * 高级档单价（钻石）。**只在 `premiumAvailable` 为真时有展示意义**。
    */
   premiumPricePerPoster: number;
   /**
-   * 高级档此刻能不能下单 = 图片供应商已配置且启用 且 运营没把 aiMode 锁成 graphic。
+   * 高级档此刻能不能下单 = 图片供应商已配置且启用。
    * 前端据此决定**是否露出高级档这个选项**——同 `enabled` 的口径：不可用就整块隐藏，
    * 而不是让用户选了再撞 422。
    */
   premiumAvailable: boolean;
+  /** 两条路线内可选的创作方向；顺序即前端展示顺序。 */
+  directions: PosterDirectionOption[];
   /**
    * 当前**启用中**的版式清单（后台停用的不下发）。前端必须照这个列表渲染版式选择器：
    * 硬编码三套恒可选会让用户选到已停用的版式，而服务端对显式请求停用模板一律 422。
@@ -798,13 +832,12 @@ export interface CreatePosterJobRequest {
   messageId?: string;
   idempotencyKey: string;
 }
-/** 只改文案重排（不重出主视觉 → 不再扣钻石）。字段留空 = 沿用父任务。 */
+/** 只改文案重排（不换版式、不重出主视觉 → 不再扣钻石）。字段留空 = 沿用父任务。 */
 export interface RevisePosterJobRequest {
   headline?: string;
   subheadline?: string;
   proofPoints?: string[];
   cta?: string;
-  templateKey?: string;
   idempotencyKey?: string;
 }
 /** 重出主视觉（重新扣费）。 */
@@ -812,6 +845,8 @@ export interface RegeneratePosterJobRequest {
   visualDirection?: string;
   negativePrompt?: string;
   templateKey?: string;
+  /** 换方向属于重新创作，沿用 regenerate 的收费规则。 */
+  directionKey?: PosterDirectionKey;
   idempotencyKey?: string;
 }
 
@@ -860,25 +895,31 @@ export interface AdminCreativeConfig {
   dailyLimit: number;            // 每用户每日任务数上限；**0 = 不限量**（紧急停量请用 enabled）
   timeoutMs: number;             // 单次渲染超时（只传给渲染器，不是端到端）；上限 480000，见 config.ts
   /**
-   * 排版引擎（2026-07-29 新增，**缺省 'ai'**）。
+   * 排版引擎（缺省 'ai'），只决定怎么排版，不决定是否调用图片模型：
    * · `'ai'`：模型自己写整张海报的 HTML/CSS（宣言 → 创作 → 量测 → 无条件打磨一轮），
-   *   任何一步走不通自动回落模板路径 —— 付费任务永不因 AI 引擎失败，所以这个开关**不是**风险开关，
-   *   而是「要不要试更好的画质」。切成 'template' 只是回到上一代行为（三套模板 + 图片供应商主视觉）。
+   *   standard 任一步走不通可回落模板；premium 不降级交付。
+   * · `'template'`：固定白名单版式。standard 仍零生图，premium 仍必须有主视觉。
    * · 后台文案建议：「AI 排版（模型自由创作，失败自动回落模板）」/「模板排版（固定三套版式）」。
    */
   layoutEngine: 'ai' | 'template';
-  /**
-   * AI 创作路线（2026-07-30 影像主导模式，**缺省 'auto'**）。只在 layoutEngine='ai' 时被读。
-   * · `'auto'`：模型在宣言阶段自选 —— 纯图形排印（graphic）或影像主导（photo）；
-   * · `'photo'`：强制影像主导。**仍受三条门禁**（未配图片供应商 / 用户上传了本人照片 /
-   *   模型没给出可用的英文主体描述 → 一律降 graphic），所以「强制」是「优先」而不是「一定」；
-   * · `'graphic'`：强制纯图形排印（宣言提示词里根本不给 photo 选项）。
-   * 与 layoutEngine 同理，这**不是**风险开关：photo 链任一步失败退回 graphic 复用同一篇宣言，
-   * 再失败才回落模板 —— 交付与计费都不受影响。要盯的是任务台上每行的**实际**路线。
-   */
-  aiMode: 'auto' | 'graphic' | 'photo';
   templates: Record<string, boolean>; // 模板启停（key = person_hero | editorial | business_launch）
   visual: AdminCreativeVisualConfig;
+}
+export interface AdminCreativeDirectionSample {
+  id: string;
+  directionKey: PosterDirectionKey;
+  directionName: string;
+  tier: PosterTier;
+  status: 'draft' | 'published' | 'archived';
+  sourceJobId: string;
+  previewUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface CreateCreativeDirectionSampleRequest {
+  directionKey: PosterDirectionKey;
+  /** 必须是该方向/路线下已成功的真实任务；服务端复制成独立全局物料。 */
+  sourceJobId: string;
 }
 export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'visual'>> & {
   visual?: Partial<Omit<AdminCreativeVisualConfig, 'hasKey'>>;
@@ -918,8 +959,8 @@ export interface AdminCreativeJobItem {
    * 本单**实际**走的 AI 创作路线（读 resultJson.aiMode）：
    * `'photo'`（影像主导：生图模型出全幅主视觉 + 排版层叠字）| `'graphic'`（纯图形排印）
    * | `null`（模板路径 / 老任务 / 未完成）。
-   * 与配置里的 aiMode 不是一回事：配置是意图，这里是结果。photo 有三条门禁 + 一条回落边，
-   * 「配置成 photo 却整天在出 graphic」必须在任务台看得出来，否则又是一次静默失明。
+   * 这是历史字段名，现只表达实际结果；生成来源由 tier 权威决定。若结果与档位契约不一致，
+   * 必须在任务台可见并作为异常排查，不能再把它当成可运营切换的意图配置。
    */
   aiMode: string | null;
   /** 影像路线用的风格档 key（如 mono_authority_portrait）；graphic / 模板路径为 null。 */
@@ -927,16 +968,14 @@ export interface AdminCreativeJobItem {
   /** AI 引擎回落原因（layoutEngine='template_fallback' 时有值，运营排障用）。 */
   aiEngineError?: string;
   /**
-   * 影像路线**尝试过但没走通**的原因（此时 aiMode='graphic'，任务仍成功）。
-   * 与 aiEngineError 是两层：这条说「photo 降级成 graphic」，那条说「AI 引擎整体回落模板」。
+   * 历史任务里影像路线尝试过但没走通的原因。tier 权威契约上线后，新任务不再跨档降级；
+   * 字段仅保留兼容老数据与运营排障。
    */
   photoError?: string;
-  /** 建单时的供应商快照（'configured' | null）。**实际是否产出主视觉看 degraded**。 */
+  /** 本单可能承担的图片供应商成本快照；standard 恒为 null，premium 新单配置齐时为 configured。 */
   provider: string | null;
   /**
-   * 本单是否走了降级路径（配了图片供应商但没拿到主视觉 → 纯排版出图）。
-   * 老任务（resultJson 无此字段）按 false。任务台要显示它：否则供应商挂一整天，
-   * 任务台仍然全绿，运营看不出用户拿到的都是"无主视觉"版。
+   * 历史跨路线降级标记。tier 权威契约上线后新任务不再产生该形态；老任务无字段按 false。
    */
   degraded: boolean;
   creditCost: number;

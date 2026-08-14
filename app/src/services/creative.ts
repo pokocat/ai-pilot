@@ -48,7 +48,7 @@ export function peekCreativeStatus(): CreativeStatusResult | null {
  * 超限一律 422，前端这份只为「敲字时就标红」的即时反馈，不是判定依据。
  * 之所以复制而不是共享：SSOT `shared/contracts.d.ts` 是 .d.ts，放不了运行时值。改服务端那份务必回头改这里。
  *
- * 确认页用全部字段，详情页（改文字 / 换风格）只用其中 4 项——曾经各存一份，
+ * 确认页用全部字段，详情页（改文字 / 换方向）只用其中 4 项——曾经各存一份，
  * 结果同一个上限有两个来源，改一处漏一处就会出现「前端放行、服务端 422」。
  */
 export const POSTER_LIMITS = {

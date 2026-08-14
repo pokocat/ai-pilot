@@ -954,6 +954,14 @@ const MOCK_POSTER_TEMPLATES = [
   { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
   { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质' },
 ];
+const MOCK_POSTER_DIRECTIONS = [
+  { key: 'graphic_bold_type', tier: 'standard', name: '强标题视觉', desc: '让一句主张成为画面主角，靠字号、字形和留白制造冲击。' },
+  { key: 'graphic_symbol', tier: 'standard', name: '品牌图形', desc: '从业务里提炼一个专属符号，用图形母题建立辨识度。' },
+  { key: 'graphic_portrait', tier: 'standard', name: '本人形象', desc: '使用你上传的本人照片，让人物与标题共同建立信任。', requiresPortrait: true },
+  { key: 'photo_character', tier: 'premium', name: '人物意象', desc: '用 AI 演绎一个角色与气场，适合表达专业感或情绪张力。', note: 'AI 演绎人物，不是本人' },
+  { key: 'photo_product', tier: 'premium', name: '产品大片', desc: '用材质、光线和空间把产品或服务成果拍成主角。' },
+  { key: 'photo_scene', tier: 'premium', name: '场景叙事', desc: '用一个有真实感的场景，把活动、服务或品牌故事讲出来。' },
+];
 // 档案 · 兵器（处方）：战局页把它们按序挂到待执行军令上，措辞与军令一一对齐——
 // 第一条口播视频配「快出片」，第二条见证素材配「海报代笔」。
 function seedPrescriptions() {
@@ -976,6 +984,7 @@ function creativeStatus() {
     pricePerPoster: 10,
     premiumPricePerPoster: 25,
     premiumAvailable: true,
+    directions: MOCK_POSTER_DIRECTIONS,
     templates: MOCK_POSTER_TEMPLATES,
   });
 }
@@ -1029,6 +1038,8 @@ function creativeView(row) {
     completedAt: done ? new Date(Number(row.terminalAt || Number(row.createdAt) + 3200)).toISOString() : undefined,
     assets: succeeded ? [asset] : [], outputs: succeeded ? [MOCK_POSTER_PNG] : [],
     parentJobId: row.parentJobId || undefined, actions: creativeActions(phase.status), brief: Object.assign({}, row.brief || {}),
+    // 与服务端同口径：只回布尔事实，不回 assetId。详情页「换方向」据它过滤 requiresPortrait 的方向。
+    hasPortrait: Boolean(row.brief && row.brief.portraitAssetId),
     errorMessage: phase.status === 'cancelled' ? '已取消' : phase.status === 'failed' ? '出图失败，已退回钻石' : undefined,
   };
 }
@@ -1065,8 +1076,8 @@ function createPosterChild(id, body, kind) {
   if (duplicate) return Promise.resolve(creativeResult(duplicate, true));
   const brief = Object.assign({}, parent.brief || {});
   const fields = kind === 'revise'
-    ? ['headline', 'subheadline', 'proofPoints', 'cta', 'templateKey']
-    : ['visualDirection', 'negativePrompt', 'templateKey'];
+    ? ['headline', 'subheadline', 'proofPoints', 'cta']
+    : ['visualDirection', 'negativePrompt', 'templateKey', 'directionKey'];
   fields.forEach((field) => { if (Object.prototype.hasOwnProperty.call(patch, field)) brief[field] = patch[field]; });
   const row = {
     id: `mock-poster-${Date.now()}-${jobs.length + 1}`, createdAt: Date.now(), idempotencyKey: key,

@@ -18,6 +18,12 @@ export function creativeAssetKey(opts: { tenantId: string; jobId?: string | null
   return `${prefix()}creative/${opts.tenantId}/${opts.jobId ?? '_loose'}/${opts.assetId}.${ext}`;
 }
 
+/** 全局方向样例不带 tenant/user 归属，单独前缀便于运营生命周期管理。 */
+export function creativeDirectionSampleKey(opts: { sampleId: string; mimeType: string }): string {
+  const ext = IMAGE_MIME_EXT[opts.mimeType.toLowerCase()] ?? 'png';
+  return `${prefix()}creative-direction-samples/${opts.sampleId}.${ext}`;
+}
+
 /** 存一份资产字节（OSS 私有 or 内存回退）。 */
 export async function putCreativeObject(key: string, buf: Buffer, mimeType: string): Promise<void> {
   if (ossConfigured()) {

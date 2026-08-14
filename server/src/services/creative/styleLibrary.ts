@@ -432,8 +432,9 @@ export function posterStyle(raw: unknown, scene: PosterScene): PosterStyle {
 }
 
 /** 档案清单摘要（进宣言提示词：模型据此选档并写出配得上这一档的 subject）。 */
-export function styleCatalogDigest(): string {
+export function styleCatalogDigest(allowed?: readonly PosterStyleKey[]): string {
   return POSTER_STYLE_LIST
+    .filter((s) => !allowed || allowed.includes(s.key))
     .map((s) => `- ${s.key}｜${s.name}：${s.scene}。主体：${s.subjectHint}`)
     .join('\n');
 }

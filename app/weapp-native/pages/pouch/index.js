@@ -113,7 +113,7 @@ function posterWorks(payload) {
       'poster', text(row.jobId), text(row.headline),
       at(row.completedAt || row.createdAt), '海报快印',
       // 「再来一张」落到**这张海报的详情页**，不是空白需求单：那里的「改文字」（不扣钻）与
-      // 「换风格」（重出主视觉、按本单档位再扣一次）都带着上一版的完整上下文，
+      // 「换方向」（重新创作、按本单路线再扣一次）都带着上一版的完整上下文，
       // 而空白需求单等于让用户把刚做过的一张从头再描述一遍。
       `/packages/work/posterJob/index?jobId=${encodeURIComponent(text(row.jobId))}`,
       text(row.poster && row.poster.previewUrl),

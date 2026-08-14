@@ -11,15 +11,14 @@
 //     → refine（LLM #2）：**首轮干净也照样打磨一轮**——这是上游 skill 的核心机制（"take a second pass"），
 //                          不是可选优化；首轮有违规则把违规逐条回喂
 //     → 最多再 refine 一轮（LLM #3）
-//     → 仍不干净 → 返回 ok:false，由 worker 回落模板路径（付费任务永不因 AI 引擎失败）
+//     → 仍不干净 → 返回 ok:false，由 worker 按 tier 决定模板回落或 premium 失败退款
 //
 // 三条不变式（改本文件前先读）：
 //   ① **HTML 相关的 LLM 调用最多 3 次**（MAX_HTML_CALLS）。每轮都要跑一次真实渲染，成本与时延都在这里；
 //      整段还压着一个 180s 预算，超了就用手上最好的结果或回落。
 //   ② **打磨轮不许让画面变差**。若首轮干净、打磨轮反而量出违规，直接退回首轮那张干净图
 //      （polishReverted），绝不为了"执行了打磨"而交一张更差的图。
-//   ③ 失败一律**返回**而不是抛：调用方要靠返回值决定回落，抛异常会被 worker 归成 INTERNAL 并退款，
-//      而那时用户本该拿到一张模板图。
+//   ③ 失败一律**返回**而不是抛：调用方要靠返回值按 tier 决定回落或退款；抛异常会丢失可诊断原因。
 import { completeText } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
 import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS, FONT_SERIF } from './templates.js';
@@ -33,6 +32,7 @@ import { SAFE_ZONE_HINTS, type PosterStyle } from './styleLibrary.js';
 import { critiqueDirective, requestVisualCritique, type VisualCritique } from './visualCritique.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
+import { directionFor } from './directions.js';
 
 /**
  * HTML 相关的 LLM 调用上限（生成 1 + 打磨/修复 2）。
@@ -266,6 +266,18 @@ const POLISH_DIRECTIVE = [
   '再走一遍代码，把它打磨成一件有哲学支撑的杰作。保持同一套构图与信息层级，也保持全部硬约束。',
 ].join('\n');
 
+function rebuildDirective(reason: string): string {
+  return [
+    '',
+    '【本轮任务：机会式重构（只此一次）】',
+    '上一版已经通过全部机器量测，但艺术总监判断它缺少清晰的视觉主角，局部打磨不足以解决。',
+    `具体原因：${reason}`,
+    '允许重组构图、尺度关系与视觉母题，但文案原字、素材、创作方向、AI 标识及全部硬约束不变。',
+    '只建立一个视觉主角，不要用增加卡片、图标和装饰数量来冒充“更丰富”。',
+    '若本轮引入任何机器违规，系统会直接退回上一版干净产物，不再给额外轮次补救。',
+  ].join('\n');
+}
+
 function fixDirective(violations: PosterViolation[]): string {
   return [
     '',
@@ -313,6 +325,8 @@ function canvasUserPrompt(o: {
     '【业务背景（决定气质，不要把这些字印上去）】',
     `商业目标：${brief.goal}`,
     `目标客群：${brief.audience}`,
+    `创作方向：${directionFor(brief.directionKey).name}`,
+    `【正向 Art Direction】${directionFor(brief.directionKey).artDirection}`,
     brief.visualDirection ? `视觉方向：${brief.visualDirection}` : '',
     brief.negativePrompt ? `排除项（画面里不要出现）：${brief.negativePrompt}` : '',
     '',
@@ -397,6 +411,8 @@ export interface CanvasPoster {
   violations: PosterViolation[];
   /** 打磨轮反而量出违规 → 已退回上一张干净图。 */
   polishReverted: boolean;
+  /** 艺术总监曾在既有三轮预算内触发一次构图重构。 */
+  rebuildTriggered: boolean;
   /** 服务端兜底注入了 AI 标识（模型自己没写）。 */
   aiMarkInjected: boolean;
 }
@@ -523,6 +539,7 @@ export async function generateCanvasPoster(
 
   let visionCalls = 0;
   let critiquePassed = false;
+  let rebuildTriggered = false;
 
   /** 失败出口的唯一收口：顺手把最后一轮产物截断后带上（有就带，没有就不带这个键）。 */
   const fail = (
@@ -555,7 +572,7 @@ export async function generateCanvasPoster(
       ok: true,
       poster: toPoster(a, {
         rounds, firstViolationCount: fvc, polishReverted: reverted,
-        visualCritiques: visionCalls, critiquePassed,
+        visualCritiques: visionCalls, critiquePassed, rebuildTriggered,
       }),
     };
   };
@@ -572,10 +589,12 @@ export async function generateCanvasPoster(
 
   let calls = 0;
   let firstViolationCount = 0;
+  let firstProductClean = false;         // 首轮产物就机器量测干净（机会式重构的准入条件之一，见下面 wantsRebuild）
   let lastClean: Attempt | null = null;
   let current: Attempt | null = null;
   let pending: PosterViolation[] = [];   // 待回喂的违规（机器闸门：空 = 上一轮量测干净）
   let notes: string[] = [];              // 待落实的视觉评审意见（人眼顾问：空 = 没有意见可落实）
+  let rebuildReason = '';                // 非空 = 下一轮允许重组构图（最多一次，仍占既有 HTML 轮次）
   let polished = false;                   // 是否已经发生过一次 refine（打磨或修复都算 second pass）
   let reason = '未知原因';
 
@@ -591,7 +610,15 @@ export async function generateCanvasPoster(
     // 违规优先是因为它是**交付闸门**：带着违规的版面再美也交不出去，先把它修干净再谈审美。
     const sys = calls === 0
       ? system
-      : `${system}\n${pending.length ? fixDirective(pending) : notes.length ? critiqueDirective(notes) : POLISH_DIRECTIVE}`;
+      : `${system}\n${pending.length
+        ? fixDirective(pending)
+        : rebuildReason
+          ? rebuildDirective(rebuildReason)
+          : notes.length
+            ? critiqueDirective(notes)
+            : POLISH_DIRECTIVE}`;
+    // 本轮一旦消费即清空；即使模型失败，也不允许在后续重复触发第二次重构。
+    rebuildReason = '';
     // 静态审计不过的那一轮没有可用产物（current 仍是上一轮的），此时不附「上一版 HTML」，
     // 让模型按 critique 重写一份完整文档，而不是去改一份它看不到的东西。
     // 回喂的是**模型自己写的源码**（占位符形态），不是渲染用的那份 —— 后者内联了约 200KB 的
@@ -639,6 +666,7 @@ export async function generateCanvasPoster(
     // ── 干净 ──
     if (r.attempt && !r.violations.length) {
       lastClean = r.attempt;
+      if (calls === 1) firstProductClean = true;
       // 量测干净只说明「没排坏」，不说明「好看」。这里请艺术总监看一眼真图再决定收不收工。
       let verdict: VisualCritique | null = null;
       // 剩余预算连一次评审都放不下时就别看了：评审的价值全在「看完还能再改一轮」，
@@ -654,8 +682,31 @@ export async function generateCanvasPoster(
           verdict = null;
         }
       }
-      // 艺术总监还拿得出**具体意见** = 这一版还没到头。
-      const stillWants = !!verdict && !verdict.pass;
+      // 机会式重构的准入条件（四条缺一不可，每条都是花钱买过的教训）：
+      // ① 艺术总监明确判断「缺少视觉主角」，且本单还没重构过（重构最多一次）；
+      // ② **第一版产物就机器干净**：走过修复轮才干净，说明这版是「刚被扳回合规」的，
+      //    再整页推翻等于把刚修好的东西丢掉重赌一次，而且模型这一单的手感已经证明不稳；
+      // ③ 重构后**至少还剩一轮补救**：重构一旦引入违规就直接回退（rebuildDirective 里也是这么写的），
+      //    落在最后一轮就是白烧一整轮且无处补救；
+      // ④ 时间还够。
+      // 重构占用既有 HTML 轮次；若引入违规，下面 lastClean 分支会退回本张干净图。
+      const wantsRebuild = !!verdict?.needsRebuild && !rebuildTriggered
+        && firstProductClean && calls + 1 < MAX_HTML_CALLS && !outOfTime();
+      if (wantsRebuild) {
+        rebuildTriggered = true;
+        rebuildReason = verdict!.rebuildReason;
+        pending = [];
+        // notes 在这里**故意丢弃**：这一轮要整页重组构图与尺度关系，而 notes 是针对**即将被推翻的那一版**
+        // 写的局部意见（「副标题字号压到主标题 1/3」「右下角留白塌了」）——那些位置马上就不存在了。
+        // 更要命的是两套指令方向相反：critiqueDirective 明写「不要推翻构图重排」，
+        // 与 rebuildDirective 的「允许重组构图」直接打架，拼在一起等于让模型自己挑一条听。
+        // 重构轮只带 rebuildReason 这一条主线；重构后的新版本会被重新评审，届时的 notes 才是针对新画面的。
+        notes = [];
+        polished = true;
+        continue;
+      }
+      // 艺术总监还拿得出**具体局部意见** = 这一版还没到头。
+      const stillWants = !!verdict && !verdict.pass && verdict.notes.length > 0;
       // ★ 无条件的第二遍仍然是底线（上游 "take a second pass"）：**评审判定不能让打磨轮被跳过**。
       //   首轮就判达标也照打一轮——真让它在首轮收工，等于用一个宽松的评委把现有行为往回退。
       //   收工条件因此是「已经打磨过 且（达标 或 评审不可用）」：
@@ -696,6 +747,7 @@ function toPoster(a: Attempt, o: {
   polishReverted: boolean;
   visualCritiques: number;
   critiquePassed: boolean;
+  rebuildTriggered: boolean;
 }): CanvasPoster {
   return {
     buffer: a.buffer,
@@ -709,6 +761,7 @@ function toPoster(a: Attempt, o: {
     violationsFixed: Math.max(0, o.firstViolationCount - a.violations.length),
     violations: a.violations,
     polishReverted: o.polishReverted,
+    rebuildTriggered: o.rebuildTriggered,
     aiMarkInjected: a.aiMarkInjected,
   };
 }

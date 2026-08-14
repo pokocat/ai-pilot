@@ -4,7 +4,7 @@
 // 不依赖组件态，也不依赖上一页传来的状态——退出重进、杀进程重开都走同一条路。
 //
 // 轮询节奏对齐 chat 的 resumeGeneration：前 30 秒 1.2s，之后 3s，10 分钟上限（服务端单任务超时同量级）。
-// 表单（改文字 / 换风格）就地展开在页面里，不用 fixed 弹层、不套 ScrollView——AGENTS.md §7.2：
+// 表单（改文字 / 换方向）就地展开在页面里，不用 fixed 弹层、不套 ScrollView——AGENTS.md §7.2：
 // Android 真机的普通表单 Input 不得放在全屏纵向 ScrollView 或 fixed 弹层中。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { View, Text, Textarea, Image } from '@tarojs/components';
@@ -13,7 +13,10 @@ import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import KbInput from '../../../components/KbInput';
 import { useStore } from '../../../hooks/useStore';
-import { api, type CreativeJobView, type CreativeAssetView, type PosterTemplateOption } from '../../../services/api';
+import {
+  api, type CreativeJobView, type CreativeAssetView, type PosterTemplateOption,
+  type PosterDirectionKey, type PosterDirectionOption,
+} from '../../../services/api';
 import {
   absoluteCreativeUrl, fetchPosterFile, getCreativeStatus, POSTER_LIMITS as LIMITS,
   PROGRESS_STAGES as STAGES, progressText, type PosterProgressStage,
@@ -70,8 +73,11 @@ export default function PosterJobPage() {
   const [loadErr, setLoadErr] = useState('');
   const [timedOut, setTimedOut] = useState(false);
   const [price, setPrice] = useState<number | null>(null);
-  // 启用中的版式清单由 /creative/status 下发；空清单 = 换风格面板不给选版式（只能改视觉方向）。
+  const [routePrices, setRoutePrices] = useState<{ standard: number; premium: number } | null>(null);
+  // 启用中的版式清单由 /creative/status 下发；空清单 = 换方向面板不给选版式（只能改视觉方向）。
   const [templates, setTemplates] = useState<PosterTemplateOption[]>([]);
+  const [directions, setDirections] = useState<PosterDirectionOption[]>([]);
+  const [directionKey, setDirectionKey] = useState<PosterDirectionKey | ''>('');
   const [panel, setPanel] = useState<'' | 'revise' | 'style'>('');
   const [headline, setHeadline] = useState('');
   const [proofs, setProofs] = useState<string[]>(['', '', '']);
@@ -174,11 +180,20 @@ export default function PosterJobPage() {
     let alive = true;
     void getCreativeStatus().then((st) => {
       if (!alive || !st) return;
-      setPrice(st.pricePerPoster);
+      setRoutePrices({ standard: st.pricePerPoster, premium: st.premiumPricePerPoster });
       setTemplates(st.templates ?? []);
+      setDirections((st.directions ?? []).map((item) => ({
+        ...item,
+        ...(item.previewUrl ? { previewUrl: absoluteCreativeUrl(item.previewUrl) } : {}),
+      })));
     });
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    if (!routePrices) return;
+    setPrice(job?.tier === 'premium' ? routePrices.premium : routePrices.standard);
+  }, [job?.tier, routePrices]);
 
   const asset = posterAsset(job);
   const imgUrl = absoluteCreativeUrl(asset?.previewUrl);
@@ -256,6 +271,7 @@ export default function PosterJobPage() {
     styleKeyRef.current = newIdempotencyKey('regen');
     setVisual('');
     setTplKey('');
+    setDirectionKey('');
     setPanel('style');
   };
 
@@ -266,6 +282,10 @@ export default function PosterJobPage() {
     const tpls = st.templates ?? [];
     setTemplates(tpls);
     setTplKey((cur) => (cur && tpls.some((t) => t.key === cur) ? cur : ''));
+    setDirections((st.directions ?? []).map((item) => ({
+      ...item,
+      ...(item.previewUrl ? { previewUrl: absoluteCreativeUrl(item.previewUrl) } : {}),
+    })));
   };
 
   const submitRevise = async () => {
@@ -326,6 +346,7 @@ export default function PosterJobPage() {
       const r = await api.regenerateJob(job.id, {
         ...(opts.usePanel && visual.trim() ? { visualDirection: visual.trim() } : {}),
         ...(opts.usePanel && tplKey ? { templateKey: tplKey } : {}),
+        ...(opts.usePanel && directionKey ? { directionKey } : {}),
         idempotencyKey: key,
       });
       if (!aliveRef.current) return;
@@ -340,7 +361,7 @@ export default function PosterJobPage() {
         setErrors({ form: msg || '没通过校验，改一下再试。' });
         // 版式在本页停留期间被后台停用（服务端 422，不静默换版）：重取清单让那一项立刻消失。
         if (/版式/.test(msg)) void refreshTemplates();
-      } else s.handleApiError(e, { fallbackTitle: '换风格失败，请重试' });
+      } else s.handleApiError(e, { fallbackTitle: '换方向失败，请重试' });
     } finally {
       if (aliveRef.current) setBusy('');
     }
@@ -367,6 +388,12 @@ export default function PosterJobPage() {
 
   const stageIdx = Math.max(0, STAGES.indexOf((job?.progress ?? 'philosophy') as PosterProgressStage));
   const actions = job?.actions ?? [];
+  // 「换方向」清单 = 本单路线 ∩ 本单能选的方向。requiresPortrait 的方向对没传过本人照片的单
+  // 必 422，而详情页没有上传入口 —— 摆出来就是一个只能碰壁的死选项。
+  const activeDirections = job
+    ? directions.filter((item) => item.tier === (job.tier === 'premium' ? 'premium' : 'standard')
+      && (!item.requiresPortrait || job.hasPortrait))
+    : [];
 
   return (
     <View className={`page poster-job ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -434,7 +461,7 @@ export default function PosterJobPage() {
                   ) : null}
                   {actions.includes('regenerate') ? (
                     <View className="pj-act ghost" onClick={openStyle}>
-                      <Text className="pj-act-t">换风格</Text>
+                      <Text className="pj-act-t">换方向</Text>
                       {typeof price === 'number' ? <Text className="pj-act-c">{`💎x${price}`}</Text> : null}
                     </View>
                   ) : null}
@@ -499,14 +526,33 @@ export default function PosterJobPage() {
               </View>
             ) : null}
 
-            {/* ——— 换风格（重出主视觉，会再扣费） ——— */}
+            {/* ——— 换创作方向（重新创作，会再扣费） ——— */}
             {panel === 'style' ? (
               <View className="pj-panel">
                 <View className="pj-panel-h">
-                  <Text className="pj-panel-t">换风格</Text>
+                  <Text className="pj-panel-t">换创作方向</Text>
                   <Text className="pj-panel-x" onClick={() => setPanel('')}>×</Text>
                 </View>
-                <Text className="pj-panel-d">重出主视觉，会再扣一次钻石。旧版本不会被覆盖，随时能回看。</Text>
+                <Text className="pj-panel-d">会按原路线重新创作并再扣一次钻石。旧版本不会被覆盖，随时能回看。</Text>
+                {activeDirections.length ? (
+                  <Field label="创作方向（留空 = 沿用）">
+                    <View className="pj-dir-grid">
+                      {activeDirections.map((item) => {
+                        const on = item.key === directionKey;
+                        return (
+                          <View key={item.key} className={`pj-dir${on ? ' on' : ''}`} onClick={() => setDirectionKey(on ? '' : item.key)}>
+                            {item.previewUrl ? <Image className="pj-dir-img" src={item.previewUrl} mode="aspectFill" /> : <View className="pj-dir-empty">样例待发布</View>}
+                            <View className="pj-dir-b">
+                              <Text className="pj-dir-n">{item.name}</Text>
+                              <Text className="pj-dir-d">{item.desc}</Text>
+                              {item.note ? <Text className="pj-dir-note">{item.note}</Text> : null}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </Field>
+                ) : null}
                 {/* 版式清单来自 /creative/status（只含启用中的）；不选 = 沿用上一版的版式。
                     一套都没下发时整块不渲染——不要给出一个服务端会 422 的选项。 */}
                 {templates.length ? (
@@ -532,12 +578,12 @@ export default function PosterJobPage() {
                     </View>
                   </Field>
                 ) : null}
-                <Field label="视觉方向" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
+                <Field label="补充画面要求" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
                   <Textarea className="pj-area" value={visual} placeholder="留空 = 沿用上一版；只写画面属性" onInput={(e) => setVisual(e.detail.value)} />
                 </Field>
                 {errors.form ? <Text className="pj-ferr">{errors.form}</Text> : null}
                 <View className="pj-btn" style={{ background: accent }} onClick={() => void submitRegenerate({ usePanel: true })}>
-                  <Text className="pj-btn-t">{busy === 'regen' ? '正在发起…' : '重出主视觉'}</Text>
+                  <Text className="pj-btn-t">{busy === 'regen' ? '正在发起…' : '按新方向重做'}</Text>
                   {typeof price === 'number' ? <Text className="pj-btn-c">{`💎x${price}`}</Text> : null}
                 </View>
               </View>

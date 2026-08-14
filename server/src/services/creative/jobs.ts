@@ -25,8 +25,9 @@ import {
   POSTER_SKILL_KEY, type CreativeRuntimeConfig,
 } from './config.js';
 import { normalizePosterBrief, briefModerationText, LIMITS, type NormalizedPosterBrief } from './schema.js';
+import { defaultDirectionKey, isPosterDirectionKey } from './directions.js';
 import { resolveBriefAssets, UploadRejectedError } from './uploads.js';
-import { creativeAssetUrl } from './storage.js';
+import { creativeAssetUrl, getCreativeObject } from './storage.js';
 import type {
   CreativeJobView, CreativeAssetView, PosterBrief,
   RevisePosterJobRequest, RegeneratePosterJobRequest,
@@ -65,12 +66,15 @@ export class JobNotFoundError extends CreativeError {
 /**
  * requestJson 里除 brief 之外的编排元信息。
  * 曾有一个 `visualConfigured` 布尔（建单时的供应商可用性快照）：只写不读，且与 `provider` 列
- * 表达同一件事 → 已删。**实际是否产出了主视觉**看 resultJson.degraded，那才是有读者的字段。
+ * 表达同一件事 → 已删。新任务的主视觉来源由 brief.tier 决定，实际资产看 resultJson.visualAssetId。
  */
 interface RequestSnapshot {
   brief: NormalizedPosterBrief;
   /** revise 复用父任务主视觉时记来源资产 id（worker 据此跳过 visual 阶段）。 */
   sourceVisualAssetId?: string | null;
+  /** 与来源主视觉一起钉死；revise 不得重跑风格抽签导致叠层语法漂移。 */
+  sourceVisualStyleKey?: string | null;
+  sourceVisualSubject?: string | null;
 }
 
 type JobRow = {
@@ -110,7 +114,7 @@ function actionsFor(status: string): CreativeJobView['actions'] {
 /**
  * 面向用户的失败原因（克制口径，不透内部细节；内部原文留在 errorMessage 里给运营看）。
  * 只列**真的会落到 errorCode 上**的码。删掉过三个永不出现的：MODERATION_BLOCKED（建单前就 422，
- * 不会变成任务的终态）、VISUAL_PROVIDER_FAILED（供应商失败一律降级为纯排版，从不置此码）、
+ * 不会变成任务的终态）、VISUAL_PROVIDER_FAILED（当前实现统一收口为 PREMIUM_VISUAL_FAILED）、
  * ASSET_STORE_FAILED（那是上传期抛的 502 UploadRejectedError）。未列出的码统一回落到兜底文案。
  */
 const USER_FACING_ERROR: Record<string, string> = {
@@ -141,9 +145,12 @@ function toView(job: JobRow, assets: Parameters<typeof assetView>[0][]): Creativ
     // 只对外暴露成品与主视觉；源素材是用户自己传的，不必在任务视图里回显。
     assets: assets.filter((a) => a.kind !== 'source').map(assetView),
     ...(job.parentJobId ? { parentJobId: job.parentJobId } : {}),
-    // 档位：详情页的「换风格」按它显示价格（regenerate 继承父单档位、按 priceForTier 扣费）。
+    // 路线：详情页的「换方向」按它显示价格（regenerate 继承父单 tier、按 priceForTier 扣费）。
     // 老任务 requestJson 里没有这个字段 → 不带，前端按 standard 显示。
     ...(requestOf(job).brief?.tier === 'premium' ? { tier: 'premium' as const } : {}),
+    // 只是布尔事实，不带 assetId：详情页「换方向」据它过滤 requiresPortrait 的方向，
+    // 否则无照片的单也会被摆出「本人形象」，选中即 422，而那页没有上传入口。
+    hasPortrait: !!requestOf(job).brief?.portraitAssetId,
     actions: actionsFor(job.status),
   };
 }
@@ -382,6 +389,8 @@ async function insertJob(input: {
   idempotencyKey: string;
   parentJobId?: string | null;
   sourceVisualAssetId?: string | null;
+  sourceVisualStyleKey?: string | null;
+  sourceVisualSubject?: string | null;
   /** false = 不扣费路径（revise）。 */
   charge: boolean;
 }): Promise<CreatePosterJobResult> {
@@ -390,6 +399,8 @@ async function insertJob(input: {
   const request: RequestSnapshot = {
     brief: input.brief,
     ...(input.sourceVisualAssetId ? { sourceVisualAssetId: input.sourceVisualAssetId } : {}),
+    ...(input.sourceVisualStyleKey ? { sourceVisualStyleKey: input.sourceVisualStyleKey } : {}),
+    ...(input.sourceVisualSubject ? { sourceVisualSubject: input.sourceVisualSubject } : {}),
   };
   // 按档位定价：高级档每单多一次图片大模型调用，成本结构不同（priceForTier 是唯一口径）。
   const nominalCost = input.charge ? priceForTier(cfg, input.brief.tier) : 0;
@@ -419,7 +430,9 @@ async function insertJob(input: {
           kind: POSTER_JOB_KIND,
           status: 'pending',
           engine: POSTER_ENGINE,
-          provider: visualReady ? 'configured' : null,
+          // provider 是本单可能承担的图片供应商成本快照。standard 契约永不调用图片供应商，
+          // 即使后台已配置也必须记 null；否则运营成本统计会把纯排版单误判为影像单。
+          provider: input.brief.tier === 'premium' && visualReady ? 'configured' : null,
           requestJson: request as unknown as Prisma.InputJsonValue,
           idempotencyKey: input.idempotencyKey,
           creditCost: nominalCost,
@@ -467,12 +480,12 @@ export function assertTierAvailable(cfg: CreativeRuntimeConfig, brief: Normalize
   // 让它先扣 25 钻再失败退款，是把一次可预见的拒绝做成了一次往返。
   if (brief.portraitAssetId) {
     throw new CreativeError(
-      '高级海报的主视觉由图片模型生成，不能同时使用您上传的本人照片；请改用标准海报，或去掉人物照片',
+      '「主视觉大片」由图片模型创作主视觉，不能同时使用您上传的本人照片；请改用「创意排版」，或去掉人物照片',
       'PREMIUM_PORTRAIT_CONFLICT', 422,
     );
   }
   if (premiumTierAvailable(cfg)) return;
-  throw new CreativeError('高级海报暂时不可用，请改用标准海报或稍后再试', 'PREMIUM_UNAVAILABLE', 422);
+  throw new CreativeError('「主视觉大片」暂时不可用，请改用「创意排版」或稍后再试', 'PREMIUM_UNAVAILABLE', 422);
 }
 
 /**
@@ -527,10 +540,14 @@ export async function createPosterJob(
     charge: true,
   });
   if (!r.reused) {
-    noteCreativeJobCreated(POSTER_SKILL_KEY, visualProviderConfigured(cfg) ? 'configured' : 'none');
+    noteCreativeJobCreated(POSTER_SKILL_KEY,
+      brief.tier === 'premium' && visualProviderConfigured(cfg) ? 'configured' : 'none');
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'creative.job.created',
-      payload: { jobId: r.jobId, templateKey: brief.templateKey, scene: brief.scene, credits: r.creditCost },
+      payload: {
+        jobId: r.jobId, templateKey: brief.templateKey, scene: brief.scene,
+        tier: brief.tier, directionKey: brief.directionKey, credits: r.creditCost,
+      },
     });
   }
   return r;
@@ -550,15 +567,42 @@ function requestOf(job: JobRow): RequestSnapshot {
   return raw as RequestSnapshot;
 }
 
-/** 找出可复用的主视觉资产 id（沿版本链往上找：父任务自己没有就用它记录的来源）。 */
-async function reusableVisualAssetId(job: JobRow): Promise<string | null> {
+interface ReusableVisual {
+  assetId: string;
+  styleKey: string | null;
+  subject: string | null;
+}
+
+function visualMeta(assetId: string, metadataJson: unknown, fallback?: Partial<ReusableVisual>): ReusableVisual {
+  const m = metadataJson && typeof metadataJson === 'object' && !Array.isArray(metadataJson)
+    ? metadataJson as Record<string, unknown> : {};
+  return {
+    assetId,
+    styleKey: typeof m.styleKey === 'string' ? m.styleKey : fallback?.styleKey ?? null,
+    subject: typeof m.subject === 'string' ? m.subject : fallback?.subject ?? null,
+  };
+}
+
+/** 沿版本链找可复用的主视觉，并把当时的风格上下文一起带回。 */
+async function reusableVisual(job: JobRow): Promise<ReusableVisual | null> {
   const own = await prisma.creativeAsset.findFirst({
     where: { jobId: job.id, kind: 'visual' },
     orderBy: { createdAt: 'desc' },
-    select: { id: true },
+    select: { id: true, ossKey: true, metadataJson: true },
   });
-  if (own) return own.id;
-  return requestOf(job).sourceVisualAssetId ?? null;
+  if (own && (await getCreativeObject(own.ossKey))?.length) return visualMeta(own.id, own.metadataJson);
+  const req = requestOf(job);
+  if (!req.sourceVisualAssetId) return null;
+  const inherited = await prisma.creativeAsset.findFirst({
+    where: { id: req.sourceVisualAssetId, userId: job.userId, kind: 'visual' },
+    select: { id: true, ossKey: true, metadataJson: true },
+  });
+  return inherited && (await getCreativeObject(inherited.ossKey))?.length
+    ? visualMeta(inherited.id, inherited.metadataJson, {
+      styleKey: req.sourceVisualStyleKey ?? null,
+      subject: req.sourceVisualSubject ?? null,
+    })
+    : null;
 }
 
 /**
@@ -578,6 +622,10 @@ export async function reviseJob(
   await assertPlanActive(user.id);
   const parent = await loadOwnedJob(jobId, user.id);
   const base = requestOf(parent).brief;
+  const sourceVisual = await reusableVisual(parent);
+  if (base.tier === 'premium' && !sourceVisual) {
+    throw new CreativeError('原主视觉已不可用，无法免费改文字；请选择「换方向」重新生成', 'SOURCE_VISUAL_MISSING', 422);
+  }
 
   // 只允许改文案字段：视觉方向/素材/场景一律沿用父任务（改那些就属于 regenerate，要重新扣费）。
   const merged: PosterBrief = {
@@ -586,7 +634,6 @@ export async function reviseJob(
     ...(patch.subheadline !== undefined ? { subheadline: patch.subheadline } : {}),
     ...(patch.proofPoints !== undefined ? { proofPoints: patch.proofPoints.slice(0, LIMITS.proofPoints) } : {}),
     ...(patch.cta !== undefined ? { cta: patch.cta } : {}),
-    ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
   };
   const brief = normalizePosterBrief(merged, cfg.templates);
   await resolveBriefAssets(user.id, brief);
@@ -608,20 +655,22 @@ export async function reviseJob(
     brief,
     idempotencyKey,
     parentJobId: parent.id,
-    sourceVisualAssetId: await reusableVisualAssetId(parent),
+    sourceVisualAssetId: sourceVisual?.assetId ?? null,
+    sourceVisualStyleKey: sourceVisual?.styleKey ?? null,
+    sourceVisualSubject: sourceVisual?.subject ?? null,
     charge: false, // 改文案不扣钻石（已拍板）
   });
   if (!r.reused) {
-    noteCreativeJobCreated(POSTER_SKILL_KEY, visualProviderConfigured(cfg) ? 'configured' : 'none');
+    noteCreativeJobCreated(POSTER_SKILL_KEY, sourceVisual ? 'reused' : 'none');
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'creative.job.revised',
-      payload: { jobId: r.jobId, parentJobId: parent.id, templateKey: brief.templateKey },
+      payload: { jobId: r.jobId, parentJobId: parent.id, templateKey: brief.templateKey, directionKey: brief.directionKey },
     });
   }
   return r;
 }
 
-/** 重出主视觉：允许改 visualDirection / negativePrompt / templateKey，**重新扣费**（同 create 计费路径）。 */
+/** 重新创作：允许换视觉描述 / 创作方向 / 版式，**重新扣费**（同 create 计费路径）。 */
 export async function regenerateJob(
   user: { id: string; tenantId: string },
   jobId: string,
@@ -638,6 +687,7 @@ export async function regenerateJob(
     ...(patch.visualDirection !== undefined ? { visualDirection: patch.visualDirection } : {}),
     ...(patch.negativePrompt !== undefined ? { negativePrompt: patch.negativePrompt } : {}),
     ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
+    ...(patch.directionKey !== undefined ? { directionKey: patch.directionKey } : {}),
   };
   const brief = normalizePosterBrief(merged, cfg.templates);
   // 档位从父单继承（...base 带过来的）。重出主视觉**要真的再调一次图片模型**，所以这条路径
@@ -666,7 +716,8 @@ export async function regenerateJob(
     charge: true, // 重出主视觉再扣一次
   });
   if (!r.reused) {
-    noteCreativeJobCreated(POSTER_SKILL_KEY, visualProviderConfigured(cfg) ? 'configured' : 'none');
+    noteCreativeJobCreated(POSTER_SKILL_KEY,
+      brief.tier === 'premium' && visualProviderConfigured(cfg) ? 'configured' : 'none');
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'creative.job.regenerated',
       payload: { jobId: r.jobId, parentJobId: parent.id, templateKey: brief.templateKey, credits: r.creditCost },
@@ -727,7 +778,22 @@ export interface JobExecutionInput {
   job: JobRow;
   brief: NormalizedPosterBrief;
   sourceVisualAssetId: string | null;
+  sourceVisualStyleKey: string | null;
+  sourceVisualSubject: string | null;
   brandKit: Awaited<ReturnType<typeof getBrandKit>> | null;
+}
+
+/**
+ * 存量在途单兼容：requestJson.brief 是**建单当时**的快照，不会随代码演进被回填。
+ * directionKey 引入之前建的单里没有这个字段，而 worker 全链（宣言 / 哲学 / 画布 / 路线归一）
+ * 都按「必定有合法 key」取方向定义。这里按 brief 自己的字段推一个默认方向补齐，
+ * 让老单与新单进管线时形状一致。directions.directionFor 那道兜底是第二道保险，不是替代品：
+ * 补齐这一层还负责让 resultJson.directionKey 不是 undefined。
+ */
+function withDirectionKey(brief: NormalizedPosterBrief): NormalizedPosterBrief {
+  if (isPosterDirectionKey(brief.directionKey)) return brief;
+  const tier = brief.tier === 'premium' ? 'premium' : 'standard';
+  return { ...brief, tier, directionKey: defaultDirectionKey(tier, brief.scene, !!brief.portraitAssetId) };
 }
 
 /** worker 执行前把任务展开成可执行输入（含已确认的 BrandKit）。 */
@@ -738,7 +804,14 @@ export async function loadJobExecutionInput(jobId: string): Promise<JobExecution
   const req = requestOf(row);
   // brandKitVersion 只是「用户当时引用了资产包」的意思；实际取当前 approved 版本（未确认则不用）。
   const brandKit = req.brief.brandKitVersion ? await approvedBrandKit(row.userId) : null;
-  return { job: row, brief: req.brief, sourceVisualAssetId: req.sourceVisualAssetId ?? null, brandKit };
+  return {
+    job: row,
+    brief: withDirectionKey(req.brief),
+    sourceVisualAssetId: req.sourceVisualAssetId ?? null,
+    sourceVisualStyleKey: req.sourceVisualStyleKey ?? null,
+    sourceVisualSubject: req.sourceVisualSubject ?? null,
+    brandKit,
+  };
 }
 
 export { UploadRejectedError };

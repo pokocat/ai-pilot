@@ -17,9 +17,9 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import {
   api, type Agent, type PosterBrief, type PosterScene, type CreativeUploadRole, type PosterTemplateOption,
-  type PosterTier,
+  type PosterTier, type PosterDirectionKey, type PosterDirectionOption,
 } from '../../../services/api';
-import { getCreativeStatus, POSTER_LIMITS as LIMITS } from '../../../services/creative';
+import { absoluteCreativeUrl, getCreativeStatus, POSTER_LIMITS as LIMITS } from '../../../services/creative';
 import { attachPosterJob, markPosterPending, posterScope, readPosterPending } from '../../../services/posterPending';
 import { checkImageUpload } from '../../../services/uploadGuard';
 import { navTo, redirectToGuarded } from '../../../services/nav';
@@ -97,6 +97,8 @@ export default function PosterConfirmPage() {
   const [tier, setTier] = useState<PosterTier>('standard');
   const [premiumPrice, setPremiumPrice] = useState(0);
   const [premiumOn, setPremiumOn] = useState(false);
+  const [directions, setDirections] = useState<PosterDirectionOption[]>([]);
+  const [directionKey, setDirectionKey] = useState<PosterDirectionKey | ''>('');
   // 以下两项**用户不填也看不到**，只从服务端草稿透传回 submit（方案 §5.3 的 BrandKit 集成靠它落地）：
   //   · brandKitVersion —— 服务端据它取已确认（approved）的品牌资产包，合并品牌语气与主题色板进提示词；
   //   · negativePrompt  —— 服务端从 BrandKit 的品牌禁忌生成的排除项。
@@ -116,6 +118,9 @@ export default function PosterConfirmPage() {
   // 幂等键存页面态：本页任何一次提交都用它，重复点击不会建出第二个任务。
   const keyRef = useRef('');
   const aliveRef = useRef(true);
+  // 上传是异步的，回调里读渲染时的快照会拿到用户上传期间已改过的旧值 → 用 ref 取当下的方向。
+  const directionKeyRef = useRef<PosterDirectionKey | ''>('');
+  directionKeyRef.current = directionKey;
   useEffect(() => () => { aliveRef.current = false; }, []);
 
   const goJob = (jobId: string) => {
@@ -150,6 +155,12 @@ export default function PosterConfirmPage() {
         setPrice(st.pricePerPoster);
         setPremiumPrice(st.premiumPricePerPoster);
         setPremiumOn(!!st.premiumAvailable);
+        const directionOptions = (st.directions ?? []).map((item) => ({
+          ...item,
+          ...(item.previewUrl ? { previewUrl: absoluteCreativeUrl(item.previewUrl) } : {}),
+        }));
+        setDirections(directionOptions);
+        setDirectionKey(directionOptions.find((item) => item.tier === 'standard')?.key ?? '');
         setTemplates(tpls);
         setTemplateKey(tpls[0]?.key ?? '');
       }
@@ -170,6 +181,7 @@ export default function PosterConfirmPage() {
         // 推荐版式已被后台停用时：改选一个**启用中的**并让选中态可见，不静默沿用一个必然 422 的 key。
         const rec = String(b.templateKey ?? '');
         setTemplateKey(tpls.length ? (tpls.some((t) => t.key === rec) ? rec : (tpls[0]?.key ?? '')) : rec);
+        if (b.directionKey) setDirectionKey(b.directionKey);
         setReason(draft.templateReason ?? '');
       } else if (messageId) {
         // 只有**带着 messageId 却没拿到草稿**才是真出了事。冷启动（没有 messageId，例如从锦囊
@@ -185,6 +197,12 @@ export default function PosterConfirmPage() {
 
   const setProof = (i: number, v: string) => setProofs((cur) => cur.map((x, j) => (j === i ? v : x)));
 
+  const chooseTier = (next: PosterTier) => {
+    setTier(next);
+    setDirectionKey(directions.find((item) => item.tier === next)?.key ?? '');
+    setErrors((cur) => ({ ...cur, direction: '' }));
+  };
+
   /** 重取启用中的版式清单（后台停用某套版式后，本页缓存的清单会过期）。 */
   const refreshTemplates = async () => {
     const st = await getCreativeStatus({ force: true });
@@ -192,6 +210,18 @@ export default function PosterConfirmPage() {
     const tpls = st.templates ?? [];
     setTemplates(tpls);
     setTemplateKey((cur) => (tpls.some((t) => t.key === cur) ? cur : (tpls[0]?.key ?? '')));
+    const directionOptions = (st.directions ?? []).map((item) => ({
+      ...item,
+      ...(item.previewUrl ? { previewUrl: absoluteCreativeUrl(item.previewUrl) } : {}),
+    }));
+    setDirections(directionOptions);
+    if (tier === 'premium' && !st.premiumAvailable) {
+      setTier('standard');
+      setDirectionKey(directionOptions.find((item) => item.tier === 'standard')?.key ?? '');
+    }
+    else if (!directionOptions.some((item) => item.key === directionKey)) {
+      setDirectionKey(directionOptions.find((item) => item.tier === tier)?.key ?? '');
+    }
   };
 
   /** 前置校验：与服务端同口径。返回 true = 可提交。 */
@@ -209,12 +239,39 @@ export default function PosterConfirmPage() {
     else put('cta', over(cta, LIMITS.cta, '行动号召'));
     put('visual', over(visual, LIMITS.visualDirection, '视觉方向'));
     if (assets.portrait && !consent) next.consent = '请先确认肖像使用权';
+    if (directionKey === 'graphic_portrait' && !assets.portrait) next.direction = '「本人形象」需要先上传本人照片';
+    if (tier === 'premium' && assets.portrait) next.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     setErrors(next);
     if (Object.keys(next).length) {
       Taro.showToast({ title: '还有几处需要改一下', icon: 'none' });
       return false;
     }
     return true;
+  };
+
+  /**
+   * 本人照片刚选定 / 刚清除的那一刻，把方向拨到与之自洽的一项。
+   *
+   * 只在这两个时刻动，**不在渲染里强制**：传了照片之后又手动改选别的方向，那是用户的决定，得留住。
+   * 传了照片却停在「强标题视觉」，art direction（视觉主角必须是主标题本身）和那张脸会在同一张
+   * 画面里互相打架；服务端的 hasPortrait 默认分支本来就想选「本人形象」，是确认页恒钉第一项把它废了。
+   * 该路线没有 requiresPortrait 的方向（高级档）时：不切也不提示。
+   */
+  const syncDirectionForPortrait = (hasPortrait: boolean) => {
+    const list = directions.filter((item) => item.tier === tier);
+    const current = list.find((item) => item.key === directionKeyRef.current);
+    if (hasPortrait) {
+      if (current?.requiresPortrait) return;
+      const portraitOne = list.find((item) => item.requiresPortrait);
+      if (!portraitOne) return;
+      setDirectionKey(portraitOne.key);
+      setErrors((e) => ({ ...e, direction: '' }));
+      Taro.showToast({ title: `已切换到「${portraitOne.name || '本人形象'}」方向`, icon: 'none' });
+      return;
+    }
+    if (!current?.requiresPortrait) return;
+    setDirectionKey(list[0]?.key ?? '');
+    setErrors((e) => ({ ...e, direction: '' }));
   };
 
   const pickAsset = async (role: CreativeUploadRole) => {
@@ -240,6 +297,7 @@ export default function PosterConfirmPage() {
       const r = await api.uploadCreativeAsset(path, role);
       if (!aliveRef.current) return;
       setAssets((cur) => ({ ...cur, [role]: { assetId: r.assetId, path } }));
+      if (role === 'portrait') syncDirectionForPortrait(true);
     } catch (e) {
       s.handleApiError(e, { fallbackTitle: '图片上传失败，请重试' });
     } finally {
@@ -253,7 +311,10 @@ export default function PosterConfirmPage() {
       delete next[role];
       return next;
     });
-    if (role === 'portrait') setErrors((e) => ({ ...e, consent: '' }));
+    if (role === 'portrait') {
+      setErrors((e) => ({ ...e, consent: '' }));
+      syncDirectionForPortrait(false);
+    }
   };
 
   const submit = async () => {
@@ -276,6 +337,7 @@ export default function PosterConfirmPage() {
       // 只在高级档可用时才敢带 premium：状态过期时（用户停在本页、运营关了供应商）服务端会 422，
       // 这里少发一次也少一次白扣的风险。
       tier: premiumOn ? tier : 'standard',
+      ...(directionKey ? { directionKey } : {}),
       ratio: '3:4',
       ...(assets.portrait ? { portraitAssetId: assets.portrait.assetId } : {}),
       ...(assets.logo ? { logoAssetId: assets.logo.assetId } : {}),
@@ -439,23 +501,19 @@ export default function PosterConfirmPage() {
               </Field>
             ) : null}
 
-            {/* 档位：只在服务端说可用时渲染。高级档会多调一次图片大模型出全幅主视觉，
-                所以价格与产出形态都不同；不可用时整块不显示，而不是显示一个必然 422 的选项。
-                高级档与"本人照片"互斥（服务端同样会 422），选中时把上传区的人像入口一起收起。 */}
-            {premiumOn ? (
-              <Field label="档位">
-                <View className="ps-tpls">
-                  {([
-                    ['standard', '标准海报', `x${price} · 模型用图形与排印现场作画`],
-                    ['premium', '高级海报', `x${premiumPrice} · 顶级图片模型出全幅主视觉，质感更强`],
-                  ] as [PosterTier, string, string][]).map(([k, name, desc]) => {
+            <Field label="这次怎么创作">
+              <View className="ps-tpls">
+                {([
+                  ['standard', '创意排版', `x${price} · 用图形、字体和你的素材现场创作`],
+                  ...(premiumOn ? [['premium', '主视觉大片', `x${premiumPrice} · AI 先创作全幅主视觉，再由军师排中文`]] : []),
+                ] as [PosterTier, string, string][]).map(([k, name, desc]) => {
                     const on = k === tier;
                     return (
                       <View
                         key={k}
                         className={`ps-tpl${on ? ' on' : ''}`}
                         style={on ? { borderColor: accent } : undefined}
-                        onClick={() => setTier(k)}
+                        onClick={() => chooseTier(k)}
                       >
                         <View className="ps-tpl-h">
                           <Text className="ps-tpl-n">{name}</Text>
@@ -467,13 +525,34 @@ export default function PosterConfirmPage() {
                         </View>
                       </View>
                     );
+                })}
+              </View>
+              {tier === 'premium' ? (
+                <Text className="ps-fhint">主视觉大片不使用你上传的本人照片；人物方向是 AI 演绎，并非本人。标题等中文仍由军师排版。</Text>
+              ) : null}
+            </Field>
+
+            {directions.some((item) => item.tier === tier) ? (
+              <Field label="想往哪个方向做" err={errors.direction}>
+                <View className="ps-dir-grid">
+                  {directions.filter((item) => item.tier === tier).map((item) => {
+                    const on = item.key === directionKey;
+                    return (
+                      <View key={item.key} className={`ps-dir${on ? ' on' : ''}`} onClick={() => { setDirectionKey(item.key); setErrors((cur) => ({ ...cur, direction: '' })); }}>
+                        {item.previewUrl ? (
+                          <Image className="ps-dir-img" src={item.previewUrl} mode="aspectFill" />
+                        ) : (
+                          <View className="ps-dir-placeholder"><Icon name="image" size={18} color="#7E848B" /><Text>样例待发布</Text></View>
+                        )}
+                        <View className="ps-dir-body">
+                          <View className="ps-dir-name"><Text>{item.name}</Text>{on ? <Icon name="check" size={12} color={accent} /> : null}</View>
+                          <Text className="ps-dir-desc">{item.desc}</Text>
+                          {item.note ? <Text className="ps-dir-note">{item.note}</Text> : null}
+                        </View>
+                      </View>
+                    );
                   })}
                 </View>
-                {tier === 'premium' ? (
-                  <Text className="ps-fhint">
-                    高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。
-                  </Text>
-                ) : null}
               </Field>
             ) : null}
 

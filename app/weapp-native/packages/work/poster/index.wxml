@@ -16,16 +16,38 @@
       <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
       <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
 
-      <!-- 主视图：设计说明 + 档位。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
+      <!-- 主视图：设计说明 + 创作方式。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
            而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染、表单自动摊开。 -->
       <view wx:if="{{designNote}}" class="ps-note-card">
         <text class="ps-note-k">这张海报会这么设计</text>
         <text class="ps-note-b">{{designNote}}</text>
       </view>
-      <!-- 档位卡是纯文字卡：曾经这里各挂一张 /assets/tier/*.jpg 的示意图，但那两张图从没进过
-           src/assets（也就从没打进产物），每次进页面都靠 binderror 收起——等于一段永远走 catch 的死代码。
-           要恢复示意图：把图放进 app/src/assets/tier/，再把 <image class="ps-tier-art"> 与 tierArtError 一起加回来。 -->
-      <view wx:if="{{premiumOn}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">档位</text></view><view class="ps-tpls"><view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">标准海报</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 模型用图形与排印现场作画</text></view></view><view class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">高级海报</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · 顶级图片模型出全幅主视觉，质感更强</text></view></view></view><text wx:if="{{tier==='premium'}}" class="ps-fhint">高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。</text></view>
+      <view class="ps-field">
+        <view class="ps-flabel"><text class="ps-fl">这次怎么创作</text></view>
+        <view class="ps-tpls">
+          <view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier">
+            <view class="ps-tpl-h"><text class="ps-tpl-n">创意排版</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view>
+            <view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 用图形、字体和你的素材现场创作</text></view>
+          </view>
+          <view wx:if="{{premiumOn}}" class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier">
+            <view class="ps-tpl-h"><text class="ps-tpl-n">主视觉大片</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view>
+            <view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · AI 先创作全幅主视觉，再由军师排中文</text></view>
+          </view>
+        </view>
+        <text wx:if="{{tier==='premium'}}" class="ps-fhint">主视觉大片不使用你上传的本人照片；人物方向是 AI 演绎，并非本人。标题等中文仍由军师排版。</text>
+      </view>
+
+      <view wx:if="{{activeDirections.length}}" class="ps-field">
+        <view class="ps-flabel"><text class="ps-fl">想往哪个方向做</text></view>
+        <view class="ps-dir-grid">
+          <view wx:for="{{activeDirections}}" wx:key="key" class="ps-dir {{directionKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseDirection">
+            <image wx:if="{{item.previewUrl}}" class="ps-dir-img" src="{{item.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
+            <view wx:else class="ps-dir-placeholder"><native-icon name="image" tone="neutral" size="20"></native-icon><text>样例待发布</text></view>
+            <view class="ps-dir-body"><view class="ps-dir-name"><text>{{item.name}}</text><native-icon wx:if="{{directionKey===item.key}}" name="check" tone="green" size="13"></native-icon></view><text class="ps-dir-desc">{{item.desc}}</text><text wx:if="{{item.note}}" class="ps-dir-note">{{item.note}}</text></view>
+          </view>
+        </view>
+        <text wx:if="{{errors.direction}}" class="ps-ferr">{{errors.direction}}</text>
+      </view>
 
       <view class="ps-more" bindtap="toggleForm">
         <text class="ps-more-t">{{showForm?'收起细节':'这些细节要改吗'}}</text>

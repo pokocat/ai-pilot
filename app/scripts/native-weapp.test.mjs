@@ -1435,12 +1435,13 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     assert.match(finished.outputs[0] || '', /^data:image\/png;base64,/);
     assert.deepEqual([...Buffer.from(finished.outputs[0].split(',')[1], 'base64').subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 
-    const revised = await mock.reviseJob(created.jobId, { idempotencyKey: 'poster-revise-1', headline: '增长只抓一条主线', templateKey: 'editorial' });
+    const revised = await mock.reviseJob(created.jobId, { idempotencyKey: 'poster-revise-1', headline: '增长只抓一条主线' });
     assert.equal(revised.creditCost, 0);
     clock += 3300;
     const revisedJob = await mock.creativeJob(revised.jobId);
     assert.equal(revisedJob.parentJobId, created.jobId);
     assert.equal(revisedJob.brief.headline, '增长只抓一条主线');
+    assert.equal(revisedJob.brief.templateKey, 'person_hero', '免费改文字不得顺带换版式');
 
     const regenerated = await mock.regenerateJob(revised.jobId, { idempotencyKey: 'poster-regen-1', visualDirection: '商业发布会质感', templateKey: 'business_launch' });
     const cancelled = await mock.cancelJob(regenerated.jobId);
@@ -1884,12 +1885,12 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // （原「出图链路要带 messageId」的断言随 2026-08-13 改造一并作废：需求单改从整段对话抽，
   //   openPoster 只带 sessionId。上面的 doesNotMatch 已经把"不许再挂回某条消息"钉死。）
 
-  // ★ 档位（2026-08-13）：结算按钮上的价格必须跟着**选中的档位**走。
+  // ★ 双路线：结算按钮上的价格必须跟着**选中的生成路线**走。
   //   选了高级（25 钻）按钮却写 x10、扣的却是 25 —— 那是在扣费那一刻说假话。
   //   判据与 submit 里带 tier 的判据必须逐字同源，两处各写各的迟早对不上。
-  assert.match(posterWxml, /x\{\{premiumOn&&tier==='premium'\?premiumPrice:price\}\}/, '按钮价格要跟随档位');
-  assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard';/, '提交带的档位判据同源');
-  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]{0,400}档位/, '高级档不可用时整块不渲染');
+  assert.match(posterWxml, /x\{\{premiumOn&&tier==='premium'\?premiumPrice:price\}\}/, '按钮价格要跟随路线');
+  assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard';/, '提交带的路线判据同源');
+  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]{0,400}主视觉大片/, '主视觉大片不可用时整条路线不渲染');
   // 冷启动（没有对话上下文）不是故障：服务端现在回空草稿（2026-08-13 前是 422 MESSAGE_ID_REQUIRED），
   // 弹报错横幅会把一次正常的空白表单说成出了事。
   assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
@@ -1952,13 +1953,34 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(posterWxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
   assert.equal(posterJson.usingComponents?.['agent-unlock'], '/components/agent-unlock/index');
   assert.match(api, /creativeStatus:\s*\(\) => isMock\(\) \? mock\.creativeStatus\(\)/);
-  // mock 必须与 H5 mock 同契约（两端各一份、字段必须齐）。档位三件套缺任何一个，
-  // 原生端确认页那块档位 UI 就整块不渲染 —— 本地走查会以为"功能没做"，而不是"mock 少了字段"。
+  // mock 必须与 H5 mock 同契约（两端各一份、字段必须齐）。路线字段缺任何一个，
+  // 原生端确认页那块路线 UI 就无法完整渲染 —— 本地走查会以为"功能没做"，而不是"mock 少了字段"。
   assert.match(mock, /function creativeStatus\(\)[\s\S]*?enabled: true[\s\S]*?pricePerPoster: 10/);
   assert.match(mock, /function creativeStatus\(\)[\s\S]*?premiumPricePerPoster: 25/);
   assert.match(mock, /function creativeStatus\(\)[\s\S]*?premiumAvailable: true/);
-  // 档位选择器：只在 premiumOn 时渲染，且两档都要能点。
-  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]*?data-key="standard"[\s\S]*?data-key="premium"/);
+  // ★ 方向清单与 hasPortrait：两端**各写一份**，删掉任何一边都必须红。
+  //   少了 requiresPortrait，确认页与详情页都判不出「本人形象」要照片；少了任务视图上的
+  //   hasPortrait，详情页「换方向」只能按 tier 过滤 —— 给没传照片的单摆出一个必 422 的死选项，
+  //   而那页没有上传入口。本地走查只会以为「功能没做」，查不到是 mock 吃了字段。
+  const h5Mock = fs.readFileSync(path.join(appRoot, 'src/services/mock.ts'), 'utf8');
+  for (const [side, src] of [['原生', mock], ['H5', h5Mock]]) {
+    assert.match(src, /directions: MOCK_POSTER_DIRECTIONS/, `${side} mock 的 creativeStatus 要下发方向清单`);
+    for (const key of ['graphic_bold_type', 'graphic_symbol', 'graphic_portrait', 'photo_character', 'photo_product', 'photo_scene']) {
+      assert.match(src, new RegExp(`key: '${key}'`), `${side} mock 的方向清单缺 ${key}`);
+    }
+    assert.match(src, /key: 'graphic_portrait'[^\n]*requiresPortrait: true/, `${side} mock 要标出「本人形象」需要照片`);
+    assert.match(src, /hasPortrait: [^\n]*portraitAssetId/, `${side} mock 的任务视图要按 brief 回 hasPortrait`);
+  }
+  // 详情页「换方向」的清单 = 路线 ∩ 照片事实，两个条件缺一不可。
+  assert.match(posterJob, /item\.tier === tier && \(!item\.requiresPortrait \|\| hasPortrait\)/,
+    '换方向清单必须同时按路线和 hasPortrait 过滤');
+  // 照片刚选定 / 刚清除的那一刻才拨方向；不许在渲染里强制，否则用户手动改选会被反复顶回去。
+  assert.match(poster, /syncDirectionForPortrait\(hasPortrait\)/, '确认页要有照片→方向的同步');
+  assert.match(poster, /this\.setData\(\{ assets \}\);\s*\n\s*if \(role === 'portrait'\) this\.syncDirectionForPortrait\(true\);/,
+    '自动切方向挂在上传成功那一刻');
+  assert.match(poster, /if \(role === 'portrait'\) this\.syncDirectionForPortrait\(false\);/, '清除照片要回落方向');
+  // 创意排版恒可选；主视觉大片只在 premiumOn 时渲染，两条路线都要能点。
+  assert.match(posterWxml, /data-key="standard"[\s\S]*?wx:if="\{\{premiumOn\}\}"[^>]*data-key="premium"/);
   assert.match(poster, /chooseTier\(event\)/);
   assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard'/);
 });

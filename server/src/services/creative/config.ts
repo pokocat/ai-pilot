@@ -50,8 +50,8 @@ export const TEMPLATE_CATALOG: Record<TemplateKey, { name: string; desc: string 
 /**
  * 排版引擎（2026-07-29 第 3 档拍板）。
  * · `'ai'`（**默认**）：模型自己写整张海报的 HTML/CSS（宣言 → 创作 → 量测 → 无条件打磨），
- *   失败一律回落 `'template'` 的完整逻辑，付费任务永不因 AI 引擎失败；
- * · `'template'`：只走三套白名单模板（含图片供应商主视觉），即上一代行为。
+ *   standard 失败回落 `'template'`；premium 仍须保住主视觉契约，否则失败退款；
+ * · `'template'`：只走三套白名单模板。主视觉来源只由 tier 决定，不得由排版引擎暗中改变。
  * 取值收窄成联合类型而不是任意字符串：payload 里读到别的值一律按默认处理（见 layoutEngineOf）。
  */
 export const LAYOUT_ENGINES = ['ai', 'template'] as const;
@@ -60,23 +60,6 @@ export const DEFAULT_LAYOUT_ENGINE: LayoutEngine = 'ai';
 
 function layoutEngineOf(v: unknown): LayoutEngine {
   return (LAYOUT_ENGINES as readonly string[]).includes(v as string) ? (v as LayoutEngine) : DEFAULT_LAYOUT_ENGINE;
-}
-
-/**
- * AI 创作路线（2026-07-30 影像主导模式拍板）。**只在 layoutEngine='ai' 时有意义。**
- * · `'auto'`（**默认**）：模型在宣言阶段自选 graphic / photo（提示词里同时给两个选项）；
- * · `'photo'`：强制影像主导（仍受两条门禁约束，不满足时降 graphic —— 见 posterRoute.ts）；
- * · `'graphic'`：强制纯图形排印（宣言提示词里根本不给 photo 选项，省 token 也免得模型选个走不通的）。
- *
- * 为什么不做成「风险开关」文案：photo 链任一步失败退回 graphic 复用同一篇宣言，再失败才回落模板 ——
- * 交付与计费都不会因它出问题。真正要盯的是任务台上的实际路线（AI 影像 / AI 排版 / 回落模板）。
- */
-export const AI_MODES = ['auto', 'graphic', 'photo'] as const;
-export type AiMode = (typeof AI_MODES)[number];
-export const DEFAULT_AI_MODE: AiMode = 'auto';
-
-function aiModeOf(v: unknown): AiMode {
-  return (AI_MODES as readonly string[]).includes(v as string) ? (v as AiMode) : DEFAULT_AI_MODE;
 }
 
 /**
@@ -171,8 +154,6 @@ export interface CreativeRuntimeConfig {
   timeoutMs: number;
   /** 排版引擎（默认 'ai'，AI 失败自动回落模板）。 */
   layoutEngine: LayoutEngine;
-  /** AI 创作路线（默认 'auto'=模型自选）。只在 layoutEngine='ai' 时被读。 */
-  aiMode: AiMode;
   templates: Record<TemplateKey, boolean>;
   visual: {
     enabled: boolean;
@@ -189,7 +170,12 @@ export interface CreativeRuntimeConfig {
 
 type RawPayload = {
   pricePerPoster?: unknown; premiumPricePerPoster?: unknown; dailyLimit?: unknown; timeoutMs?: unknown;
-  layoutEngine?: unknown; aiMode?: unknown; templates?: unknown; visual?: unknown;
+  layoutEngine?: unknown; templates?: unknown; visual?: unknown;
+  /**
+   * 已退役字段，**只在 raw 层宽松读取，不许回到 CreativeRuntimeConfig 的类型里**。
+   * 旧版的 `aiMode='graphic'` 是运营的熔断锁（含义就是「不许调图片供应商」），见 visual.enabled 处。
+   */
+  aiMode?: unknown;
 };
 
 function num(v: unknown, def: number, min: number, max: number): number {
@@ -237,15 +223,16 @@ export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise
       ?? num(p.premiumPricePerPoster, DEFAULT_PREMIUM_PRICE_PER_POSTER, 0, 10_000),
     dailyLimit: num(p.dailyLimit, DEFAULT_DAILY_LIMIT, 0, 1000),
     timeoutMs: num(p.timeoutMs, DEFAULT_TIMEOUT_MS, 10_000, MAX_TIMEOUT_MS),
-    // 缺省即 'ai'：这意味着**部署即切 AI 引擎**（运营不需要动配置）。安全性由回落矩阵兜住，
-    // 见 worker.ts 的 runPipeline —— AI 引擎任何一步失败都退回模板路径，不影响交付与计费。
+    // 缺省即 'ai'：这意味着**部署即切 AI 排版**（运营不需要动配置）。standard 由模板回落兜底；
+    // premium 的主视觉契约不能被排版回落改写，拿不到主视觉仍失败退款。
     layoutEngine: layoutEngineOf(p.layoutEngine),
-    // 缺省 'auto'：模型自选路线。photo 走不通时自动降 graphic（posterRoute.ts 的两条门禁），
-    // graphic 走不通时回落模板 —— 所以这个旋钮同样不是风险开关。
-    aiMode: aiModeOf(p.aiMode),
     templates: templatesOf(p.templates),
     visual: {
-      enabled: !!(visualRaw.enabled as boolean),
+      // aiMode 退役的迁移兼容：旧版 premiumTierAvailable 要求 aiMode !== 'graphic'，运营是拿它当
+      // 熔断锁用的。新版完全不读 aiMode —— 生产 payload 里若还残留这把锁，发版当天高级档就会
+      // 静默重开。这里视同「图片供应商关闭」，与旧口径等价。
+      // 运营下次在后台保存创作配置时，updateCreativeConfig 写的新 payload 不含 aiMode，本分支自然失活。
+      enabled: !!(visualRaw.enabled as boolean) && p.aiMode !== 'graphic',
       dialect: dialectOf(visualRaw.dialect),
       baseUrl: str(visualRaw.baseUrl),
       model: str(visualRaw.model),
@@ -270,16 +257,14 @@ export function visualProviderConfigured(cfg: CreativeRuntimeConfig): boolean {
 /**
  * 高级档此刻能不能下单。
  *
- * 两个条件缺一不可：
- * ① 图片供应商已配置并启用 —— 高级档的全部溢价就是那次图片大模型调用，供应商没配就没有高级档；
- * ② 运营没把 `aiMode` 锁成 `'graphic'` —— 那是「全局禁用影像路线」的熔断闸（比如供应商在出事故），
- *    锁着的时候高级单必然降级成标准产物，那就不该收高级的钱。
+ * 唯一条件：图片供应商已配置并启用。
+ * 高级档的全部溢价就是那次图片大模型调用，供应商没配就没有高级档。
  *
  * ⚠️ 这个判断同时供 `GET /creative/status`（决定前端露不露出高级档）与建单闸门用，**必须同一个函数**：
  * 两处各写一遍的下场是前端露着入口、后端一律 422（模板清单当初就是这么对不上的）。
  */
 export function premiumTierAvailable(cfg: CreativeRuntimeConfig): boolean {
-  return visualProviderConfigured(cfg) && cfg.aiMode !== 'graphic';
+  return visualProviderConfigured(cfg);
 }
 
 /** 本单该扣多少钻（档位定价的唯一口径，路由与退款都走它）。 */
@@ -306,7 +291,6 @@ export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeC
     dailyLimit: cfg.dailyLimit,
     timeoutMs: cfg.timeoutMs,
     layoutEngine: cfg.layoutEngine,
-    aiMode: cfg.aiMode,
     templates: cfg.templates,
     visual,
   };
@@ -356,7 +340,6 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     dailyLimit: patch.dailyLimit === undefined ? cur.dailyLimit : num(patch.dailyLimit, cur.dailyLimit, 0, 1000),
     timeoutMs: patch.timeoutMs === undefined ? cur.timeoutMs : num(patch.timeoutMs, cur.timeoutMs, 10_000, MAX_TIMEOUT_MS),
     layoutEngine: patch.layoutEngine === undefined ? cur.layoutEngine : layoutEngineOf(patch.layoutEngine),
-    aiMode: patch.aiMode === undefined ? cur.aiMode : aiModeOf(patch.aiMode),
     templates: patch.templates === undefined ? cur.templates : templatesOf({ ...cur.templates, ...plainObject(patch.templates) }),
     visual: {
       enabled: vp.enabled === undefined ? cur.visual.enabled : !!vp.enabled,

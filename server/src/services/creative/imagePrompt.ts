@@ -100,7 +100,7 @@ function tidy(s: string): string {
  *
  * 剥掉一个词不只是留下空格 —— `a masterpiece close-up of a lawyer` 剥完变成 `a of a lawyer`，
  * 拼进骨架就是 "portrait of a of a lawyer"（模型读到一个坏句子，画面质量随之下降）。
- * 所以冠词后面紧跟介词/逗号时把冠词也去掉；整段只剩一个冠词时视为空（由路线门禁③降级到 graphic）。
+ * 所以冠词后面紧跟介词/逗号时把冠词也去掉；整段只剩一个冠词时视为空（由 premium 路线门禁判失败）。
  */
 function tidySubject(raw: string): string {
   let s = tidy(raw);

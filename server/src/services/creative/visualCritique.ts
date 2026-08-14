@@ -23,6 +23,7 @@ import { noteCreativeCritique } from '../metrics.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
 import type { PosterStyle } from './styleLibrary.js';
+import { directionFor } from './directions.js';
 
 /** 评审产出的意见条数上限（多了模型在打磨轮顾不过来，反而每条都做半截）。 */
 export const MAX_CRITIQUE_NOTES = 5;
@@ -39,6 +40,9 @@ export interface VisualCritique {
   pass: boolean;
   /** 可执行的改进意见（pass=true 时为空数组）。 */
   notes: string[];
+  /** 仅在画面没有视觉主角/记忆母题、局部打磨救不回来时为 true。 */
+  needsRebuild: boolean;
+  rebuildReason: string;
 }
 
 /* ───────────────── 提示词 ───────────────── */
@@ -74,14 +78,13 @@ export function critiqueSystemPrompt(photo?: PosterStyle | null): string {
     '- 不要提议删掉或弱化 AI 生成标识、行动号召、二维码（合规与业务要件，必须留）；',
     '- 不要写长篇分析、不要复述你看到了什么、不要客套。',
     '',
-    '【输出格式（严格遵守）】',
-    '第一行只写判定，二选一：',
-    '判定：达标        ← 这张已经达到可交付水准，没有值得再改的地方',
-    '判定：可提升      ← 还有具体可改之处',
-    `判定为「可提升」时，接着写最多 ${MAX_CRITIQUE_NOTES} 条改进意见，每条一行，以「1. 」「2. 」这样编号。`,
-    '每条必须**指名画面上的哪一块** + **怎么改**，例如：',
-    '「1. 主标题与副标题的音量差不够，副标题字号压到主标题的 1/3、字距放开，让层级一眼成立」。',
-    '判定为「达标」时，后面不要再写任何内容。',
+    '【重构判定】needsRebuild 只有在画面**没有明确视觉主角或记忆母题**、靠对齐/字距/色彩微调救不回来时才为 true。',
+    '普通的层级、留白、色彩、排印问题一律为 false，并写进 notes。不要用「与常见 AI 海报差异度」这类空泛标准。',
+    '',
+    '【输出格式（严格 JSON，不要 Markdown）】',
+    `{"pass":true或false,"needsRebuild":true或false,"rebuildReason":"","notes":["最多 ${MAX_CRITIQUE_NOTES} 条"]}`,
+    'pass=true 时 notes=[] 且 needsRebuild=false。needsRebuild=true 时 rebuildReason 必须指明缺少的视觉主角是什么。',
+    '每条 note 必须指名画面上的哪一块 + 怎么改，例如「主标题与副标题的音量差不够，副标题字号压到主标题的 1/3」。',
   ].join('\n');
 }
 
@@ -97,6 +100,8 @@ export function critiqueUserPrompt(o: {
     `【这张海报要的气质 · ${o.manifesto.movement}】`,
     o.manifesto.paragraphs[0] ?? '',
     `色板：${o.manifesto.palette.join('  ')}`,
+    `创作方向：${directionFor(o.brief.directionKey).name}`,
+    `应兑现的视觉主角：${directionFor(o.brief.directionKey).artDirection}`,
     ...(o.photo ? [`影像主导路线 · ${o.photo.name}：${o.photo.typographyHints}`] : []),
     '',
     '【画面上必须存在的要件（不许建议删）】',
@@ -138,16 +143,78 @@ const REVISE_RE = /判定\s*[:：]\s*可提升/;
 /** 编号行：「1. xxx」「2） xxx」「- xxx」都收（模型对编号符号的遵从性向来不稳）。 */
 const NOTE_RE = /^\s*(?:\d+\s*[.、)）]|[-·•])\s*(.+)$/;
 
+function cleanNotes(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    // 非字符串项直接丢：String({}) 会变成「[object Object]」，那种噪音喂给作者模型比没有更糟。
+    .filter((note): note is string => typeof note === 'string')
+    .map((note) => note.trim().slice(0, MAX_NOTE_CHARS))
+    .filter(Boolean)
+    .slice(0, MAX_CRITIQUE_NOTES);
+}
+
 /**
- * 解析评审产出。**宁可返回 null 也不要瞎猜**：调用方拿到 null 就按「没有评审」继续走老逻辑，
- * 而一个猜出来的 pass=true 会让打磨轮被跳过——那是把本模块的价值直接抹掉。
+ * 从模型产出里挖出 JSON 对象。要处理两种常见漂移：① markdown 代码围栏；
+ * ② JSON 前后带一句导语（「好的，我看完了：{...}」）。取第一个 { 到最后一个 } 再试一次即可覆盖。
+ */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const unfenced = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  const candidates = start >= 0 && end > start && (start > 0 || end < unfenced.length - 1)
+    ? [unfenced, unfenced.slice(start, end + 1)]
+    : [unfenced];
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+    } catch { /* 换下一个候选 */ }
+  }
+  return null;
+}
+
+/** 布尔字段的宽容读法：模型偶尔把布尔写成字符串 "true"/"false"。读不出布尔语义 → null（交给上层给默认值）。 */
+function readBool(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const s = value.trim().toLowerCase();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+  }
+  return null;
+}
+
+/**
+ * 解析评审产出。口径是**宽收严出**：格式上的漂移（围栏、导语、布尔写成字符串、缺字段）尽量收下来，
+ * 语义上拿不准的一律不猜——返回 null 让调用方按「没有评审」走老逻辑，绝不猜一个 pass=true
+ * 把打磨轮抹掉。
  *
- * 判定行缺失时的口径：有可解析的意见条 → 按「可提升」处理（模型写了意见却漏了判定行，
- * 意图是明确的）；一条都没有 → null（既没判定也没意见 = 这次评审没产出，不可用）。
+ * 缺字段的口径：
+ * · pass 缺失但有可解析的意见条 → 按「可提升」处理（模型写了意见却漏了判定，意图是明确的）；
+ * · needsRebuild 缺失 → false（重构是重活，默认不做）；
+ * · needsRebuild=true 但没写 rebuildReason → 降级成 needsRebuild=false 并**保留 notes**：
+ *   理由缺失只说明重构指令拼不出来（rebuildDirective 靠它落地），不代表这几条意见没价值。
+ * · 既没判定也没意见 → null（这次评审没产出，不可用）。
  */
 export function parseCritique(raw: string | null | undefined): VisualCritique | null {
   const text = String(raw ?? '').trim();
   if (!text) return null;
+
+  const json = extractJsonObject(text);
+  if (json) {
+    const notes = cleanNotes(json.notes);
+    const pass = readBool(json.pass) ?? (notes.length ? false : null);
+    if (pass !== null) {
+      if (pass) return { pass: true, needsRebuild: false, rebuildReason: '', notes: [] };
+      const rebuildReason = (typeof json.rebuildReason === 'string' ? json.rebuildReason : '')
+        .trim().slice(0, MAX_NOTE_CHARS);
+      const needsRebuild = (readBool(json.needsRebuild) ?? false) && !!rebuildReason;
+      if (!needsRebuild && !notes.length) return null;
+      return { pass: false, needsRebuild, rebuildReason: needsRebuild ? rebuildReason : '', notes };
+    }
+  }
+
+  /* 兼容升级前评审模型与存量测试的文本格式。 */
 
   const notes: string[] = [];
   for (const line of text.split('\n')) {
@@ -159,9 +226,9 @@ export function parseCritique(raw: string | null | undefined): VisualCritique | 
   }
 
   // 达标优先判：模型偶尔会在「达标」之后仍习惯性写两句建议，那不是要改的意思。
-  if (PASS_RE.test(text)) return { pass: true, notes: [] };
-  if (REVISE_RE.test(text)) return notes.length ? { pass: false, notes } : null;
-  return notes.length ? { pass: false, notes } : null;
+  if (PASS_RE.test(text)) return { pass: true, needsRebuild: false, rebuildReason: '', notes: [] };
+  if (REVISE_RE.test(text)) return notes.length ? { pass: false, needsRebuild: false, rebuildReason: '', notes } : null;
+  return notes.length ? { pass: false, needsRebuild: false, rebuildReason: '', notes } : null;
 }
 
 /* ───────────────── 调用 ───────────────── */
@@ -201,7 +268,13 @@ export async function requestVisualCritique(
       },
     );
     const verdict = parseCritique(raw);
-    noteCreativeCritique(verdict ? (verdict.pass ? 'pass' : 'revise') : 'unavailable');
+    // 「没配 provider / 调用返回空」与「调到了但产出吃不下」是两种毛病（前者是环境，后者是提示词或模型），
+    // 分桶记，线上才分得开。
+    if (verdict) noteCreativeCritique(verdict.pass ? 'pass' : 'revise');
+    else if (String(raw ?? '').trim()) {
+      noteCreativeCritique('unparsed');
+      console.warn('[creative] 视觉评审产出解析不了，按未评审继续：', String(raw).slice(0, 200));
+    } else noteCreativeCritique('unavailable');
     return verdict;
   } catch (e) {
     noteCreativeCritique('unavailable');

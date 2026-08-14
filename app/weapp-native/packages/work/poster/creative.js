@@ -49,6 +49,8 @@ function normalizeJob(raw) {
   return Object.assign({}, job, {
     id: String(job.id || ''), status, assets, actions,
     creditCost: Number(job.creditCost || 0), refunded: Boolean(job.refunded),
+    // 缺省 false：服务端没说有本人照片就当没有（露出一个必然 422 的方向比不露更糟）。
+    hasPortrait: job.hasPortrait === true,
     progress: STAGES.includes(job.progress) ? job.progress : (isInFlight(status) ? 'philosophy' : 'upload'),
   });
 }
@@ -68,6 +70,9 @@ function normalizeStatus(raw) {
     premiumPricePerPoster: num(status.premiumPricePerPoster),
     // 缺省 false：服务端没说可用就当不可用（露出一个必然 422 的选项比不露更糟）。
     premiumAvailable: status.premiumAvailable === true,
+    directions: Array.isArray(status.directions) ? status.directions.map((item) => Object.assign({}, item, {
+      previewUrl: absoluteCreativeUrl(item && item.previewUrl),
+    })) : [],
     templates: Array.isArray(status.templates) ? status.templates : [],
   };
 }

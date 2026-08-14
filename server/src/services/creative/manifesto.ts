@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { structured } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
 import { styleCatalogDigest } from './styleLibrary.js';
+import { directionFor } from './directions.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { TemplateKey } from './config.js';
 import type { BrandKitView } from '../../../../shared/contracts';
@@ -41,13 +42,15 @@ const MANIFESTO_TIMEOUT_MS = 120_000;
 //   "a subtle, niche reference embedded within the art
 //    itself ... like a jazz musician quoting another song"    → 【隐性主题】爵士乐引用那句原样保留
 /**
- * 影像主导路线的增补段（**只在 photo 路线可能成立时拼进去**）。
+ * 影像主导路线的增补段（只在 tier 已确定为 photo，或免费 revise 固定复用历史主视觉时拼入）。
  *
- * 为什么条件拼接而不是恒定拼上：没配图片供应商 / 用户传了本人照片时 photo 路线根本走不通
- * （门禁见 posterRoute.ts），给模型一个走不通的选项只会白烧 token，还可能让它按 photo 的思路
- * 写出一篇「主视觉承重」的宣言，然后被强制降级到 graphic —— 那篇宣言与实际路线不匹配，画质更差。
+ * standard 根本看不到本段；premium 只让模型在路线内给 styleKey/subject，不再让模型选择价格路线。
  */
-function photoRouteDirective(forcePhoto = false): string {
+function photoRouteDirective(
+  forcePhoto = false,
+  fixedPhotoRoute?: { styleKey: string; subject: string } | null,
+  allowedStyleKeys?: readonly import('./styleLibrary.js').PosterStyleKey[],
+): string {
   return [
     '',
     ...(forcePhoto ? [
@@ -55,9 +58,14 @@ function photoRouteDirective(forcePhoto = false): string {
       //   实测过一次「给选项」的后果：模型对这份 brief 自选了 graphic 且 subject 留空，
       //   于是整单在路线归一处降级 → 高级档按设计要整单失败退款。也就是说，只要还给选项，
       //   高级档就存在一条「模型一句话就把订单否掉」的路径。所以这里不给选择，只给要求。
-      '【本张是高级档，路线已定：影像主导（photo）。不要选 graphic，不要在正文讨论路线。】',
+      '【本张是主视觉大片，路线已定：影像主导（photo）。不要选 graphic，不要在正文讨论路线。】',
       '你必须给出 styleKey 与 subject（两者缺一这张海报就做不出来），并按影像主导来写这篇宣言：',
       '宣言要描述「一张全幅主视觉照片/画作 + 克制文字叠层」的美学，而不是纯图形排印的美学。',
+      ...(fixedPhotoRoute ? [
+        '【这是免费改字任务，原主视觉必须原样复用】不要重新选择风格或主体；排版必须延续原图的视觉语法。',
+        `styleKey 固定为 "${fixedPhotoRoute.styleKey}"。`,
+        ...(fixedPhotoRoute.subject ? [`subject 固定为 "${fixedPhotoRoute.subject}"。`] : []),
+      ] : []),
     ] : [
       '【本张海报可以走两条路线，你要选一条】',
       '- graphic（纯图形排印）：没有照片，由排版层用纯 CSS/SVG 作画——几何母题、色域、刻度、排印对比。',
@@ -74,8 +82,8 @@ function photoRouteDirective(forcePhoto = false): string {
     '  甚至反向降质）。就写清楚人物气质或物件本体，例如 "a composed Chinese woman in her forties, a tax advisor"。',
     '  不要写具体人名，不要指名任何在世人物。',
     '',
-    '【12 档风格】',
-    styleCatalogDigest(),
+    '【本方向可用的影像风格】',
+    styleCatalogDigest(allowedStyleKeys),
     '',
     ...(forcePhoto
       ? ['**styleKey 与 subject 都不许留空**，mode 固定填 "photo"。']
@@ -125,12 +133,19 @@ const MANIFESTO_SYS_BASE = [
  * 拼系统提示词。`allowPhoto` 为假时**完全不提** photo 这个词（见 photoRouteDirective 的注释）。
  * 两种形态的 JSON 契约不同：不给 photo 选项时就不要求它输出 mode/styleKey/subject 三个字段。
  */
-function manifestoSystem(allowPhoto: boolean, forcePhoto = false): string {
+function manifestoSystem(
+  allowPhoto: boolean,
+  forcePhoto = false,
+  fixedPhotoRoute?: { styleKey: string; subject: string } | null,
+  allowedStyleKeys?: readonly import('./styleLibrary.js').PosterStyleKey[],
+): string {
   const tail = allowPhoto
     ? [
       '',
       '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":"",',
-      ' "mode":"graphic 或 photo","styleKey":"","subject":""}',
+      forcePhoto
+        ? ' "mode":"photo","styleKey":"","subject":""}'
+        : ' "mode":"graphic 或 photo","styleKey":"","subject":""}',
       'movement / manifesto / reference 全部用中文；subject 用英文。克制、具体、不说空话。',
     ].join('\n')
     : [
@@ -138,7 +153,7 @@ function manifestoSystem(allowPhoto: boolean, forcePhoto = false): string {
       '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":""}',
       '全部用中文，克制、具体、不说空话。',
     ].join('\n');
-  return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective(forcePhoto) : ''}${tail}`;
+  return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective(forcePhoto, fixedPhotoRoute, allowedStyleKeys) : ''}${tail}`;
 }
 
 /** 模板选择只作气质提示（AI 引擎不套模板，但用户挑的那套版式表达了他要的音量）。 */
@@ -157,8 +172,7 @@ const ManifestoSchema = z.object({
   ),
   palette: z.array(z.string()).catch([]).default([]),
   reference: z.string().catch('').default(''),
-  // ★ 路线三件套：只有 allowPhoto 时才要求模型输出，缺省一律空 —— 空值的语义是「走 graphic」，
-  //   由 posterRoute.resolvePosterRoute 统一裁定（这里刻意不做判定，路线规则只有一处实现）。
+  // 历史字段 mode 只为输出兼容与留痕；实际路线由 tier 决定。photo 仍需 styleKey/subject。
   mode: z.string().catch('').default(''),
   styleKey: z.string().catch('').default(''),
   subject: z.string().catch('').default(''),
@@ -172,9 +186,8 @@ export interface PosterManifesto {
   /** 隐性主题私语（进提示词，不进画面）。 */
   reference: string;
   /**
-   * 模型自选的路线三件套（**原始值，未归一**）。
-   * 归一与门禁一律走 posterRoute.resolvePosterRoute —— 这里保留原样是为了排障时能看出
-   * 「模型想走 photo 但被门禁降级了」和「模型自己选的 graphic」不是一回事。
+   * 模型返回的历史路线字段与 photo 风格/主体（原始值，未归一）。mode 不再决定商品路线；
+   * 归一与门禁一律走 posterRoute.resolvePosterRoute。
    */
   route: { mode: string; styleKey: string; subject: string };
 }
@@ -202,6 +215,8 @@ function digest(brief: NormalizedPosterBrief, kit?: BrandKitView | null): string
     brief.subheadline ? `副标题：${brief.subheadline}` : '',
     brief.proofPoints.length ? `卖点：${brief.proofPoints.join('；')}` : '',
     `行动号召：${brief.cta}`,
+    `创作方向：${directionFor(brief.directionKey).name}`,
+    `正向艺术指导：${directionFor(brief.directionKey).artDirection}`,
     brief.visualDirection ? `视觉方向：${brief.visualDirection}` : '',
     brief.negativePrompt ? `排除项（不要出现）：${brief.negativePrompt}` : '',
     TEMPLATE_TENDENCY[brief.templateKey],
@@ -231,21 +246,29 @@ export async function generateManifesto(opts: {
   tenantId?: string | null;
   userId?: string | null;
   /**
-   * 是否给模型「影像主导」这个选项（= photo 路线的门禁在**调模型之前**就已经过了）。
-   * 缺省 false：调用方没显式开就不给选项 —— 宁可少一条路线，也不要让模型选个走不通的（白烧 token）。
+   * 是否给模型 photo 风格/主体字段。仅 premium 或历史 photo revise 为 true；standard 恒 false。
    */
   allowPhoto?: boolean;
   /**
-   * 高级档：**不给模型选路线的机会**，直接要求 photo + 必给 styleKey/subject。
+   * 主视觉大片：不给模型选路线的机会，直接要求 photo + 必给 styleKey/subject。
    * 只在 allowPhoto 为真时有意义（allowPhoto 为假说明门禁本来就不允许影像路线，
    * 那时"强制"是句空话——真正的处置在 worker：高级档路线没落到 photo 就整单失败退款）。
    */
   forcePhoto?: boolean;
+  /** 免费 revise 钉死父版本的风格上下文；模型输出不得重新抽签。 */
+  fixedPhotoRoute?: { styleKey: string; subject: string } | null;
 }): Promise<PosterManifesto | null> {
   let ai: z.infer<typeof ManifestoSchema> | null = null;
   try {
     ai = await structured(ManifestoSchema, {
-      system: manifestoSystem(!!opts.allowPhoto, !!opts.forcePhoto),
+      system: manifestoSystem(
+        !!opts.allowPhoto,
+        !!opts.forcePhoto,
+        opts.fixedPhotoRoute,
+        opts.fixedPhotoRoute
+          ? [opts.fixedPhotoRoute.styleKey as import('./styleLibrary.js').PosterStyleKey]
+          : directionFor(opts.brief.directionKey).styleKeys,
+      ),
       user: digest(opts.brief, opts.brandKit),
       maxChars: 4000,
       // ★ 必须显式给产出预算：provider 辅助档缺省 700 token，而 4-6 段中文宣言 + JSON 壳
@@ -281,15 +304,20 @@ export async function generateManifesto(opts: {
     paragraphs,
     palette: hex.length >= 3 ? hex.slice(0, 5) : opts.fallbackPalette,
     reference: ai.reference.trim().slice(0, 200),
-    // allowPhoto=false 时即使模型硬塞了 mode:'photo' 也不采信：门禁在调模型前就已判定不可用，
-    // 采信它只会让 resolvePosterRoute 白走一趟再降级（且 promptSnapshot 上留下一条误导的路线记录）。
-    route: opts.allowPhoto
+    // standard 即使模型硬塞 photo 也清空；tier 路线不能被模型改写。
+    route: opts.fixedPhotoRoute
       ? {
-        mode: ai.mode.trim().slice(0, 16),
-        styleKey: ai.styleKey.trim().slice(0, 40),
-        subject: ai.subject.trim().slice(0, 240),
+        mode: 'photo',
+        styleKey: opts.fixedPhotoRoute.styleKey,
+        subject: opts.fixedPhotoRoute.subject,
       }
-      : { mode: '', styleKey: '', subject: '' },
+      : opts.allowPhoto
+        ? {
+          mode: ai.mode.trim().slice(0, 16),
+          styleKey: ai.styleKey.trim().slice(0, 40),
+          subject: ai.subject.trim().slice(0, 240),
+        }
+        : { mode: '', styleKey: '', subject: '' },
   };
 
   // 输出侧审核（fail-closed，同 philosophy）：宣言会进 promptSnapshot 并间接决定画面，必须过审。

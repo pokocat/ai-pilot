@@ -14,6 +14,7 @@ import { moderate } from '../moderation.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { TemplateKey } from './config.js';
 import type { BrandKitView, PosterScene } from '../../../../shared/contracts';
+import { directionFor } from './directions.js';
 
 /* ───────────────── 提示词（design-philosophy.md 的核心段落内联） ───────────────── */
 
@@ -136,6 +137,8 @@ function briefDigest(brief: NormalizedPosterBrief, kit?: BrandKitView | null): s
     brief.subheadline ? `副标题：${brief.subheadline}` : '',
     brief.proofPoints.length ? `卖点：${brief.proofPoints.join('；')}` : '',
     `行动号召：${brief.cta}`,
+    `创作方向：${directionFor(brief.directionKey).name}`,
+    `正向艺术指导：${directionFor(brief.directionKey).artDirection}`,
     brief.visualDirection ? `视觉方向：${brief.visualDirection}` : '',
     brief.negativePrompt ? `排除项：${brief.negativePrompt}` : '',
     `版式：${brief.templateKey}（3:4 竖版）`,
@@ -174,7 +177,7 @@ export async function generatePhilosophy(opts: {
   let ai: z.infer<typeof PhilosophySchema> | null = null;
   try {
     ai = await structured(PhilosophySchema, {
-      system: `${PHILOSOPHY_SYS}\n\n【本次版式提示】${TEMPLATE_HINT[brief.templateKey]}`,
+      system: `${PHILOSOPHY_SYS}\n\n【本次创作方向】${directionFor(brief.directionKey).artDirection}\n\n【本次版式提示】${TEMPLATE_HINT[brief.templateKey]}`,
       user: briefDigest(brief, brandKit),
       maxChars: 1800,
     });
@@ -204,7 +207,7 @@ export async function generatePhilosophy(opts: {
   return out;
 }
 
-/* ───────────────── 图片供应商提示词（模板/回落路径专用） ───────────────── */
+/* ───────────────── 图片供应商提示词（premium 的模板排版路径专用） ───────────────── */
 
 // 色板 → 可读的色彩指令。图片模型不认十六进制，认「深墨绿 / 暖砂纸 / 哑光金」这类词，
 // 所以按明度与色相把 hex 粗分成几档中文说法。粗糙但足够：目的只是不让它自由发挥出撞色。
@@ -222,7 +225,7 @@ function colorWords(hex: string): string {
 }
 
 /**
- * 拼给图片供应商的提示词（**模板路径与 AI 回落路径共用**；AI 引擎本身不调图片模型）。
+ * 拼给图片供应商的提示词。只用于 premium + template；standard 与 standard AI 回落一律不调图片模型。
  *
  * 2026-07-29 止血：此前只发 `philosophy.visualPrompt` 那一句 ≤80 字，palette / 构图 / 材质全没传。
  * 真机实测的两个后果：① 图片模型自选配色 → 墨绿页头压一块大红照片（撞色）；

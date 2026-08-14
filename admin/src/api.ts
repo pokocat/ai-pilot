@@ -79,6 +79,20 @@ export async function downloadPaymentsCsv(q: { status?: string; days?: number; q
   URL.revokeObjectURL(url);
 }
 
+/**
+ * 后台预览图地址 → 可直接喂给 <img> 的 src。
+ * previewUrl 由服务端拼：配了 OSS 是签名直链（绝对地址，原样返回）；未配 OSS 时是
+ * `/api/admin/...` 的取图路由，那条要管理鉴权，而 <img> 带不了 x-admin-token ——
+ * 只能先带头取回 blob 再转 object URL（调用方负责 revoke）。
+ */
+export async function adminImageObjectUrl(url: string): Promise<string> {
+  if (!url.startsWith(`${BASE}/admin/`)) return url;
+  const res = await fetch(url, { headers: { 'x-admin-token': getAdminToken() } });
+  if (res.status === 401) throw unauthorizedError(res.status);
+  if (!res.ok) throw new Error(`预览图加载失败 HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 // 后台代用户上传知识库文档（multipart）：req() 走 JSON，文件上传需单独用 FormData（浏览器自动带 boundary）。
 export async function uploadUserKnowledge(userId: string, file: File): Promise<{ id: string; status: string }> {
   const fd = new FormData();
@@ -175,6 +189,8 @@ import type {
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
   AdminUserQuotaView, AdminQuotaAdjustRequest,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
+  AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
+  PosterDirectionKey,
   AdminClonePricing, AdminClonePricingUpdate,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
@@ -188,6 +204,8 @@ export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg
 export type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
   AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
+  AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
+  PosterDirectionKey,
 } from '../../shared/contracts';
 // —— 短视频克隆动作定价（数字人 / 专属声音的钻石单价）——
 export type { AdminClonePricing, AdminClonePricingUpdate } from '../../shared/contracts';
@@ -337,6 +355,11 @@ export const api = {
   saveCreativeConfig: (body: AdminCreativeConfigUpdate) => req<AdminCreativeConfig>('/admin/creative/config', 'PUT', body),
   // 连通性试跑（仅 owner/master）：真发一次最小请求，只回通/不通 + 耗时，不落资产。
   creativeProviderDryRun: () => req<AdminCreativeDryRunResult>('/admin/creative/provider/dry-run', 'POST', {}),
+  creativeDirectionSamples: () => req<AdminCreativeDirectionSample[]>('/admin/creative/direction-samples'),
+  createCreativeDirectionSample: (body: CreateCreativeDirectionSampleRequest) =>
+    req<AdminCreativeDirectionSample>('/admin/creative/direction-samples', 'POST', body),
+  publishCreativeDirectionSample: (id: string) =>
+    req<AdminCreativeDirectionSample>(`/admin/creative/direction-samples/${encodeURIComponent(id)}/publish`, 'POST', {}),
   creativeJobs: (q: { status?: string; page?: number; pageSize?: number } = {}) => {
     const p = new URLSearchParams();
     if (q.status) p.set('status', q.status);

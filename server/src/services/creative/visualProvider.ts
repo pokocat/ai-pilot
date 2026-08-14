@@ -3,12 +3,12 @@
 // 形态：OpenAI images 兼容的通用适配器。POST {baseUrl}/images/generations
 //   请求：{ prompt, model, size, ...extraParams }（extraParams 是后台填的参数模板，原样合并）
 //   响应：{ data: [{ b64_json }] } 或 { data: [{ url }] } —— 两种都吃；国内厂商多兼容此形态。
-// 未配置或 disabled → 上层跳过 visual 阶段走「无主视觉」纯排版路径（不报错，见方案 §7）。
+// 未配置或 disabled → standard 不受影响；premium 不开放新单，在途任务按契约失败退款。
 //
 // **只支持同步返回**（OpenAI images 就是同步的）：submit 一次调用要么拿到图，要么算失败。
 // 曾经还有一条 `status:'pending'` + `query(taskId)` 的异步分支，写着「记下 providerTaskId 让 sweep
-// 续查」—— 但 sweep 从来没有查过它，query() 也没有任何调用点。那条分支的真实行为就是"当次降级为
-// 纯排版，providerTaskId 写进库再没人看"。删掉假承诺后语义变诚实：异步响应 = 失败 → 上层降级。
+// 续查」—— 但 sweep 从来没有查过它，query() 也没有任何调用点。删掉假承诺后语义变诚实：
+// 异步响应 = 当前不支持的失败；premium 任务重试/退款，standard 根本不会调用本适配器。
 // 真要接异步供应商，得连着 worker 的状态机与 sweep 的续查一起做，不是补一个方法就成立的。
 //
 // 安全：目标地址过 assertSafeUrl（复用 llm/tools/httpTool 的 SSRF 防护——运营可在后台填任意
@@ -192,7 +192,7 @@ class ImagesApiVisualProvider implements VisualProvider {
     if (first && typeof first.url === 'string' && first.url) {
       return { status: 'succeeded', image: await downloadVisual(first.url, this.cfg.visual.timeoutMs) };
     }
-    // 异步形态（只回任务 id）：本适配器不支持轮询 → 按失败上报，上层降级为纯排版。
+    // 异步形态（只回任务 id）：本适配器不支持轮询 → 按失败上报，由 premium 重试/退款。
     const asyncId = [json.id, json.task_id, json.output?.task_id].find((v) => typeof v === 'string' && v);
     if (typeof asyncId === 'string') {
       return { status: 'failed', error: '供应商返回异步任务，当前只支持同步返回图片的接口' };
@@ -216,7 +216,7 @@ class ImagesApiVisualProvider implements VisualProvider {
   }
 }
 
-/** 解析当前生效的图片供应商；未配置 / 未启用 → null（上层跳过 visual 阶段，不报错）。 */
+/** 解析当前生效的图片供应商；未配置 / 未启用 → null（premium 不开放或执行失败，standard 不调用）。 */
 export async function resolveVisualProvider(cfg?: CreativeRuntimeConfig): Promise<VisualProvider | null> {
   const c = cfg ?? (await getCreativeConfig());
   if (!visualProviderConfigured(c)) return null;

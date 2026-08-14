@@ -346,7 +346,7 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.equal(render.htmls.length, 2);
   });
 
-  // 轮数上限是个会变的旋钮（3 → 4，2026-08-12 为看图打磨腾出一轮），所以桩按 MAX_HTML_CALLS 生成，
+  // 轮数上限是个会变的旋钮，所以桩按 MAX_HTML_CALLS 生成，
   // 不写死。改上限时这两条用例应当自动跟着走，而不是留下一条"名字说 4 轮、其实只喂了 3 轮"的假绿。
   test(`${MAX_HTML_CALLS} 轮仍违规 → 不交付，返回 ok:false 让 worker 回落模板`, async () => {
     const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);
@@ -520,23 +520,30 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
 /* ───────────────── ③′ 视觉评审闭环（看图打磨） ───────────────── */
 
 /** 排队返回评审判定；null 表示「评审不可用」。记录被看过的图，用来断言看的是哪一轮的产物。 */
-function stubCritique(verdicts: ({ pass: boolean; notes: string[] } | null)[]): {
+function stubCritique(verdicts: ({
+  pass: boolean; notes: string[]; needsRebuild?: boolean; rebuildReason?: string;
+} | null)[]): {
   fn: CritiqueFn; seen: string[];
 } {
   const seen: string[] = [];
   const fn: CritiqueFn = async (i) => {
     seen.push(i.png.toString());
-    return verdicts[seen.length - 1] ?? null;
+    const verdict = verdicts[seen.length - 1] ?? null;
+    return verdict ? {
+      ...verdict,
+      needsRebuild: verdict.needsRebuild ?? false,
+      rebuildReason: verdict.rebuildReason ?? '',
+    } : null;
   };
   return { fn, seen };
 }
 
 describe('AI 排版引擎 · 视觉评审解析（纯函数）', () => {
   test('判定达标 → pass=true 且不带意见（后面即使习惯性写了两句也不算要改）', () => {
-    assert.deepEqual(parseCritique('判定：达标'), { pass: true, notes: [] });
+    assert.deepEqual(parseCritique('判定：达标'), { pass: true, needsRebuild: false, rebuildReason: '', notes: [] });
     assert.deepEqual(
       parseCritique('判定：达标\n1. 硬要说的话字距可以再收一点'),
-      { pass: true, notes: [] },
+      { pass: true, needsRebuild: false, rebuildReason: '', notes: [] },
       '达标就是收工信号；把后面的客套话当成"要改"会白烧一轮',
     );
   });
@@ -553,7 +560,9 @@ describe('AI 排版引擎 · 视觉评审解析（纯函数）', () => {
   });
 
   test('漏了判定行但写了意见 → 按可提升处理（意图是明确的）', () => {
-    assert.deepEqual(parseCritique('1. 主标题压到照片人脸上了'), { pass: false, notes: ['主标题压到照片人脸上了'] });
+    assert.deepEqual(parseCritique('1. 主标题压到照片人脸上了'), {
+      pass: false, needsRebuild: false, rebuildReason: '', notes: ['主标题压到照片人脸上了'],
+    });
   });
 
   // ★ 这条是本模块「顾问不是闸门」的底线：解析不出来一律 null，让引擎按「没有评审」继续走。
@@ -566,8 +575,8 @@ describe('AI 排版引擎 · 视觉评审解析（纯函数）', () => {
 
   test('评审提示词钉住三条边界：只谈画面 / 不许加东西 / 不许动文案与合规元素', () => {
     const sys = critiqueSystemPrompt(null);
-    assert.match(sys, /判定：达标/);
-    assert.match(sys, /判定：可提升/);
+    assert.match(sys, /严格 JSON/);
+    assert.match(sys, /needsRebuild/);
     assert.match(sys, /不要提议加新元素/, '每轮都建议加东西会让画面越改越挤');
     assert.match(sys, /一个字都不能动/, '文案是客户原文，评审无权改');
     assert.match(sys, /AI 生成标识/, '合规元素不许被建议删掉');
@@ -576,6 +585,76 @@ describe('AI 排版引擎 · 视觉评审解析（纯函数）', () => {
   test('影像主导版的评审要额外看"文字压没压脸"（机器量不出来，只能靠看图）', () => {
     assert.doesNotMatch(critiqueSystemPrompt(null), /人物面部/);
     assert.match(critiqueSystemPrompt(POSTER_STYLE_LIST[0]), /人物面部|主体上/);
+  });
+
+  test('结构化评审只有明确缺少视觉主角时才允许触发重构', () => {
+    assert.deepEqual(
+      parseCritique('{"pass":false,"needsRebuild":true,"rebuildReason":"画面没有能承载品牌记忆的视觉主角","notes":[]}'),
+      { pass: false, needsRebuild: true, rebuildReason: '画面没有能承载品牌记忆的视觉主角', notes: [] },
+    );
+    assert.equal(
+      parseCritique('{"pass":false,"needsRebuild":true,"rebuildReason":"","notes":[]}'),
+      null,
+      '重构理由为空时不可猜测或误触发',
+    );
+  });
+
+  // ★ 宽收严出：下面这几种漂移在真实产出里都出现过，从前每一种都让整份评审（含有效意见）被丢弃，
+  //   于是 notes 全丢、机会式重构永不触发、指标还记成「没配 provider」。格式的毛病不该吃掉语义。
+  test('JSON 缺 needsRebuild → 默认 false，意见照收（不因少一个字段丢整份评审）', () => {
+    assert.deepEqual(
+      parseCritique('{"pass":false,"notes":["主副标题音量差不够"]}'),
+      { pass: false, needsRebuild: false, rebuildReason: '', notes: ['主副标题音量差不够'] },
+    );
+  });
+
+  test('JSON 缺 pass 但有意见 → 按可提升处理（与文本格式同一口径）', () => {
+    assert.deepEqual(
+      parseCritique('{"notes":["右下角留白塌了"]}'),
+      { pass: false, needsRebuild: false, rebuildReason: '', notes: ['右下角留白塌了'] },
+    );
+    assert.equal(parseCritique('{"notes":[]}'), null, '既没判定也没意见 = 没产出，仍然是 null');
+  });
+
+  test('布尔写成字符串 "true"/"false" → 收编成布尔', () => {
+    assert.deepEqual(
+      parseCritique('{"pass":"false","needsRebuild":"true","rebuildReason":"没有视觉主角","notes":[]}'),
+      { pass: false, needsRebuild: true, rebuildReason: '没有视觉主角', notes: [] },
+    );
+    assert.deepEqual(
+      parseCritique('{"pass":"true","needsRebuild":"false","rebuildReason":"","notes":[]}'),
+      { pass: true, needsRebuild: false, rebuildReason: '', notes: [] },
+    );
+  });
+
+  test('JSON 前后带导语 / 被 markdown 围栏包住 → 照样解析', () => {
+    const expected = { pass: false, needsRebuild: false, rebuildReason: '', notes: ['色彩明度层次拉不开'] };
+    assert.deepEqual(
+      parseCritique('好的，我看完了，这是我的判断：\n{"pass":false,"needsRebuild":false,"notes":["色彩明度层次拉不开"]}\n以上。'),
+      expected,
+      '模型爱在 JSON 前写一句导语，那不是"输出不可用"',
+    );
+    assert.deepEqual(
+      parseCritique('```json\n{"pass":false,"needsRebuild":false,"notes":["色彩明度层次拉不开"]}\n```'),
+      expected,
+    );
+    assert.deepEqual(
+      parseCritique('审完了：\n```json\n{"pass":false,"needsRebuild":false,"notes":["色彩明度层次拉不开"]}\n```'),
+      expected,
+      '导语 + 围栏一起来也要收',
+    );
+  });
+
+  test('needsRebuild=true 但没写理由 → 降级成不重构，但意见必须保留', () => {
+    assert.deepEqual(
+      parseCritique('{"pass":false,"needsRebuild":true,"rebuildReason":"","notes":["主副标题音量差不够","右下角留白塌了"]}'),
+      { pass: false, needsRebuild: false, rebuildReason: '', notes: ['主副标题音量差不够', '右下角留白塌了'] },
+      '理由缺失只是重构指令拼不出来，不代表这两条意见没价值',
+    );
+  });
+
+  test('notes 里的非字符串项丢掉（String({}) 会变成 [object Object] 喂给作者）', () => {
+    assert.deepEqual(parseCritique('{"pass":false,"notes":["有效意见",{"a":1},null,42]}')?.notes, ['有效意见']);
   });
 
   test('意见回喂块框住权限边界：只谈画面表现，不得据此改文案或删合规元素', () => {
@@ -639,9 +718,69 @@ describe('AI 排版引擎 · 看图打磨闭环', () => {
     assert.ok(r.ok && r.poster.visualCritiques === 2);
   });
 
+  test('明确缺少视觉主角 → 只在既有三轮预算内重构一次', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('rebuilt')]);
+    const r = await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: stubCritique([
+        { pass: false, needsRebuild: true, rebuildReason: '没有明确视觉主角', notes: [] },
+        { pass: true, notes: [] },
+      ]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.equal(c.calls.length, 2);
+    assert.match(c.calls[1].system, /只此一次/);
+    assert.match(c.calls[1].system, /没有明确视觉主角/);
+    assert.ok(r.ok && r.poster.rebuildTriggered);
+  });
+
+  // ★ 重构是整页推翻重来，一旦引入违规就直接回退、不再给补救轮次。所以它只允许发生在
+  //   「第一版就机器干净」+「重构后至少还剩一轮」的位置上。少了这两条约束，最坏情况是
+  //   在最后一轮把一张已经干净的图推翻重赌，翻车即回退——整轮白烧且无处补救。
+  test('首轮违规 → 修复轮才干净 → 即使判 needsRebuild 也不重构（这版是刚被扳回合规的，不再重赌）', async () => {
+    const c = stubComplete([okHtml('dirty'), okHtml('fixed'), okHtml('polished')]);
+    const r = await runEngine(c.fn, stubRender([[marginViolation], [], []]).fn, {
+      critique: stubCritique([
+        { pass: false, needsRebuild: true, rebuildReason: '没有明确视觉主角', notes: ['色彩层次不够'] },
+        { pass: true, notes: [] },
+      ]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.ok(r.ok && !r.poster.rebuildTriggered, '第一版不干净就不许走机会式重构');
+    assert.doesNotMatch(c.calls[2].system, /机会式重构/);
+    assert.match(c.calls[2].system, /色彩层次不够/, '不重构不等于把意见也丢了：照常走打磨轮落实');
+  });
+
+  test('重构后至少要剩一轮补救：只剩最后一轮时不重构，走普通打磨交付', async () => {
+    // 首轮干净 → 第二轮打磨后仍干净，此时 calls=2，重构会落在第 3 轮（最后一轮）→ 不许触发。
+    const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);
+    const c = stubComplete(labels.map(okHtml));
+    const r = await runEngine(c.fn, stubRender(labels.map(() => [])).fn, {
+      critique: stubCritique([
+        { pass: false, notes: ['再收一点'] },
+        { pass: false, needsRebuild: true, rebuildReason: '没有明确视觉主角', notes: ['留白再匀一次'] },
+      ]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.ok(r.ok && !r.poster.rebuildTriggered, '重构落在最后一轮 = 翻车即回退、白烧一轮');
+    assert.doesNotMatch(c.calls[2].system, /机会式重构/);
+    assert.match(c.calls[2].system, /留白再匀一次/, '降级成按意见打磨，意见不丢');
+  });
+
+  test('机会式重构引入机器违规 → 回退重构前的干净版本交付', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('rebuilt-bad')]);
+    const r = await runEngine(c.fn, stubRender([[], [marginViolation]]).fn, {
+      critique: stubCritique([
+        { pass: false, needsRebuild: true, rebuildReason: '没有明确视觉主角', notes: [] },
+      ]).fn,
+    });
+    assert.equal(r.ok, true, r.ok ? '' : r.reason);
+    assert.ok(r.ok && r.poster.rebuildTriggered);
+    assert.ok(r.ok && r.poster.polishReverted);
+    assert.equal(r.ok && r.poster.buffer.toString(), 'r0');
+  });
+
   // 两个上限是**独立**的，这条用例钉的就是它们咬合出来的实际轮数：
   //   看图上限 2 次 ⇒ 审美闭环最多「创作 + 2 轮打磨」= 3 次 HTML 调用；
-  //   HTML 上限 4 次里剩下的那一次是留给**违规修复**的（脏图不请艺术总监看，见下一条）。
   // 也就是说：评审再挑剔也不会把轮次烧穿，挑剔到头就交手上那张干净图。
   test('评审一直说"可提升" → 打到看图上限就收工，交付最后一张干净图', async () => {
     const labels = Array.from({ length: MAX_HTML_CALLS }, (_, i) => `r${i + 1}`);

@@ -6,6 +6,18 @@
 
 ## 变更日志
 
+### 2026-08-14 · 海报从“标准/高级”重构为双路线内三种创作方向，并封死免费重生图与跨档降级 · 影响面：shared 契约、CreativeJob/方向样例数据模型、worker 路线与 revise、宣言/看图评审、小程序与 H5 确认/换方向、运营后台、测试与工程文档
+
+- **背景与线上发现**：原产品把价格档位与生成方式混在一起，用户只能看到抽象的“标准/高级”；同时生产只读核查确认 `layoutEngine=ai`、旧 `aiMode=auto`，4 个 standard 任务里 3 个实际带主视觉，说明标准价任务会机会式调用图片供应商。代码审计还发现默认 AI 排版下 premium 的免费 revise 会重新生图，以及 `layoutEngine=template` 可绕过 premium 的“不降级”保护。这不是单纯换文案，而是路线契约、成本与体验已经漂移。
+- **tier 成为唯一生成来源契约**：standard 对外名「创意排版」，AI/模板/回落全路径只走 graphic、零图片供应商；premium 对外名「主视觉大片」，必须生成或复用全幅无文字主视觉，AI 与模板两种排版引擎下都不得降为纯排版交付，失败走既有重试与幂等退款。`layoutEngine` 只管排版，旧 `aiMode` 配置、后台旋钮与配置契约退役；图片熔断只由 `visual.enabled` 控制。standard 的 `CreativeJob.provider` 不再因系统“配了供应商”而误记成本。
+- **免费改字资损修复**：revise 沿版本链解析并钉死 `sourceVisualAssetId/styleKey/subject`，AI 与模板排版都只读取原主视觉真实字节，不再重跑图片供应商或重新抽风格；源文件缺失时返回 `SOURCE_VISUAL_MISSING`，引导用户走收费 regenerate。换创作方向沿用 regenerate，按目标档位重新计费。
+- **六种创作方向与正向美术指导**：创意排版含「强标题视觉 / 品牌图形 / 本人形象」，主视觉大片含「人物意象 / 产品大片 / 场景叙事」。方向不是质量等级，而是可理解的视觉母题；`directions.ts` 将母题、构图骨架、密度与 premium 风格子集注入 manifesto/canvas prompt。本人形象要求真实 portrait；人物意象明确为 AI 演绎非本人。既有反 AI-slop 负向清单保持不动。
+- **审美闭环可控增强**：`visualCritique` 从自由文本升级为结构化 `pass/needsRebuild/rebuildReason/notes`。只有明确缺少视觉主角且仍有预算才在既有最多 3 次 HTML 调用内重构一次；不加轮次、不无限循环，重构引入机器违规即退回旧的干净版。`resultJson.rebuildTriggered/directionKey` 留痕。
+- **真实缩略图资产管线**：新增不绑定用户/租户的 `CreativeDirectionSample`。运营只能从已成功任务的 `poster_png` 复制草稿，确认路线与方向后审核发布；同方向新发布自动归档旧样例，`/creative/status.directions[].previewUrl` 只下发 published 真实成品。运营后台补生成/预览/发布，C 端确认页与收费“换方向”面板显示三方向缩略图；未发布时诚实显示「样例待发布」，不再依赖小程序包内不存在的死图片。
+- **方向选择的两处死路补齐**：① `CreativeJobView` 增 `hasPortrait`（只下发布尔事实、不下发 assetId，素材本体仍不进视图），详情页「换方向」按 `tier ∩ (!requiresPortrait || hasPortrait)` 过滤——此前只按 tier 过滤，给没传照片的单也摆出「本人形象」，选中提交必 422 而那页没有上传入口。② 确认页方向不再恒钉 tier 第一项：本人照片**刚选定**时自动切到「本人形象」并给一句轻提示，清除照片（或切到主视觉大片）时回落该 tier 第一项；只在这两个时刻拨，用户之后手动改选一律尊重。修掉「传了照片却停在强标题视觉」——那条 art direction 要求视觉主角是主标题本身，和 `{{PORTRAIT_URL}}` 在同一张画面里互相打架，服务端 `defaultDirectionKey` 的 hasPortrait 分支也因此成了死代码。
+- **验证**：新增 `creativeDirectionSamples.test.ts`，并补 tier 在 AI/template 两种排版引擎、premium 不降级、standard 零生图、premium revise 真实主视觉复用、结构化评审、单次重构与违规回退等回归。server 全量 **1674/1674** 后，新增“资产行存在但文件丢失”守卫并专项 **37/37**；app 原生 **165/165** + H5/共享层 **103/103**、admin **76/76** 全绿。
+- **上线前审查修复（同日，8 角度审查 + 逐条对抗验证后落码）**：① 存量在途单兼容——`loadJobExecutionInput` 补 `directionKey` 归一（按 brief 自身 tier/scene/portrait 推默认方向），`directionFor` 对未知 key 不再裸下标，改动前建的 pending 单不会在宣言阶段崩掉（premium 老单原本会失败退款、standard 老单会静默降模板）；② `aiMode` 旧值兼容读——payload 残留 `aiMode='graphic'`（运营熔断锁）视同 `visual.enabled=false`，运营下次保存配置旧字段自然消失；③ worker 侧免费单硬闸——`parentJobId` 非空且未扣费的单在两条排版路径上都禁调图片供应商（在途老 revise 单可绕过建单侧闸门，防线必须收在 worker）；④ 方向样例安全——公开取图路由只发 `published`（样例源自真实客户成品），id 从手搓时间戳+`Math.random` 改回 cuid，后台预览 draft 走带管理鉴权的专用路由；⑤ 样例性能——方向清单 60s 进程缓存（发布/生成即失效）、签名 URL 按 10 分钟窗口对齐（同窗口逐字节相同，小程序图片缓存能命中）、入库时 sharp 缩短边 360（原 1080×1440 原图直发 124px 宫格）；⑥ 看图评审解析宽收严出——剥导语/围栏、布尔字符串收编、缺 `needsRebuild` 默认 false、缺 `rebuildReason` 降级保留 notes 而非整份丢弃，解析失败在 metrics 里独立记 `unparsed`（与「没配 provider」分桶）；⑦ 机会式重构补两条准入——首版产物就干净、且重构后至少剩一轮补救（原实现修复轮出的干净图也能触发、重构可落在最后一轮白烧）；⑧ 恢复 premium 终态退款断言（原唯一断言随 `describe.skip` 停用且类型已烂，整段删除并在活跃套件重写：扣 25 → 耗尽重试 → failed + refundedAt + 零资产）。修复后全量：server **1693/1693（零 skip）**、app **268/268**、admin build 通过，`tsc` 三端无错。server build、生产 server 模式原生小程序构建、H5 server 构建、admin build + `lint:ui` 与 `git diff --check` 通过；H5 仅保留仓库既有的 bundle/font 体积警告。
+
 ### 2026-08-13 · 海报设计师换成真正的设计 skill；确认页从填表改成「看设计说明 + 选档位」 · 影响面：海报设计师提示词、需求单预填、确认页信息架构
 
 - **提示词整份重写**（`POSTER_DESIGNER_PROMPT`，**不是在 seed 模板上打补丁**）。旧版只讲流程不讲手艺——模型知道该问什么，但不知道什么样的海报算好。新版写进三样东西：

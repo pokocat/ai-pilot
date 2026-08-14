@@ -2082,6 +2082,28 @@ model CreativeAsset {
   @@map("creative_asset")
 }
 
+/// 海报创作方向的对外真实样例。与 CreativeAsset 分表：这是全局运营物料，不属于任何用户/租户。
+/// 由成功 CreativeJob 的 poster_png 复制为 draft，经运营审核 publish；每个方向同时只下发一个 published。
+model CreativeDirectionSample {
+  id           String   @id @default(cuid())
+  directionKey String
+  tier         String
+  status       String   @default("draft") // draft | published | archived
+  sourceJobId  String
+  ossKey       String
+  mimeType     String
+  width        Int?
+  height       Int?
+  bytes        Int?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([directionKey, status, updatedAt])
+  @@index([sourceJobId])
+  @@map("creative_direction_sample")
+}
+
 /// 快出片 BFF 的积分 hold 事实源。视频项目/作品真值在 aidrama；本表只保证军师钻石账幂等、失败只退一次。
 model VideoCreditHold {
   id              String   @id @default(cuid())

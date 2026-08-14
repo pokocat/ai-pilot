@@ -48,12 +48,9 @@ Page({
     ctaCount: `0/${LIMITS.cta}`, visualCount: `0/${LIMITS.visualDirection}`,
     goalOver: false, audienceOver: false, headlineOver: false, subheadlineOver: false, ctaOver: false, visualOver: false,
     proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
-    // 档位：premiumOn 为假时整块不渲染（供应商没配好时露出一个必然 422 的选项比不露更糟）。
+    // 两条创作路线 + 路线内方向；真实缩略图由 status 下发，不进小程序代码包。
     tier: 'standard', premiumPrice: 0, premiumOn: false,
-    // 档位卡没有示意图：曾经引 assets 下的两张固定模板图，但它们从没进过 src/assets，
-    // 也就从没打进产物 —— 实测每次进页面两张都触发 binderror、兜底开关立刻全 false，
-    // 「档位卡有插画」这个设计一次都没生效过。与其留一段永远走 catch 的死代码，不如拆掉；
-    // 要恢复就先把图放进 src/assets 下（构建会跟着 ASSET_ROOT 拷进产物），再把 image 与兜底一起加回来。
+    directions: [], activeDirections: [], directionKey: '',
     // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
     // 有它时表单默认收起（用户刚聊完，不该再对着表把话重打一遍）；没有就退回表单打头。
     designNote: '', showForm: false,
@@ -134,6 +131,7 @@ Page({
       templates, templateKey,
       premiumPrice: status ? status.premiumPricePerPoster : 0,
       premiumOn: !!(status && status.premiumAvailable),
+      directions: status ? status.directions : [],
       scene: brief.scene || 'personal_brand', brandKitVersion: typeof brief.brandKitVersion === 'number' ? brief.brandKitVersion : null,
       negativePrompt: String(brief.negativePrompt || ''), proofs,
     };
@@ -141,6 +139,13 @@ Page({
       const state = count(fields[field], LIMITS[field === 'visual' ? 'visualDirection' : field]);
       updates[field] = fields[field]; updates[`${field}Count`] = state.text; updates[`${field}Over`] = state.over;
     });
+    const directionTier = brief.tier === 'premium' && updates.premiumOn ? 'premium' : 'standard';
+    const activeDirections = updates.directions.filter((item) => item.tier === directionTier);
+    const requestedDirection = String(brief.directionKey || '');
+    updates.tier = directionTier;
+    updates.activeDirections = activeDirections;
+    updates.directionKey = activeDirections.some((item) => item.key === requestedDirection)
+      ? requestedDirection : String(activeDirections[0] && activeDirections[0].key || '');
     this.setData(updates);
   },
 
@@ -164,8 +169,41 @@ Page({
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
   toggleForm() { this.setData({ showForm: !this.data.showForm }); },
-  chooseTier(event) { this.setData({ tier: String(event.currentTarget.dataset.key || 'standard') }); },
+  chooseTier(event) {
+    const tier = String(event.currentTarget.dataset.key || 'standard');
+    const activeDirections = this.data.directions.filter((item) => item.tier === tier);
+    this.setData({
+      tier,
+      activeDirections,
+      directionKey: String(activeDirections[0] && activeDirections[0].key || ''),
+      'errors.direction': '',
+    });
+  },
+  chooseDirection(event) { this.setData({ directionKey: String(event.currentTarget.dataset.key || ''), 'errors.direction': '' }); },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },
+
+  /**
+   * 本人照片刚选定 / 刚清除的那一刻，把方向拨到与之自洽的一项。
+   *
+   * 只在这两个时刻动，**不在每次渲染里强制**：传了照片之后又手动改选别的方向，那是用户的决定，得留住。
+   * 传了照片却停在「强标题视觉」，art direction（视觉主角必须是主标题本身）和那张脸会在同一张
+   * 画面里互相打架；服务端的 hasPortrait 默认分支本来就想选「本人形象」，是确认页恒钉第一项把它废了。
+   * 该路线没有 requiresPortrait 的方向（高级档）时：不切也不提示。
+   */
+  syncDirectionForPortrait(hasPortrait) {
+    const list = this.data.activeDirections || [];
+    const current = list.find((item) => item.key === this.data.directionKey);
+    if (hasPortrait) {
+      if (current && current.requiresPortrait) return;
+      const portraitOne = list.find((item) => item.requiresPortrait);
+      if (!portraitOne) return;
+      this.setData({ directionKey: portraitOne.key, 'errors.direction': '' });
+      wx.showToast({ title: `已切换到「${portraitOne.name || '本人形象'}」方向`, icon: 'none' });
+      return;
+    }
+    if (!current || !current.requiresPortrait) return;
+    this.setData({ directionKey: String(list[0] && list[0].key || ''), 'errors.direction': '' });
+  },
 
   async pickAsset(event) {
     if (this.data.submitting || this.data.assets.some((item) => item.uploading)) return;
@@ -187,6 +225,7 @@ Page({
       if (!assetId) throw new Error('素材上传没有返回编号');
       assets = this.data.assets.map((item) => item.role === role ? Object.assign({}, item, { uploading: false, assetId, path: picked.path }) : item);
       this.setData({ assets });
+      if (role === 'portrait') this.syncDirectionForPortrait(true);
     } catch (error) {
       assets = this.data.assets.map((item) => item.role === role ? Object.assign({}, item, { uploading: false }) : item);
       this.setData({ assets });
@@ -197,6 +236,7 @@ Page({
   dropAsset(event) {
     const role = String(event.currentTarget.dataset.role || '');
     this.setData({ assets: this.data.assets.map((item) => item.role === role ? Object.assign({}, item, { assetId: '', path: '', uploading: false }) : item) });
+    if (role === 'portrait') this.syncDirectionForPortrait(false);
   },
 
   validate() {
@@ -208,7 +248,10 @@ Page({
     if (!this.data.cta.trim()) errors.cta = '行动号召不能为空'; else over('cta', LIMITS.cta, '行动号召');
     over('visual', LIMITS.visualDirection, '视觉方向');
     const proofs = this.data.proofs.map((proof, index) => Object.assign({}, proof, { err: proof.value.trim().length > LIMITS.proofPoint ? `第 ${index + 1} 条卖点不超过 ${LIMITS.proofPoint} 个字` : '' }));
-    if (this.data.assets.some((item) => item.role === 'portrait' && item.assetId) && !this.data.consent) errors.consent = '请先确认肖像使用权';
+    const hasPortrait = this.data.assets.some((item) => item.role === 'portrait' && item.assetId);
+    if (hasPortrait && !this.data.consent) errors.consent = '请先确认肖像使用权';
+    if (this.data.directionKey === 'graphic_portrait' && !hasPortrait) errors.direction = '「本人形象」需要先上传本人照片';
+    if (this.data.tier === 'premium' && hasPortrait) errors.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     this.setData({ errors, proofs });
     if (Object.keys(errors).length || proofs.some((proof) => proof.err)) {
       wx.showToast({ title: '还有几处需要改一下', icon: 'none' });
@@ -221,9 +264,14 @@ Page({
     try {
       const status = normalizeStatus(await api.creativeStatus());
       const templateKey = status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : (status.templates[0] && status.templates[0].key || '');
+      const tier = this.data.tier === 'premium' && status.premiumAvailable ? 'premium' : 'standard';
+      const activeDirections = status.directions.filter((item) => item.tier === tier);
+      const directionKey = activeDirections.some((item) => item.key === this.data.directionKey)
+        ? this.data.directionKey : String(activeDirections[0] && activeDirections[0].key || '');
       this.setData({
         templates: status.templates, templateKey, price: status.pricePerPoster,
         premiumPrice: status.premiumPricePerPoster, premiumOn: !!status.premiumAvailable,
+        directions: status.directions, activeDirections, directionKey, tier,
       });
     } catch (_) { /* 服务端原错误已经在提交区展示 */ }
   },
@@ -236,6 +284,7 @@ Page({
       goal: this.data.goal.trim(), audience: this.data.audience.trim(), headline: this.data.headline.trim(),
       proofPoints: this.data.proofs.map((proof) => proof.value.trim()).filter(Boolean),
       cta: this.data.cta.trim(), visualDirection: this.data.visual.trim(), ratio: '3:4',
+      directionKey: this.data.directionKey,
     };
     if (this.data.subheadline.trim()) brief.subheadline = this.data.subheadline.trim();
     if (this.data.negativePrompt.trim()) brief.negativePrompt = this.data.negativePrompt.trim();

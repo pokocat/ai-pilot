@@ -18,6 +18,7 @@ import {
 } from '../src/services/creative/worker.js';
 import { refundJob } from '../src/services/creative/jobs.js';
 import { CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER } from '../src/services/creative/config.js';
+import { putCreativeObject } from '../src/services/creative/storage.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
@@ -180,12 +181,15 @@ describe('海报成品图 · worker 生命周期', () => {
     await tickCreativeWorker();
     const balanceAfterParent = await getBalance(token);
 
-    // 模拟「父任务当年配了供应商、产出过主视觉」：内存回退区里没有这个 key，
-    // 渲染取图会拿到 null 并按无图路径继续 —— 复用链路本身与字节是否可读无关。
+    // 模拟「父任务当年配了供应商、产出过主视觉」；免费改字必须能读回真实字节，
+    // 文件丢失时应明确拒绝并引导收费重出，不能悄悄生成新图。
+    const visualKey = `test/creative/revise/${parentId}.png`;
+    await putCreativeObject(visualKey, Buffer.from('source-visual'), 'image/png');
     const parentVisual = await prisma.creativeAsset.create({
       data: {
         tenantId, userId: token, jobId: parentId, kind: 'visual',
-        ossKey: `creative/${tenantId}/${parentId}/fake-visual.png`, mimeType: 'image/png', bytes: 1,
+        ossKey: visualKey, mimeType: 'image/png', bytes: 13,
+        metadataJson: { styleKey: 'mono_authority_portrait', subject: 'founder portrait' },
       },
     });
 
@@ -276,9 +280,7 @@ describe('海报成品图 · worker 生命周期', () => {
     assert.equal(await refundLedgerCount(token), 0);
   });
 
-  // D7：供应商降级此前零痕迹 —— 只 console.warn，而 provider 列是建单时的 'configured' 快照，
-  // metrics 也用它 → 供应商挂一整天，任务台与监控全绿，用户拿到的全是"无主视觉"版。
-  test('图片供应商不可用 → 任务仍成功，但 resultJson.degraded=true 且任务台可见', async () => {
+  test('标准档即使配置了图片供应商也不调用、不降级、不记供应商成本', async () => {
     const { token } = await posterUser();
     // 配一个必然打不通的供应商：127.0.0.1 会被 assertSafeUrl 的 SSRF 防护直接拦下，
     // 不依赖任何真实网络（也不会误发请求到外部）。
@@ -288,26 +290,21 @@ describe('海报成品图 · worker 生命周期', () => {
     __clearFeatureCache();
 
     const jobId = await createJob(token, 'w-degraded');
-    assert.equal(
-      (await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).provider,
-      'configured',
-      '建单时供应商配着 → 快照是 configured（正是它让降级看不出来）',
-    );
+    assert.equal((await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).provider, null);
     await tickCreativeWorker();
 
     const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
-    assert.equal(job.status, 'succeeded', `纯排版本身是完整交付物，不该失败：${job.errorCode} ${job.errorMessage}`);
+    assert.equal(job.status, 'succeeded', `标准创意排版本身是完整交付物：${job.errorCode} ${job.errorMessage}`);
     const result = job.resultJson as { degraded?: boolean; visualError?: string; visualAssetId: string | null };
-    assert.equal(result.degraded, true, '配了供应商却没拿到主视觉 = 降级，必须留痕');
-    assert.ok(result.visualError && result.visualError.length > 0, '带一句对外可读的说明');
-    assert.doesNotMatch(String(result.visualError), /127\.0\.0\.1|ECONNREFUSED|SSRF/i, '对外文案不含内部细节');
+    assert.equal(result.degraded, false, '标准档没请求主视觉，不属于降级');
+    assert.equal(result.visualError, undefined);
     assert.equal(result.visualAssetId, null);
     assert.equal(await prisma.creativeAsset.count({ where: { jobId, kind: 'visual' } }), 0);
 
     // 任务台看得见（老任务无该字段按 false，这里是新任务 → true）
     const list = await api('GET', '/api/admin/creative/jobs');
     assert.equal(list.status, 200, JSON.stringify(list.body));
-    assert.equal(list.body.items[0].degraded, true, '运营在任务台上要能看出这一单没有主视觉');
+    assert.equal(list.body.items[0].degraded, false);
   });
 
   test('未配供应商的正常任务：degraded=false（"没配"不是"降级"）', async () => {

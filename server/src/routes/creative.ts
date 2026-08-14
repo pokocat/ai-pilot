@@ -12,6 +12,7 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { getCreativeConfig, enabledTemplateOptions, premiumTierAvailable } from '../services/creative/config.js';
 import { buildPosterBriefDraft } from '../services/creative/briefDraft.js';
+import { getDirectionSampleFile, publishedDirectionOptions } from '../services/creative/directionSamples.js';
 import {
   createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView, listPosterJobs,
 } from '../services/creative/jobs.js';
@@ -39,16 +40,30 @@ export async function creativeRoutes(app: FastifyInstance) {
   app.get('/creative/status', async (req): Promise<CreativeStatusResult> => {
     await resolveUser(req.headers['x-user-id'] as string | undefined); // 需登录（401 由 resolveUser 抛）
     const cfg = await getCreativeConfig();
+    const premiumAvailable = cfg.enabled && premiumTierAvailable(cfg);
     return {
       enabled: cfg.enabled,
       pricePerPoster: cfg.pricePerPoster,
       premiumPricePerPoster: cfg.premiumPricePerPoster,
       // 与 templates 同一条口径：不可用就别露出来。高级档不可用时前端不该显示那个选项，
       // 更不该显示价格 —— 让用户选完再撞 422 是最差的一种交互。
-      premiumAvailable: cfg.enabled && premiumTierAvailable(cfg),
+      premiumAvailable,
+      directions: cfg.enabled ? await publishedDirectionOptions(premiumAvailable) : [],
       // 功能关着时不下发清单：前端本就该整块隐藏入口，给了列表反而像"能用"。
       templates: cfg.enabled ? enabledTemplateOptions(cfg) : [],
     };
+  });
+
+  // 全局方向样例是对外运营物料，不含用户/租户资产；cuid 不可猜，可被 <image> 直接加载（故不设 resolveUser）。
+  // **只发已发布样例**：这条路由无鉴权，草稿/归档是未审核或已下线的物料，不得从这里流出
+  // （后台预览草稿走 /admin/creative/direction-samples/:id/file，那条有管理鉴权）。
+  app.get<{ Params: { id: string } }>('/creative/direction-samples/:id/file', async (req, reply) => {
+    const file = await getDirectionSampleFile(req.params.id);
+    if (!file) return reply.code(404).send({ error: '样例不存在', code: 'NOT_FOUND' });
+    return reply
+      .header('content-type', file.mimeType)
+      .header('cache-control', 'public, max-age=600')
+      .send(file.buffer);
   });
 
   // 需求单草稿：成果消息 + 已确认 BrandKit 预填（用户在确认页只做增删改）。

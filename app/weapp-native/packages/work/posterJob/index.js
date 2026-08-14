@@ -20,6 +20,15 @@ function count(value, max) {
   return { text: `${size}/${max}`, over: size > max };
 }
 
+// 「换方向」清单 = 本单路线 ∩ 本单能选的方向。requiresPortrait 的方向对没传过本人照片的单
+// 必 422，而本页没有上传入口 —— 摆出来就是一个只能碰壁的死选项。
+// 任务详情还没回来时按「无照片」算（applyJob 拿到 job 后会重算）。
+function activeDirectionsFor(directions, job) {
+  const tier = job && job.tier === 'premium' ? 'premium' : 'standard';
+  const hasPortrait = !!(job && job.hasPortrait);
+  return (directions || []).filter((item) => item.tier === tier && (!item.requiresPortrait || hasPortrait));
+}
+
 function wxAsync(name, options) {
   return new Promise((resolve, reject) => {
     const method = wx[name];
@@ -33,7 +42,7 @@ Page({
     jobId: '', loading: true, loadErr: '', showLogin: false, job: null,
     inFlight: false, succeeded: false, failed: false, cancelled: false, timedOut: false,
     stageItems: [], progressLabel: '', assetUrl: '', assetMissingText: '', canCancel: false, canRevise: false, canRegenerate: false,
-    price: null, templates: [], panel: '',
+    price: null, templates: [], directions: [], activeDirections: [], directionKey: '', panel: '',
     // 出图是异步的（约一分钟），用户本来就该走开。这里放订阅模板，让他一键「好了通知我」。
     posterTemplate: null, subscribing: false, headline: '', cta: '', visual: '', templateKey: '',
     headlineCount: `0/${LIMITS.headline}`, ctaCount: `0/${LIMITS.cta}`, visualCount: `0/${LIMITS.visualDirection}`,
@@ -112,7 +121,11 @@ Page({
       const status = normalizeStatus(await api.creativeStatus());
       // 两档单价都留着：本单是哪一档要等任务详情回来才知道（见 applyTierPrice）。
       this._prices = { standard: status.pricePerPoster, premium: status.premiumPricePerPoster };
-      this.setData({ templates: status.templates });
+      this.setData({
+        templates: status.templates,
+        directions: status.directions,
+        activeDirections: activeDirectionsFor(status.directions, this.data.job),
+      });
       this.applyTierPrice();
     } catch (_) { /* 状态失败不阻断任务回看 */ }
   },
@@ -136,8 +149,9 @@ Page({
       assetUrl: absoluteCreativeUrl(asset && (asset.previewUrl || asset.downloadUrl)),
       assetMissingText: job.assets.length ? '成品图链接已过期，点重试获取新链接。' : '本地演示任务没有图片文件，连接服务端后可查看真实成品。',
       canCancel: job.actions.includes('cancel'), canRevise: job.actions.includes('revise'), canRegenerate: job.actions.includes('regenerate'),
+      activeDirections: activeDirectionsFor(this.data.directions, job),
     });
-    // 档位现在才知道 → 重算「换风格」的价格（loadStatus 可能早于详情返回）。
+    // 路线现在才知道 → 重算「换方向」的价格（loadStatus 可能早于详情返回）。
     this.applyTierPrice();
     return job;
   },
@@ -246,7 +260,7 @@ Page({
   },
   openStyle() {
     this._styleKey = newIdempotencyKey('regen');
-    this.setData({ panel: 'style', errors: {}, visual: '', templateKey: '', visualCount: `0/${LIMITS.visualDirection}`, visualOver: false });
+    this.setData({ panel: 'style', errors: {}, visual: '', templateKey: '', directionKey: '', visualCount: `0/${LIMITS.visualDirection}`, visualOver: false });
   },
   closePanel() { this.setData({ panel: '', errors: {} }); },
 
@@ -267,7 +281,7 @@ Page({
     this.setData({ proofs, 'errors.form': '' });
   },
   /**
-   * 「换风格」面板的价格 = **本单档位**的单价。
+   * 「换方向」面板的价格 = **本单路线**的单价。
    *
    * regenerate 继承父单的 tier、服务端按 priceForTier 扣费，而这里此前写死 pricePerPoster：
    * 高级单在面板上显示 10、实扣 25 —— 在扣费那一刻说了假话。tier 由 GET /creative/jobs/:id
@@ -285,12 +299,24 @@ Page({
     const key = String(event.currentTarget.dataset.key || '');
     this.setData({ templateKey: key === this.data.templateKey ? '' : key });
   },
+  chooseDirection(event) {
+    const key = String(event.currentTarget.dataset.key || '');
+    this.setData({ directionKey: key === this.data.directionKey ? '' : key, 'errors.form': '' });
+  },
 
   async refreshTemplates() {
     try {
       const status = normalizeStatus(await api.creativeStatus());
       this._prices = { standard: status.pricePerPoster, premium: status.premiumPricePerPoster };
-      this.setData({ templates: status.templates, templateKey: status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : '' });
+      const tier = this.data.job && this.data.job.tier === 'premium' ? 'premium' : 'standard';
+      const activeDirections = status.directions.filter((item) => item.tier === tier);
+      this.setData({
+        templates: status.templates,
+        directions: status.directions,
+        activeDirections,
+        directionKey: activeDirections.some((item) => item.key === this.data.directionKey) ? this.data.directionKey : '',
+        templateKey: status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : '',
+      });
       this.applyTierPrice();
     } catch (_) { /* 当前错误已展示 */ }
   },
@@ -330,6 +356,7 @@ Page({
       const body = { idempotencyKey: usePanel ? (this._styleKey || newIdempotencyKey('regen')) : newIdempotencyKey('regen') };
       if (usePanel && this.data.visual.trim()) body.visualDirection = this.data.visual.trim();
       if (usePanel && this.data.templateKey) body.templateKey = this.data.templateKey;
+      if (usePanel && this.data.directionKey) body.directionKey = this.data.directionKey;
       const result = await api.regenerateJob(this.data.job.id, body);
       this.goJob(result.jobId);
     } catch (error) {
@@ -338,7 +365,7 @@ Page({
       if (code === 'INSUFFICIENT_CREDITS') { this.setData({ 'errors.form': '钻石不足，去「我的 · 权益额度」看看余额。' }); wx.showToast({ title: '钻石不足', icon: 'none' }); }
       else if (code === 'CREATIVE_DAILY_LIMIT') { this.setData({ 'errors.form': '今日出图额度已满，明天再来。' }); wx.showToast({ title: '今日额度已满', icon: 'none' }); }
       else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') { this.setData({ 'errors.form': message || '没通过校验，改一下再试。' }); if (/版式/.test(message)) this.refreshTemplates(); }
-      else store.handleApiError(error, { fallbackTitle: '换风格失败，请重试' });
+      else store.handleApiError(error, { fallbackTitle: '换方向失败，请重试' });
     } finally { this.setData({ busy: '' }); }
   },
 

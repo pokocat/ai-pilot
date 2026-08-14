@@ -35,7 +35,7 @@ export const FONT_SERIF = '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Ser
 export const AI_MARK_TEXT = 'AI 生成内容 · 军师参谋部';
 
 export interface TemplateAssets {
-  /** 人物照签名 URL 或 data URI（可空 → 走无主视觉的纯排版路径）。 */
+  /** 人物照签名 URL 或 data URI（可空；standard 可做无主视觉纯排版）。 */
   portraitUrl?: string | null;
   logoUrl?: string | null;
   qrUrl?: string | null;
@@ -279,7 +279,7 @@ function businessLaunch(input: TemplateInput): string {
   .art{flex-basis:158px;min-height:0;overflow:hidden;background:${c.ink}}
   .art img{width:100%;height:100%;object-fit:cover;display:block}
   .main{padding:18px 30px 0;display:flex;flex-direction:column}
-  /* 无主视觉时（未配图片供应商的默认路径）卖点区上下留白均分：把本该给图的空间摊成呼吸，
+  /* standard 无主视觉时，卖点区上下留白均分：把本该给图的空间摊成呼吸，
      而不是在卖点与 CTA 条之间留一大块死白。
      ⚠️ 用「1 0 auto」（可涨不可缩）而非「1 1 auto」：它是文字块，一旦允许收缩就会在文案顶到
      上限时把卖点压到 CTA 条底下（本模板没有 overflow:hidden，压出来是重叠而不是裁切，更糟）。 */

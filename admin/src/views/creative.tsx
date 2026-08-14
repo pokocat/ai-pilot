@@ -14,17 +14,16 @@
 // 慢（要 SSH + 重启）。代价是这个开关变重了：打开保存 = 立刻放量 + 立刻开始扣钻，没有第二道闸门兜底。
 // 所以页面必须把这件事写在开关旁（.ai-note），并对 关→开 走 ConfirmDialog 回显单价与限额。
 //
-// 排版引擎（2026-07-29 起）是另一回事，别按开关的规格对待它：AI 排版失败必回落模板，付费任务不会因它
-// 失败，所以它可逆、不涉资金、不弹确认框，文案也不该写成「实验性功能」。它真正的风险是**静默失效** ——
-// AI 挂了照样出模板图、任务照样全绿，配置页看起来一直是「AI 排版」。所以观测的重心放在任务台：每行显示
-// 本单实际引擎，template_fallback 用警示色 + 回落原因，汇总条给一个（本页样本的）AI 回落率。
+// 排版引擎只决定版式实现，不决定主视觉来源：创意排版可从 AI 回落模板，主视觉大片则失败退款、不跨档降级。
+// 切换本身可逆、不涉资金、不弹确认框；观测重心放在任务台，每行显示本单实际引擎与回落原因。
 
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import {
-  api, type AdminCreativeConfig, type AdminCreativeConfigUpdate, type AdminCreativeJobItem,
-  type AdminCreativeVisualConfig,
+  api, adminImageObjectUrl,
+  type AdminCreativeConfig, type AdminCreativeConfigUpdate, type AdminCreativeJobItem,
+  type AdminCreativeVisualConfig, type AdminCreativeDirectionSample, type PosterDirectionKey,
 } from '../api';
 import { PageHead, ViewState, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
@@ -45,13 +44,21 @@ const TEMPLATES: [string, string, string][] = [
 /**
  * 排版引擎两项（措辞对齐 shared/contracts.d.ts 的契约注释）。
  *
- * 刻意**不**写成「实验性 / 有风险 / 可能失败」：AI 引擎的任何一步走不通（模型不可用、HTML 不合规、
- * 量测反复不过）都会自动回落到模板路径，付费任务不会因为它失败。所以这是「要不要试更好的画质」，
- * 不是风险开关，恐吓文案只会让运营永远不敢打开它。真正需要盯的是**回落率** —— 见任务台汇总条。
+ * 刻意**不**写成「实验性」：standard 失败自动回落，premium 仍由 tier 的失败退款契约保护。
+ * 这个旋钮不改变计价路线，真正需要盯的是 standard 回落率与 premium 失败率。
  */
 const LAYOUT_ENGINES: ['ai' | 'template', string, string][] = [
-  ['ai', 'AI 排版', '模型按设计哲学自由创作整页版式，量测不过自动修正，失败自动回落模板'],
-  ['template', '模板排版', '固定三套版式（上一代行为），不调用创作模型'],
+  ['ai', 'AI 排版', '模型按设计哲学自由创作版式；创意排版失败可回落模板'],
+  ['template', '模板排版', '固定三套版式；主视觉来源仍严格服从所选路线'],
+];
+
+const DIRECTIONS: [PosterDirectionKey, string, 'standard' | 'premium'][] = [
+  ['graphic_bold_type', '强标题视觉', 'standard'],
+  ['graphic_symbol', '品牌图形', 'standard'],
+  ['graphic_portrait', '本人形象', 'standard'],
+  ['photo_character', '人物意象', 'premium'],
+  ['photo_product', '产品大片', 'premium'],
+  ['photo_scene', '场景叙事', 'premium'],
 ];
 
 function engineName(k: string): string {
@@ -59,20 +66,31 @@ function engineName(k: string): string {
 }
 
 /**
- * AI 创作路线三项（2026-07-30 影像主导模式）。措辞对齐 shared/contracts.d.ts 的契约注释。
- *
- * 同样**不写成风险开关**：photo 链任一步走不通就退回 graphic 复用同一篇宣言，再失败才回落模板，
- * 交付与计费都不受影响。但它有**三条门禁**，副文案必须说清 —— 否则运营切到「影像」后看到任务台
- * 全是「AI 排版」，会以为功能坏了（真实原因往往是没配图片供应商，或用户传了本人照片）。
+ * 方向样例预览图。previewUrl 有两种形态（服务端按 OSS 是否配置拼）：
+ *   · OSS 签名直链 → 原样喂 <img>；
+ *   · `/api/admin/creative/direction-samples/:id/file` → 那条要管理鉴权，而 <img> 带不了
+ *     x-admin-token，必须先带头取回 blob（adminImageObjectUrl 已按前缀分流）。
+ * 未发布草稿只能从后台这条路由取（C 端那条无鉴权、只发已发布），所以审核动线必须走这里。
  */
-const AI_MODES: ['auto' | 'graphic' | 'photo', string, string][] = [
-  ['auto', '模型自选', '让模型按这张海报的诉求自己决定走影像还是纯图形（推荐）'],
-  ['photo', '影像优先', '优先让生图模型出全幅主视觉、排版层只叠字；不满足门禁时自动降为纯图形'],
-  ['graphic', '纯图形', '只用 CSS/SVG 图形与排印作画，完全不调生图模型'],
-];
-
-function aiModeName(k: string): string {
-  return AI_MODES.find(([key]) => key === k)?.[1] ?? k;
+function SamplePreview({ url, alt }: { url: string; alt: string }) {
+  const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    let objectUrl = '';
+    setSrc(''); setFailed(false);
+    adminImageObjectUrl(url)
+      .then((u) => {
+        if (!alive) { if (u !== url) URL.revokeObjectURL(u); return; }
+        if (u !== url) objectUrl = u;
+        setSrc(u);
+      })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [url]);
+  if (failed) return <div className="cr-dir-empty">样例预览加载失败</div>;
+  if (!src) return <div className="cr-dir-empty">预览加载中…</div>;
+  return <img className="cr-dir-preview" src={src} alt={alt} />;
 }
 
 /**
@@ -214,7 +232,6 @@ interface CfgDraft {
   dailyLimit: number;
   timeoutMs: number;
   layoutEngine: 'ai' | 'template';
-  aiMode: 'auto' | 'graphic' | 'photo';
   templates: Record<string, boolean>;
   visualEnabled: boolean;
   /** 接口方言：三家 images 接口长得像但请求体不兼容，填错的症状是 dry-run 报 400。 */
@@ -242,7 +259,6 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
     dailyLimit: c.dailyLimit,
     timeoutMs: c.timeoutMs,
     layoutEngine: c.layoutEngine,
-    aiMode: c.aiMode,
     templates: { ...c.templates },
     visualEnabled: c.visual.enabled,
     dialect: c.visual.dialect,
@@ -262,7 +278,6 @@ function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
     || d.dailyLimit !== c.dailyLimit
     || d.timeoutMs !== c.timeoutMs
     || d.layoutEngine !== c.layoutEngine
-    || d.aiMode !== c.aiMode
     || TEMPLATES.some(([k]) => !!d.templates[k] !== !!c.templates[k]);
 }
 
@@ -285,6 +300,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     useCallback(() => api.creativeJobs({ status: status || undefined, page }), [status, page]),
     [status, page],
   );
+  const samples = useResource(api.creativeDirectionSamples, []);
 
   const [draft, setDraft] = useState<CfgDraft | null>(null);
   const [busy, setBusy] = useState('');
@@ -292,6 +308,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
   const [openErr, setOpenErr] = useState('');
   const [openPhil, setOpenPhil] = useState('');
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+  const [sampleJobIds, setSampleJobIds] = useState<Partial<Record<PosterDirectionKey, string>>>({});
 
   const cfg = cfgRes.data;
   // 每次拿到新配置（首载 / 刷新 / 保存后回填）都重置草稿：顺带清掉密钥输入框与 dirty 态。
@@ -299,7 +316,8 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
   const cfgReload = cfgRes.reload;
   const jobsReload = jobs.reload;
-  const reloadAll = useCallback(() => { cfgReload(); jobsReload(); }, [cfgReload, jobsReload]);
+  const samplesReload = samples.reload;
+  const reloadAll = useCallback(() => { cfgReload(); jobsReload(); samplesReload(); }, [cfgReload, jobsReload, samplesReload]);
 
   const set = (p: Partial<CfgDraft>) => setDraft((d) => d && { ...d, ...p });
   const setTpl = (k: string, on: boolean) => setDraft((d) => d && { ...d, templates: { ...d.templates, [k]: on } });
@@ -320,7 +338,6 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       dailyLimit: draft.dailyLimit,
       timeoutMs: draft.timeoutMs,
       layoutEngine: draft.layoutEngine,
-      aiMode: draft.aiMode,
       templates: draft.templates,
     };
     const run = async () => { setBusy('basics'); try { await put(body, '配置已保存'); } finally { setBusy(''); } };
@@ -330,10 +347,10 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     // 两件事常常一起发生（先定价再开量），合成**一个**对话框回显，不要连弹两次。
     // 关闭方向不拦：停量是止血动作，多一次点击就是多一分钟的损失。
     //
-    // 排版引擎切换**自己不弹框**：它可逆、不涉资金、失败必回落（见 LAYOUT_ENGINES 注释）。但如果它和
+    // 排版引擎切换**自己不弹框**：它可逆且不改变 tier 商品契约（standard 可回落，premium 不降级）。但如果它和
     // 改价/放量同批保存，就顺带回显一行 —— 一次保存里改了几件事，确认框必须说全，否则回显反而误导。
     const turningOn = draft.enabled && !cfg.enabled;
-    // 两档单价任一变更都要回显 —— 高级档一张 25 钻，改错了比标准档更贵。
+    // 两条路线单价任一变更都要回显；数值只取运营价格表，不在页面写死。
     const priceChanged = draft.pricePerPoster !== cfg.pricePerPoster
       || draft.premiumPricePerPoster !== cfg.premiumPricePerPoster;
     const engineChanged = draft.layoutEngine !== cfg.layoutEngine;
@@ -341,30 +358,22 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       const echo: NonNullable<ConfirmSpec['echo']> = [];
       if (turningOn) echo.push({ k: '功能开关', v: '未开启 → 已开启' });
       if (draft.pricePerPoster !== cfg.pricePerPoster) {
-        echo.push({ k: '标准档原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true });
-        echo.push({ k: '标准档新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '创意排版原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '创意排版新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
       } else {
-        echo.push({ k: '标准档单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '创意排版单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
       }
       if (draft.premiumPricePerPoster !== cfg.premiumPricePerPoster) {
-        echo.push({ k: '高级档原价', v: `${cfg.premiumPricePerPoster} 钻 / 张`, amount: true });
-        echo.push({ k: '高级档新价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '主视觉大片原价', v: `${cfg.premiumPricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '主视觉大片新价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
       } else {
-        echo.push({ k: '高级档单价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '主视觉大片单价', v: `${draft.premiumPricePerPoster} 钻 / 张`, amount: true });
       }
       echo.push({ k: '每日限额', v: draft.dailyLimit === 0 ? '不限量（0 = 不限）' : `${draft.dailyLimit} 张 / 人` });
       if (engineChanged) {
         echo.push({
           k: '排版引擎',
           v: `${engineName(cfg.layoutEngine)} → ${engineName(draft.layoutEngine)}（同批保存）`,
-        });
-      }
-      // 同上：路线切换自己不弹框，但和改价/放量同批保存时必须一起回显 —— 一次保存里改了几件事，
-      // 确认框说不全反而误导。
-      if (draft.aiMode !== cfg.aiMode) {
-        echo.push({
-          k: 'AI 创作路线',
-          v: `${aiModeName(cfg.aiMode)} → ${aiModeName(draft.aiMode)}（同批保存）`,
         });
       }
       setConfirmSpec({
@@ -416,7 +425,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
   const clearKey = () => setConfirmSpec({
     title: '清除图片供应商密钥',
-    desc: '清除后主视觉生成将失去凭证：任务不会报错，但会退化成「无主视觉」的纯排版模板路径。重新填入密钥即可恢复。',
+    desc: '清除后「主视觉大片」会立即停止开放；已在途且拿不到主视觉的任务会失败退款。「创意排版」不受影响。重新填入密钥即可恢复。',
     echo: [
       { k: '接入点', v: cfg?.visual.baseUrl || '（未填）' },
       { k: '模型', v: cfg?.visual.model || '（未填）' },
@@ -439,6 +448,35 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     } catch (e) { setDry({ ok: false, msg: (e as Error)?.message || '试跑请求失败' }); }
     setBusy('');
   };
+
+  const createSample = async (directionKey: PosterDirectionKey) => {
+    const sourceJobId = String(sampleJobIds[directionKey] ?? '').trim();
+    if (!sourceJobId) { toast('请先填写已成功的来源任务 ID'); return; }
+    setBusy(`sample:${directionKey}`);
+    try {
+      await api.createCreativeDirectionSample({ directionKey, sourceJobId });
+      setSampleJobIds((cur) => ({ ...cur, [directionKey]: '' }));
+      samplesReload();
+      toast('样例草稿已生成，请看图确认后发布');
+    } catch (e) { toast((e as Error)?.message || '生成样例草稿失败'); }
+    finally { setBusy(''); }
+  };
+
+  const confirmPublishSample = (sample: AdminCreativeDirectionSample) => setConfirmSpec({
+    title: `发布「${sample.directionName}」样例`,
+    desc: '发布后小程序确认页会立即把这张真实成品作为该方向缩略图；同方向旧样例自动归档。',
+    echo: [
+      { k: '创作方向', v: sample.directionName },
+      { k: '来源任务', v: sample.sourceJobId },
+      { k: '路线', v: sample.tier === 'premium' ? '主视觉大片' : '创意排版' },
+    ],
+    confirmText: '确认发布',
+    onConfirm: async () => {
+      setBusy(`publish:${sample.id}`);
+      try { await api.publishCreativeDirectionSample(sample.id); samplesReload(); toast('样例已发布'); }
+      finally { setBusy(''); }
+    },
+  });
 
   const retry = (j: AdminCreativeJobItem) => setConfirmSpec({
     title: '重试失败任务',
@@ -465,11 +503,14 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     <>
       <PageHead
         k="creative"
-        res={{ loading: cfgRes.loading || jobs.loading, reload: reloadAll, updatedAt: Math.max(cfgRes.updatedAt, jobs.updatedAt) }}
+        res={{
+          loading: cfgRes.loading || jobs.loading || samples.loading,
+          reload: reloadAll,
+          updatedAt: Math.max(cfgRes.updatedAt, jobs.updatedAt, samples.updatedAt),
+        }}
         badge={cfg
           ? (cfg.enabled
             ? `已开启 · ${cfg.pricePerPoster} 钻/张 · ${engineName(cfg.layoutEngine)}`
-              + (cfg.layoutEngine === 'ai' ? ` / ${aiModeName(cfg.aiMode)}` : '')
             : '未开启')
           : undefined}
       />
@@ -507,17 +548,16 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               </div>
 
               <div className="ai-field">
-                <div className="ai-fl">标准档价格（钻石 / 张 · 0–10000）</div>
+                <div className="ai-fl">创意排版价格（钻石 / 张 · 0–10000）</div>
                 <NumInput className="ai-input" min={0} max={10_000} step={1} value={draft.pricePerPoster} disabled={!isSuper} onChange={(pricePerPoster) => set({ pricePerPoster })} />
               </div>
               <div className="ai-field">
-                <div className="ai-fl">高级档价格（钻石 / 张 · 0–10000）</div>
+                <div className="ai-fl">主视觉大片价格（钻石 / 张 · 0–10000）</div>
                 <NumInput className="ai-input" min={0} max={10_000} step={1} value={draft.premiumPricePerPoster} disabled={!isSuper} onChange={(premiumPricePerPoster) => set({ premiumPricePerPoster })} />
                 <div className="ai-note">
-                  高级档每单会多调一次图片大模型出全幅主视觉（中文仍由服务端排版，不交给图片模型）。
-                  <b>没配好下方的图片供应商时，高级档在小程序里整块不显示</b>，也不接受下单 —— 不会出现
-                  「用户买了高级、拿到标准图」的情况。高级单若最终没能出主视觉，整单失败并全额退款，
-                  不降级交付。
+                  主视觉大片每单会调图片大模型出全幅主视觉（中文仍由服务端排版，不交给图片模型）。
+                  <b>没配好下方的图片供应商时，这条路线在小程序里整块不显示</b>，也不接受下单。
+                  若最终没能出主视觉，整单失败并全额退款，不降级交付。
                 </div>
               </div>
               <div className="ai-field">
@@ -531,7 +571,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                 <NumInput className="ai-input" min={10_000} max={480_000} step={5000} value={draft.timeoutMs} disabled={!isSuper} onChange={(timeoutMs) => set({ timeoutMs })} />
               </div>
 
-              {/* 排版引擎：可逆、不涉资金、失败必回落 → 不弹确认框，切完直接「保存配置」。 */}
+              {/* 排版引擎：可逆、不改变 tier 计价路线 → 不弹确认框，切完直接「保存配置」。 */}
               <div className="ai-field">
                 <div className="ai-fl">排版引擎（决定海报版式是模型现场创作还是套固定模板）</div>
                 <div className="bill-seg">
@@ -550,34 +590,6 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   AI 排版不是风险开关：模型不可用、产出不合规、量测反复不过，任何一步走不通都会自动回落到模板路径出图，
                   付费任务不会因为它失败。要盯的是下面任务台的「AI 回落率」—— 回落率高说明 AI 排版名义上开着、
                   实际大多在出模板图，那时候才该回去查模型配置或切回模板排版。
-                </div>
-              </div>
-
-              {/* AI 创作路线：同样可逆、不涉资金、失败必回落 → 不弹确认框。只在 AI 排版下生效，
-                  切到模板排版时整块置灰并说明原因（藏起来会让运营以为设置丢了）。 */}
-              <div className="ai-field">
-                <div className="ai-fl">
-                  AI 创作路线（影像主导 = 生图模型出全幅主视觉，排版层只叠字）
-                  {draft.layoutEngine === 'ai' ? '' : ' · 当前排版引擎为「模板排版」，本项不生效'}
-                </div>
-                <div className="bill-seg">
-                  {AI_MODES.map(([k, label, desc]) => (
-                    <div
-                      key={k}
-                      className={`bill-opt ${draft.aiMode === k ? 'on' : ''}`}
-                      onClick={() => isSuper && draft.layoutEngine === 'ai' && set({ aiMode: k })}
-                    >
-                      <div className="bo-t">{label}</div>
-                      <div className="bo-d">{desc}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="ai-note">
-                  影像路线有三条门禁，任一不满足时这一单就自动降为纯图形（任务仍成功、照样扣费，只是画风不同）：
-                  ① 上方「图片供应商」未启用或没填接口地址/模型；② 用户自己上传了本人照片
-                  （v1 不做真人融合：模型生成的脸和用户的照片放一起必然打架）；③ 模型没给出可用的影像主体描述。
-                  影像版排版失败时还会退回纯图形版（复用同一篇宣言，不重出主视觉），再失败才回落模板。
-                  所以切到「影像优先」后若任务台仍全是「AI 排版」，先去查这三条，而不是怀疑功能没上线。
                 </div>
               </div>
 
@@ -612,7 +624,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       </ViewState>
 
       {/* ── 图片供应商 ── */}
-      <div className="sec-h"><span className="t">图片供应商</span><span className="s">主视觉生成接入点 · 未配置时走纯排版路径，不报错</span></div>
+      <div className="sec-h"><span className="t">图片供应商</span><span className="s">仅供主视觉大片使用 · 未配置时该路线不开放</span></div>
       {cfgRes.initial ? <div className="pad"><Skeleton kind="rows" /></div> : !cfg || !draft ? null : (
         <div className="pad">
           <div className="crd new-agent">
@@ -620,7 +632,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               <div className="cfg-row">
                 <div className="cb">
                   <div className="ct">启用主视觉生成</div>
-                  <div className="cs">关闭（或缺 接入点/模型）时任务不报错，直接出「无主视觉」的纯排版海报</div>
+                  <div className="cs">关闭（或缺接入点/模型）时「主视觉大片」不开放；「创意排版」不受影响</div>
                 </div>
                 <div className={`sw ${draft.visualEnabled ? 'on' : ''}`} onClick={() => isSuper && set({ visualEnabled: !draft.visualEnabled })}><i /></div>
               </div>
@@ -728,6 +740,76 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
           </div>
         </div>
       )}
+
+      {/* ── 创作方向真实样例 ── */}
+      <div className="sec-h"><span className="t">创作方向样例</span><span className="s">从真实成功任务生成草稿 / 审核 / 发布到小程序缩略图</span></div>
+      <div className="pad">
+        <div className="ai-note">
+          样例必须来自真实成功任务，不能上传一张与实际能力无关的宣传图。生成草稿会把该任务成品复制为全局运营物料，
+          不继承用户或租户归属；确认画面与方向一致后再发布，同方向旧样例会自动归档。
+        </div>
+        {samples.error && <ErrorState msg={samples.error} onRetry={samplesReload} stale={!!samples.data} />}
+        <div className="cr-dir-grid">
+          {DIRECTIONS.map(([key, name, tier]) => {
+            const rows = (samples.data ?? []).filter((item) => item.directionKey === key);
+            const draftSample = rows.find((item) => item.status === 'draft');
+            const published = rows.find((item) => item.status === 'published');
+            const shown = draftSample ?? published;
+            return (
+              <div key={key} className="crd cr-dir-card">
+                <div className="cr-dir-head">
+                  <div>
+                    <b>{name}</b>
+                    <span>{tier === 'premium' ? '主视觉大片' : '创意排版'}</span>
+                  </div>
+                  <span className={`tag ${published ? 'ok' : 'off'}`}>{published ? '已发布' : '待发布'}</span>
+                </div>
+                {shown ? (
+                  <SamplePreview url={shown.previewUrl} alt={`${name}真实样例`} />
+                ) : (
+                  <div className="cr-dir-empty">还没有真实样例</div>
+                )}
+                {draftSample && (
+                  <div className="ai-note">当前展示草稿 · 来源任务 {draftSample.sourceJobId}</div>
+                )}
+                {published && !draftSample && (
+                  <div className="ai-note">线上样例 · 来源任务 {published.sourceJobId}</div>
+                )}
+                {isSuper && (
+                  <>
+                    <input
+                      className="ai-input"
+                      value={sampleJobIds[key] ?? ''}
+                      placeholder="填写已成功的任务 ID"
+                      onChange={(e) => setSampleJobIds((cur) => ({ ...cur, [key]: e.target.value }))}
+                    />
+                    <div className="ai-actions">
+                      <button
+                        type="button"
+                        className="ai-btn ghost"
+                        disabled={busy === `sample:${key}`}
+                        onClick={() => void createSample(key)}
+                      >
+                        {busy === `sample:${key}` ? '生成中…' : '从任务生成草稿'}
+                      </button>
+                      {draftSample && (
+                        <button
+                          type="button"
+                          className="ai-btn primary"
+                          disabled={busy === `publish:${draftSample.id}`}
+                          onClick={() => confirmPublishSample(draftSample)}
+                        >
+                          审核并发布
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* ── 任务台 ── */}
       <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 排版引擎与创作路线 / 降级 / 失败原因</span></div>

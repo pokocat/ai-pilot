@@ -538,3 +538,31 @@ select.ai-input { appearance: none; }
 /* 状态色徽标（草稿未发布 / 线上版本）—— 颜色集中在样式表，TSX 只用类名 */
 .tag.warn, .badge.warn { background: #FBE9D8; color: #C1791F; }
 .tag.live { background: #DCEEE2; color: #1A8A5A; }
+.cr-dir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.cr-dir-card { display: flex; flex-direction: column; gap: 10px; }
+.cr-dir-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.cr-dir-head b { display: block; font-size: 14px; color: var(--ink); }
+.cr-dir-head div > span { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+.cr-dir-preview {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cr-dir-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 3 / 4;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  font-size: 12px;
+}

@@ -18,7 +18,7 @@ import type {
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
   KnowledgeBatch, KnowledgeBatchFile,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
-  CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, PosterTemplateOption, CreativeUploadResult,
+  CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, PosterDirectionOption, PosterTemplateOption, CreativeUploadResult,
   CreativeJobView, CreativeAssetView, CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
   CreativePosterListItem, CreativePosterListResult, DailyBattleReportView,
 } from '../../../shared/contracts';
@@ -754,6 +754,14 @@ const MOCK_POSTER_TEMPLATES: PosterTemplateOption[] = [
   { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
   { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质' },
 ];
+const MOCK_POSTER_DIRECTIONS: PosterDirectionOption[] = [
+  { key: 'graphic_bold_type', tier: 'standard', name: '强标题视觉', desc: '让一句主张成为画面主角，靠字号、字形和留白制造冲击。' },
+  { key: 'graphic_symbol', tier: 'standard', name: '品牌图形', desc: '从业务里提炼一个专属符号，用图形母题建立辨识度。' },
+  { key: 'graphic_portrait', tier: 'standard', name: '本人形象', desc: '使用你上传的本人照片，让人物与标题共同建立信任。', requiresPortrait: true },
+  { key: 'photo_character', tier: 'premium', name: '人物意象', desc: '用 AI 演绎一个角色与气场，适合表达专业感或情绪张力。', note: 'AI 演绎人物，不是本人' },
+  { key: 'photo_product', tier: 'premium', name: '产品大片', desc: '用材质、光线和空间把产品或服务成果拍成主角。' },
+  { key: 'photo_scene', tier: 'premium', name: '场景叙事', desc: '用一个有真实感的场景，把活动、服务或品牌故事讲出来。' },
+];
 // 60×80 3:4 渐变占位 PNG（墨绿→纸白 + 两条浅色「标题」带）。base64 内联，避免 mock 依赖网络与 OSS。
 const MOCK_POSTER_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAB2klEQVR42tXOW0vTcQCH8edVBBFUkoghggzzkJlhmeKBMRhmaYllBzWGMjxgJqZ4RpNhiWklw5KRNUYmZqiMxViZ5hFLLKSuvO4N9Ap+eiV/vvC5fx6O2E7I4WhilByOJUXL4XhqjBxOpp2Ww6n0ODnEZMTLITYzQQ5xl2xyiL+cKIeEnGQ52PJS5XCm4JwcUuzn5XDWcUEO6c6LcsgozJJDZlGOHLKu5cohuyTf5N9exFqmMXJL7SaWT5vGyC9zmFg+bRrDfstpYvm0aQzH7UITy6dNYzjvFcnhSmWxHK7evy6HElepHG7U3JRDmbvcJBLyH559ugeivPauyaFO79M9EHfqK+RQ0Vglh6omlxxczdVyqG5xy8HdWiuHuvZ6OTR0NsrhQXeTHB72Nsuhpf+RHNoG2uTQ7umQQ9dglxx6hnrk0DfcJ4eBkcdy8Dz3yOHJ2KAchrxP5fBsfFgOo69H5PDS90IO3jdjchh/65XDhP+VHHyBCTlMTvnk4J+elENg5p0cpmYDcpieey+Hjwsf5PApOCOH+dCsHILhOTmEIgtyCH8NyiHy7bMcFr+H5bC8+kUOK+uLcljfXJLD5taKHH5sr8lhe2dDDr9+b8lhd/enHP783ZHzHwStB5oWBI+zAAAAAElFTkSuQmCC';
 
@@ -821,6 +829,8 @@ function creativeViewM(rec: CreativeJobRec): CreativeJobView {
     ...(done ? { completedAt: new Date(rec.terminalAt ?? rec.createdAt + 3200).toISOString() } : {}),
     assets,
     ...(rec.parentJobId ? { parentJobId: rec.parentJobId } : {}),
+    // 与服务端同口径：只回布尔事实，不回 assetId。详情页「换方向」据它过滤 requiresPortrait 的方向。
+    hasPortrait: !!rec.brief.portraitAssetId,
     actions: creativeActionsM(status),
   };
 }
@@ -2069,6 +2079,7 @@ export const mock = {
       pricePerPoster: MOCK_POSTER_PRICE,
       premiumPricePerPoster: MOCK_POSTER_PREMIUM_PRICE,
       premiumAvailable: true,
+      directions: MOCK_POSTER_DIRECTIONS,
       templates: MOCK_POSTER_TEMPLATES,
     }, 60);
   },
@@ -2116,7 +2127,6 @@ export const mock = {
         ...(patch.subheadline !== undefined ? { subheadline: patch.subheadline } : {}),
         ...(patch.proofPoints !== undefined ? { proofPoints: patch.proofPoints } : {}),
         ...(patch.cta !== undefined ? { cta: patch.cta } : {}),
-        ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
       },
     };
     jobs.push(rec); saveCreativeM(token, jobs);
@@ -2138,6 +2148,7 @@ export const mock = {
         ...(patch.visualDirection !== undefined ? { visualDirection: patch.visualDirection } : {}),
         ...(patch.negativePrompt !== undefined ? { negativePrompt: patch.negativePrompt } : {}),
         ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
+        ...(patch.directionKey !== undefined ? { directionKey: patch.directionKey } : {}),
       },
     };
     jobs.push(rec); saveCreativeM(token, jobs);
