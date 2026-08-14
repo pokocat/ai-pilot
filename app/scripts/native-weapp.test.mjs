@@ -1284,7 +1284,11 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   assert.doesNotMatch(pouch, /route: '\/packages\/work\/poster\/index'/, '手艺格不许直接甩空表单');
   assert.match(pouch, /packages\/work\/posterJob\/index\?jobId=/,
     '「再来一张」落到那张海报的详情页（改文字/换风格都带上下文）');
-  assert.match(pouch, /worksRoute: '\/packages\/work\/gallery\/index'/, '作品库改由作品数那行进');
+  assert.match(pouch, /worksRoute: '\/packages\/work\/gallery\/index'/, '作品库仍在手艺格表里');
+  // 2026-08-14 真机走查：卡上写着「看 1 件作品」，点下去却进了聊天窗。主路径必须通向
+  // 卡面正在承诺的那件事——有作品就先给作品库，别让人找不到已经生成的资产。
+  assert.match(pouch, /const hasWorks = counts\[app\.countKey\] > 0;/, '落点按有无作品分');
+  assert.match(pouch, /route: worksRoute \|\| app\.route,/, '有作品时整卡进作品库');
   assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
     '带 agentKey 的固定格必须跟着那位军师的启用状态置灰');
   assert.match(pouch, /covered\.has\(text\(agent\.key\)\)/, '被固定格覆盖的军师不许再出一格');

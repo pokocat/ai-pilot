@@ -263,16 +263,21 @@ Page({
             roleLine: '还没一起用过', metaLine: '让军师带你做一次', route: '', worksRoute: '',
           };
         }
-        // 一件作品都没有时作品数那行点了没意义（进去是个空库），不做成入口。
-        const worksRoute = counts[app.countKey] > 0 ? (app.worksRoute || '') : '';
+        // ★ 落点按**有没有作品**分（2026-08-14 真机走查后改）：
+        //   有作品 → 点整卡进作品库，先让人看见自己已有的资产（「锦囊只放你已经有的」这条铁律的本意），
+        //            「再做一张」退成卡内那行小字去对话；
+        //   零作品 → 点整卡进对话（那时作品库是个空页，先进去只是白跑一趟）。
+        //   上一版一律进对话、作品库只挂在一行下划线小字上 —— 结果是卡上明写着「看 1 件作品」，
+        //   点下去却进了聊天窗，用户找不到以前生成的图。主路径必须通向卡面正在承诺的那件事。
+        const hasWorks = counts[app.countKey] > 0;
+        const worksRoute = hasWorks ? (app.worksRoute || '') : '';
         return {
           key: app.key, name: app.name, art: app.art,
           locked: false, roleLine: app.roleLine,
-          // 这行是入口时，文案本身要说清它会带你去哪 —— 同一张卡上有两个落点（主体做新的、
-          // 这行看旧的），只靠下划线区分不够；符号箭头又过不了图标守卫（符号必须走 Lucide）。
-          metaLine: worksRoute ? `看 ${countLine(counts[app.countKey])}` : countLine(counts[app.countKey]),
-          route: app.route,
-          worksRoute,
+          // 卡内那行小字始终指向**主路径之外**的那一个：进了作品库就给「再做一张」，反之给作品数。
+          metaLine: worksRoute ? '再做一张' : countLine(counts[app.countKey]),
+          route: worksRoute || app.route,
+          worksRoute: worksRoute ? app.route : '',
         };
       })
       .concat(agents
