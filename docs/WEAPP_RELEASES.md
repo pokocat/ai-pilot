@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-08-14 | `0.2.33` | `海报双路线与真实方向样例` | `795a9c1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp` | 2.2 MB / 2278938 B | 上传成功：开发版已进入微信后台，仅供明日真机验收，尚未提交审核或发布 |
 | 2026-08-12 | `0.2.32` | `快出片全流程与iOS资料修复` | `cb786ea` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 2.0 MB / 2049556 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-09 | `0.2.31` | `统一错误提示与恢复入口` | `ed89e03` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.7 MB / 1736373 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-09 | `0.2.30` | `修复停止回复后续发失败` | `fd7b328` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.6 MB / 1726044 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
