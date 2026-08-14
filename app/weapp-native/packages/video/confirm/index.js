@@ -22,6 +22,7 @@ Page({
     problems: [],
     aiWatermark: false,
     watermarkSaving: false,
+    coverSummary: { state: 'off', text: '不加封面' },
     submitting: false,
     showLogin: false,
   }),
@@ -62,6 +63,7 @@ Page({
         afterBalance: null,
         aiWatermark: !!(project.subtitleStyle && project.subtitleStyle.aiWatermark === true),
         watermarkSaving: false,
+        coverSummary: model.coverSummary(project.cover),
       });
 
       // 服务端报价才是扣费口径，端上这份只用于首屏即时显示；拿到服务端结果后覆盖
@@ -108,6 +110,19 @@ Page({
         this.setData({ aiWatermark: previous, watermarkSaving: false });
         host.toast(error && error.message ? error.message : '水印设置保存失败');
       });
+  },
+
+  /** 封面是可选支线：去了再回来要把摘要刷新，不能还显示旧状态。 */
+  goCover() {
+    host.go(`/cover/index?projectId=${encodeURIComponent(this.data.projectId)}`);
+  },
+
+  onShow() {
+    // 从封面页返回时只补摘要，不重跑 load()——那会把已拿到的服务端报价打回「核算中」
+    if (this.data.loading || !this.data.project) return;
+    api.project(this.data.projectId)
+      .then((project) => this.setData({ project, coverSummary: model.coverSummary(project.cover) }))
+      .catch(() => {});
   },
 
   submit() {

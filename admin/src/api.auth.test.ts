@@ -88,6 +88,18 @@ describe('admin api · 401 踢回登录页 / 403 只提示权限不足', () => {
     assert.deepEqual(events, []);
   });
 
+  // 克隆定价与创作任务改价同级（都是 requireSuper 的营收动作），同一条契约必须一起守住：
+  // 普通运营点保存看到的应该是「需要 owner 权限」，而不是被踢回登录页。
+  test('403 克隆定价改价：保留登录态，提示去要授权而不是重新登录', async () => {
+    stubFetch(403, { error: '需要 owner 权限', code: 'OWNER_ONLY' });
+    const e = await expectReject(api.saveClonePricing({ voiceCreate: 300, voiceRetrain: 80, avatarVideo: 260, avatarImage: 120 }));
+    assert.equal(e.code, 'OWNER_ONLY');
+    assert.equal(getAdminToken(), 'operator-token');
+    assert.deepEqual(events, []);
+    assert.equal(isForbidden(e), true);
+    assert.match(last?.url ?? '', /\/api\/admin\/video\/clone-pricing$/);
+  });
+
   test('403 且响应体不是 JSON（反代兜的 403 页）：仍走权限提示，不踢登录', async () => {
     stubFetch(403);
     const e = await expectReject(api.creativeProviderDryRun());

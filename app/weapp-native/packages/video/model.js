@@ -88,6 +88,34 @@ function formatBytes(bytes) {
   return `${value} B`;
 }
 
+/**
+ * 从 `wx.chooseMedia` 的 tempFile 里取像素宽高。
+ *
+ * ⚠️ 官方 MediaFile 把 `width`/`height` 注释成「视频的宽度/高度」——**图片项不保证给**，
+ * 且低版本/部分机型会给 0。所以这里的口径是「两个都拿到正数才算数」，否则返回空对象，
+ * 让调用方**根本拿不到这两个字段**，而不是拿到 0：0 会一路写进服务端，最后在素材卡上
+ * 渲染成「0×0」，把「没测到」说成「这素材是 0 像素」。空态与失败态不许混。
+ */
+function mediaDimensions(file) {
+  const width = Math.round(Number(file && file.width) || 0);
+  const height = Math.round(Number(file && file.height) || 0);
+  if (!(width > 0) || !(height > 0)) return {};
+  return { width, height };
+}
+
+/**
+ * 分辨率角标（「1080×1920」）。
+ *
+ * 缺字段、0、负数、非数字一律回空串 —— 调用方据此**整块不渲染**。历史素材入库时没有采集宽高，
+ * 它们的正确表达是「不显示」，不是「0×0」，也不是编一个看起来正常的默认值。
+ */
+function formatResolution(width, height) {
+  const w = Math.round(Number(width) || 0);
+  const h = Math.round(Number(height) || 0);
+  if (!(w > 0) || !(h > 0)) return '';
+  return `${w}×${h}`;
+}
+
 /** 素材时长 → 卡片角标。不足 1 秒按 1 秒显示，避免出现「0 秒」。 */
 function formatAssetDuration(durationSec) {
   const sec = Number(durationSec) || 0;
@@ -95,6 +123,153 @@ function formatAssetDuration(durationSec) {
   const rounded = Math.max(1, Math.round(sec));
   if (rounded < 60) return `${rounded}″`;
   return `${Math.floor(rounded / 60)}′${String(rounded % 60).padStart(2, '0')}″`;
+}
+
+/* ── 克隆扣费 ──────────────────────────────────────────────────────────
+   价格一律来自服务端 GET /video/clone-pricing（运营后台可配）。
+   端上**只把数字排成文案**，不做任何价格算术，也不自带一份常量。 */
+
+/**
+ * 钻石数 → 文案。
+ * 读不到（null/undefined/非数字/负数）一律回空串，调用方据此**整块不显示**。
+ * 绝不回退成「0 钻石」——那会把「还没读到价格」说成「免费」，是最坏的一种误导。
+ */
+function formatCredits(value) {
+  // ⚠️ 必须先挡住 null / undefined / 空串：`Number(null)` 和 `Number('')` 都等于 0，
+  // 只靠 isFinite 判断会把「还没读到价格」渲染成「0 钻石」—— 那是在告诉用户这件事免费。
+  // 运营真把某一档配成 0 时，传进来的是数字 0，仍然正常显示。
+  if (value === null || value === undefined || value === '') return '';
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return '';
+  return `${Math.round(n)} 钻石`;
+}
+
+/**
+ * 某一档克隆动作的扣费文案。
+ * `pricing` 为 null（还没拉到 / 拉失败）时回空串，界面据此不显示价格，而不是显示 0。
+ */
+function cloneCostText(pricing, action) {
+  if (!pricing) return '';
+  return formatCredits(pricing[action]);
+}
+
+/**
+ * 「关联声音」候选项与默认选中项。
+ *
+ * ★ 产品口径（2026-08-13）：**默认复用已有声音**。
+ *   新训练一条声音在供应商侧是全流程最贵的单次动作之一（16AI 一条音色 8000+ 算力），
+ *   而复用一条已训好的声音不额外扣费。此前默认是「视频原声」，等于用户每建一个形象都顺带
+ *   新训一条声音，克隆权益很快被烧光。所以这里把便宜的那个设成默认，
+ *   花钱的路径（视频原声 / 单独录制）必须用户**主动选**，且选中前就要看见扣多少。
+ *
+ * 「视频原声」不是免费的顺带产物：它同样要新训一条声音，走的就是 voiceCreate 那一档，
+ * 所以它的文案必须带价，不能只写「自动提取」让人以为白送。
+ *
+ * @returns {{options: object[], defaultVoiceId: string, hasReusable: boolean}}
+ *   `defaultVoiceId` 为空串表示「视频原声」——与既有 voiceSource='video' 契约一致，不要改成 null。
+ */
+function voiceChoices(voices, pricing) {
+  const ready = (Array.isArray(voices) ? voices : []).filter((item) => item && item.status === 'ready');
+  const createText = cloneCostText(pricing, 'voiceCreate');
+  // 可复用的排在前面：默认选中项必须一眼看得见，不能藏在横向滚动的右边。
+  const options = ready.map((item, index) => ({
+    // 「视频原声」那一项的 id 是空串，不能拿来做 wx:key（空串会让列表复用错位），所以另给一个稳定 key。
+    key: String(item.id || `voice_${index}`),
+    id: String(item.id || ''),
+    name: item.name || '已有声音',
+    meta: item.source === 'video' ? '来自视频' : '单独录制',
+    costText: '复用不额外扣费',
+    free: true,
+    recommended: index === 0,
+  }));
+  options.push({
+    key: 'video_original',
+    id: '',
+    name: '视频原声',
+    meta: '从这段视频新训练',
+    costText: createText ? `新训练 · ${createText}` : '要新训练一条声音',
+    free: false,
+    recommended: false,
+  });
+  return {
+    options,
+    defaultVoiceId: ready.length ? String(ready[0].id || '') : '',
+    hasReusable: ready.length > 0,
+  };
+}
+
+/**
+ * 本次提交要扣哪几档 —— 端上**显示什么**与端上**提交什么报价**的唯一真源。
+ *
+ * ★ 必须与服务端 services/video/cloneCredits.ts 的 cloneChargeItems 同口径。服务端才是权威，
+ *   两边算出来不一致会被 409 CLIP_CLONE_QUOTE_CHANGED 挡住 —— 宁可挡住，也不许按另一个价静默扣。
+ *   把明细行和 expectedCredits 都从这一个函数派生，是为了根除「按钮上的价没跟着档位走」那类回归
+ *   （见 d70e1bb）：只要有一份，就不会有两份对不上。
+ *
+ * @param {string} mode 'avatar' = 创建数字人；'voice' = 单独训练声音
+ * @param {object|null} pricing 四档单价；null = 还没读到
+ * @param {string} selectedVoiceId avatar 模式下：空串 = 用视频原声（要新训一条），非空 = 复用已有声音
+ * @param {string} retrainVoiceId voice 模式下：非空 = 重训这一条已有声音（走便宜的 voiceRetrain 档）
+ * @returns {{action: string, key: string, label: string, credits: number}[]}
+ */
+function cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId) {
+  if (!pricing) return [];
+  if (mode === 'voice') {
+    return String(retrainVoiceId || '')
+      ? [{ action: 'voiceRetrain', key: 'voice', label: '重新训练这条声音', credits: pricing.voiceRetrain }]
+      : [{ action: 'voiceCreate', key: 'voice', label: '训练专属声音', credits: pricing.voiceCreate }];
+  }
+  const items = [{ action: 'avatarVideo', key: 'avatar', label: '用视频训练数字人', credits: pricing.avatarVideo }];
+  // 复用已有声音不额外扣费；「视频原声」要新训一条，那是实打实的另一档开销。
+  if (!String(selectedVoiceId || '')) {
+    items.push({ action: 'voiceCreate', key: 'voice', label: '从视频新训练声音', credits: pricing.voiceCreate });
+  }
+  return items;
+}
+
+/**
+ * 「还剩几次免费重训」的一句话。
+ *
+ * 供应商每条 speaker 给 4 次 recreate（不消耗克隆权益），用尽后我们会回落成新建 —— 用户看不出
+ * 差别，所以必须在他开录之前就说清楚。
+ *
+ * ★ 查不到余额时**不许编一个数字**（例如默认写 4）：这是「读失败」，不是「还剩 4 次」。
+ *   同 [空态 vs 读失败不许混] 那条口径。
+ */
+function retrainQuotaText(quota) {
+  if (!quota) return '';
+  if (quota.retrainable === false) return '这条声音无法直接重训，会训练一条新的替代它。';
+  if (!quota.available) return '暂时查不到免费重训余额，不影响提交。';
+  const remaining = Number(quota.remaining);
+  const total = Number(quota.total);
+  if (!Number.isFinite(remaining) || !Number.isFinite(total)) return '暂时查不到免费重训余额，不影响提交。';
+  if (remaining <= 0) return `这条声音的 ${total} 次免费重训已用完，这次会重新训练一条音色来替换它。`;
+  return `这条声音还剩 ${remaining} 次免费重训（共 ${total} 次）。`;
+}
+
+function cloneChargeTotal(items) {
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + (Number(item.credits) || 0), 0);
+}
+
+/**
+ * 「这次要扣多少」的明细行。入口处必须让用户在点提交**之前**就看见成本。
+ *
+ * 价格没读到（pricing 为 null）时返回空数组 —— 界面整块不渲染，
+ * 而不是渲染一张写着「0 钻石」的账单。空态与失败态不许混。
+ */
+function cloneCostRows(mode, pricing, selectedVoiceId, retrainVoiceId) {
+  const rows = cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId).map((item) => ({
+    key: item.key,
+    label: item.label,
+    // 运营把某一档配成 0（内测免费就是这么做的）时写「免费」，比「0 钻石」更像人话，含义完全一致。
+    costText: item.credits === 0 ? '免费' : formatCredits(item.credits),
+    free: item.credits === 0,
+  }));
+  // avatar 模式下复用已有声音是一条「不扣费」的说明行：不能让用户以为声音那一档没算过。
+  if (mode !== 'voice' && String(selectedVoiceId || '') && rows.length) {
+    rows.push({ key: 'voice', label: '关联已有声音', costText: '不额外扣费', free: true });
+  }
+  return rows;
 }
 
 /** 秒 → mm:ss。 */
@@ -575,9 +750,78 @@ function stageRows(stage, progress) {
   });
 }
 
+/* ── 成片封面 ───────────────────────────────────────────────────────────────
+ *
+ * 封面 = 拼在成片最前面的一张 720x1280 图，只占 1~2 帧，不占播放内容；
+ * 抖音等平台发布后拿第一帧当缩略图，所以它值得单独设计。
+ *
+ * 下面这几个是**服务端截断规则的端上镜像**：字数上限必须与 AIStar 的
+ * ClipCoverTemplate 槽位 maxChars 一致，否则用户在端上看着没超、存完却被截了一刀。
+ * 端上截断只为「所见即所得」，服务端仍会再截一次（端上不是权威）。
+ */
+const COVER_TEMPLATE_ID = 'cover_shiti';
+const COVER_LIMITS = { keyword: 2, handle: 20, slogan: 14, sloganLines: 2, signature: 12 };
+
+/** 按码点截断，和服务端 ClipCoverPlan.truncate 同规则：emoji 不能被劈成半个字符。 */
+function truncateCoverText(value, maxChars) {
+  const trimmed = String(value == null ? '' : value).trim();
+  if (!(maxChars > 0)) return '';
+  const points = Array.from(trimmed);
+  if (points.length <= maxChars) return trimmed;
+  return `${points.slice(0, Math.max(1, maxChars - 1)).join('')}…`;
+}
+
+/** 把任意形状的 cover 规整成稳定形状，缺字段一律给默认值，绝不返回 undefined 字段。 */
+function normalizeCover(cover) {
+  const source = cover && typeof cover === 'object' ? cover : {};
+  const rawLines = Array.isArray(source.sloganLines)
+    ? source.sloganLines
+    : String(source.sloganLines == null ? '' : source.sloganLines).split('\n');
+  const sloganLines = [];
+  rawLines.forEach((line) => {
+    String(line == null ? '' : line).split('\n').forEach((piece) => {
+      if (sloganLines.length >= COVER_LIMITS.sloganLines) return;
+      const value = truncateCoverText(piece, COVER_LIMITS.slogan);
+      if (value) sloganLines.push(value);
+    });
+  });
+  return {
+    enabled: source.enabled === true,
+    templateId: String(source.templateId || COVER_TEMPLATE_ID),
+    keyword: truncateCoverText(source.keyword, COVER_LIMITS.keyword),
+    handle: truncateCoverText(source.handle, COVER_LIMITS.handle),
+    sloganLines,
+    signature: truncateCoverText(source.signature, COVER_LIMITS.signature),
+    backgroundAssetId: source.backgroundAssetId || null,
+    backgroundSourceNo: Number(source.backgroundSourceNo) || 0,
+  };
+}
+
+/** 四个槽位有没有填过东西。全空 = 等于没填，服务端也不会加封面。 */
+function coverHasText(cover) {
+  const value = normalizeCover(cover);
+  return Boolean(value.keyword || value.handle || value.signature || value.sloganLines.length);
+}
+
+/**
+ * 确认页入口卡片那一行摘要。三种状态要分得清：
+ * 没开 / 开了但一个字没填（服务端不会加封面，必须说清）/ 开了且填了。
+ */
+function coverSummary(cover) {
+  const value = normalizeCover(cover);
+  if (!value.enabled) return { state: 'off', text: '不加封面' };
+  if (!coverHasText(value)) return { state: 'blank', text: '还没填内容，出片时不会加封面' };
+  const parts = [value.keyword, value.signature || value.sloganLines[0] || value.handle].filter(Boolean);
+  return { state: 'on', text: parts.join(' · ') };
+}
+
 module.exports = {
   ROLE, STAGES,
+  COVER_TEMPLATE_ID, COVER_LIMITS,
+  truncateCoverText, normalizeCover, coverHasText, coverSummary,
   estimateSeconds, segmentSeconds, formatDuration, formatBytes, formatAssetDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
+  mediaDimensions, formatResolution,
+  formatCredits, cloneCostText, voiceChoices, cloneCostRows, cloneChargeItems, cloneChargeTotal, retrainQuotaText,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   scriptToText, applyBulkScript, splitScriptText,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,

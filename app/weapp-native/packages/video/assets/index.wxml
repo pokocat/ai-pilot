@@ -56,6 +56,10 @@
         >
           <view class="ac-thumb {{item.previewUrl ? '' : 'vd-grain'}} {{item.tone}}">
             <image wx:if="{{item.previewUrl}}" class="ac-thumb-image" src="{{item.previewUrl}}" mode="aspectFill"></image>
+            <!-- 分辨率角标：resolutionText 为空 = 这条素材没有宽高记录（老素材/微信没给），整块不渲染。
+                 决不渲染「零乘零」—— 那是把「没测到」说成「0 像素」。宽高与乘号在
+                 model.formatResolution 里拼好，wxml 不碰字符串算术（乘号本身也是本目录的违禁字形）。 -->
+            <text wx:if="{{item.resolutionText}}" class="ac-res">{{item.resolutionText}}</text>
             <text wx:if="{{item.durationText}}" class="ac-dur">{{item.durationText}}</text>
             <view wx:if="{{!picking}}" class="ac-del" data-id="{{item.id}}" catchtap="deleteFromCard"><native-icon name="trash" tone="white" size="13"></native-icon></view>
             <view class="ac-preview" data-id="{{item.id}}" catchtap="previewAsset">{{item.kind === 'video' ? '播放' : '预览'}}</view>

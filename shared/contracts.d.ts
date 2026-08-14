@@ -2474,6 +2474,30 @@ export interface ClipSubtitleStyle {
   aiWatermark?: boolean;
   [key: string]: unknown;
 }
+/**
+ * 成片封面：一张 720x1280 的图，拼在成片最前面当第一帧，供抖音等平台抓取做缩略图。
+ * 只占 1~2 帧，不影响视频内容与时长。可选步骤 ——
+ * enabled 非 true，或四个文本槽位全空，出片时就不加封面。
+ * 文案字数上限与 AIStar 的 ClipCoverTemplate 槽位一致，服务端会再截一次。
+ */
+export interface ClipCoverConfig {
+  enabled?: boolean;
+  /** 版式模板 id；未知值回落主模板 cover_shiti。 */
+  templateId?: string;
+  /** 顶部书法大字关键词，2 字。 */
+  keyword?: string;
+  /** 白底黑字账号名标签。 */
+  handle?: string;
+  /** 居中两行标语，白色粗体 + 黑描边。 */
+  sloganLines?: string[];
+  /** 落款金句，金色渐变粗体，比标语更大。 */
+  signature?: string;
+  /** 自传底图素材 id；留空则从成片抽一帧。 */
+  backgroundAssetId?: string | null;
+  /** 底图取自哪一句（segment.no）；0 表示服务端挑形象出镜段。 */
+  backgroundSourceNo?: number;
+  [key: string]: unknown;
+}
 export interface ClipTemplate {
   id: string; name: string; industry: string; themeKey: string; description: string;
   estDurationSec: number; avatarSecHint: number; creditHint?: number | null; segmentCount: number;
@@ -2488,6 +2512,7 @@ export interface ClipProject {
   shots?: ClipShot[]; scriptChat?: ClipScriptMessage[];
   avatarId?: string | null; voiceId?: string | null; step?: number; updatedAt?: string | number;
   subtitleStyle?: ClipSubtitleStyle | null;
+  cover?: ClipCoverConfig | null;
 }
 export interface ClipScriptChatResult { reply: string; applied: boolean; project: ClipProject; }
 export interface ClipEstimateItem { key: string; label: string; credits: number; freeText?: string; }
@@ -2506,13 +2531,62 @@ export interface ClipJobView {
   id: string; status: 'queued' | 'generating' | 'assembling' | 'succeeded' | 'failed' | 'cancelled';
   stage?: string; progress?: number; workId?: string | null; errorMessage?: string | null;
 }
+/** 素材库存储占用（GET /video/assets/storage）。预置素材由平台提供，不计入用户配额。 */
+export interface ClipAssetStorage { usedBytes: number; limitBytes: number; count: number; }
 export interface ClipAsset {
   id: string; label: string; tag?: string | null; kind: 'video' | 'image' | 'bgm'; durationSec?: number; usedCount?: number;
+  /** 文件字节数；素材列表的大小标签与容量条都读它。上游恒发（Java 侧是 long），本地 mock 不发。 */
+  bytes?: number;
+  /**
+   * 像素宽高。**字段缺失 = 未知**（历史素材，或服务端 ffprobe 读不出）。
+   * 上传视频的分辨率决定成片分辨率，所以这是用户要看见的画质凭据。
+   * 消费方必须把「缺字段」渲染成不显示，**不得回退成 0** —— 「0×0」是把「没测到」说成「0 像素」。
+   */
+  width?: number | null; height?: number | null;
   /** 列表封面：图片原图或视频抽帧 JPEG。 */
   previewUrl?: string | null;
   /** 用户主动点开预览时才使用的原始媒体签名地址。 */
   contentUrl?: string | null;
 }
+/**
+ * 克隆类动作的钻石单价（GET /video/clone-pricing）。真源是运营后台的 FeatureFlag 行
+ * 'video-clone-pricing'，端上**只显示不计算**，更不许自带一份常量。
+ * 服务端形状定义在 server/src/services/video/pricing.ts 的 ClonePricing。
+ */
+export interface ClipClonePricing {
+  /** 新训练一条专属声音。供应商侧最贵的单次动作。 */
+  voiceCreate: number;
+  /** 重训已有声音；供应商免费不等于我方免费，按低价收。 */
+  voiceRetrain: number;
+  /** 上传视频训练数字人。 */
+  avatarVideo: number;
+  /** 单张图片训练数字人（低成本入口）。 */
+  avatarImage: number;
+  /** 四档是否都由运营配过。false = 当前用的是代码兜底价，端上口径要说软一点。 */
+  configured: boolean;
+}
+/**
+ * 运营后台读到的克隆定价（GET /admin/video/clone-pricing）。
+ *
+ * **与 C 端视图同形，这是有意的**：定价没有需要脱敏的字段 —— 不像 AdminCreativeConfig 要把
+ * 供应商 apiKey 压成 hasKey。后台和端上看到的必须是同一组数字，否则「后台显示 200、端上扣 60」
+ * 这种事没人能第一时间发现。真要分家时再拆成独立 interface，别为了对称先拆。
+ *
+ * `configured=false` 在后台的含义比端上更重：它表示这四个数字还是 pricing.ts 里
+ * `TODO(定价待运营核定)` 的兜底价，没有任何商务结论背书。后台必须把这件事显式写在页面上。
+ */
+export type AdminClonePricing = ClipClonePricing;
+/**
+ * 后台写入形状（PUT /admin/video/clone-pricing，仅 owner/master）。
+ *
+ * 去掉 `configured`：它是**派生**的（= 四档在库里都有合法值），不是可写字段。若允许运营直接置位，
+ * 「运营核定过」这个唯一凭据就会与实际库内容脱钩。
+ *
+ * 虽然类型上四档都可选（PATCH 语义：未给的保持原值），但服务端有一条额外约束：
+ * **首次配置（当前 configured=false）必须四档一起给**。原因见 pricing.ts —— 只改一档会把另外
+ * 三档没人核定过的兜底价一并升格成「运营配过的价」，等于用一次改价给三个占位数字盖了章。
+ */
+export type AdminClonePricingUpdate = Partial<Omit<ClipClonePricing, 'configured'>>;
 export interface ClipWork {
   id: string; projectId?: string | null; title: string; status: 'generating' | 'done' | 'published';
   durationSec: number; avatarSec: number; credits?: number; videoUrl?: string | null; thumbnailUrl?: string | null;

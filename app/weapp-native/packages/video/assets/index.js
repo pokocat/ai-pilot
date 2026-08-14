@@ -5,7 +5,7 @@
 //   · 挑选态（从「配画面」那屏进，带 pick=1&no=N）：点一张就回填到那一句，自动返回。
 const host = require('../host');
 const api = require('../api');
-const { formatBytes, formatAssetDuration } = require('../model');
+const { formatBytes, formatAssetDuration, formatResolution, mediaDimensions } = require('../model');
 
 Page({
   data: host.hostBaseData({
@@ -75,6 +75,9 @@ Page({
     return Object.assign({}, item, {
       durationText: item.kind === 'video' ? formatAssetDuration(item.durationSec) : '',
       sizeText: item.bytes ? formatBytes(item.bytes) : '',
+      // 空串 = 这条素材没有宽高记录（上传时微信没给，或它早于本次改动入库）。
+      // wxml 据此整块不渲染；**不得**回退成 0×0 或「未知分辨率」这类看起来像真值的文案。
+      resolutionText: formatResolution(item.width, item.height),
     });
   },
 
@@ -187,13 +190,22 @@ Page({
       count: 1,
       mediaType: ['video', 'image'],
       sourceType: ['album', 'camera'],
+      // ★ 与克隆采集同一条理由：不写 sizeType 时微信默认取压缩版，b-roll 素材被压过一道后
+      //   合进成片就再也补不回来。sizeType 对视频**确实生效**（基础库 2.25.0 起对全量
+      //   mediaType 有效，本项目 libVersion 3.16.2），依据见 clone/index.js 的详细注释。
+      sizeType: ['original'],
       maxDuration: 30,
       camera: 'back',
       success: (res) => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
         host.loading('上传中');
-        api.uploadAsset(file.tempFilePath, { kind: file.fileType || 'video' })
+        // 宽高只在真读到时才带：拿不到就**不传这两个字段**，让服务端保持 null。
+        // 传 0 会把「没测到」写成「0 像素」，素材卡从此显示 0×0。
+        api.uploadAsset(file.tempFilePath, Object.assign(
+          { kind: file.fileType || 'video' },
+          mediaDimensions(file),
+        ))
           .then((asset) => {
             host.hideLoading();
             this.setData({ assets: [this.decorate(asset)].concat(this.data.assets) });

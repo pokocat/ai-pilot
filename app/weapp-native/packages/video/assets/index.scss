@@ -75,6 +75,16 @@
   background: rgba(27, 25, 23, 0.62);
   padding: 2px 6px; border-radius: 5px;
 }
+// 分辨率角标。放左上：右上是删除按钮（26px），左下是时长角标，三者互不重叠。
+// max-width 兜住 4K 这类长文本（3840×2160），宁可省略号也不许把删除按钮顶掉。
+.ac-res {
+  position: absolute; left: 5px; top: 5px;
+  max-width: calc(100% - 40px);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 9px; color: #FFF;
+  background: rgba(27, 25, 23, 0.62);
+  padding: 2px 5px; border-radius: 5px;
+}
 .ac-del {
   position: absolute; right: 4px; top: 4px;
   width: 26px; height: 26px; border-radius: 13px;

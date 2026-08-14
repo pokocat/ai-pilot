@@ -6,6 +6,7 @@ import {
   assertVideoMediaModerationReady,
   assertVideoUploadContent,
   clipMediaModerationBypassEnabled,
+  projectText,
 } from '../src/services/video/moderation.js';
 import { getBalance, grantCredits } from '../src/services/credits.js';
 import { assertSandboxSafe } from '../src/services/sandbox.js';
@@ -14,9 +15,15 @@ import { api, cleanBusiness, closeApp, getApp, login, seedBaseline, uniquePhone 
 process.env.AIDRAMA_CLIP_BASE_URL = 'https://aidrama.example.test';
 process.env.AIDRAMA_CLIP_SERVICE_TOKEN = 'test-service-token';
 process.env.AIDRAMA_CLIP_ALLOW_PRIVATE_NET = 'false';
+// 本组用例验的是计费与结算，不是机审链路（机审自有用例）。不开旁路的话每次上传都 503，
+// 计费逻辑一行都跑不到。NODE_ENV!=production 时这个开关才生效，生产另有硬拒绝。
+process.env.CLIP_MEDIA_MODERATION_BYPASS = 'true';
 
 const originalFetch = globalThis.fetch;
 let jobStatus = 'queued';
+let voiceStatus = 'ready';
+let cloneCalls = 0;
+let cloneUpstream: Record<string, unknown> = { voiceId: 'VC-new' };
 let renderCalls = 0;
 let seenHeaders: Headers | null = null;
 let renderBlock: Promise<void> | null = null;
@@ -64,7 +71,11 @@ before(async () => {
       return json([{ id: 'DH-scene', name: '门店形象', imageStatus: 'ready', voiceStatus: 'ready', linkedVoiceId: 'VC-scene', linkedVoiceName: '主理人声线' }]);
     }
     if (url.pathname === '/api/me/clip/voices') {
-      return json([{ id: 'VC-scene', name: '主理人声线', status: 'ready', source: 'dedicated', progress: 100 }]);
+      return json([{ id: 'VC-scene', name: '主理人声线', status: voiceStatus, source: 'dedicated', progress: 100 }]);
+    }
+    if (url.pathname === '/api/me/clip/avatar/clone') {
+      cloneCalls += 1;
+      return json({ ok: true, kind: 'voice', status: 'training', ...cloneUpstream });
     }
     if (url.pathname === '/api/me/clip/avatars/DH-scene' && init?.method === 'DELETE') {
       return json({ ok: true });
@@ -91,6 +102,9 @@ after(async () => {
 beforeEach(async () => {
   await cleanBusiness();
   await seedBaseline();
+  voiceStatus = 'ready';
+  cloneCalls = 0;
+  cloneUpstream = { voiceId: 'VC-new' };
   jobStatus = 'queued';
   renderCalls = 0;
   seenHeaders = null;
@@ -158,6 +172,23 @@ test('视频 BFF 原样保存默认关闭的 AI 水印偏好', async () => {
   });
   assert.equal(result.status, 200, JSON.stringify(result.body));
   assert.equal(result.body.subtitleStyle.aiWatermark, false);
+});
+
+// 封面 = 拼在成片最前面的一张 720x1280 图（只占 1~2 帧，不影响视频内容），
+// 平台发布后拿第一帧当缩略图。BFF 只做透传，截断与「不填就不加」的判定都在 AIStar 侧。
+test('视频 BFF 原样透传成片封面配置', async () => {
+  const token = await login(uniquePhone(), '封面设置用户');
+  const cover = {
+    enabled: true,
+    templateId: 'cover_shiti',
+    keyword: '团结',
+    handle: '@可乐米乐麻麻讲Ai',
+    sloganLines: ['一群人一条心', '一件事一起拼'],
+    signature: '集体为实体发声',
+  };
+  const result = await api('PUT', '/api/video/projects/cp_test', { token, body: { cover } });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.deepEqual(result.body.cover, cover, '封面四个槽位必须一字不改地送到 AIStar');
 });
 
 test('初始文案支持连续 AI 对话；测试环境无真实模型时诚实保留原稿', async () => {
@@ -290,4 +321,165 @@ test('同一出片请求并发时复用者不能重复建单或退掉首个预�
   assert.equal(first.status, 200, JSON.stringify(first.body));
   assert.equal(first.body.jobId, 'cj_test');
   assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'submitted' } }), 1);
+});
+
+// 封面上的四个文本槽位会被烧进成片第一帧、随作品一起发布出去，
+// 所以它必须和口播文案一起过机审 —— 只审 segments 会留下「图上写什么都行」的绕过路径。
+test('封面文案与口播文案一起进机审送检文本', () => {
+  const text = projectText({
+    segments: [
+      { role: 'avatar', text: '我来开场' },
+      { role: 'tail', text: '固定尾段不送检' },
+    ],
+    cover: {
+      enabled: true,
+      keyword: '团结',
+      handle: '@可乐米乐麻麻讲Ai',
+      sloganLines: ['一群人一条心', '一件事一起拼'],
+      signature: '集体为实体发声',
+    },
+  });
+
+  assert.ok(text.includes('我来开场'));
+  assert.ok(text.includes('团结'), '封面关键词必须送检');
+  assert.ok(text.includes('@可乐米乐麻麻讲Ai'), '封面账号名必须送检');
+  assert.ok(text.includes('一件事一起拼'), '封面标语必须送检');
+  assert.ok(text.includes('集体为实体发声'), '封面落款必须送检');
+  assert.ok(!text.includes('固定尾段不送检'), '固定尾段仍不送检，口径不变');
+});
+
+test('封面藏在 payloadJson 里也照样送检，且没有封面时口径不变', () => {
+  const nested = projectText({
+    payloadJson: { segments: [{ role: 'avatar', text: '正文' }], cover: { enabled: true, signature: '落款' } },
+  });
+  assert.ok(nested.includes('正文'));
+  assert.ok(nested.includes('落款'));
+
+  assert.equal(projectText({ segments: [{ role: 'avatar', text: '只有正文' }] }), '只有正文');
+  assert.equal(projectText({ segments: [], cover: null }), '');
+});
+
+/* ── 克隆预扣：界面标了多少钱，服务端就得真扣多少 ─────────────────────────── */
+
+/**
+ * 手搓 multipart。字段必须排在文件之前 —— @fastify/multipart 的 req.file() 是流式的，
+ * 排在文件后面的字段读不到，测试会莫名其妙地缺参数。
+ */
+function multipart(fields: Record<string, string>) {
+  const boundary = '----clipCloneTestBoundary';
+  const parts: Buffer[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`));
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="voice.mp3"\r\n`
+    + 'Content-Type: audio/mpeg\r\n\r\n',
+  ));
+  // ID3 magic：服务端按魔数判真实类型，不信 multipart 声明的 MIME。
+  parts.push(Buffer.concat([Buffer.from('ID3'), Buffer.alloc(4096, 1)]));
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { payload: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+async function postClone(token: string, fields: Record<string, string>) {
+  const app = await getApp();
+  const { payload, contentType } = multipart(fields);
+  const res = await app.inject({
+    method: 'POST', url: '/api/video/avatar/clone',
+    headers: { 'x-user-id': token, 'content-type': contentType }, payload,
+  });
+  let body: any = null;
+  try { body = res.json(); } catch { body = res.body; }
+  return { status: res.statusCode, body };
+}
+
+async function cloneUser(balance: number) {
+  const token = await login(uniquePhone(), '克隆计费');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+  await grantCredits(user.tenantId, token, balance, '克隆计费测试余额');
+  return token;
+}
+
+test('训练声音真的扣钻石，而不是只在界面上写着要扣', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  const res = await postClone(token, {
+    kind: 'voice', clientRequestId: 'clone-req-0001', expectedCredits: '200',
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(cloneCalls, 1);
+  assert.equal(await getBalance(token), before - 200, '预扣必须落到余额上');
+});
+
+test('缺幂等标识 / 报价对不上，一律挡在调用上游之前', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+
+  const noId = await postClone(token, { kind: 'voice', expectedCredits: '200' });
+  assert.equal(noId.status, 422);
+  assert.equal(noId.body.code, 'CLIENT_REQUEST_ID_REQUIRED');
+
+  // 端上看到 60（重训档）却按新建提交 —— 停下来重新确认，绝不按另一个数字静默扣。
+  const wrongQuote = await postClone(token, {
+    kind: 'voice', clientRequestId: 'clone-req-0002', expectedCredits: '60',
+  });
+  assert.equal(wrongQuote.status, 409);
+  assert.equal(wrongQuote.body.code, 'CLIP_CLONE_QUOTE_CHANGED');
+
+  assert.equal(cloneCalls, 0, '报价没对齐就不该碰上游');
+  assert.equal(await getBalance(token), before, '被挡下的请求分文不扣');
+});
+
+test('余额不够时直接 402，不会先把训练跑起来', async () => {
+  const token = await cloneUser(10);
+  const before = await getBalance(token);
+  assert.ok(before < 200, '前置条件：这个账号确实付不起一次训练');
+  const res = await postClone(token, {
+    kind: 'voice', clientRequestId: 'clone-req-0003', expectedCredits: '200',
+  });
+  assert.equal(res.status, 402);
+  assert.equal(res.body.code, 'INSUFFICIENT_CREDITS');
+  assert.equal(cloneCalls, 0, '钱不够就不该消耗供应商算力');
+  assert.equal(await getBalance(token), before);
+});
+
+test('带 voiceId 走重训档：更便宜，且这条路以前端上根本走不到', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  const res = await postClone(token, {
+    kind: 'voice', voiceId: 'VC-scene', clientRequestId: 'clone-req-0004', expectedCredits: '60',
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await getBalance(token), before - 60, '重训按重训档收，不是按新建档');
+});
+
+test('训练失败后，钻石在下一次查状态时退回来', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  cloneUpstream = { voiceId: 'VC-scene' };
+  const res = await postClone(token, {
+    kind: 'voice', clientRequestId: 'clone-req-0005', expectedCredits: '200',
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(await getBalance(token), before - 200);
+
+  // 上游给出终态 failed：端上本来就会轮询声音列表，谁先看到终态谁负责结账。
+  voiceStatus = 'failed';
+  const list = await api('GET', '/api/video/voices', { token });
+  assert.equal(list.status, 200);
+  assert.equal(await getBalance(token), before, '训练失败必须全额退回');
+});
+
+test('训练成功则结清，不会被后续查询误退', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  cloneUpstream = { voiceId: 'VC-scene' };
+  await postClone(token, { kind: 'voice', clientRequestId: 'clone-req-0006', expectedCredits: '200' });
+
+  await api('GET', '/api/video/voices', { token });       // ready → 结算
+  assert.equal(await getBalance(token), before - 200);
+
+  voiceStatus = 'failed';                                  // 之后这条声音被重训并失败
+  await api('GET', '/api/video/voices', { token });
+  assert.equal(await getBalance(token), before - 200, '已结算的那一单不该被后来的失败退掉');
 });

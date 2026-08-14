@@ -99,6 +99,10 @@ const api = {
     ? Promise.resolve({ id, name })
     : call(`/voices/${q(id)}`, { method: 'PATCH', data: { name } })),
   avatarRequirements: () => (useMock() ? mock.avatarRequirements() : call('/avatar/requirements')),
+  /** 这条声音还剩几次免费重训。只在重训页调 —— 它会打到供应商，不能进列表接口。 */
+  retrainQuota: (id) => (useMock() ? mock.retrainQuota(id) : call(`/voices/${q(id)}/retrain-quota`)),
+  /** 克隆各档单价（运营后台可配）。端上只显示，不参与计算，更不自带常量。 */
+  clonePricing: () => (useMock() ? mock.clonePricing() : call('/clone-pricing')),
   startConsent: (payload) => {
     if (useMock()) return mock.startConsent(payload);
     const filePath = payload && payload.filePath;
@@ -117,6 +121,11 @@ const api = {
       avatarId: payload.avatarId || '',
       voiceId: payload.voiceId || '',
       name: payload.name || '',
+      // 训练要预扣钻石，所以这两个字段是必需的，缺了服务端直接 422：
+      // clientRequestId —— 上传超时重试不能扣两次；expectedCredits —— 端上看到的价和服务端要收的价
+      // 对不上时停下来重新确认，而不是按另一个数字静默扣。两者口径同出片确认页。
+      clientRequestId: payload.clientRequestId || '',
+      expectedCredits: String(payload.expectedCredits == null ? '' : payload.expectedCredits),
     }, { timeout: 180000 });
   },
   consentLogs: () => (useMock() ? mock.consentLogs() : call('/avatar/consents')),

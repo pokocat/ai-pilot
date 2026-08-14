@@ -1,0 +1,160 @@
+@use "../styles/tokens.scss";
+
+/* 屏 07b · 成片封面。
+   预览区是 CSS 模拟 720x1280 版式：层级/位置/配色与服务端 ClipCoverTemplate 一一对应，
+   但不追求像素级还原（端上没有毛笔书法字体，字号也按预览宽度等比缩过）。 */
+
+.cv-body { padding: 0 20px; }
+
+.cv-intro { padding: 4px 2px 14px; }
+.cv-intro-title { display: block; font-family: var(--vd-serif); font-size: 19px; font-weight: 700; color: var(--vd-ink); }
+.cv-intro-sub { display: block; margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--vd-ink-3); }
+
+/* ── 开关 ─────────────────────────────────────────────── */
+.cv-switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; margin-bottom: 14px;
+}
+.cv-switch-copy { min-width: 0; flex: 1; }
+.cv-switch-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.cv-switch-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.cv-switch-control { min-height: 44px; flex: none; display: flex; align-items: center; gap: 8px; }
+.cv-switch-state { font-size: 11px; color: var(--vd-muted); }
+.cv-switch-control switch { transform: scale(.82); transform-origin: right center; }
+
+/* ── 预览 ─────────────────────────────────────────────── */
+.cv-stage { margin-bottom: 14px; }
+.cv-stage.is-off { opacity: .42; }
+
+/* 9:16 —— 宽 180px 对应 720，缩放比 0.25；下面所有字号都按这个比例折算 */
+.cv-canvas {
+  position: relative;
+  width: 180px; height: 320px;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--vd-shadow);
+}
+.cv-bg {
+  position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+  background: linear-gradient(160deg, #12362F 0%, #3B3A2C 52%, #75341F 100%);
+}
+
+/* 1) 书法关键词：亮黄 + 深色描边，横跨顶部约 1/4 */
+.cv-kw {
+  position: absolute; left: 0; right: 0; top: 14px;
+  text-align: center;
+  font-family: var(--vd-serif);
+  font-size: 58px; line-height: 1.12; font-weight: 700;
+  letter-spacing: 6px;
+  color: #FFE400;
+  text-shadow:
+    -1.5px -1.5px 0 rgba(36, 26, 0, .72), 1.5px -1.5px 0 rgba(36, 26, 0, .72),
+    -1.5px 1.5px 0 rgba(36, 26, 0, .72), 1.5px 1.5px 0 rgba(36, 26, 0, .72);
+}
+
+/* 2) 账号名：白底黑字标签，左对齐，中部偏下 */
+.cv-handle-wrap { position: absolute; left: 14px; top: 190px; }
+.cv-handle {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: #FFFFFF;
+  color: #14110C;
+  font-size: 8px; font-weight: 700; line-height: 1.3;
+}
+
+/* 3) 两行标语：白色粗体 + 黑描边，居中 */
+.cv-slogan { position: absolute; left: 0; right: 0; top: 222px; text-align: center; }
+.cv-slogan-line {
+  display: block;
+  font-size: 14px; line-height: 1.42; font-weight: 800;
+  color: #FFFFFF;
+  text-shadow:
+    -1px -1px 0 #000, 1px -1px 0 #000,
+    -1px 1px 0 #000, 1px 1px 0 #000;
+}
+
+/* 4) 落款金句：金色渐变 + 深色描边，比标语更大 */
+.cv-sign {
+  position: absolute; left: 0; right: 0; bottom: 24px;
+  text-align: center;
+  font-size: 19px; line-height: 1.3; font-weight: 800;
+  /* 纯色兜底在前：不支持 background-clip:text 的运行时仍是金色，不会变透明 */
+  color: #F6C544;
+  text-shadow:
+    -1px -1px 0 #2B1A03, 1px -1px 0 #2B1A03,
+    -1px 1px 0 #2B1A03, 1px 1px 0 #2B1A03;
+}
+
+.cv-kw.ghost, .cv-slogan-line.ghost, .cv-sign.ghost { opacity: .32; }
+.cv-handle.ghost { background: rgba(255, 255, 255, .42); color: rgba(20, 17, 12, .6); }
+
+.cv-stage-note {
+  display: block; margin-top: 10px; padding: 0 4px;
+  font-size: 11px; line-height: 1.6; color: var(--vd-muted); text-align: center;
+}
+
+/* ── 表单 ─────────────────────────────────────────────── */
+.cv-form { padding: 6px 16px 16px; margin-bottom: 14px; }
+.cv-field { padding-top: 14px; }
+.cv-field + .cv-field { border-top: 1px solid var(--vd-line-soft); margin-top: 14px; }
+.cv-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.cv-label { font-size: 13px; font-weight: 700; color: var(--vd-ink); }
+.cv-count { font-size: 11px; color: var(--vd-faint); }
+.cv-input {
+  margin-top: 8px;
+  width: 100%; box-sizing: border-box;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 1px solid var(--vd-line);
+  border-radius: var(--vd-r-field);
+  background: var(--vd-bg);
+  font-size: 14px; color: var(--vd-ink);
+}
+.cv-input-second { margin-top: 8px; }
+.cv-ph { color: var(--vd-faint); }
+.cv-hint { display: block; margin-top: 7px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+
+/* ── 底图 ─────────────────────────────────────────────── */
+.cv-bg-card { padding: 14px 16px; margin-bottom: 14px; }
+.cv-bg-title { display: block; font-size: 13px; font-weight: 700; color: var(--vd-ink); }
+.cv-bg-sub { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.cv-bg-strip { margin-top: 12px; white-space: nowrap; }
+.cv-bg-item {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 62px; margin-right: 10px; vertical-align: top;
+}
+.cv-bg-auto, .cv-bg-thumb {
+  width: 62px; height: 92px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  box-sizing: border-box;
+  background: var(--vd-sunken);
+}
+.cv-bg-auto { display: flex; align-items: center; justify-content: center; }
+.cv-bg-item.on .cv-bg-auto, .cv-bg-item.on .cv-bg-thumb { border-color: var(--vd-avatar); }
+.cv-bg-name {
+  display: block; max-width: 62px;
+  font-size: 10px; color: var(--vd-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cv-bg-item.on .cv-bg-name { color: var(--vd-avatar-deep); font-weight: 700; }
+.cv-bg-failed { margin-top: 8px; }
+.cv-bg-empty { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cv-bg-go { display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--vd-avatar-deep); }
+
+/* ── 读失败 ───────────────────────────────────────────── */
+.cv-error { padding: 18px 16px; margin-bottom: 14px; }
+.cv-error-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-danger); }
+.cv-error-text { display: block; margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--vd-ink-3); }
+.cv-retry {
+  margin-top: 12px; align-self: flex-start;
+  display: inline-block; min-height: 44px; line-height: 44px;
+  padding: 0 18px;
+  border-radius: var(--vd-r-chip);
+  background: var(--vd-sunken);
+  font-size: 13px; color: var(--vd-ink);
+}
+
+.cv-note { display: block; padding: 2px 4px; font-size: 11px; line-height: 1.7; color: var(--vd-muted); }

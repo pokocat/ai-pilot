@@ -1,0 +1,138 @@
+<view class="vd vd-cover {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">成片封面</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="cv-body">
+
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在读取封面设置…</text></view>
+
+      <view wx:elif="{{loadError}}" class="cv-error vd-card">
+        <text class="cv-error-title">封面设置没读出来</text>
+        <text class="cv-error-text">{{loadError}}</text>
+        <view class="cv-retry" bindtap="load">重新读取</view>
+      </view>
+
+      <block wx:else>
+        <view class="cv-intro">
+          <text class="cv-intro-title">封面就是成片的第一帧</text>
+          <text class="cv-intro-sub">发到抖音后平台拿第一帧当缩略图。它只占一两帧，不影响视频内容和时长。</text>
+        </view>
+
+        <view class="cv-switch vd-card">
+          <view class="cv-switch-copy">
+            <text class="cv-switch-title">给这条片子加封面</text>
+            <text class="cv-switch-sub">可选步骤；不加也能正常出片</text>
+          </view>
+          <view class="cv-switch-control">
+            <text class="cv-switch-state">{{enabled ? '已开启' : '已关闭'}}</text>
+            <switch checked="{{enabled}}" color="#C65232" bindchange="toggleEnabled"></switch>
+          </view>
+        </view>
+
+        <!-- 实时预览：版式对得上即可，字体/描边以服务端烧录为准 -->
+        <view class="cv-stage {{enabled ? '' : 'is-off'}}">
+          <view class="cv-canvas">
+            <view class="cv-bg"></view>
+            <text class="cv-kw {{preview.keywordGhost ? 'ghost' : ''}}">{{preview.keyword}}</text>
+            <view class="cv-handle-wrap">
+              <text class="cv-handle {{preview.handleGhost ? 'ghost' : ''}}">{{preview.handle}}</text>
+            </view>
+            <view class="cv-slogan">
+              <text class="cv-slogan-line {{preview.slogan1Ghost ? 'ghost' : ''}}">{{preview.slogan1}}</text>
+              <text class="cv-slogan-line {{preview.slogan2Ghost ? 'ghost' : ''}}">{{preview.slogan2}}</text>
+            </view>
+            <text class="cv-sign {{preview.signatureGhost ? 'ghost' : ''}}">{{preview.signature}}</text>
+          </view>
+          <text class="cv-stage-note">灰字是占位示例，不会印进封面。成片里关键词用毛笔书法体，这里用宋体近似。</text>
+        </view>
+
+        <view class="cv-form vd-card">
+          <view class="cv-field">
+            <view class="cv-label-row">
+              <text class="cv-label">书法关键词</text>
+              <text class="cv-count">{{keyword.length}}/{{limits.keyword}}</text>
+            </view>
+            <input class="cv-input" value="{{keyword}}" data-field="keyword" maxlength="{{limits.keyword}}"
+              placeholder="团结" placeholder-class="cv-ph" bindinput="inputField" adjust-position="{{true}}" cursor-spacing="24" />
+            <text class="cv-hint">2 个字最好看，亮黄大字压在画面顶部</text>
+          </view>
+
+          <view class="cv-field">
+            <view class="cv-label-row">
+              <text class="cv-label">账号名</text>
+              <text class="cv-count">{{handle.length}}/{{limits.handle}}</text>
+            </view>
+            <input class="cv-input" value="{{handle}}" data-field="handle" maxlength="{{limits.handle}}"
+              placeholder="@你的账号名" placeholder-class="cv-ph" bindinput="inputField" adjust-position="{{true}}" cursor-spacing="24" />
+            <text class="cv-hint">白底黑字标签，方便别人记住你</text>
+          </view>
+
+          <view class="cv-field">
+            <view class="cv-label-row">
+              <text class="cv-label">两行标语</text>
+              <text class="cv-count">{{slogan1.length}}+{{slogan2.length}}/{{limits.slogan}}</text>
+            </view>
+            <input class="cv-input" value="{{slogan1}}" data-field="slogan1" maxlength="{{limits.slogan}}"
+              placeholder="一群人一条心" placeholder-class="cv-ph" bindinput="inputField" adjust-position="{{true}}" cursor-spacing="24" />
+            <input class="cv-input cv-input-second" value="{{slogan2}}" data-field="slogan2" maxlength="{{limits.slogan}}"
+              placeholder="一件事一起拼" placeholder-class="cv-ph" bindinput="inputField" adjust-position="{{true}}" cursor-spacing="24" />
+            <text class="cv-hint">上下句字数接近时最整齐</text>
+          </view>
+
+          <view class="cv-field">
+            <view class="cv-label-row">
+              <text class="cv-label">落款金句</text>
+              <text class="cv-count">{{signature.length}}/{{limits.signature}}</text>
+            </view>
+            <input class="cv-input" value="{{signature}}" data-field="signature" maxlength="{{limits.signature}}"
+              placeholder="集体为实体发声" placeholder-class="cv-ph" bindinput="inputField" adjust-position="{{true}}" cursor-spacing="24" />
+            <text class="cv-hint">金色大字，整张封面最重的一句</text>
+          </view>
+        </view>
+
+        <view class="cv-bg-card vd-card">
+          <text class="cv-bg-title">封面底图</text>
+          <text class="cv-bg-sub">默认从成片里自动取一帧形象出镜的画面；也可以选素材库里的图。</text>
+          <scroll-view class="cv-bg-strip" scroll-x enable-flex>
+            <view class="cv-bg-item {{backgroundAssetId ? '' : 'on'}}" bindtap="useAutoFrame">
+              <view class="cv-bg-auto"><native-icon name="spark" tone="ink" size="18"></native-icon></view>
+              <text class="cv-bg-name">自动取帧</text>
+            </view>
+            <view wx:for="{{images}}" wx:key="id" class="cv-bg-item {{backgroundAssetId === item.id ? 'on' : ''}}"
+              data-id="{{item.id}}" bindtap="chooseBackground">
+              <image class="cv-bg-thumb" src="{{item.previewUrl}}" mode="aspectFill"></image>
+              <text class="cv-bg-name">{{item.label}}</text>
+            </view>
+          </scroll-view>
+          <view wx:if="{{imagesFailed}}" class="cv-bg-failed">
+            <text class="cv-hint">素材库这次没读出来，先用自动取帧。</text>
+          </view>
+          <view wx:elif="{{!images.length}}" class="cv-bg-empty" bindtap="goAssets">
+            <text class="cv-hint">素材库里还没有图片</text>
+            <view class="cv-bg-go"><text>去上传</text><native-icon name="arrow" tone="ink" size="14"></native-icon></view>
+          </view>
+        </view>
+
+        <text class="cv-note">
+          封面不占播放内容：它只在成片最前面停留一两帧，观众几乎察觉不到，但平台抓缩略图时拿到的就是这张。留空的槽位不会印出来；四个都空就等于不加封面。
+        </text>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <view class="vd-footer">
+    <view class="vd-btn ghost" bindtap="back">返回</view>
+    <view class="vd-btn {{(loading || saving || loadError) ? 'disabled' : ''}}" style="flex:1" bindtap="save">{{saving ? '正在保存…' : '保存封面'}}</view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

@@ -5,10 +5,16 @@ import { aidramaJson, aidramaUpload } from '../services/video/aidramaGateway.js'
 import {
   attachVideoJob, refundStaleUnsubmittedVideoHolds, refundVideoHold, reserveVideoCredits, settleVideoJob,
 } from '../services/video/credits.js';
+import {
+  applyCloneSettlements, assertCloneAffordable, attachCloneTargets, cloneChargeItems, cloneChargeTotal,
+  pendingCloneHolds, refundCloneHold, refundStaleUnsubmittedCloneHolds, refundStalledCloneHolds,
+  reserveCloneCredits, resolveCloneSettlements,
+} from '../services/video/cloneCredits.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
+import { clonePricing, clonePricingView } from '../services/video/pricing.js';
 import type {
-  ClipAsset, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
+  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 
@@ -135,10 +141,43 @@ function captureFileName(kind: 'consent' | 'avatar' | 'voice', fileName: string 
   return 'voice.mp3';
 }
 
+/**
+ * 顺手结算在途的克隆预扣。挂在「端上本来就会轮询的状态接口」上，理由同 GET /video/jobs/:id：
+ * 训练结果只有上游知道，而上游没有回调，所以谁先看到终态谁就负责把账结掉。
+ *
+ * 形象视图里带着它关联声音的状态 —— 训练页只轮询形象一个接口，声音那一档也必须能在这里结清，
+ * 否则用户训完就离开、声音的预扣会一直挂到超时清扫器才退。
+ */
+async function settleCloneHolds(
+  userId: string,
+  sources: { avatars?: (ClipAvatarView | null)[]; voices?: (ClipVoiceView | null)[] },
+): Promise<void> {
+  const holds = await pendingCloneHolds(userId);
+  if (!holds.length) return;
+  const avatarStatus = new Map<string, string>();
+  const voiceStatus = new Map<string, string>();
+  for (const view of sources.avatars ?? []) {
+    if (!view) continue;
+    avatarStatus.set(view.id, view.imageStatus);
+    if (view.linkedVoiceId) voiceStatus.set(view.linkedVoiceId, view.voiceStatus);
+  }
+  for (const view of sources.voices ?? []) if (view) voiceStatus.set(view.id, view.status);
+  await applyCloneSettlements(resolveCloneSettlements(
+    holds,
+    (kind, id) => (kind === 'avatar' ? avatarStatus : voiceStatus).get(id) ?? null,
+  ));
+}
+
 export async function videoRoutes(app: FastifyInstance) {
   // 扣费后尚未拿到上游 jobId 的崩溃窗口有界自动退款。
-  void refundStaleUnsubmittedVideoHolds().catch(() => {});
-  const sweepTimer = setInterval(() => { void refundStaleUnsubmittedVideoHolds().catch(() => {}); }, 5 * 60_000);
+  const sweep = () => {
+    void refundStaleUnsubmittedVideoHolds().catch(() => {});
+    void refundStaleUnsubmittedCloneHolds().catch(() => {});
+    // 上游可能永远不给终态；不设这道闸，用户的钻石会被一笔不会结算的 hold 无限期占住。
+    void refundStalledCloneHolds().catch(() => {});
+  };
+  sweep();
+  const sweepTimer = setInterval(sweep, 5 * 60_000);
   sweepTimer.unref();
   app.addHook('onClose', async () => clearInterval(sweepTimer));
 
@@ -318,7 +357,7 @@ export async function videoRoutes(app: FastifyInstance) {
   // 素材库容量：端上据此显示容量条，并在满之前就提示，而不是等上传被拒。
   app.get('/video/assets/storage', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson('/api/me/clip/assets/storage', identityOf(user)); }
+    try { return await aidramaJson<ClipAssetStorage>('/api/me/clip/assets/storage', identityOf(user)); }
     catch (e) { return sendErr(reply, e, 502); }
   });
 
@@ -387,19 +426,47 @@ export async function videoRoutes(app: FastifyInstance) {
 
   app.get('/video/avatar', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson<ClipAvatarView | null>('/api/me/clip/avatar', identityOf(user)); }
-    catch (e) { return sendErr(reply, e, 502); }
+    try {
+      const view = await aidramaJson<ClipAvatarView | null>('/api/me/clip/avatar', identityOf(user));
+      await settleCloneHolds(user.id, { avatars: view ? [view] : [] });
+      return view;
+    } catch (e) { return sendErr(reply, e, 502); }
   });
   app.get('/video/avatars', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson<ClipAvatarView[]>('/api/me/clip/avatars', identityOf(user)); }
-    catch (e) { return sendErr(reply, e, 502); }
+    try {
+      const views = await aidramaJson<ClipAvatarView[]>('/api/me/clip/avatars', identityOf(user));
+      await settleCloneHolds(user.id, { avatars: views });
+      return views;
+    } catch (e) { return sendErr(reply, e, 502); }
+  });
+  // 训练页轮询的就是这个（api.avatarById）。此前 BFF 少了这条透传，新建形象后每次轮询都 404，
+  // 训练进度只能靠用户自己退出重进列表页才看得到。
+  app.get<{ Params: { id: string } }>('/video/avatars/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const view = await aidramaJson<ClipAvatarView>(`/api/me/clip/avatars/${enc(req.params.id)}`, identityOf(user));
+      await settleCloneHolds(user.id, { avatars: view ? [view] : [] });
+      return view;
+    } catch (e) { return sendErr(reply, e, 404); }
   });
   app.get('/video/voices', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson<ClipVoiceView[]>('/api/me/clip/voices', identityOf(user)); }
+    try {
+      const views = await aidramaJson<ClipVoiceView[]>('/api/me/clip/voices', identityOf(user));
+      await settleCloneHolds(user.id, { voices: views });
+      return views;
+    } catch (e) { return sendErr(reply, e, 502); }
+  });
+  // 克隆定价：端上在克隆入口明示要扣多少钻石。价格由运营在后台配（FeatureFlag
+  // `video-clone-pricing`），代码只给保守兜底 —— 对外定价数据不进代码常量。
+  app.get('/video/clone-pricing', async (req, reply) => {
+    await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return clonePricingView(await clonePricing()); }
     catch (e) { return sendErr(reply, e, 502); }
   });
+
   app.get('/video/avatar/requirements', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try { return await aidramaJson<ClipCaptureRequirements>('/api/me/clip/avatar/requirements', identityOf(user)); }
@@ -426,6 +493,9 @@ export async function videoRoutes(app: FastifyInstance) {
   });
   app.post('/video/avatar/clone', { config: { rateLimit: { max: 10, timeWindow: '1 hour' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    // 预扣成功后但凡后面任一步失败，都要把这批 hold 退回；ownsSubmission 保证并发复用者无退款权。
+    let holds: Awaited<ReturnType<typeof reserveCloneCredits>>['holds'] = [];
+    let ownsSubmission = false;
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到采集文件', code: 'CLIP_CLONE_FILE_REQUIRED' });
@@ -434,20 +504,97 @@ export async function videoRoutes(app: FastifyInstance) {
       const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
       if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
+      const clientRequestId = String(fields?.clientRequestId?.value ?? '').trim();
+      if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) {
+        return reply.code(422).send({ error: '缺少合法的 clientRequestId', code: 'CLIENT_REQUEST_ID_REQUIRED' });
+      }
+      const voiceId = String(fields?.voiceId?.value ?? '');
+      const voiceSource = String(fields?.voiceSource?.value ?? '');
+
+      // 计价先行：端上展示的是哪几档、服务端就按哪几档收，且档位由服务端自己判定（见 cloneChargeItems）。
+      const pricing = await clonePricing();
+      const items = cloneChargeItems({ kind, voiceId, voiceSource }, pricing);
+      const total = cloneChargeTotal(items);
+      const expectedCredits = Number(fields?.expectedCredits?.value);
+      if (!Number.isSafeInteger(expectedCredits) || expectedCredits < 0) {
+        return reply.code(422).send({ error: '缺少合法的确认报价', code: 'CLIP_EXPECTED_CREDITS_REQUIRED' });
+      }
+      // 端上看到的价 ≠ 服务端要收的价 → 停下来重新确认。运营改价后正在填表的人不该被静默按新价扣。
+      if (expectedCredits !== total) {
+        throw Object.assign(new Error('训练报价已变化，请返回重新确认'), { statusCode: 409, code: 'CLIP_CLONE_QUOTE_CHANGED' });
+      }
+      // 余额闸提前到内容审核之前：别让用户等审完大文件才被告知钱不够。真正扣费仍在调上游前。
+      await assertCloneAffordable(user.id, total);
+
       // 同 consent：录音临时文件常被 wx.uploadFile 标成 octet-stream，必须按魔数纠正后再校验。
       const mimeType = resolveCaptureMime(kind as 'avatar' | 'voice', data.mimetype, buffer);
       assertCaptureUpload(kind as 'avatar' | 'voice', mimeType, buffer.length, data.file.truncated);
       await assertVideoMediaModerationReady(mimeType);
       await assertVideoUploadContent(buffer, mimeType, identityOf(user));
-      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, mimeType), mimeType }, {
+
+      const reservation = await reserveCloneCredits({ tenantId: user.tenantId, userId: user.id, clientRequestId, items });
+      holds = reservation.holds;
+      if (reservation.reused) {
+        // 同一次提交的重试。已退款 = 上一次已经失败并退干净了，必须换一个请求标识重来，
+        // 否则会卡在「复用一笔已经结束的 hold」上，既不扣费也不建单。
+        if (holds.some((hold) => hold.status === 'refunded')) {
+          throw Object.assign(new Error('这次训练已经结束，请重新提交'), { statusCode: 409, code: 'CLIP_CLONE_REQUEST_CLOSED' });
+        }
+        // 已建单的按原结果幂等返回，未建单的说明首个请求还在跑，让端上稍后再查。
+        const attached = holds.filter((hold) => hold.targetId);
+        if (!attached.length) {
+          throw Object.assign(new Error('这次训练正在提交，请稍后在分身管理里查看'), { statusCode: 409, code: 'CLIP_CLONE_CREATING' });
+        }
+        return {
+          ok: true, kind, status: 'training', reused: true,
+          avatarId: attached.find((hold) => hold.targetKind === 'avatar')?.targetId ?? undefined,
+          voiceId: attached.find((hold) => hold.targetKind === 'voice')?.targetId ?? undefined,
+        };
+      }
+      ownsSubmission = true;
+
+      const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, mimeType), mimeType }, {
         kind,
         // 声音来源的显式意图：'video' = 只从本次视频提取，服务端据此禁止回退到旧声音。
-        voiceSource: String(fields?.voiceSource?.value ?? ''),
+        voiceSource,
         avatarId: String(fields?.avatarId?.value ?? ''),
-        voiceId: String(fields?.voiceId?.value ?? ''),
+        voiceId,
         name: String(fields?.name?.value ?? ''),
+        clientRequestId,
       });
-    } catch (e) { return sendErr(reply, e, 422); }
+      // 没产出对应对象的那一档在这里就退（典型：选了「视频原声」但视频里提不出可用音色）。
+      holds = await attachCloneTargets(holds, result);
+
+      // 上游把重训回落成了新建：说明这条 speaker 的 4 次免费重训已用尽或调用失败，我方按新建
+      // 付了供应商成本，却只收了重训价。差额由我方承担（用户看到的价必须兑现），但**不能不留痕** ——
+      // 长期只能靠把重训余额透出到端上、让用户一开始就看见正确的价来根治。
+      const retrainFellBack = items.some((item) => item.action === 'voiceRetrain')
+        && !!voiceId && !!result?.voiceId && result.voiceId !== voiceId;
+      if (retrainFellBack) {
+        req.log.warn({ userId: user.id, requestedVoiceId: voiceId, createdVoiceId: result.voiceId },
+          '[video-clone] 重训回落为新建，按重训价计费，差额由我方承担');
+      }
+      await recordAudit({
+        tenantId: user.tenantId, userId: user.id, action: 'user.video.clone',
+        payload: {
+          kind, clientRequestId, credits: total, retrainFellBack,
+          items: items.map((item) => ({ action: item.action, credits: item.credits })),
+          avatarId: result?.avatarId, voiceId: result?.voiceId,
+        },
+      });
+      return { ok: true, kind, status: 'training', ...result, creditsHeld: total };
+    } catch (e) {
+      if (ownsSubmission) for (const hold of holds) await refundCloneHold(hold.id, 'submit_failed').catch(() => {});
+      return sendErr(reply, e, 422);
+    }
+  });
+  // 这条声音还剩几次免费重训。只在重训页调一次 —— 它会打到供应商，不能塞进声音列表接口。
+  app.get<{ Params: { id: string } }>('/video/voices/:id/retrain-quota', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      return await aidramaJson(`/api/me/clip/voices/${enc(req.params.id)}/retrain-quota`, identityOf(user));
+    } catch (e) { return sendErr(reply, e, 404); }
   });
   app.patch<{ Params: { id: string }; Body: { name?: string } }>('/video/voices/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);

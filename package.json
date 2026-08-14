@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "dev:seed": "SEED=1 bash scripts/dev.sh",
-    "dev:real": "AI_PROVIDER=openai bash scripts/dev.sh"
+    "dev:real": "AI_PROVIDER=openai bash scripts/dev.sh",
+    "check:aidrama-contract": "node scripts/check-aidrama-contract.mjs"
   }
 }

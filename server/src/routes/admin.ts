@@ -33,6 +33,7 @@ import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit, maskAuditPhone } from '../services/audit.js';
 import { getCreativeConfig, updateCreativeConfig, publicCreativeConfig } from '../services/creative/config.js';
 import { dryRunVisualProvider } from '../services/creative/visualProvider.js';
+import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
 import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
@@ -65,6 +66,7 @@ import type {
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
+  AdminClonePricing, AdminClonePricingUpdate,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -1260,6 +1262,45 @@ export async function adminRoutes(app: FastifyInstance) {
       },
     });
     return { ok: true, jobId: job.id, status: 'pending' };
+  });
+
+  /* ─────────── 短视频克隆动作的钻石定价（数字人 / 专属声音） ───────────
+   * 与上面那段海报配置同一套路，理由也同一套：配置持久化 = FeatureFlag 单行
+   * id='video-clone-pricing' 的 payload（详见 services/video/pricing.ts 文件头），
+   * 写操作 requireSuper（改价直接影响营收，与套餐改价、海报改价同级），读沿用插件级 requireAdmin。
+   *
+   * 在此之前这四个价只存在于 pricing.ts 的 FALLBACK 常量里 —— 也就是说「定价归运营后台」
+   * 这条铁律对克隆动作只是纸面上的：运营没有任何入口能改，`configured` 永远是 false。
+   * 这两个路由就是把它变成真的。
+   *
+   * GET 用 fresh=true 绕过 60s 读缓存：后台必须读得回自己刚写的值，否则运营会以为没保存上
+   * 而重复提交（C 端热路径照旧走缓存，见 GET /video/clone-pricing）。
+   */
+  app.get('/admin/video/clone-pricing', async (): Promise<AdminClonePricing> => {
+    return clonePricingView(await clonePricing({ fresh: true }));
+  });
+
+  app.put<{ Body: AdminClonePricingUpdate }>('/admin/video/clone-pricing', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const before = clonePricingView(await clonePricing({ fresh: true }));
+    try {
+      const after = clonePricingView(await updateClonePricing(req.body ?? {}));
+      await recordAudit({
+        action: 'admin.video.clonePricing.update',
+        payload: {
+          by: actorName(actor),
+          // 四档全记 before/after：改价是可复核动作，事后要能答「谁在什么时候把哪一档从多少改到多少」。
+          before, after,
+          // 首次核定要单独看得出来：这一笔把 TODO(定价待运营核定) 的兜底价换成了真实定价，
+          // 是这套价格从「占位」变成「承诺」的那一刻。
+          firstTimeConfigured: !before.configured,
+        },
+      });
+      return after;
+    } catch (e) {
+      return sendErr(reply, e, 422);
+    }
   });
 
   // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——

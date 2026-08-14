@@ -56,6 +56,18 @@
           </view>
         </view>
 
+        <!-- 成片封面：可选支线，不填就不加 -->
+        <view class="cf-cover vd-card" bindtap="goCover">
+          <view class="cf-cover-copy">
+            <text class="cf-cover-title">成片封面</text>
+            <text class="cf-cover-sub cf-cover-{{coverSummary.state}}">{{coverSummary.text}}</text>
+          </view>
+          <view class="cf-cover-go">
+            <text class="cf-cover-action">{{coverSummary.state === 'on' ? '修改' : '去设置'}}</text>
+            <native-icon name="arrow" tone="ink" size="16"></native-icon>
+          </view>
+        </view>
+
         <!-- preflight 问题 -->
         <view wx:if="{{problems.length}}" class="cf-problems">
           <text class="cp-title">还差这些才能出片</text>

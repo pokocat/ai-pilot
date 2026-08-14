@@ -4,8 +4,8 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type AdminAccountItem, type AdminFeatureFlag, type AdminMonitorNotify, type AdminBenchmark } from '../api';
-import { PageHead, ErrorState, ConfirmDialog, type ConfirmSpec } from '../components';
+import { api, type AdminAccountItem, type AdminClonePricing, type AdminFeatureFlag, type AdminMonitorNotify, type AdminBenchmark } from '../api';
+import { PageHead, ErrorState, ViewState, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
 
@@ -196,11 +196,195 @@ export function BenchmarksView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
+/* ─────────── 短视频克隆定价（数字人 / 专属声音的钻石单价） ───────────
+ *
+ * 为什么是「功能开关」页的一段，而不是自己一屏：
+ *   · nav.ts 的「配置」组已经是 8 项，DESIGN.md 写死了「一组超过 ~8 项就得拆组」——
+ *     为四个数字开第 9 项，代价是把整组重排，不划算；
+ *   · 本页的定位本来就是**平台级可写数值**（页头副标题：「合规一键降级与数值配置」），
+ *     告警阈值、飞书 webhook 已经在这儿，克隆单价是同一类东西。
+ *   短视频后续真长出任务台 / 供应商配置时，再连着这段一起搬去独立页（那时它够一屏了）。
+ *
+ * 定价为什么不能留在代码里：仓库铁律是「会影响真实用户的对外数据（定价 / 权益）归运营后台」。
+ * 在这段 UI 出现之前，这四个价只存在于 pricing.ts 的 FALLBACK 常量 —— 运营没有任何入口能改，
+ * `configured` 永远是 false，「定价归运营后台」只是纸面上的。
+ */
+
+/**
+ * 四档的中文名与副文案。服务端 pricing.ts 有一份同名映射，那份只用于 422 错误文案，不下发。
+ * `short` 是二次确认弹窗回显用的短名：ConfirmDialog 的字段名列很窄，六个字会折行成两行，
+ * 而那正是运营按下「确认核定」前唯一要核对的一列。
+ */
+const CLONE_PRICE_FIELDS: { key: CloneKey; label: string; short: string; hint: string }[] = [
+  {
+    key: 'voiceCreate',
+    label: '新建专属声音',
+    short: '新建声音',
+    hint: '供应商侧最贵的单次动作（一条音色 8000+ 算力）。这一档定低了，声音克隆就是在亏本跑。',
+  },
+  {
+    key: 'voiceRetrain',
+    label: '重训已有声音',
+    short: '重训声音',
+    hint: '供应商每条免费 4 次，但我方的上传 / 存储 / 审核 / 编排成本照付，所以按低价收而不是收 0。'
+      + '应当明显低于「新建专属声音」，否则用户没有动力走这条省供应商权益的路径。',
+  },
+  { key: 'avatarVideo', label: '视频训练数字人', short: '视频训练', hint: '用户上传本人出镜视频训练形象。' },
+  {
+    key: 'avatarImage',
+    label: '图片训练数字人',
+    short: '图片训练',
+    hint: '单张图片训练，成本远低于视频训练，是低成本入口，价格应低于「视频训练数字人」。'
+      + '⚠️ 该能力目前只有上游网关就绪，尚未接通到军师小程序 —— 这一档现在还没有真实成交，'
+      + '填的是「接通那天生效的价」。',
+  },
+];
+
+type CloneKey = 'voiceCreate' | 'voiceRetrain' | 'avatarVideo' | 'avatarImage';
+type CloneDraft = Record<CloneKey, number>;
+
+const cloneDraftOf = (p: AdminClonePricing): CloneDraft => ({
+  voiceCreate: p.voiceCreate, voiceRetrain: p.voiceRetrain, avatarVideo: p.avatarVideo, avatarImage: p.avatarImage,
+});
+
+const cloneDirty = (d: CloneDraft, p: AdminClonePricing): boolean =>
+  CLONE_PRICE_FIELDS.some(({ key }) => d[key] !== p[key]);
+
+/**
+ * 两条业务序关系（pricing.ts 的注释与单测都写着）被打破时提示，但**不拦保存**。
+ * 不做成硬校验：运营有做活动的正当理由把某一档临时打低（例如新建声音限时特价），
+ * 后台不该替业务把这种决定判成非法。要的是「你正在反转一条我们自己写下的定价原则，确认一下」。
+ */
+function cloneOrderWarnings(d: CloneDraft): string[] {
+  const out: string[] = [];
+  if (d.voiceRetrain >= d.voiceCreate) {
+    out.push(`重训（${d.voiceRetrain}）不低于新建（${d.voiceCreate}）：用户没有动力走省供应商权益的重训路径`);
+  }
+  if (d.avatarImage >= d.avatarVideo) {
+    out.push(`图片训练（${d.avatarImage}）不低于视频训练（${d.avatarVideo}）：低成本入口比完整能力还贵`);
+  }
+  return out;
+}
+
+function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+  const res = useResource(api.clonePricing, []);
+  const [draft, setDraft] = useState<CloneDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+  const cur = res.data;
+  // 服务端回包是唯一真源：加载完 / 保存完都用它重置草稿，运营不会对着一份「本地以为改上了」的数字操作。
+  useEffect(() => { if (cur) setDraft(cloneDraftOf(cur)); }, [cur]);
+
+  const set = (p: Partial<CloneDraft>) => setDraft((d) => (d ? { ...d, ...p } : d));
+
+  const save = async (next: CloneDraft) => {
+    setBusy(true);
+    try {
+      // 整份提交（不只发脏字段）：服务端要求首次核定四档一起给 —— 只发一档会把另外三档
+      // 没人核定过的兜底价一并升格成「运营配过的价」。
+      const saved = await api.saveClonePricing(next);
+      res.setData(saved);
+      setDraft(cloneDraftOf(saved));
+      toast('克隆定价已保存 · 小程序侧最迟 1 分钟内按新价扣费');
+    } catch (e) {
+      toast((e as Error)?.message || '保存失败');
+    }
+    setBusy(false);
+  };
+
+  const submit = () => {
+    if (!draft || !cur) return;
+    const warns = cloneOrderWarnings(draft);
+    setConfirmSpec({
+      // 首次核定与日常改价是两件事：前者是把一组占位数字变成对外承诺，措辞必须说清。
+      title: cur.configured ? '修改克隆定价' : '首次核定克隆定价',
+      desc: cur.configured
+        ? '保存后小程序侧最迟 1 分钟内按新价预扣钻石。已经在训练中的任务沿用下单时的价格，不重新计价。'
+        : '当前四个数字是代码里的保守兜底价，没有任何商务结论背书。保存即把它们（或你改后的值）定为线上定价，'
+          + '小程序侧随即按此扣费，并向用户按「已核定」的口径展示。',
+      echo: CLONE_PRICE_FIELDS.map(({ key, short }) => ({
+        k: short,
+        v: cur[key] === draft[key] ? `💎 ${draft[key]}（未改）` : `💎 ${cur[key]} → ${draft[key]}`,
+        amount: true,
+      })),
+      ...(warns.length ? { warn: warns.join('；') } : {}),
+      confirmText: cur.configured ? '确认改价' : '确认核定',
+      onConfirm: async () => { await save(draft); },
+    });
+  };
+
+  return (
+    <>
+      <div className="sec-h">
+        <span className="t">短视频克隆定价</span>
+        <span className="s">数字人形象与专属声音的钻石单价 · 保存即生效，无需发版</span>
+      </div>
+      <ViewState res={res} skeleton="rows">
+        {(p: AdminClonePricing) => !draft ? null : (
+          <div className="pad">
+            {!p.configured && (
+              <div className="ai-note">
+                <b>当前是代码兜底价，尚未经运营核定。</b>
+                这四个数字由内测临时给定，没有按真实成本与毛利算过，小程序侧也据此把口径说软（不当承诺价）。
+                正式开量前必须在这里定死一次 —— 保存之后 <code>configured</code> 才会为真。
+              </div>
+            )}
+            {!isSuper && (
+              <div className="ai-note">
+                当前账户为普通运营：改价直接影响营收，需要超级管理员（owner / master）。这里只读，数字可以正常查看。
+              </div>
+            )}
+            <div className="crd new-agent">
+              {CLONE_PRICE_FIELDS.map(({ key, label, hint }) => (
+                <div key={key} className="ai-field">
+                  <div className="ai-fl">{label}（钻石 / 次 · 0–1000000 · 0 = 该档免费）</div>
+                  <NumInput
+                    className="ai-input" min={0} max={1_000_000} step={1}
+                    value={draft[key]} disabled={!isSuper}
+                    onChange={(n) => set({ [key]: n } as Partial<CloneDraft>)}
+                  />
+                  <div className="ai-note">{hint}</div>
+                </div>
+              ))}
+              {cloneOrderWarnings(draft).map((w) => (
+                <div key={w} className="ai-note"><b>提醒：</b>{w}。确认这是有意为之即可保存。</div>
+              ))}
+              {isSuper && (
+                <div className="ai-actions">
+                  <button
+                    type="button" className="ai-btn ghost"
+                    disabled={busy || !cloneDirty(draft, p)}
+                    onClick={() => setDraft(cloneDraftOf(p))}
+                  >
+                    <Icon name="close" size={14} /> 撤销改动
+                  </button>
+                  <button
+                    type="button" className="ai-btn primary"
+                    // 未核定过时即便一个数字都没改也允许保存：那一次「保存」本身就是核定动作
+                    // （把兜底价确认为线上价），不是空操作。
+                    disabled={busy || (p.configured && !cloneDirty(draft, p))}
+                    onClick={submit}
+                  >
+                    <Icon name="check" size={14} /> {busy ? '保存中…' : p.configured ? '保存定价' : '核定并保存'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </ViewState>
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
+    </>
+  );
+}
+
 // 功能开关（P0-2）：命理等合规开关一键降级。关闭合规开关前二次确认，避免误触把全产品命理下线。
 // 监控大盘二期：告警阈值也注册为 number 类开关（monitor.* 前缀），改动 ≤75s 喂给 Prometheus；
 // 底部「告警通知」卡（仅 owner/master）配置飞书群机器人 webhook：非超管整卡不渲染，
 // 别摆一个注定 403 的入口；万一 me() 拿不到角色而露了出来，403 也会照原文 toast 出来
 // （api.ts 的 401/403 已分流，403 不再踢回登录页）。
+// 「短视频克隆定价」是本页第三段：非超管**也渲染**（只读），与告警通知那卡的取舍不同 ——
+// 值班运营需要答得出「训一个数字人扣多少钻」，看不到反而要去问人。
 export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const [list, setList] = useState<AdminFeatureFlag[]>([]);
   const [busy, setBusy] = useState('');
@@ -327,6 +511,7 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
           </div>
         </>
       )}
+      <ClonePricingSection toast={toast} isSuper={isSuper} />
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );

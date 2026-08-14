@@ -101,7 +101,12 @@ Page({
       host.toast(`专属声音正在训练 ${avatar.voiceProgress || 0}%`);
       return;
     }
-    host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1&avatarId=${encodeURIComponent(avatarId)}`);
+    // 重录已有声音时把那条声音的 id 带过去 —— 服务端据此走「重训」而不是「新建」：
+    // 供应商每条 speaker 给 4 次免费重训且不消耗克隆权益，我方也按更低的重训档计价。
+    // 少了这个参数，每次「重新录制」都会新建一条 speaker，克隆权益很快被烧光（2026-08-13 实测归零即由此而来）。
+    const retrainVoiceId = kind === 'voice' && avatar ? String(avatar.linkedVoiceId || '') : '';
+    const query = retrainVoiceId ? `&voiceId=${encodeURIComponent(retrainVoiceId)}` : '';
+    host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1&avatarId=${encodeURIComponent(avatarId)}${query}`);
   },
 
   startClone() {

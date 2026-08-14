@@ -4,6 +4,8 @@
 const host = require('../host');
 const api = require('../api');
 const { POLL_INTERVAL_MS } = require('../config');
+const model = require('../model');
+const { mediaDimensions, formatResolution, cloneCostText, voiceChoices, cloneCostRows } = model;
 
 const STEPS = [
   { no: 1, key: 'video', label: '上传视频' },
@@ -49,7 +51,32 @@ Page({
     avatarId: '',
     avatarName: '',
     voices: [],
+    /** 关联声音候选项（含扣费文案）。由 model.voiceChoices 预算好，wxml 不碰价格算术。 */
+    voiceOptions: [],
+    hasReusableVoice: false,
+    /**
+     * 空串 = 「视频原声」（新训练一条）。
+     * 有可用声音时 loadVoices 会把它改成第一条已有声音 —— **默认复用，花钱要主动选**。
+     */
     selectedVoiceId: '',
+    /**
+     * voice 模式下要重训的那条已有声音。非空 = 走 voiceRetrain（便宜的一档，且供应商侧每条有 4 次
+     * 免费重训、不消耗新的克隆权益）。由分身管理页「重新录制 / 提升」带进来。
+     * 空 = 新建一条声音，走 voiceCreate。
+     */
+    retrainVoiceId: '',
+    /** 克隆各档单价；null = 还没读到，界面据此不显示价格而不是显示 0。 */
+    pricing: null,
+    /** 本次提交的合计报价；null = 价格还没读到，此时不许提交（提交要带确认报价）。 */
+    expectedCredits: null,
+    /** 「还剩几次免费重训」；空串 = 不适用或还没读到，界面据此不渲染这一行。 */
+    retrainQuotaText: '',
+    /** 本次动作的扣费文案（形象/声音各一档），JS 预算好给 wxml 直接渲染。 */
+    avatarCostText: '',
+    voiceCostText: '',
+    /** 扣费明细行；空数组 = 价格没读到，整块不渲染（不显示 0 钻石的假账单）。 */
+    costRows: [],
+    voiceNoteText: '',
     training: null,
     recaptureKind: null,
     presetAvailable: api.isMock(),
@@ -74,12 +101,19 @@ Page({
       mode,
       step,
       avatarId: String(opts.avatarId || ''),
+      // 只有声音模式认这个参数：形象模式下的 voiceId 是「关联哪条已有声音」，不是「重训哪条」。
+      retrainVoiceId: mode === 'voice' ? String(opts.voiceId || '') : '',
       recaptureKind: String(opts.recapture || '') === '1' ? mode : null,
       training: step === 2 ? initialTraining(mode) : null,
     });
     if (!host.isLoggedIn()) this.setData({ showLogin: true });
     this.loadRequirements();
     this.loadVoices();
+    // 价格不设登录门：用户在决定要不要做之前就该看见成本（浏览类信息不拦登录）。
+    this.loadPricing();
+    this.loadRetrainQuota();
+    // 先按「还没有可用声音」的形状把选项排出来，避免首屏空一块；voices/pricing 到了再重算。
+    this.applyVoiceChoices();
     if (host.isLoggedIn()) this.loadNotificationTemplate();
   },
 
@@ -98,13 +132,87 @@ Page({
       .catch(() => this.setData({ requirementsReady: true }));
   },
 
+  /**
+   * 本次提交的账单 —— 明细行与要提交的确认报价**必须出自同一次计算**，
+   * 否则又会出现「界面显示一个价、实际按另一个价扣」。
+   */
+  chargeState(selectedVoiceId) {
+    const { mode, pricing, retrainVoiceId } = this.data;
+    const items = model.cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId);
+    return {
+      costRows: cloneCostRows(mode, pricing, selectedVoiceId, retrainVoiceId),
+      // pricing 没读到时 items 为空 → null（而不是 0）。0 是「免费」，null 是「还不知道」，不许混。
+      expectedCredits: items.length ? model.cloneChargeTotal(items) : null,
+    };
+  },
+
+  /**
+   * 价格与可用声音都会影响「关联声音」这一栏，两者到达顺序不定（各自独立请求），
+   * 所以统一收口到这里重算一次，谁后到都能补齐文案。
+   */
+  applyVoiceChoices() {
+    const { options, defaultVoiceId, hasReusable } = voiceChoices(this.data.voices, this.data.pricing);
+    // 只在用户还没动过选择时才落默认值：用户主动选了「视频原声」之后，
+    // 价格接口姗姗来迟不能把他的选择改回复用。
+    const selectedVoiceId = this.voiceTouched ? this.data.selectedVoiceId : defaultVoiceId;
+    this.setData(Object.assign({
+      voiceOptions: options,
+      hasReusableVoice: hasReusable,
+      selectedVoiceId,
+      avatarCostText: cloneCostText(this.data.pricing, 'avatarVideo'),
+      voiceCostText: cloneCostText(this.data.pricing, 'voiceCreate'),
+      voiceNoteText: hasReusable
+        ? '已默认复用你现有的声音，复用不额外扣费。只有主动选「视频原声」才会新训练一条并扣费。'
+        : '还没有可复用的声音，这段视频会用来训练一条新的声音。',
+    }, this.chargeState(selectedVoiceId)));
+  },
+
   loadVoices() {
     if (!host.isLoggedIn()) return;
-    api.voices().then((voices) => this.setData({ voices: (Array.isArray(voices) ? voices : []).filter((item) => item.status === 'ready') })).catch(() => {});
+    api.voices()
+      .then((voices) => {
+        this.setData({ voices: (Array.isArray(voices) ? voices : []).filter((item) => item.status === 'ready') });
+        this.applyVoiceChoices();
+      })
+      .catch(() => {});
+  },
+
+  /** 价格读失败不阻断创建流程：pricing 保持 null，界面不显示价格，而不是显示 0 或假数字。 */
+  loadPricing() {
+    api.clonePricing()
+      .then((pricing) => { this.setData({ pricing: pricing || null }); this.applyVoiceChoices(); })
+      .catch(() => {});
+  },
+
+  /**
+   * 免费重训余额。读失败就保持空串、整行不渲染 —— 不许退化成一个编出来的默认数字，
+   * 那会让用户以为自己还有免费额度。
+   */
+  loadRetrainQuota() {
+    if (!this.data.retrainVoiceId || !host.isLoggedIn()) return;
+    api.retrainQuota(this.data.retrainVoiceId)
+      .then((quota) => this.setData({ retrainQuotaText: model.retrainQuotaText(quota) }))
+      .catch(() => {});
   },
 
   changeAvatarName(event) { this.setData({ avatarName: String(event.detail.value || '').slice(0, 20) }); },
-  chooseExistingVoice(event) { this.setData({ selectedVoiceId: String(event.currentTarget.dataset.id || '') }); },
+  /**
+   * 选关联声音。一旦用户自己点过，就不再让后到的默认值覆盖他的选择（见 applyVoiceChoices）。
+   * 主动选「视频原声」= 主动选择新训练一条，这里明确提示要扣多少 —— 花钱的路径不许静默发生。
+   */
+  chooseExistingVoice(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    this.voiceTouched = true;
+    // ★ 账单必须跟着选择走。少了这一步，用户从「复用」切到「视频原声」之后，
+    //   明细还写着「关联已有声音 · 不额外扣费」——正是这次要消灭的那种不透明。
+    //   （同类回归见 d70e1bb：结算按钮价格没跟着档位走。）
+    //   这里显式用新的 id 算，不依赖 setData 之后 this.data 是否已经刷新。
+    this.setData(Object.assign({ selectedVoiceId: id }, this.chargeState(id)));
+    if (!id && this.data.hasReusableVoice) {
+      const cost = this.data.voiceCostText;
+      host.toast(cost ? `会新训练一条声音，扣 ${cost}` : '会新训练一条声音');
+    }
+  },
 
   loadNotificationTemplate() {
     if (api.isMock()) return;
@@ -286,16 +394,70 @@ Page({
 
   retakeVoice() { this.setData({ voiceFile: null, voiceSubmitted: false, recordSeconds: 0 }); },
 
+  /**
+   * 本次提交的幂等标识。训练要预扣钻石，所以「同一次提交重试」和「换一单重来」必须能区分：
+   * 前者复用同一个 id（服务端据此不重复扣），后者必须换新 id。
+   *
+   * ★ 标识由「素材路径 + 报价」派生，而不是在各个素材变更处手动清空 —— 那种写法漏掉任何一处，
+   *   都会让新录的素材复用旧标识，于是服务端把上一单的结果幂等地原样返回：用户以为新素材训好了，
+   *   其实压根没提交。报价也计入，是因为用户改了「复用/新训」选择后价格会变，
+   *   沿用旧标识只会撞上 409 报价冲突，而他其实是想重新下一单。
+   */
+  ensureCloneRequestId(filePath) {
+    const key = `${filePath || ''}|${this.data.expectedCredits}`;
+    if (this.cloneRequestKey !== key) { this.cloneRequestKey = key; this.cloneRequestId = ''; }
+    if (!this.cloneRequestId) {
+      this.cloneRequestId = `clip-clone:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    }
+    return this.cloneRequestId;
+  },
+
+  /** 价格没读到就不许提交 —— 服务端要求带确认报价，硬编个 0 上去只会换来一个看不懂的 409。 */
+  assertQuoteReady() {
+    if (this.data.expectedCredits == null) {
+      host.toast('还没拿到训练价格，请稍后重试');
+      this.loadPricing();
+      return false;
+    }
+    return true;
+  },
+
+  /**
+   * 提交失败的统一收尾。
+   * - 余额不足（402）：直接引到充值，而不是甩一句「提交失败」。
+   * - 服务端给了明确判决（有 statusCode）：这个请求标识作废，下次点是新的一单。
+   * - 纯网络失败（没有 statusCode）：保留标识，重试才能被服务端识别为同一次提交、不重复扣费。
+   */
+  handleCloneError(error, fallbackMessage) {
+    this.setData({ submitting: false });
+    if (error && error.statusCode) this.cloneRequestId = '';
+    if (error && error.code === 'INSUFFICIENT_CREDITS') {
+      host.confirm({
+        title: '钻石不够',
+        content: `这次训练需要 ${this.data.expectedCredits} 钻石。去充值吗？`,
+        confirmText: '去充值',
+      }).then((ok) => { if (ok) host.goHost('/packages/work/credits/index'); });
+      return;
+    }
+    host.toast(error && error.message ? error.message : fallbackMessage);
+  },
+
   submitVoice() {
     if (!this.data.voiceFile) { host.toast('先录一段声音或上传音频'); return; }
     if (this.data.submitting) return;
+    if (!this.assertQuoteReady()) return;
     this.setData({ submitting: true });
-    api.startClone('voice', { filePath: this.data.voiceFile.path, avatarId: this.data.avatarId })
+    api.startClone('voice', {
+      filePath: this.data.voiceFile.path,
+      avatarId: this.data.avatarId,
+      // 非空 = 重训这一条已有声音：供应商每条给 4 次免费重训，且不消耗新的克隆权益。
+      // 少了这个字段，每次「重新录制」都会新建一条 speaker，把账户的克隆权益烧光。
+      voiceId: this.data.retrainVoiceId,
+      clientRequestId: this.ensureCloneRequestId(this.data.voiceFile.path),
+      expectedCredits: this.data.expectedCredits,
+    })
       .then(() => this.enterTraining())
-      .catch((error) => {
-        this.setData({ submitting: false });
-        host.toast(error && error.message ? error.message : '声音提交失败');
-      });
+      .catch((error) => this.handleCloneError(error, '声音提交失败'));
   },
 
   /* ── 第 1 步：一段视频创建数字人 ── */
@@ -308,13 +470,28 @@ Page({
       count: 1,
       mediaType: ['video'],
       sourceType: [sourceType],
+      // ★ 上传分辨率 = 成片分辨率（石榴技术 2026-08-13 明确）。不写 sizeType 时微信默认
+      //   ['original','compressed'] 并**实际取压缩版**，等于在源头把成片画质砍掉。
+      //   sizeType 对视频是否生效：**生效**。依据是官方 API 定义（本仓库 vendored 的
+      //   miniprogram-api-typings@3.12.3，由官方文档生成）对 ChooseMediaOption.sizeType 的原文：
+      //   「是否压缩所选文件，基础库 2.25.0 前仅对 mediaType 为 image 时有效，2.25.0 及以后对全量
+      //   mediaType 有效」。本项目 project.config.json 的 libVersion 是 3.16.2，远高于 2.25.0，
+      //   所以这里对 mediaType:['video'] 是有效参数，不是只对图片生效的摆设。
+      //   注意它只是「别再压一道」，拿不到比用户源文件更高的分辨率；真实宽高以回调里的
+      //   width/height 为准（下面带上去给服务端），不要靠这个参数反推画质。
+      sizeType: ['original'],
       maxDuration: Math.min(60, this.captureRule('avatar').maxDurationSec),
       camera: 'front',
       success: (res) => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
         if (!this.validateCapture('avatar', file)) return;
-        this.setData({ faceFile: { path: file.tempFilePath, duration: file.duration || 0, size: file.size || 0 } });
+        this.setData({
+          faceFile: Object.assign(
+            { path: file.tempFilePath, duration: file.duration || 0, size: file.size || 0 },
+            mediaDimensions(file),
+          ),
+        });
       },
       fail: (error) => {
         if (String(error && error.errMsg || '').indexOf('cancel') >= 0) return;
@@ -337,6 +514,7 @@ Page({
     if (!this.data.faceFile) { host.toast('先录一段或从相册选一个视频'); return; }
     if (!this.data.agreed) { host.toast('请先确认素材使用权'); return; }
     if (this.data.submitting) return;
+    if (!this.assertQuoteReady()) return;
     this.setData({ submitting: true });
     api.startClone('avatar', {
       filePath: this.data.faceFile.path,
@@ -345,12 +523,14 @@ Page({
       // 没选已有声音 = 用户选的是「视频原声」。显式传，服务端才不会回退到该形象原先关联的声音。
       voiceSource: this.data.selectedVoiceId ? 'existing' : 'video',
       name: this.data.avatarName,
+      clientRequestId: this.ensureCloneRequestId(this.data.faceFile.path),
+      expectedCredits: this.data.expectedCredits,
     })
-      .then((result) => { if (result && result.avatarId) this.setData({ avatarId: result.avatarId }); this.enterTraining(); })
-      .catch((error) => {
-        this.setData({ submitting: false });
-        host.toast(error && error.message ? error.message : '形象提交失败');
-      });
+      .then((result) => {
+        if (result && result.avatarId) this.setData({ avatarId: result.avatarId });
+        this.enterTraining();
+      })
+      .catch((error) => this.handleCloneError(error, '形象提交失败'));
   },
 
   /* ── 第 2 步：训练 ── */

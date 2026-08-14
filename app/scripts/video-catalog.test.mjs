@@ -112,8 +112,8 @@ test('快出片所有页面只占一层原生导航高度', () => {
   const pages = fs.readdirSync(videoRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(videoRoot, entry.name, 'index.wxml')))
     .map((entry) => path.join(videoRoot, entry.name, 'index.wxml'));
-  // 12 = 原 11 页 + templates（模板专区，从首页拆出来，便于后续上新模板）
-  assert.equal(pages.length, 12);
+  // 13 = 原 11 页 + templates（模板专区，从首页拆出来）+ cover（成片封面，确认页的可选支线）
+  assert.equal(pages.length, 13);
   pages.forEach((file) => {
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /--native-nav-inset:\{\{navInset\}\}px/);
@@ -252,4 +252,122 @@ test('AI 生成水印默认关闭，确认页主动开启后才保存并显示',
   assert.match(workView, /wx:if="\{\{work\.aiWatermark\}\}"/);
   assert.match(workSource, /this\.data\.work\.aiWatermark/);
   assert.doesNotMatch(templateView, />AI 生成<\/view>/, '模板能力标签不能冒充默认成片水印');
+});
+
+// 2026-08-13 成片封面：封面 = 拼在成片最前面的一张 720x1280 图，只占 1~2 帧，不影响视频内容。
+// 抖音等平台发布后拿第一帧当缩略图，所以它值得单独设计。整条链路的铁律是「不填就不加封面」。
+test('封面文案按码点截断，且与服务端 ClipCoverTemplate 的槽位上限一致', () => {
+  assert.deepEqual(model.COVER_LIMITS, { keyword: 2, handle: 20, slogan: 14, sloganLines: 2, signature: 12 });
+
+  assert.equal(model.truncateCoverText('团结', 2), '团结');
+  assert.equal(model.truncateCoverText('团结一心', 2), '团…');
+  assert.equal(model.truncateCoverText('  留白  ', 2), '留白');
+  assert.equal(model.truncateCoverText(null, 2), '');
+  // emoji 是双 char：按 char 截会劈出半个代理对，渲染成乱码
+  assert.equal(model.truncateCoverText('🧧🧧🧧', 2), '🧧…');
+  assert.equal(Array.from(model.truncateCoverText('🧧🧧🧧', 2))[0], '🧧');
+});
+
+test('封面配置规整：形状稳定、标语最多两行、关掉不丢文案', () => {
+  const full = model.normalizeCover({
+    enabled: true,
+    keyword: '团结一心',
+    handle: '@可乐米乐麻麻讲Ai',
+    sloganLines: ['一群人一条心', '一件事一起拼', '第三行会被丢掉'],
+    signature: '集体为实体发声',
+  });
+  assert.equal(full.enabled, true);
+  assert.equal(full.templateId, model.COVER_TEMPLATE_ID);
+  assert.equal(full.keyword, '团…');
+  assert.deepEqual(full.sloganLines, ['一群人一条心', '一件事一起拼']);
+  assert.equal(full.backgroundAssetId, null);
+  assert.equal(full.backgroundSourceNo, 0);
+
+  // 用户在一个输入框里敲换行也要拆成两行
+  assert.deepEqual(model.normalizeCover({ sloganLines: '上一句\n下一句' }).sloganLines, ['上一句', '下一句']);
+
+  // 缺字段/垃圾入参不许抛，也不许返回 undefined 字段
+  const blank = model.normalizeCover(null);
+  assert.equal(blank.enabled, false);
+  assert.equal(blank.keyword, '');
+  assert.deepEqual(blank.sloganLines, []);
+
+  // 关掉开关只是不渲染，文案要留着，不然「手滑关一下」等于清空重填
+  const off = model.normalizeCover({ enabled: false, keyword: '团结', signature: '集体为实体发声' });
+  assert.equal(off.enabled, false);
+  assert.equal(off.keyword, '团结');
+  assert.equal(off.signature, '集体为实体发声');
+});
+
+test('封面三种状态在确认页各说各的话，「开了但没填」不能伪装成已设置', () => {
+  assert.equal(model.coverHasText({ enabled: true }), false);
+  assert.equal(model.coverHasText({ enabled: true, sloganLines: ['', '  '] }), false, '全空白 = 没填');
+  assert.equal(model.coverHasText({ enabled: true, keyword: '团结' }), true);
+
+  assert.deepEqual(model.coverSummary({ enabled: false, keyword: '团结' }), { state: 'off', text: '不加封面' });
+
+  const blank = model.coverSummary({ enabled: true });
+  assert.equal(blank.state, 'blank');
+  assert.match(blank.text, /不会加封面/, '开了却一个字没填，必须说清出片时不会有封面');
+
+  const on = model.coverSummary({ enabled: true, keyword: '团结', signature: '集体为实体发声' });
+  assert.equal(on.state, 'on');
+  assert.match(on.text, /团结/);
+});
+
+test('封面页已注册、从确认页可达，且不填就不加封面', async () => {
+  const project = await mock.createProject('ct_shiti');
+  assert.equal(project.cover.enabled, false, '建项目时封面默认关着');
+  assert.equal(model.coverSummary(project.cover).state, 'off');
+
+  const appConfig = JSON.parse(fs.readFileSync(path.resolve(videoRoot, '../../app.json'), 'utf8'));
+  const videoPackage = appConfig.subPackages.find((item) => item.root === 'packages/video');
+  assert.ok(videoPackage.pages.includes('cover/index'), '封面页必须注册进 packages/video 分包');
+
+  const confirmSource = fs.readFileSync(path.join(videoRoot, 'confirm/index.js'), 'utf8');
+  const confirmView = fs.readFileSync(path.join(videoRoot, 'confirm/index.wxml'), 'utf8');
+  const coverSource = fs.readFileSync(path.join(videoRoot, 'cover/index.js'), 'utf8');
+  const coverView = fs.readFileSync(path.join(videoRoot, 'cover/index.wxml'), 'utf8');
+
+  // 入口在出片确认页，且是可选支线：不挡出片按钮
+  assert.match(confirmSource, /host\.go\(`\/cover\/index\?projectId=/);
+  assert.match(confirmSource, /model\.coverSummary\(project\.cover\)/);
+  assert.match(confirmView, /class="cf-cover vd-card" bindtap="goCover"/);
+  assert.doesNotMatch(confirmSource, /coverSummary[\s\S]{0,80}problems\.push/, '封面没设置不能变成出片的前置阻断');
+
+  // 保存走整份 cover 对象；四个槽位齐全
+  assert.match(coverSource, /api\.saveProject\(this\.data\.projectId, \{ cover \}\)/);
+  ['keyword', 'handle', 'slogan1', 'slogan2', 'signature'].forEach((field) => {
+    assert.match(coverView, new RegExp(`data-field="${field}"`), `缺少输入槽位 ${field}`);
+  });
+  // 预览四层齐全，层级与参考图一致
+  ['cv-kw', 'cv-handle', 'cv-slogan-line', 'cv-sign'].forEach((cls) => {
+    assert.match(coverView, new RegExp(`class="[^"]*${cls}`), `预览缺少 ${cls}`);
+  });
+  // 读失败必须报错重试，不能静默当成空封面把已有配置盖掉
+  assert.match(coverSource, /loadError/);
+  assert.match(coverView, /bindtap="load"/);
+  // 登录门只挡保存动作，游客可以先填着看
+  assert.match(coverSource, /host\.requireLogin\(this, 'execute'\)/);
+  assert.ok(coverSource.indexOf('host.requireLogin') > coverSource.indexOf('save()'), '登录门不得前置到 onLoad');
+
+  const coverStyle = fs.readFileSync(path.join(videoRoot, 'cover/index.scss'), 'utf8');
+  assert.match(coverStyle, /^@use "\.\.\/styles\/tokens\.scss";/, '分包样式只许用分包自己的 tokens');
+  assert.match(coverStyle, /#FFE400/, '关键词亮黄');
+  assert.match(coverStyle, /#F6C544/, '落款金色');
+});
+
+test('免费重训余额：查不到就不许编数字，用完了要说清会新训一条', () => {
+  const { retrainQuotaText } = model;
+  assert.match(retrainQuotaText({ available: true, retrainable: true, used: 1, total: 4, remaining: 3 }), /还剩 3 次/);
+  // 用完了 ≠ 不能重训：我们会新训一条替换它，成本落在我方，但用户得知道发生了什么。
+  assert.match(retrainQuotaText({ available: true, retrainable: true, used: 4, total: 4, remaining: 0 }), /已用完/);
+  // 读失败必须说「查不到」，绝不能退化成「还剩 4 次」——那是把读失败说成有额度。
+  const unknown = retrainQuotaText({ available: false, retrainable: true });
+  assert.match(unknown, /查不到/);
+  assert.doesNotMatch(unknown, /[0-9]+ 次/);
+  assert.match(retrainQuotaText({ available: false, retrainable: false }), /无法直接重训/);
+  assert.equal(retrainQuotaText(null), '', '没有数据时整行不渲染');
+  // total/remaining 缺字段时同样按「查不到」处理，不许算出 NaN 次
+  assert.match(retrainQuotaText({ available: true, retrainable: true }), /查不到/);
 });

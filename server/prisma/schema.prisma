@@ -2103,3 +2103,33 @@ model VideoCreditHold {
   @@index([status, updatedAt])
   @@map("video_credit_hold")
 }
+
+/// 快出片「克隆类动作」（训声音 / 训数字人）的钻石 hold。与出片同形状：先预扣，训练失败退回。
+///
+/// 为什么不复用 VideoCreditHold：① 克隆没有 projectId（那里是必填）；② 出片的锚点 upstreamJobId
+/// 是唯一的，而重训声音**复用同一个 voiceId**，加唯一约束会让第二次重训直接建不出 hold。
+model VideoCloneHold {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  /// voiceCreate | voiceRetrain | avatarVideo | avatarImage —— 与 services/video/pricing.ts 的档位一一对应
+  action          String
+  clientRequestId String
+  credits         Int
+  /// avatar | voice：结算时据此决定去形象状态还是声音状态里认领本次训练结果
+  targetKind      String
+  /// 上游返回的 avatarId / voiceId；建单成功后回填。为空 = 还没提交成功，归超时清扫器处理
+  targetId        String?
+  status          String   @default("submitting") // submitting | submitted | settled | refunded
+  lastTrainStatus String?
+  chargedAt       DateTime @default(now())
+  refundedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@index([userId, targetKind, targetId])
+  @@map("video_clone_hold")
+}

@@ -36,6 +36,23 @@
 .cf-watermark-state { font-size: 11px; color: var(--vd-muted); }
 .cf-watermark-control switch { transform: scale(.82); transform-origin: right center; }
 
+/* 成片封面入口：可选支线，整卡可点 */
+.cf-cover {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; margin-top: 12px;
+}
+.cf-cover-copy { min-width: 0; flex: 1; }
+.cf-cover-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.cf-cover-sub {
+  display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 「开了但没填」要看得出是待办，不能和「不加封面」长得一样 */
+.cf-cover-blank { color: var(--vd-danger); }
+.cf-cover-on { color: var(--vd-ink-3); }
+.cf-cover-go { min-height: 44px; flex: none; display: flex; align-items: center; gap: 2px; }
+.cf-cover-action { font-size: 12px; color: var(--vd-avatar-deep); }
+
 /* preflight 问题 */
 .cf-problems {
   background: var(--vd-danger-soft);

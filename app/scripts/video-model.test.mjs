@@ -288,3 +288,121 @@ test('素材时长：不足一秒按 1 秒显示，不出现「0 秒」', () => 
   assert.equal(model.formatAssetDuration(60), '1′00″');
   assert.equal(model.formatAssetDuration(125), '2′05″');
 });
+
+/* ── 上传画质：分辨率的「未知」与「0」不许混 ───────────────────────── */
+
+test('chooseMedia 宽高：两个都拿到正数才算数，否则整体不给字段', () => {
+  assert.deepEqual(model.mediaDimensions({ width: 1080, height: 1920 }), { width: 1080, height: 1920 });
+  // 只有一半 = 半个尺寸，没有意义，整体丢弃
+  assert.deepEqual(model.mediaDimensions({ width: 1080, height: 0 }), {});
+  assert.deepEqual(model.mediaDimensions({ width: 0, height: 1920 }), {});
+  // 图片项在部分机型上根本没有 width/height；不能因此往服务端写 0
+  assert.deepEqual(model.mediaDimensions({}), {});
+  assert.deepEqual(model.mediaDimensions(null), {});
+  assert.deepEqual(model.mediaDimensions({ width: '1080', height: '1920' }), { width: 1080, height: 1920 });
+});
+
+test('分辨率角标：读不到就不显示，绝不渲染 0×0', () => {
+  assert.equal(model.formatResolution(1080, 1920), '1080×1920');
+  assert.equal(model.formatResolution(3840, 2160), '3840×2160');
+  // 历史素材没有宽高：正确表达是「不显示」，不是「0×0」
+  assert.equal(model.formatResolution(0, 0), '', '0×0 会把「没测到」说成「0 像素」');
+  assert.equal(model.formatResolution(undefined, undefined), '');
+  assert.equal(model.formatResolution(null, null), '');
+  assert.equal(model.formatResolution(1080, null), '', '缺一半也算未知');
+  assert.equal(model.formatResolution(-1, -1), '');
+});
+
+/* ── 克隆扣费：价格来自服务端，端上只排文案 ───────────────────────── */
+
+const PRICING = { voiceCreate: 200, voiceRetrain: 60, avatarVideo: 200, avatarImage: 100, configured: true };
+
+test('钻石文案：读不到价格时留空，绝不说成「0 钻石」（那等于说免费）', () => {
+  assert.equal(model.formatCredits(200), '200 钻石');
+  assert.equal(model.formatCredits(0), '0 钻石', '运营真把某档配成 0 时，0 是真值，要显示');
+  assert.equal(model.formatCredits(null), '');
+  assert.equal(model.formatCredits(undefined), '');
+  assert.equal(model.formatCredits('abc'), '');
+  assert.equal(model.formatCredits(-5), '');
+});
+
+test('价格没拉到时不显示任何数字，而不是编一个', () => {
+  assert.equal(model.cloneCostText(null, 'voiceCreate'), '');
+  assert.equal(model.cloneCostText(PRICING, 'voiceCreate'), '200 钻石');
+  assert.equal(model.cloneCostText(PRICING, 'avatarVideo'), '200 钻石');
+});
+
+test('有可用声音时默认复用——花钱的路径必须用户主动选', () => {
+  const voices = [
+    { id: 'vo_1', name: '张姐原声', status: 'ready', source: 'dedicated' },
+    { id: 'vo_2', name: '门店版', status: 'ready', source: 'video' },
+  ];
+  const result = model.voiceChoices(voices, PRICING);
+  assert.equal(result.defaultVoiceId, 'vo_1', '默认落在第一条已有声音，而不是「视频原声」');
+  assert.equal(result.hasReusable, true);
+  // 可复用的排前面，默认选中项要一眼看得见
+  assert.equal(result.options[0].id, 'vo_1');
+  assert.equal(result.options[0].free, true);
+  assert.match(result.options[0].costText, /不额外扣费/);
+  // 「视频原声」= 新训练一条，必须带价，不能写成「自动提取」让人以为白送
+  const original = result.options[result.options.length - 1];
+  assert.equal(original.id, '');
+  assert.equal(original.free, false);
+  assert.match(original.costText, /200 钻石/);
+});
+
+test('没有可用声音时才默认「视频原声」，且 id 保持空串（voiceSource=video 契约）', () => {
+  const result = model.voiceChoices([], PRICING);
+  assert.equal(result.defaultVoiceId, '');
+  assert.equal(result.hasReusable, false);
+  assert.equal(result.options.length, 1);
+  assert.equal(result.options[0].id, '');
+});
+
+test('未就绪的声音不能被当成可复用项', () => {
+  const voices = [
+    { id: 'vo_train', name: '训练中', status: 'training', source: 'dedicated' },
+    { id: 'vo_ok', name: '好了的', status: 'ready', source: 'dedicated' },
+  ];
+  const result = model.voiceChoices(voices, PRICING);
+  assert.equal(result.defaultVoiceId, 'vo_ok', '还在训练的声音复用不了，不能成为默认');
+  assert.equal(result.options.filter((item) => item.free).length, 1);
+});
+
+test('候选项的 wx:key 稳定且唯一（「视频原声」的 id 是空串，不能拿来当 key）', () => {
+  const result = model.voiceChoices([{ id: 'vo_1', name: 'A', status: 'ready' }], PRICING);
+  const keys = result.options.map((item) => item.key);
+  assert.equal(new Set(keys).size, keys.length, 'key 不能重复，否则列表复用会错位');
+  assert.ok(keys.every(Boolean), 'key 不能是空串');
+});
+
+test('价格拉不到时候选项照样能选，只是不显示金额', () => {
+  const result = model.voiceChoices([{ id: 'vo_1', name: 'A', status: 'ready' }], null);
+  assert.equal(result.defaultVoiceId, 'vo_1', '价格读失败不该影响「默认复用」这条产品口径');
+  const original = result.options[result.options.length - 1];
+  assert.doesNotMatch(original.costText, /钻石/, '没有价格就别编一个数字出来');
+  assert.match(original.costText, /新训练/, '但仍要说清它会新训练一条');
+});
+
+test('扣费明细：复用声音只扣形象那一档，选视频原声则两档都要', () => {
+  const reuse = model.cloneCostRows('avatar', PRICING, 'vo_1');
+  assert.equal(reuse.length, 2);
+  assert.equal(reuse[0].costText, '200 钻石');
+  assert.equal(reuse[1].free, true, '复用不额外扣费');
+
+  const fresh = model.cloneCostRows('avatar', PRICING, '');
+  assert.equal(fresh.filter((row) => row.free).length, 0, '视频原声要新训练，没有免费项');
+  assert.match(fresh[1].costText, /200 钻石/);
+});
+
+test('扣费明细：单独训练声音只出一行', () => {
+  const rows = model.cloneCostRows('voice', PRICING, '');
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].label, /声音/);
+  assert.match(rows[0].costText, /200 钻石/);
+});
+
+test('扣费明细：价格没读到就返回空数组，界面整块不渲染假账单', () => {
+  assert.deepEqual(model.cloneCostRows('avatar', null, 'vo_1'), []);
+  assert.deepEqual(model.cloneCostRows('voice', null, ''), []);
+});

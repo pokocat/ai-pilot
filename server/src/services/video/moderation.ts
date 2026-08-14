@@ -30,17 +30,34 @@ export function clipMediaModerationBypassEnabled(): boolean {
     || process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION === 'true';
 }
 
-function projectText(project: unknown): string {
+/** 导出仅为单测：机审送检文本的组装口径必须能被直接断言，不用起一整条 render 链路。 */
+export function projectText(project: unknown): string {
   const p = project && typeof project === 'object' ? project as Record<string, unknown> : {};
   const segments = Array.isArray(p.segments)
     ? p.segments
     : (p.payloadJson && typeof p.payloadJson === 'object' && Array.isArray((p.payloadJson as Record<string, unknown>).segments)
       ? (p.payloadJson as Record<string, unknown>).segments as unknown[]
       : []);
-  return segments.map((segment) => {
+  const lines = segments.map((segment) => {
     const row = segment && typeof segment === 'object' ? segment as Record<string, unknown> : {};
     return row.role === 'tail' ? '' : String(row.text ?? '');
-  }).filter(Boolean).join('\n');
+  });
+  return [...lines, ...coverText(p)].filter(Boolean).join('\n');
+}
+
+/**
+ * 封面上的四个文本槽位同样会被烧进成片第一帧、随作品发布出去，
+ * 所以它必须和口播文案一起过机审 —— 只审 segments 会留下一条「图上写什么都行」的绕过路径。
+ */
+function coverText(project: Record<string, unknown>): string[] {
+  const payload = project.payloadJson && typeof project.payloadJson === 'object'
+    ? project.payloadJson as Record<string, unknown>
+    : {};
+  const raw = project.cover ?? payload.cover;
+  const cover = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null;
+  if (!cover) return [];
+  const slogan = Array.isArray(cover.sloganLines) ? cover.sloganLines.map((line) => String(line ?? '')) : [];
+  return [String(cover.keyword ?? ''), String(cover.handle ?? ''), ...slogan, String(cover.signature ?? '')];
 }
 
 export async function assertVideoProjectContent(project: unknown, identity: { tenantId: string; userId: string }) {

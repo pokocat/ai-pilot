@@ -10,7 +10,24 @@
 .cl-voice-option.on { border-color: var(--vd-avatar); background: var(--vd-avatar-soft); }
 .cl-voice-option .name { font-size: 12px; font-weight: 700; color: var(--vd-ink); }
 .cl-voice-option .meta { margin-top: 3px; font-size: 9px; color: var(--vd-muted); }
+// 扣费文案跟着每个候选项走，沿用本分包既有的价格语义色（见 styles/tokens.scss）：
+// 橙 = 贵的那个（要新训练），绿 = 不花钱（复用）。让「哪个便宜」扫一眼就分得出来，
+// 而不是等点进去才知道。不另造 gold/green 变量，免得与令牌表分叉。
+.cl-voice-option .cost { margin-top: 4px; font-size: 9px; font-weight: 700; color: var(--vd-avatar-deep); }
+.cl-voice-option .cost.free { color: var(--vd-success); font-weight: 400; }
+// 高度撑了一行 cost，min-height 跟着加，否则选中框会把文字压出圆角。
+.cl-voice-option { min-height: 66px; }
 .cl-profile-note { display: block; margin-top: 9px; font-size: 10px; line-height: 1.5; color: var(--vd-muted); }
+
+/* 成本明示卡：内测期必须让用户在动手之前看见要扣多少。 */
+.cl-cost { margin: 0 0 12px; padding: 14px 16px; }
+.cc-head { display: flex; align-items: center; gap: 6px; }
+.cc-title { font-size: 12px; font-weight: 700; color: var(--vd-ink); }
+.cc-row { margin-top: 9px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cc-label { flex: 1; min-width: 0; font-size: 12px; color: var(--vd-ink-2); }
+.cc-value { flex: none; font-size: 12px; font-weight: 700; color: var(--vd-avatar-deep); }
+.cc-value.free { color: var(--vd-success); font-weight: 400; }
+.cc-note { display: block; margin-top: 10px; font-size: 10px; line-height: 1.5; color: var(--vd-muted); }
 
 .vd-clone { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }

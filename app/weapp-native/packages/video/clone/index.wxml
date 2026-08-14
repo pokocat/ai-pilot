@@ -3,7 +3,7 @@
     <view class="vd-safe"></view>
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">{{mode === 'voice' ? '提升专属声音' : '创建我的数字分身'}}</text>
+      <text class="vd-title">{{mode === 'voice' ? (retrainVoiceId ? '重新训练声音' : '提升专属声音') : '创建我的数字分身'}}</text>
       <text class="vd-headact"> </text>
     </view>
 
@@ -21,9 +21,25 @@
       <!-- 可选声音增强：它是管理页的独立任务，不在数字人创建主链上。 -->
       <block wx:if="{{mode === 'voice' && step === 1}}">
         <view class="cl-enhance-intro">
-          <text class="cl-enhance-kicker">可选增强</text>
-          <text class="cl-h">让分身更像你的声音</text>
-          <text class="cl-s">数字人已经可以由一段视频创建。单独录一段干净人声，只是让后续口播的音色更稳定、更像你。</text>
+          <text class="cl-enhance-kicker">{{retrainVoiceId ? '重新训练' : '可选增强'}}</text>
+          <text class="cl-h">{{retrainVoiceId ? '用新录音换掉现有声音' : '让分身更像你的声音'}}</text>
+          <!-- 重训是就地覆盖那条声音（供应商 recreate 改的是同一个对象），不是新增一条。
+               不说清楚的话，用户会以为自己在攒声音库，结果原来的音色没了。 -->
+          <text class="cl-s">{{retrainVoiceId ? '这段新录音会替换掉这条声音现在的音色，之后的口播都用新的；已经生成好的成片不受影响。' : '数字人已经可以由一段视频创建。单独录一段干净人声，只是让后续口播的音色更稳定、更像你。'}}</text>
+        </view>
+
+        <!-- 训练声音是全流程最贵的单次动作，必须在录之前就把价摆出来。价格读不到时整块不渲染。 -->
+        <view wx:if="{{costRows.length}}" class="cl-cost vd-card">
+          <view class="cc-head">
+            <native-icon name="diamond" tone="gold" size="15"></native-icon>
+            <text class="cc-title">这次要扣多少</text>
+          </view>
+          <view wx:for="{{costRows}}" wx:key="key" class="cc-row">
+            <text class="cc-label">{{item.label}}</text>
+            <text class="cc-value {{item.free ? 'free' : ''}}">{{item.costText}}</text>
+          </view>
+          <text wx:if="{{retrainQuotaText}}" class="cc-note">{{retrainQuotaText}}</text>
+          <text class="cc-note">{{retrainVoiceId ? '重新训练比新建一条便宜，也不会多占一份克隆权益。' : '已经有可用声音的话，直接在创建数字人时复用它，不额外扣费。'}}</text>
         </view>
 
         <view class="cl-source-tabs">
@@ -66,13 +82,37 @@
           <text class="cl-profile-label">给这个形象起个名字</text>
           <input class="cl-name-input" value="{{avatarName}}" maxlength="20" placeholder="例如：门店日常、工作室正装" bindinput="changeAvatarName" />
           <text class="cl-profile-label voice">关联声音</text>
+          <!-- 候选项与扣费文案都由 model.voiceChoices 预算好：默认复用（不额外扣费）排在最前，
+               「视频原声」= 新训练一条，带价展示，绝不写成「自动提取」让人以为白送。 -->
           <scroll-view class="cl-voice-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
             <view class="cl-voice-options">
-              <view class="cl-voice-option {{!selectedVoiceId ? 'on' : ''}}" data-id="" bindtap="chooseExistingVoice"><text class="name">视频原声</text><text class="meta">自动提取</text></view>
-              <view wx:for="{{voices}}" wx:key="id" class="cl-voice-option {{selectedVoiceId === item.id ? 'on' : ''}}" data-id="{{item.id}}" bindtap="chooseExistingVoice"><text class="name">{{item.name}}</text><text class="meta">{{item.source === 'video' ? '来自视频' : '单独录制'}}</text></view>
+              <view
+                wx:for="{{voiceOptions}}"
+                wx:key="key"
+                class="cl-voice-option {{selectedVoiceId === item.id ? 'on' : ''}} {{item.free ? '' : 'paid'}}"
+                data-id="{{item.id}}"
+                bindtap="chooseExistingVoice"
+              >
+                <text class="name">{{item.name}}</text>
+                <text class="meta">{{item.meta}}</text>
+                <text class="cost {{item.free ? 'free' : ''}}">{{item.costText}}</text>
+              </view>
             </view>
           </scroll-view>
-          <text class="cl-profile-note">选择已有声音后会直接关联；不选则从这段视频里尽力生成基础声音。</text>
+          <text class="cl-profile-note">{{voiceNoteText}}</text>
+        </view>
+
+        <!-- 成本明示：价格来自服务端（运营后台可配），costRows 为空 = 还没读到价格，整块不渲染。 -->
+        <view wx:if="{{costRows.length}}" class="cl-cost vd-card">
+          <view class="cc-head">
+            <native-icon name="diamond" tone="gold" size="15"></native-icon>
+            <text class="cc-title">这次要扣多少</text>
+          </view>
+          <view wx:for="{{costRows}}" wx:key="key" class="cc-row">
+            <text class="cc-label">{{item.label}}</text>
+            <text class="cc-value {{item.free ? 'free' : ''}}">{{item.costText}}</text>
+          </view>
+          <text class="cc-note">训练一条新声音在供应商侧成本很高，内测期请优先复用已有声音。</text>
         </view>
 
         <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="pickFace">

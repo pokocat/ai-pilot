@@ -84,7 +84,8 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   }
   // 2026-08-12 IA 重排：+1 = pages/pouch（锦囊作品页）。studio 降为过渡跳转页但仍注册（接老分享卡）。
   // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
-  assert.equal(routes.length, 51, '路由数量变化时必须同步审计原生迁移覆盖');
+  // 2026-08-13 成片封面：+1 = packages/video/cover（出片确认页的可选支线，填四个文本槽位）。
+  assert.equal(routes.length, 52, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -174,6 +175,90 @@ test('素材库显示真实封面，浏览与挑选态都保留可播放预览',
   assert.match(assetsWxml, /catchtap="previewAsset"/);
   assert.match(assetsWxml, /previewAsset\.contentUrl/);
   assert.match(assetsWxml, /poster="\{\{previewAsset\.previewUrl\}\}"/);
+});
+
+test('采集与素材上传必须取原始画质：上传分辨率决定成片分辨率', () => {
+  const cloneJs = read('weapp-native/packages/video/clone/index.js');
+  const assetsJs = read('weapp-native/packages/video/assets/index.js');
+  // 不写 sizeType 时微信默认取压缩版，等于在源头把成片画质砍掉（石榴 2026-08-13 确认
+  // 「上传视频的分辨率决定生成视频的分辨率」）。sizeType 对视频自基础库 2.25.0 起生效，
+  // 本项目 libVersion 3.16.2，远高于该门槛。
+  for (const [name, source] of [['clone', cloneJs], ['assets', assetsJs]]) {
+    assert.match(source, /sizeType:\s*\['original'\]/, `${name} 的 chooseMedia 必须显式取原始画质`);
+  }
+  const libVersion = JSON.parse(read(appRoot, 'project.config.json')).libVersion;
+  const [major, minor] = String(libVersion).split('.').map(Number);
+  assert.ok(major > 2 || (major === 2 && minor >= 25),
+    `sizeType 对视频要基础库 ≥2.25.0 才生效，当前 libVersion=${libVersion}`);
+  // 图片场景（聊天附件 / 海报）是**故意**压缩的，不要被这条规则带跑
+  assert.match(read(chatCoreRoot, 'behavior.js'), /sizeType:\s*\['compressed'\]/, '聊天图片附件仍应压缩');
+});
+
+test('素材分辨率：未知与 0 不许混，端上不得渲染 0×0', () => {
+  const assetsJs = read('weapp-native/packages/video/assets/index.js');
+  const assetsWxml = read('weapp-native/packages/video/assets/index.wxml');
+  // 宽高由 model.mediaDimensions 判定，拿不到就整体不传字段（不落 0 到服务端）
+  assert.match(assetsJs, /mediaDimensions/);
+  assert.match(assetsJs, /resolutionText:\s*formatResolution\(item\.width,\s*item\.height\)/);
+  // 空串 = 未知 → 整块不渲染；wxml 不得自己拼宽高（拼就绕过了空值判定）
+  assert.match(assetsWxml, /wx:if="\{\{item\.resolutionText\}\}"/, '未知分辨率必须整块不渲染');
+  assert.doesNotMatch(assetsWxml, /item\.width\s*\+|\{\{item\.width\}\}/, '宽高拼接只允许发生在 model.js 里');
+});
+
+test('创建数字人默认复用已有声音，新训练要主动选且必须明示扣费', () => {
+  const cloneJs = read('weapp-native/packages/video/clone/index.js');
+  const cloneWxml = read('weapp-native/packages/video/clone/index.wxml');
+  const videoApi = read('weapp-native/packages/video/api.js');
+  // 默认值来自 model.voiceChoices 的 defaultVoiceId（有可用声音就选第一条），
+  // 不再是原先恒为空串的「视频原声」——那等于每建一个形象都顺带新训一条声音。
+  assert.match(cloneJs, /voiceChoices/);
+  assert.match(cloneJs, /this\.voiceTouched \? this\.data\.selectedVoiceId : defaultVoiceId/,
+    '用户动过选择之后，后到的默认值不得覆盖他的选择');
+  assert.match(cloneJs, /voiceTouched = true/, '主动选择要留痕');
+  // 价格必须来自服务端，端上不许硬编码
+  assert.match(videoApi, /clonePricing/);
+  assert.match(videoApi, /'\/clone-pricing'/);
+  assert.doesNotMatch(cloneJs, /[0-9]{2,}\s*钻石/, '端上不得硬编码价格数字，一律从服务端取');
+  assert.doesNotMatch(read('weapp-native/packages/video/config.js'), /voiceCreate|avatarVideo|钻石/,
+    '克隆价格不得进端上配置常量（对外定价数据归运营后台）');
+  // 扣费明细整块由 JS 预算好；WXML 不碰价格算术（与方案卡同一条铁律）
+  assert.match(cloneWxml, /wx:if="\{\{costRows\.length\}\}"/, '价格没读到时不得渲染假账单');
+  assert.match(cloneWxml, /\{\{item\.costText\}\}/);
+  assert.doesNotMatch(cloneWxml, /costRows\[[0-9]/, 'WXML 不得对价格做下标算术');
+  assert.match(cloneWxml, /复用不额外扣费|voiceNoteText/, '必须说清复用不额外扣费');
+  // 切换声音来源后账单必须重算。少了这一步，用户切到「新训练」而明细还写着「不额外扣费」——
+  // 与 d70e1bb（结算价没跟着档位走）同一类回归，实测时确实复现过。
+  assert.match(cloneJs, /selectedVoiceId: id[\s\S]{0,200}?this\.chargeState\(id\)/,
+    '选中声音时必须用新 id 同步重算账单');
+  // 明细行与提交用的确认报价必须同源：两处各算一次，迟早会有一处忘了跟着档位走。
+  assert.match(cloneJs, /chargeState\(selectedVoiceId\)\s*\{[\s\S]{0,600}?costRows:[\s\S]{0,300}?expectedCredits:/,
+    'costRows 与 expectedCredits 必须出自同一次计算');
+});
+
+test('训练要预扣钻石：提交必带幂等标识与确认报价，价格没读到不许提交', () => {
+  const cloneJs = read('weapp-native/packages/video/clone/index.js');
+  const videoApi = read('weapp-native/packages/video/api.js');
+  const avatarJs = read('weapp-native/packages/video/avatar/index.js');
+  // 预扣的两个前提字段。缺任一个服务端直接 422 —— 端上必须真的发出去。
+  assert.match(videoApi, /clientRequestId: payload\.clientRequestId/, '克隆上传必须带幂等标识');
+  assert.match(videoApi, /expectedCredits/, '克隆上传必须带端上看到的确认报价');
+  assert.match(cloneJs, /assertQuoteReady\(\)/, '价格没读到时不许提交');
+  assert.match(cloneJs, /expectedCredits == null/, '0（免费）与 null（还不知道）不许混');
+  // 余额不足要引到充值，而不是甩一句「提交失败」。
+  assert.match(cloneJs, /INSUFFICIENT_CREDITS/);
+  // 幂等标识由「素材 + 报价」派生：手动在各素材变更处清空，漏一处就会让新素材复用旧标识，
+  // 服务端把上一单结果原样返回，用户以为新素材训好了其实压根没提交。
+  assert.match(cloneJs, /ensureCloneRequestId\(filePath\)[\s\S]{0,400}?this\.data\.expectedCredits/,
+    '幂等标识必须随素材与报价变化，不能靠手动清空');
+  assert.match(cloneJs, /ensureCloneRequestId\(this\.data\.voiceFile\.path\)/);
+  assert.match(cloneJs, /ensureCloneRequestId\(this\.data\.faceFile\.path\)/);
+  // 重训入口：分身管理页必须把已有声音的 id 带过去，否则「重新录制」永远走新建，
+  // 每次烧掉一份克隆权益，而供应商本来每条给 4 次免费重训。
+  assert.match(avatarJs, /linkedVoiceId/, '重录已有声音必须带上那条声音的 id');
+  assert.match(avatarJs, /voiceId=\$\{encodeURIComponent\(retrainVoiceId\)\}/);
+  assert.match(cloneJs, /retrainVoiceId: mode === 'voice' \? String\(opts\.voiceId \|\| ''\) : ''/,
+    '形象模式的 voiceId 是「关联哪条」，不是「重训哪条」，不许混用');
+  assert.match(cloneJs, /voiceId: this\.data\.retrainVoiceId/, '声音提交必须把重训目标发给服务端');
 });
 
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {
@@ -420,8 +505,8 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.safe-title-wrap\s*\{[^}]*text-align:\s*left;/s);
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
-  // 主包/既有分包 36 页 + 快出片分包 12 页（+templates 模板专区），全部复用同一套胶囊几何。
-  assert.equal(navRoots.length, 48);
+  // 主包/既有分包 36 页 + 快出片分包 13 页（+templates 模板专区、+cover 成片封面），全部复用同一套胶囊几何。
+  assert.equal(navRoots.length, 49);
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {

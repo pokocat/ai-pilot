@@ -175,6 +175,7 @@ import type {
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
   AdminUserQuotaView, AdminQuotaAdjustRequest,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
+  AdminClonePricing, AdminClonePricingUpdate,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
 // —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
@@ -188,6 +189,8 @@ export type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
   AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
 } from '../../shared/contracts';
+// —— 短视频克隆动作定价（数字人 / 专属声音的钻石单价）——
+export type { AdminClonePricing, AdminClonePricingUpdate } from '../../shared/contracts';
 // —— 附身登录（impersonation，owner-only）——
 export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
@@ -344,6 +347,12 @@ export const api = {
   },
   // 重试失败任务（仅 owner/master）：failed → pending、attempts 清零，不重复扣费。
   retryCreativeJob: (id: string) => req<{ ok: boolean; jobId: string; status: string }>(`/admin/creative/jobs/${encodeURIComponent(id)}/retry`, 'POST', {}),
+  // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
+  // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。
+  clonePricing: () => req<AdminClonePricing>('/admin/video/clone-pricing'),
+  // 仅 owner/master。首次核定服务端要求四档一起提交（只改一档会把另外三档的占位价一并升格成
+  // 「运营配过的价」），所以页面一律整份提交 —— 别改成只发脏字段。
+  saveClonePricing: (body: AdminClonePricingUpdate) => req<AdminClonePricing>('/admin/video/clone-pricing', 'PUT', body),
   // 手动开通套餐 / 发放·收回模块（仅 owner/master）。
   // force：改档会缩短用户有效期时（降级 / 不限期→限期）服务端回 409 PLAN_CHANGE_SHORTENS，
   // 运营看清损失天数后带 force=true 重试才执行。升级/同档会自动结转剩余天数（carriedDays）。

@@ -34,6 +34,8 @@ function buildProject(templateId, id) {
     avatarId: 'av_mock',
     voiceId: 'vo_mock',
     subtitleStyle: { aiWatermark: false },
+    // 封面默认关着：它是出片确认页的可选支线，和线上建项目时的默认值保持一致
+    cover: { enabled: false },
     updatedAt: Date.now(),
   };
 }
@@ -283,6 +285,11 @@ module.exports = {
   avatars: () => delay(clone(avatars)),
   voices: () => delay(clone(voices)),
   avatarRequirements: () => delay(clone(CAPTURE_REQUIREMENTS)),
+  // 形状必须与 GET /video/clone-pricing 逐字段一致（server/src/services/video/pricing.ts 的 ClonePricing）。
+  // 数值取服务端兜底价，configured=false —— mock 环境本来就没有运营配置，谎报 true 会让端上
+  // 把兜底价当成线上价来渲染口径。mock 不得比真服务端「友好」。
+  retrainQuota: (id) => delay({ voiceId: id, available: true, retrainable: true, used: 1, total: 4, remaining: 3 }),
+  clonePricing: () => delay({ voiceCreate: 200, voiceRetrain: 60, avatarVideo: 200, avatarImage: 100, configured: false }),
   startConsent: () => {
     const record = { id: `cc_mock_${Date.now()}`, status: 'submitted', accepted: true, verified: false, createdText: '刚刚', scope: '本人形象与声音出片' };
     consentHistory.unshift(record);
