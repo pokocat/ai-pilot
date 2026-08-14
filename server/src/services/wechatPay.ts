@@ -14,7 +14,8 @@
 import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { applyPlanPurchase, applySkuGrant } from './purchase.js';
+import { applyPlanPurchase, applySkuGrant, skuPackAmount } from './purchase.js';
+import { revokeQuotaPack } from './tokenQuota.js';
 import { parseAttribution, recordActivation } from './activation.js';
 import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
@@ -943,6 +944,12 @@ async function revokeOrderGrant(
     const kind = snap?.sku?.kind ?? skuRow?.kind ?? 'module';
     const grantsModuleKey = snap?.sku?.grantsModuleKey ?? skuRow?.grantsModuleKey ?? null;
     const sourceEntitlement = await tx.skuEntitlement.findUnique({ where: { sourceOrderId: order.id } });
+    // 增购包回收量：以权益账本的**实际发放量**为准（不限量兜底跳过发放时 quantity=0 → 不追扣）；
+    // 无 entitlement（异常/历史）才回退下单时快照，最后才回退现行行（运营事后改 amount 不影响历史订单）。
+    const snapPackAmount = skuPackAmount(snap?.sku?.metaJson ?? null);
+    const packAmount = sourceEntitlement
+      ? Math.max(0, sourceEntitlement.quantity)
+      : (snapPackAmount > 0 ? snapPackAmount : skuPackAmount(skuRow?.metaJson ?? null));
     if (sourceEntitlement && sourceEntitlement.status === 'active') {
       await tx.skuEntitlement.update({ where: { id: sourceEntitlement.id }, data: { status: 'refunded', refundedAt: new Date() } });
     }
@@ -958,6 +965,19 @@ async function revokeOrderGrant(
         const bonus = Math.max(0, Number(extra.storageBonus ?? 0) - bytes);
         await tx.profile.update({ where: { id: profile.id }, data: { extraJson: { ...extra, storageBonus: bonus } as Prisma.InputJsonValue } });
       }
+    } else if (kind === 'credits') {
+      // 钻石增购包与套餐赠送合池，无法区分「花的是哪一笔」→ 照抄套餐退款的保守口径：
+      // 只追回 min(当前余额, 本单发放量)，不打成负数；不限量（-1）余额不动。
+      if (packAmount > 0) {
+        const last = await tx.creditLedger.findFirst({ where: { userId: order.userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+        const balance = last?.balance ?? 0;
+        if (balance > 0) {
+          await chargeCredits(order.tenantId, order.userId, Math.min(balance, packAmount), `退款追回 · ${snapshotItemName(order)}`, tx);
+        }
+      }
+    } else if (kind === 'quota') {
+      // 算力增购包：只追回尚未消耗的部分（min(发放量, packRemaining)）。
+      await revokeQuotaPack(tx, order.userId, packAmount);
     } else if (kind === 'module' && grantsModuleKey && (!sourceEntitlement || otherActiveSources === 0)) {
       await tx.userModule.updateMany({
         where: { userId: order.userId, moduleKey: grantsModuleKey, source: 'purchase' },

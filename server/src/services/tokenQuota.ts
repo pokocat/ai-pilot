@@ -62,27 +62,48 @@ const isUnlimited = (quota: number) => quota < 0;
 
 export interface QuotaState {
   quota: number; // 本月授予总额度，-1=不限量
-  balance: number; // 剩余（可为负=已透支/耗尽）
-  used: number; // 本月已用 = max(0, quota-balance)；不限量返回 0
+  balance: number; // 剩余（含增购算力包；可为负=已透支/耗尽）
+  used: number; // 本月已用（只算月度部分，增购包消耗不计入）；不限量返回 0
   unlimited: boolean;
+  packBalance: number; // 增购算力包剩余（派生的 packRemaining，永久有效直到用完）
 }
 
-const emptyState: QuotaState = { quota: 0, balance: 0, used: 0, unlimited: false };
-const unlimitedState: QuotaState = { quota: -1, balance: -1, used: 0, unlimited: true };
+const emptyState: QuotaState = { quota: 0, balance: 0, used: 0, unlimited: false, packBalance: 0 };
+const unlimitedState: QuotaState = { quota: -1, balance: -1, used: 0, unlimited: true, packBalance: 0 };
 
-function toState(quota: number, balance: number): QuotaState {
-  if (isUnlimited(quota)) return unlimitedState;
-  return { quota, balance, used: Math.max(0, quota - balance), unlimited: false };
+/**
+ * 增购算力包（pack-in-balance）的派生剩余量。约定「消耗先吃月度、后吃 pack」，
+ * 故 pack 真实剩余 = 总余额被 clamp 到上一个同步点的 pack 存量之内；
+ * quota<0（不限量套餐）时余额恒为负哨兵、pack 从未被消耗，直接取存量。
+ */
+export function packRemainingOf(row: { quota: number; balance: number; packBalance: number }): number {
+  const stock = Math.max(0, row.packBalance);
+  if (isUnlimited(row.quota)) return stock;
+  return Math.min(Math.max(0, row.balance), stock);
+}
+
+/** 同步点刷写 balance 的统一口径：不限量保持负哨兵，其余 = 月度额度 + pack 剩余。 */
+function balanceWithPack(quota: number, packRemaining: number): number {
+  return isUnlimited(quota) ? quota : quota + Math.max(0, packRemaining);
+}
+
+function toState(quota: number, balance: number, packBalance: number): QuotaState {
+  const pack = packRemainingOf({ quota, balance, packBalance });
+  if (isUnlimited(quota)) return { ...unlimitedState, packBalance: pack };
+  // 已用只算月度：先把 pack 剩余从总余额里剔除，剩下的才是月度余额。
+  const monthlyRemaining = Math.max(0, balance - pack);
+  return { quota, balance, used: Math.max(0, quota - monthlyRemaining), unlimited: false, packBalance: pack };
 }
 
 /**
  * 取/建用户当月额度账户，惰性重置（购买时快照 B + 订阅锚点子周期 + 过期冻结）：
  * - **首建账户**：初始额度 = live plan.tokenQuotaPerMonth（购买时快照；之后不再回读 live plan）。
  * - **跨锚点子周期**：复用 `wallet.quota` 快照重置 balance（**不回读 live plan** → 后台改套餐只影响新购）。
- * - **已过期**：quota / balance 归 0 冻结（只读锁定的额度侧体现；assertPlanActive 另在 AI 入口拦 403）。
+ * - **已过期**：quota 归 0 冻结、balance 只保留增购包剩余（只读锁定的额度侧体现；assertPlanActive 另在 AI 入口拦 403）。
+ * - **增购算力包**：三个同步点都先派生 packRemaining 再刷写，绝不把「买来的、永久有效」的算力抹掉。
  * periodKey 语义：付费用户=锚点子周期起始日(YYYY-MM-DD)；免费/历史用户=自然月(YYYY-MM)。见 planTime.periodKeyOf。
  */
-async function loadWallet(userId: string): Promise<{ quota: number; balance: number } | null> {
+async function loadWallet(userId: string): Promise<{ quota: number; balance: number; packBalance: number } | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { tenantId: true, planActivatedAt: true, planExpiresAt: true, plan: { select: { id: true, name: true, tokenQuotaPerMonth: true, creditsPerMonth: true, period: true } } },
@@ -108,6 +129,9 @@ async function loadWallet(userId: string): Promise<{ quota: number; balance: num
   if (!w) return null;
 
   // 到期临时加额惰性回收：quota 与 balance 同减，保持 used 不变；审计记录本身保留。
+  // 增购包口径：这里刻意不动 packBalance（回收的是运营临时加额，不是买来的包）。极端情况下
+  // （回收把 balance 压到 packBalance 之下）派生的 packRemaining 会被临时侵蚀 —— 保守方向、可接受，
+  // 不为此在临时加额路径上再叠一层 pack 记账。
   const expiredAdjustments = await prisma.tokenQuotaAdjustment.findMany({
     where: { userId, revokedAt: null, expiresAt: { lte: at } }, select: { id: true, delta: true },
   });
@@ -155,29 +179,39 @@ async function loadWallet(userId: string): Promise<{ quota: number; balance: num
       // 另一个并发请求可能已完成跨期重置并开始预扣；此时绝不能再把余额刷回满额。
       if (fresh.periodKey === pk) return { wallet: fresh, crossed: false };
       const q = expired ? 0 : fresh.quota;
+      // 增购包不随月度重置清零：先按刷写前的行派生 pack 剩余，再把它叠回新余额并落成新存量。
+      const pr = packRemainingOf(fresh);
       const reset = await tx.tokenWallet.update({
         where: { userId },
-        data: { quota: q, balance: q, periodKey: pk },
+        data: { quota: q, balance: balanceWithPack(q, pr), packBalance: pr, periodKey: pk },
       });
       return { wallet: reset, crossed: true };
     });
     await ensureMonthlyCredits(resetResult.crossed);
-    return { quota: resetResult.wallet.quota, balance: resetResult.wallet.balance };
+    return { quota: resetResult.wallet.quota, balance: resetResult.wallet.balance, packBalance: resetResult.wallet.packBalance };
   }
   await ensureMonthlyCredits(false);
-  // 同子周期内刚过期：立即冻结到 0（至多一次过渡写，之后幂等）。
-  if (expired && (w.quota !== 0 || w.balance !== 0)) {
-    const z = await prisma.tokenWallet.update({ where: { userId }, data: { quota: 0, balance: 0 } });
-    return { quota: z.quota, balance: z.balance };
+  // 同子周期内刚过期：月度额度立即冻结到 0，但**增购包保值**（买来的算力永久有效，不因套餐到期蒸发）。
+  // 因此过期用户的 balance 可能仍 >0——这不是漏洞：AI 入口有 assertPlanActive 403 挡着，
+  // pack 只是被冻结保值，续费后（setQuota 同样保 pack）即可继续消耗。
+  if (expired && (w.quota !== 0 || w.balance !== packRemainingOf(w) || w.packBalance !== packRemainingOf(w))) {
+    const z = await prisma.$transaction(async (tx) => {
+      await lockQuota(tx, userId);
+      const fresh = await tx.tokenWallet.findUniqueOrThrow({ where: { userId } });
+      const pr = packRemainingOf(fresh);
+      if (fresh.quota === 0 && fresh.balance === pr && fresh.packBalance === pr) return fresh;
+      return tx.tokenWallet.update({ where: { userId }, data: { quota: 0, balance: pr, packBalance: pr } });
+    });
+    return { quota: z.quota, balance: z.balance, packBalance: z.packBalance };
   }
-  return { quota: w.quota, balance: w.balance };
+  return { quota: w.quota, balance: w.balance, packBalance: w.packBalance };
 }
 
 /** 当前额度状态（供 /me 展示进度条）。 */
 export async function getQuotaState(userId: string): Promise<QuotaState> {
   const w = await loadWallet(userId);
   if (!w) return emptyState;
-  return toState(w.quota, w.balance);
+  return toState(w.quota, w.balance, w.packBalance);
 }
 
 /**
@@ -198,15 +232,15 @@ export async function ensureQuota(userId: string): Promise<void> {
 export async function chargeQuota(userId: string, realTokens: number, ratio: number): Promise<QuotaState> {
   const w = await loadWallet(userId);
   if (!w) return emptyState;
-  if (isUnlimited(w.quota)) return unlimitedState;
+  if (isUnlimited(w.quota)) return toState(w.quota, w.balance, w.packBalance);
   const cost = Math.ceil(Math.max(0, realTokens) * (ratio > 0 ? ratio : 1));
-  if (cost <= 0) return toState(w.quota, w.balance);
+  if (cost <= 0) return toState(w.quota, w.balance, w.packBalance);
   const updated = await prisma.tokenWallet.update({
     where: { userId },
     data: { balance: { decrement: cost } },
-    select: { quota: true, balance: true },
+    select: { quota: true, balance: true, packBalance: true },
   });
-  return toState(updated.quota, updated.balance);
+  return toState(updated.quota, updated.balance, updated.packBalance);
 }
 
 // 额度账户的 per-user 串行锁（与 credits 同套路）：保证「校验余额 → 扣减」整体原子，杜绝并发无界透支。
@@ -332,20 +366,20 @@ export async function settleDurableQuotaInTransaction(
   await lockQuota(tx, args.userId);
   const row = await tx.tokenWallet.findUnique({
     where: { userId: args.userId },
-    select: { quota: true, balance: true, periodKey: true },
+    select: { quota: true, balance: true, packBalance: true, periodKey: true },
   });
   if (!row) return emptyState;
-  if (args.unlimited || isUnlimited(row.quota)) return unlimitedState;
-  if (args.periodKey !== row.periodKey) return toState(row.quota, row.balance);
+  if (args.unlimited || isUnlimited(row.quota)) return toState(row.quota, row.balance, row.packBalance);
+  if (args.periodKey !== row.periodKey) return toState(row.quota, row.balance, row.packBalance);
   const delta = Math.max(0, args.reserved) - Math.max(0, args.charged);
   const updated = delta === 0
     ? row
     : await tx.tokenWallet.update({
       where: { userId: args.userId },
       data: { balance: { increment: delta } },
-      select: { quota: true, balance: true, periodKey: true },
+      select: { quota: true, balance: true, packBalance: true, periodKey: true },
     });
-  return toState(updated.quota, updated.balance);
+  return toState(updated.quota, updated.balance, updated.packBalance);
 }
 
 export async function reserveQuota(
@@ -356,7 +390,8 @@ export async function reserveQuota(
   const w = await loadWallet(userId); // 锁外先确保账户存在 + 惰性月度重置（upsert 不宜进事务）
   if (!w) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
   if (isUnlimited(w.quota)) {
-    return { unlimited: true, settle: async () => unlimitedState, refund: async () => {} };
+    const st = toState(w.quota, w.balance, w.packBalance);
+    return { unlimited: true, settle: async () => st, refund: async () => {} };
   }
   const targetReserved = Math.ceil(Math.max(0, opts?.reserveTokens ?? RESERVE_TOKENS) * (ratio > 0 ? ratio : 1));
   let reserved = targetReserved;
@@ -397,9 +432,9 @@ export async function reserveQuota(
         const updated = await tx.tokenWallet.update({
           where: { userId },
           data: { balance: { increment: delta } },
-          select: { quota: true, balance: true },
+          select: { quota: true, balance: true, packBalance: true },
         });
-        return toState(updated.quota, updated.balance);
+        return toState(updated.quota, updated.balance, updated.packBalance);
       });
       done = true; // 仅在结算成功后置位；若上面事务抛错，done 仍为 false → 路由 catch 的 refund 会退回预留
       return st;
@@ -416,23 +451,112 @@ export async function reserveQuota(
 }
 
 /**
- * 套餐购买/升级/续费：覆盖式授予当月额度（balance=quota，重置周期键）。quota<0=不限量。
+ * 套餐购买/升级/续费：覆盖式授予当月额度（balance=月度额度+增购包剩余，重置周期键）。quota<0=不限量。
  * activatedAt = 套餐激活锚点（购买/升级=now、续费=保留原锚点），用于对齐 periodKey 子周期；
  * 不传（如测试/历史调用）→ null → 按自然月键，行为同旧版。
+ * 增购包：硬覆盖前先在锁内派生 packRemaining 再叠回，避免续费/升级把买来的算力包抹掉（首建时为 0，行为同旧版）。
+ * db 不传时自行包一层事务（锁 + 读现行 + 写必须原子）；调用方已有事务则复用其 tx。
  */
 export async function setQuota(
   tenantId: string,
   userId: string,
   quota: number,
   activatedAt: Date | null = null,
-  db: Prisma.TransactionClient = prisma,
+  db?: Prisma.TransactionClient,
 ): Promise<void> {
   const pk = periodKeyOf(activatedAt, now());
-  await db.tokenWallet.upsert({
-    where: { userId },
-    update: { quota, balance: quota, periodKey: pk, tenantId },
-    create: { tenantId, userId, quota, balance: quota, periodKey: pk },
+  const apply = async (tx: Prisma.TransactionClient): Promise<void> => {
+    await lockQuota(tx, userId);
+    const cur = await tx.tokenWallet.findUnique({
+      where: { userId },
+      select: { quota: true, balance: true, packBalance: true },
+    });
+    const pr = cur ? packRemainingOf(cur) : 0;
+    const balance = balanceWithPack(quota, pr);
+    await tx.tokenWallet.upsert({
+      where: { userId },
+      update: { quota, balance, packBalance: pr, periodKey: pk, tenantId },
+      create: { tenantId, userId, quota, balance, packBalance: pr, periodKey: pk },
+    });
+  };
+  if (db) await apply(db);
+  else await prisma.$transaction(apply);
+}
+
+/**
+ * 增购算力包到账（SKU kind='quota'，永久有效直到用完）。由 applySkuGrant 在支付幂等事务内调用。
+ * balance 与 packBalance 同增；钱包不存在时**照抄 loadWallet 的首建口径**（未过期取 plan.tokenQuotaPerMonth、
+ * 过期/无套餐取 0，periodKey 按套餐锚点派生），绝不能建出 quota=0 的行抢掉有套餐用户的首建快照。
+ */
+export async function grantQuotaPack(
+  tx: Prisma.TransactionClient,
+  user: { id: string; tenantId: string },
+  amount: number,
+): Promise<void> {
+  const add = Math.floor(Math.max(0, Number(amount) || 0));
+  if (add <= 0) return;
+  await lockQuota(tx, user.id);
+  const cur = await tx.tokenWallet.findUnique({
+    where: { userId: user.id },
+    select: { quota: true, balance: true, packBalance: true },
   });
+  if (cur) {
+    await tx.tokenWallet.update({
+      where: { userId: user.id },
+      data: {
+        // 不限量套餐的 balance 是负哨兵，不能被 +amount 破坏；pack 存量照记，降档/到期时按存量叠回。
+        ...(isUnlimited(cur.quota) ? {} : { balance: { increment: add } }),
+        packBalance: { increment: add },
+      },
+    });
+    return;
+  }
+  const u = await tx.user.findUnique({
+    where: { id: user.id },
+    select: { planActivatedAt: true, planExpiresAt: true, plan: { select: { tokenQuotaPerMonth: true } } },
+  });
+  const at = now();
+  const initial = u && !isExpired(u.planExpiresAt, at) ? (u.plan?.tokenQuotaPerMonth ?? 0) : 0;
+  await tx.tokenWallet.create({
+    data: {
+      tenantId: user.tenantId,
+      userId: user.id,
+      quota: initial,
+      balance: balanceWithPack(initial, add),
+      packBalance: add,
+      periodKey: periodKeyOf(u?.planActivatedAt ?? null, at),
+    },
+  });
+}
+
+/**
+ * 增购算力包回收（退款）。只追回「尚未消耗」的部分：take = min(amount, packRemaining)。
+ * 无钱包 → no-op。返回实际追回量（供审计/测试断言）。
+ */
+export async function revokeQuotaPack(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  amount: number,
+): Promise<number> {
+  const want = Math.floor(Math.max(0, Number(amount) || 0));
+  if (want <= 0) return 0;
+  await lockQuota(tx, userId);
+  const cur = await tx.tokenWallet.findUnique({
+    where: { userId },
+    select: { quota: true, balance: true, packBalance: true },
+  });
+  if (!cur) return 0;
+  const pr = packRemainingOf(cur);
+  const take = Math.min(want, pr);
+  await tx.tokenWallet.update({
+    where: { userId },
+    data: {
+      // 不限量套餐的 balance 是负哨兵（pack 也从未被消耗），只需扣存量。
+      ...(isUnlimited(cur.quota) || take === 0 ? {} : { balance: { decrement: take } }),
+      packBalance: pr - take,
+    },
+  });
+  return take;
 }
 
 /** 套餐到期 → AI 交互门禁错误（D4）：拦一切产出/对话，只读放行。 */

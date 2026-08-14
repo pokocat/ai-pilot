@@ -39,8 +39,9 @@ import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
 import { WENCE_FLAG, normalizeChips, effectiveArms } from '../services/wence.js';
 import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard } from '../services/alertConfig.js';
-import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota } from '../services/tokenQuota.js';
+import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota, packRemainingOf } from '../services/tokenQuota.js';
 import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
+import { skuPackAmount } from '../services/purchase.js';
 import { now, dayStart } from '../services/clock.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
 import { aggregateToolStats } from '../services/toolStats.js';
@@ -76,6 +77,7 @@ import { effectivePrice, planPromotion, promoActive, type PlanPricingFields } fr
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { papayConfigured } from '../services/wechatPapay.js';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
@@ -700,7 +702,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const before = await getQuotaState(userId);
     await setQuota(user.tenantId, userId, target, user.planActivatedAt);
     const after = await getQuotaState(userId);
-    const snap = (s: typeof before) => ({ quota: s.quota, balance: s.balance, used: s.used, unlimited: s.unlimited });
+    const snap = (s: typeof before) => ({ quota: s.quota, balance: s.balance, used: s.used, unlimited: s.unlimited, packBalance: s.packBalance });
     await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.quota.set', payload: { by: actorName(actor), mode, quota: target, before: snap(before), after: snap(after) } });
     return { ok: true, quota: after };
   });
@@ -715,6 +717,8 @@ export async function adminRoutes(app: FastifyInstance) {
     return {
       userId: user.id, planId: user.planId, planName: user.plan?.name ?? null,
       quota: state.quota, used: state.used, remaining: state.balance, periodKey: wallet?.periodKey ?? '',
+      // 增购算力包剩余（永久有效直到用完）：运营查账要能看出 remaining 里有多少不是本月额度。
+      packBalance: state.packBalance,
       adjustments: adjustments.map((item) => ({
         id: item.id, delta: item.delta, reason: item.reason, operatorId: item.operatorId,
         startsAt: item.startsAt.toISOString(), expiresAt: item.expiresAt?.toISOString() ?? null, revokedAt: item.revokedAt?.toISOString() ?? null,
@@ -743,7 +747,14 @@ export async function adminRoutes(app: FastifyInstance) {
         const created = await tx.tokenQuotaAdjustment.create({
           data: { tenantId: user.tenantId, userId: req.params.id, delta, reason, operatorId: actorAccountId(actor), expiresAt },
         });
-        if (wallet.quota >= 0) await tx.tokenWallet.update({ where: { userId: req.params.id }, data: { quota: { increment: delta }, balance: { increment: delta } } });
+        // 临时加额抬高 balance 前先把 packBalance 归到派生值（packBalance := packRemaining，恒为等值或收缩，
+        // 不改变任何可见口径），否则「已被吃掉的 pack」会因 balance 变大而被 clamp 口径复活。
+        if (wallet.quota >= 0) {
+          await tx.tokenWallet.update({
+            where: { userId: req.params.id },
+            data: { quota: { increment: delta }, balance: { increment: delta }, packBalance: packRemainingOf(wallet) },
+          });
+        }
         return created;
       });
     } catch (e) { return sendErr(reply, e); }
@@ -760,9 +771,14 @@ export async function adminRoutes(app: FastifyInstance) {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quota:${req.params.id}`}))`;
       const wallet = await tx.tokenWallet.findUniqueOrThrow({ where: { userId: req.params.id } });
-      const used = wallet.quota < 0 ? 0 : Math.max(0, wallet.quota - wallet.balance);
+      // 增购包不参与「恢复标准额度」：先把 pack 剩余从余额里剥出来，算清月度已用，再把 pack 原样叠回。
+      const pack = packRemainingOf(wallet);
+      const used = wallet.quota < 0 ? 0 : Math.max(0, wallet.quota - Math.max(0, wallet.balance - pack));
       const quota = user.plan!.tokenQuotaPerMonth;
-      await tx.tokenWallet.update({ where: { userId: req.params.id }, data: { quota, balance: quota < 0 ? -1 : quota - used } });
+      await tx.tokenWallet.update({
+        where: { userId: req.params.id },
+        data: { quota, balance: quota < 0 ? -1 : quota - used + pack, packBalance: pack },
+      });
       await tx.tokenQuotaAdjustment.updateMany({ where: { userId: req.params.id, revokedAt: null }, data: { revokedAt: now() } });
     });
     await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.quota.restore_plan', payload: { by: actorName(actor), quota: user.plan.tokenQuotaPerMonth } });
@@ -2354,9 +2370,66 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // V7-12：单次付费商品（SKU）目录——运营可改价/启停（key、kind、grantsModuleKey 走代码目录 admin:sync-content，不在此改）。
-  app.get('/admin/skus', async () => prisma.sku.findMany({ orderBy: { sort: 'asc' } }));
-  app.patch<{ Params: { key: string }; Body: { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number } }>(
+  // V7-12：单次付费商品（SKU）目录——运营可改价/启停（module/service/storage 的 key、kind、grantsModuleKey
+  // 走代码目录 admin:sync-content，不在此改）。
+  // 2026-08-13 增购包：kind=credits(钻石) / quota(算力) 两类档位由运营在后台**自建**（POST/DELETE 只对这两类开放，
+  // 数量在 metaJson.amount）——对外定价归运营不归代码，故不进 seedConfig.SKUS，也不受 admin:sync-content 影响。
+  const PACK_KINDS = new Set(['credits', 'quota']);
+  const adminSku = (s: { id: string; key: string; name: string; desc: string; priceFen: number; kind: string; grantsModuleKey: string | null; metaJson: unknown; enabled: boolean; sort: number }) => ({
+    id: s.id, key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind,
+    grantsModuleKey: s.grantsModuleKey,
+    amount: PACK_KINDS.has(s.kind) ? skuPackAmount(s.metaJson) : null,
+    enabled: s.enabled, sort: s.sort,
+  });
+  app.get('/admin/skus', async () => (await prisma.sku.findMany({ orderBy: { sort: 'asc' } })).map(adminSku));
+
+  // 新建增购包档位。只允许 credits/quota：module/service/storage 的发放逻辑绑代码（grantsModuleKey / metaJson.bytes），
+  // 后台凭空造一行只会得到「付了钱发不出权益」的商品，故 400 拒绝。
+  app.post<{ Body: { kind?: string; name?: string; desc?: string; priceFen?: number; amount?: number; enabled?: boolean; sort?: number } }>(
+    '/admin/skus',
+    async (req, reply) => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const b = req.body ?? {};
+      const kind = String(b.kind ?? '').trim();
+      if (!PACK_KINDS.has(kind)) {
+        return reply.code(400).send({ error: '只能新建增购包（credits 钻石 / quota 算力）；其他类型商品走代码目录', code: 'SKU_KIND_NOT_ALLOWED' });
+      }
+      const name = String(b.name ?? '').trim().slice(0, 60);
+      if (!name) return reply.code(400).send({ error: '名称必填', code: 'BAD_NAME' });
+      const amount = Number(b.amount);
+      if (!Number.isInteger(amount) || amount <= 0) {
+        return reply.code(400).send({ error: '数量必须是正整数', code: 'BAD_AMOUNT' });
+      }
+      const priceFen = Number(b.priceFen);
+      // 0 元档不建：免费发放走既有用户运营写口（补发钻石 / 调额度），别在售卖目录里开白送入口。
+      if (!Number.isInteger(priceFen) || priceFen <= 0) {
+        return reply.code(400).send({ error: '售价（分）必须是大于 0 的整数；免费发放请走用户额度/钻石运营操作', code: 'BAD_PRICE' });
+      }
+      // key 服务端生成（运营不填、也不该编）：随机短 id 防碰撞，冲突极小概率下由 @unique 兜底。
+      const key = `pack-${kind}-${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+      let sku;
+      try {
+        sku = await prisma.sku.create({
+          data: {
+            key, name,
+            desc: String(b.desc ?? '').trim().slice(0, 500),
+            priceFen: Math.round(priceFen), kind,
+            metaJson: { amount } as Prisma.InputJsonValue,
+            enabled: typeof b.enabled === 'boolean' ? b.enabled : true,
+            sort: typeof b.sort === 'number' ? Math.round(b.sort) : 0,
+          },
+        });
+      } catch (e) { return sendErr(reply, e); }
+      await recordAudit({
+        action: 'admin.sku.create',
+        payload: { by: actorName(actor), key: sku.key, kind, name: sku.name, priceFen: sku.priceFen, amount, enabled: sku.enabled, sort: sku.sort },
+      });
+      return reply.code(201).send(adminSku(sku));
+    },
+  );
+
+  app.patch<{ Params: { key: string }; Body: { name?: string; desc?: string; priceFen?: number; amount?: number; enabled?: boolean; sort?: number } }>(
     '/admin/skus/:key',
     async (req, reply) => {
       // 改价/启停直接影响营收：仅 owner/master（与套餐改价、资金三写同级），审计带操作人与前后快照。
@@ -2371,18 +2444,56 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.priceFen === 'number' && b.priceFen >= 0) data.priceFen = Math.round(b.priceFen);
       if (typeof b.enabled === 'boolean') data.enabled = b.enabled;
       if (typeof b.sort === 'number') data.sort = Math.round(b.sort);
+      // 数量只对增购包开放（storage 的 metaJson.bytes 归代码）。改动只影响新订单：已下单的按
+      // buildOrderSnapshot 存的 metaJson 快照发放（见 markPaidAndApply / revokeOrderGrant）。
+      if (b.amount !== undefined) {
+        if (!PACK_KINDS.has(existing.kind)) {
+          return reply.code(400).send({ error: '只有增购包（credits/quota）能改数量', code: 'SKU_AMOUNT_NOT_ALLOWED' });
+        }
+        if (!Number.isInteger(b.amount) || b.amount <= 0) {
+          return reply.code(400).send({ error: '数量必须是正整数', code: 'BAD_AMOUNT' });
+        }
+        const meta = (existing.metaJson as Record<string, unknown> | null) ?? {};
+        data.metaJson = { ...meta, amount: b.amount } as Prisma.InputJsonValue;
+      }
       const sku = await prisma.sku.update({ where: { key: req.params.key }, data });
       await recordAudit({
         action: 'admin.sku.update',
         payload: {
           by: actorName(actor), key: sku.key,
-          before: { priceFen: existing.priceFen, enabled: existing.enabled },
-          after: { priceFen: sku.priceFen, enabled: sku.enabled },
+          before: { priceFen: existing.priceFen, enabled: existing.enabled, amount: skuPackAmount(existing.metaJson) },
+          after: { priceFen: sku.priceFen, enabled: sku.enabled, amount: skuPackAmount(sku.metaJson) },
         },
       });
-      return sku;
+      return adminSku(sku);
     },
   );
+
+  // 删除增购包档位。只允许 credits/quota（其余归代码目录）；有历史订单挂着就不删——订单快照虽然自带
+  // metaJson，但删了行会让订单页/对账失去商品来源，改用「停用」下架。
+  app.delete<{ Params: { key: string } }>('/admin/skus/:key', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const existing = await prisma.sku.findUnique({ where: { key: req.params.key } });
+    if (!existing) return reply.code(404).send({ error: 'SKU 不存在', code: 'SKU_NOT_FOUND' });
+    if (!PACK_KINDS.has(existing.kind)) {
+      return reply.code(400).send({ error: '只能删除增购包（credits/quota）；其他类型商品走代码目录', code: 'SKU_KIND_NOT_ALLOWED' });
+    }
+    const refs = await prisma.paymentOrder.count({ where: { skuKey: existing.key } });
+    if (refs > 0) {
+      return reply.code(409).send({
+        error: `「${existing.name}」已有 ${refs} 笔订单，不能删除。改为「停用」即可下架。`,
+        code: 'SKU_IN_USE',
+        refs,
+      });
+    }
+    await prisma.sku.delete({ where: { key: existing.key } });
+    await recordAudit({
+      action: 'admin.sku.delete',
+      payload: { by: actorName(actor), key: existing.key, kind: existing.kind, name: existing.name, priceFen: existing.priceFen, amount: skuPackAmount(existing.metaJson) },
+    });
+    return { ok: true };
+  });
 
   // ===== D-1 / WO-12：处方多来源漏斗报表（处方六态聚合 + 开通来源计数，一次两块） =====
   app.get<{ Querystring: { days?: string } }>('/admin/prescriptions/funnel', async (req): Promise<AdminPrescriptionFunnel> => {

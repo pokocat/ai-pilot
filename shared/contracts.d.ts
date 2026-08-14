@@ -296,18 +296,20 @@ export interface ProphecyLedger { items: ProphecyView[]; stats: ProphecyStats; }
 /** 本月 token 额度（客户端「钻石管理」只看进度 %）。limit/remaining<0=不限量 */
 export interface TokenQuotaView {
   limit: number;     // 本月授予总额度，-1=不限量
-  used: number;      // 本月已用
-  remaining: number; // 剩余（可为负=已耗尽）
+  used: number;      // 本月已用（仅月度部分，不含增购包消耗）
+  remaining: number; // 剩余（含增购包；可为负=已耗尽/透支）
   unlimited: boolean;
+  packRemaining?: number; // 增购算力包剩余（永久有效直到用完；旧服务端缺省=0）
 }
 export type UsageStatus = 'sufficient' | 'normal' | 'near_limit' | 'exhausted';
 export type UsageLevel = 'standard' | '5x' | '20x' | 'custom';
 /** 用户侧只消费相对进度，不读取内部额度原值；旧版兼容期 TokenQuotaView 仍保留。 */
 export interface PublicUsageView {
-  usagePercent: number;
-  usageStatus: UsageStatus;
+  usagePercent: number;   // 仅月度额度的进度；增购包不计入分母
+  usageStatus: UsageStatus; // 月度用满但增购包有余量时不报 exhausted（仍可产出）
   resetsAt: string;
   unlimited: boolean;
+  packRemaining?: number; // 增购算力包剩余 token 数（无包/旧服务端缺省=0）
 }
 /** 套餐有效期状态：驱动前端只读态 + 展示到期/剩余天数/下次额度重置日。 */
 export interface PlanStatusView {
@@ -1553,20 +1555,28 @@ export interface PlanPurchaseResult {
 export interface WechatPayParams { timeStamp: string; nonceStr: string; package: string; signType: 'RSA' | 'MD5' | 'HMAC-SHA256'; paySign: string; }
 
 /* ────────────── V7-12：单次付费商品（SKU） ────────────── */
-export type SkuKind = 'module' | 'service' | 'storage';
-/** 单次付费商品（GET /skus，公开）。kind=module 启用能力 | service 一次性服务 | storage 空间包。 */
+// 2026-08-13 增购包：kind 扩 credits(钻石增购包)/quota(算力增购包)，数量在 metaJson.amount，
+// 档位由运营后台自建（POST /admin/skus），不走 seedConfig 同步（对外定价归运营不归代码）。
+export type SkuKind = 'module' | 'service' | 'storage' | 'credits' | 'quota';
+/** 单次付费商品（GET /skus，公开）。kind=module 启用能力 | service 一次性服务 | storage 空间包
+ *  | credits 钻石增购包 | quota 算力增购包（永久有效直到用完）。 */
 export interface SkuView {
   key: string; name: string; desc: string; priceFen: number;
   kind: SkuKind; grantsModuleKey?: string | null;
+  amount?: number; // 增购包数量：credits=钻石颗数；quota=算力 token 数（其余 kind 不带）
 }
 /** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）；
  *  mock=测试期模拟支付单（PAY_MOCK_SUCCESS）：payParams 是占位值，端上必须跳过 wx.requestPayment，
  *  改调 POST /pay/mock/pay 触发到账，再复用 awaitPaymentApplied 轮询确认。 */
 export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; mock?: true; }
-/** 运营端 SKU 行（GET /admin/skus） */
-export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; enabled: boolean; sort: number; }
-/** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示（key 与 kind/grantsModuleKey 走代码目录，不在此改） */
-export interface AdminSkuUpdate { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number; }
+/** 运营端 SKU 行（GET /admin/skus）。amount 仅增购包（credits/quota）非空 */
+export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; amount?: number | null; enabled: boolean; sort: number; }
+/** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示；amount 仅增购包可改（改动只影响新订单，已下单走快照）。
+ *  key 与 kind/grantsModuleKey 不在此改（module/service/storage 走代码目录；增购包 kind 建档时定死）。 */
+export interface AdminSkuUpdate { name?: string; desc?: string; priceFen?: number; amount?: number; enabled?: boolean; sort?: number; }
+/** 运营端新建增购包（POST /admin/skus）：仅 credits/quota 两种 kind；key 服务端生成。
+ *  amount：credits=钻石颗数；quota=算力 token 数。priceFen>0（免费发放走用户运营写口，不建 0 元商品）。 */
+export interface AdminSkuCreate { kind: 'credits' | 'quota'; name: string; desc?: string; priceFen: number; amount: number; enabled?: boolean; sort?: number; }
 
 /* ────────────── D-3-7：生态工具注册表（运营 CRUD） ────────────── */
 /** 生态工具行（GET /admin/eco-tools）。id=toolKey，enabled 控制是否可开方。 */

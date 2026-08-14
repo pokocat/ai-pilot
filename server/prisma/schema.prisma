@@ -458,8 +458,8 @@ model Session {
   mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
   lastReadAt         DateTime? // 未读判定：最后一条 AI 回复晚于此即未读；打开会话时置 now
   activeGenerationId String?   @unique // 同一会话最多一个在途 GenerationJob；终态事务清空
-  lineageId         String? // 同一主线标识；新建主线显式写入，存量/非聊天会话允许空以便无损迁移
-  continuationOf    String? // 直接来源 Session；自关联只用于血缘，不复制消息
+  lineageId          String? // 同一主线标识；新建主线显式写入，存量/非聊天会话允许空以便无损迁移
+  continuationOf     String? // 直接来源 Session；自关联只用于血缘，不复制消息
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -475,7 +475,7 @@ model Session {
   predecessor      Session?                @relation("SessionContinuation", fields: [continuationOf], references: [id], onDelete: SetNull)
   continuations    Session[]               @relation("SessionContinuation")
   handoff          SessionHandoff?         @relation("SessionHandoffTarget")
-  sourceHandoffs   SessionHandoff[]         @relation("SessionHandoffSource")
+  sourceHandoffs   SessionHandoff[]        @relation("SessionHandoffSource")
   sourceFacts      UserFact[]
 
   @@index([userId, agentKey])
@@ -504,60 +504,60 @@ model Message {
 
 /// 持久对话生成任务：HTTP/SSE 只是订阅通道，本行才是生成、恢复、取消与结算事实源。
 model GenerationJob {
-  id                     String                     @id @default(cuid())
-  tenantId               String
-  userId                 String
-  sessionId              String
-  agentKey               String
-  clientRequestId        String
-  requestFingerprint     String
-  parentGenerationId     String?
-  status                 GenerationStatus           @default(queued)
-  phase                  GenerationPhase            @default(queue)
-  kind                   GenerationKind             @default(chat)
-  requestedOutput        String                     @default("unspecified")
-  deliveryMode           DeliveryMode               @default(single)
-  classificationStatus   GenerationClassificationStatus @default(not_required)
+  id                           String                         @id @default(cuid())
+  tenantId                     String
+  userId                       String
+  sessionId                    String
+  agentKey                     String
+  clientRequestId              String
+  requestFingerprint           String
+  parentGenerationId           String?
+  status                       GenerationStatus               @default(queued)
+  phase                        GenerationPhase                @default(queue)
+  kind                         GenerationKind                 @default(chat)
+  requestedOutput              String                         @default("unspecified")
+  deliveryMode                 DeliveryMode                   @default(single)
+  classificationStatus         GenerationClassificationStatus @default(not_required)
   classificationLeaseExpiresAt DateTime?
-  complexityJson         Json?
-  deliveryPlanId         String?
-  stageKey               String?
-  stageNumber            Int                        @default(1)
-  stageAttempt           Int                        @default(1)
-  deliveryStagesJson     Json?
-  imageCount             Int                        @default(0)
-  imageBatchCount        Int                        @default(0)
-  imageCompletedBatches  Int                        @default(0)
-  imageObservationsJson  Json?
-  imageSkippedIndexesJson Json?
-  imageTotalBytes        Int                        @default(0)
-  userMessageId          String                     @unique
-  resultMessageId        String?                    @unique
-  requestJson            Json
-  contextJson            Json?
-  contextFrozenAt        DateTime?
-  partialText            String                     @default("") @db.Text
-  replyJson              Json?
-  snapshotVersion        Int                        @default(0)
-  usageJson              Json?
-  usageSource            String?
-  terminationReason      String?
-  quotaPeriodKey         String?
-  quotaReserved          Int                        @default(0)
-  quotaCharged           Int                        @default(0)
-  settlementStatus       GenerationSettlementStatus @default(none)
-  settledAt              DateTime?
-  creditReserved         Int                        @default(0)
-  creditSettlementStatus GenerationSettlementStatus @default(none)
-  leaseOwner             String?
-  leaseVersion           Int                        @default(0)
-  leaseExpiresAt         DateTime?
-  heartbeatAt            DateTime?
-  cancelRequestedAt      DateTime?
-  startedAt              DateTime?
-  completedAt            DateTime?
-  createdAt              DateTime                   @default(now())
-  updatedAt              DateTime                   @updatedAt
+  complexityJson               Json?
+  deliveryPlanId               String?
+  stageKey                     String?
+  stageNumber                  Int                            @default(1)
+  stageAttempt                 Int                            @default(1)
+  deliveryStagesJson           Json?
+  imageCount                   Int                            @default(0)
+  imageBatchCount              Int                            @default(0)
+  imageCompletedBatches        Int                            @default(0)
+  imageObservationsJson        Json?
+  imageSkippedIndexesJson      Json?
+  imageTotalBytes              Int                            @default(0)
+  userMessageId                String                         @unique
+  resultMessageId              String?                        @unique
+  requestJson                  Json
+  contextJson                  Json?
+  contextFrozenAt              DateTime?
+  partialText                  String                         @default("") @db.Text
+  replyJson                    Json?
+  snapshotVersion              Int                            @default(0)
+  usageJson                    Json?
+  usageSource                  String?
+  terminationReason            String?
+  quotaPeriodKey               String?
+  quotaReserved                Int                            @default(0)
+  quotaCharged                 Int                            @default(0)
+  settlementStatus             GenerationSettlementStatus     @default(none)
+  settledAt                    DateTime?
+  creditReserved               Int                            @default(0)
+  creditSettlementStatus       GenerationSettlementStatus     @default(none)
+  leaseOwner                   String?
+  leaseVersion                 Int                            @default(0)
+  leaseExpiresAt               DateTime?
+  heartbeatAt                  DateTime?
+  cancelRequestedAt            DateTime?
+  startedAt                    DateTime?
+  completedAt                  DateTime?
+  createdAt                    DateTime                       @default(now())
+  updatedAt                    DateTime                       @updatedAt
 
   tenant           Tenant              @relation(fields: [tenantId], references: [id])
   user             User                @relation(fields: [userId], references: [id])
@@ -674,20 +674,20 @@ model Deliverable {
 
 /// 长期记忆（按 用户×智能体 隔离；可归属项目，可语义召回）
 model Memory {
-  id        String    @id @default(cuid())
-  tenantId  String
-  userId    String
-  agentKey  String
-  projectId String? // 归属项目（跨智能体共享时可空）
-  kind      String // fact | preference | feedback
-  category  String? // 军师记忆库六类：founder|company|status|vision|strategy|rapport（旧行为 null）
-  text      String    @db.Text
-  embedding Json? // float[]（生产用 pgvector；本地降级内存余弦）
-  weight    Float     @default(1.0)
-  source    String // conversation | document | deliverable_feedback
-  createdAt DateTime  @default(now())
+  id           String    @id @default(cuid())
+  tenantId     String
+  userId       String
+  agentKey     String
+  projectId    String? // 归属项目（跨智能体共享时可空）
+  kind         String // fact | preference | feedback
+  category     String? // 军师记忆库六类：founder|company|status|vision|strategy|rapport（旧行为 null）
+  text         String    @db.Text
+  embedding    Json? // float[]（生产用 pgvector；本地降级内存余弦）
+  weight       Float     @default(1.0)
+  source       String // conversation | document | deliverable_feedback
+  createdAt    DateTime  @default(now())
   reinforcedAt DateTime? // 近重提权时间；不得再改写原始 createdAt
-  expiresAt DateTime?
+  expiresAt    DateTime?
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id])
   user    User     @relation(fields: [userId], references: [id])
@@ -722,11 +722,11 @@ model UserFact {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceSession Session? @relation(fields: [sourceSessionId], references: [id], onDelete: SetNull)
-  supersedes   UserFact? @relation("UserFactReplacement", fields: [supersedesId], references: [id], onDelete: SetNull)
-  replacements UserFact[] @relation("UserFactReplacement")
+  tenant        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceSession Session?   @relation(fields: [sourceSessionId], references: [id], onDelete: SetNull)
+  supersedes    UserFact?  @relation("UserFactReplacement", fields: [supersedesId], references: [id], onDelete: SetNull)
+  replacements  UserFact[] @relation("UserFactReplacement")
 
   @@index([tenantId, userId, factKey, status])
   @@index([sourceSessionId])
@@ -828,37 +828,37 @@ model ReportVersion {
 
 /// 知识库条目（租户级，可挂项目）—— 统一承载：对话提炼 / 上传文档 / 报告引用
 model KnowledgeItem {
-  id           String   @id @default(cuid())
-  tenantId     String
-  projectId    String?
-  userId       String
-  kind         String // insight | document | decision | todo | report_ref
-  title        String?
-  text         String   @db.Text // 规范化文本（用于检索/注入）
-  sourceType   String // conversation | upload | deliverable | manual
-  sourceId     String? // sessionId / reportVersionId / uploadId
-  tagsJson     Json     @default("[]")
+  id                String   @id @default(cuid())
+  tenantId          String
+  projectId         String?
+  userId            String
+  kind              String // insight | document | decision | todo | report_ref
+  title             String?
+  text              String   @db.Text // 规范化文本（用于检索/注入）
+  sourceType        String // conversation | upload | deliverable | manual
+  sourceId          String? // sessionId / reportVersionId / uploadId
+  tagsJson          Json     @default("[]")
   // —— V7-06 三段式资料整理管道（加法，存量数据零迁移）——
-  stage        String   @default("confirmed") // staging 待整理（不进检索）| optimized 已优化（待确认）| confirmed 知识库（已嵌入）
-  bizCategory  String? // AI 粗分业务类目 key（见 data/bizCategories.ts）
-  batchId      String? // 同批上传标识（整理动作以批为单位）
-  dupOfId      String? // 规则去重命中的原件 id（同名+同大小）
+  stage             String   @default("confirmed") // staging 待整理（不进检索）| optimized 已优化（待确认）| confirmed 知识库（已嵌入）
+  bizCategory       String? // AI 粗分业务类目 key（见 data/bizCategories.ts）
+  batchId           String? // 同批上传标识（整理动作以批为单位）
+  dupOfId           String? // 规则去重命中的原件 id（同名+同大小）
   // —— 文档上传管线（sourceType=upload）：解析状态 + 原件元信息 ——
-  status       String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
-  fileName     String? // 原始文件名
-  fileType     String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
-  fileSize     Int? // 字节
-  fileKey      String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  status            String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
+  fileName          String? // 原始文件名
+  fileType          String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
+  fileSize          Int? // 字节
+  fileKey           String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
   // 对话图片专用的受控推理副本（最长边 2048px）；原件继续保留用于审计/未来重处理。
   inferenceFileKey  String?
   inferenceFileType String?
   inferenceFileSize Int?
-  error        String?  @db.Text // 解析/嵌入失败原因
+  error             String?  @db.Text // 解析/嵌入失败原因
   // WO-09 经营体检：财务表结构化抽取 + 纯代码派生指标的落库快照（{ financials, metrics }）。
   // 报告正文数字一律以此为准（数字铁律）；非财务/未分析条目为 null。db push 纯加法。
-  analysisJson Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now()) @updatedAt
+  analysisJson      Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now()) @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   project Project?         @relation(fields: [projectId], references: [id])
@@ -1152,13 +1152,19 @@ model CreditLedger {
 
 /// 月度 Token 额度账户（文本产出消耗池，区别于钻石 CreditLedger）。每用户单行，惰性按月重置。
 model TokenWallet {
-  id        String   @id @default(cuid())
-  tenantId  String
-  userId    String   @unique
-  quota     Int      @default(0) // 本月授予总额度；<0=不限量
-  balance   Int      @default(0) // 本月剩余（可透支为负=已耗尽）；不限量时忽略
-  periodKey String   @default("") // YYYY-MM，惰性重置锚点
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String   @unique
+  quota       Int      @default(0) // 本月授予总额度；<0=不限量
+  balance     Int      @default(0) // 本月剩余 + 增购包剩余（可透支为负=已耗尽）；不限量时忽略
+  // 增购算力包（SKU kind='quota'，永久有效直到用完）在「上一个同步点」时刻的存量。
+  // 消耗一律先吃月度、后吃 pack，故任意时刻真实剩余可派生：
+  //   packRemaining = quota<0 ? packBalance : clamp(balance, 0, packBalance)
+  // 只有会「刷写 balance」的同步点（跨周期重置 / 过期冻结 / setQuota 覆盖）需要维护本列，
+  // 扣费与预留热路径一行都不改（盲减 balance 即自动先吃月度、后吃 pack）。
+  packBalance Int      @default(0)
+  periodKey   String   @default("") // YYYY-MM，惰性重置锚点
+  updatedAt   DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   user   User   @relation(fields: [userId], references: [id])
@@ -2081,19 +2087,19 @@ model CreativeAsset {
 
 /// 快出片 BFF 的积分 hold 事实源。视频项目/作品真值在 aidrama；本表只保证军师钻石账幂等、失败只退一次。
 model VideoCreditHold {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
   userId          String
   projectId       String
   clientRequestId String
-  upstreamJobId   String?  @unique
+  upstreamJobId   String?   @unique
   credits         Int
-  status          String   @default("submitting") // submitting | submitted | settled | refunded
+  status          String    @default("submitting") // submitting | submitted | settled | refunded
   lastJobStatus   String?
-  chargedAt       DateTime @default(now())
+  chargedAt       DateTime  @default(now())
   refundedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([userId, clientRequestId])
   @@index([userId, createdAt])

@@ -41,20 +41,27 @@ export function sameCommercialTier(a: PlanRuleFields, b: PlanRuleFields): boolea
   return planFamilyKey(a) === planFamilyKey(b) && planTierRank(a) === planTierRank(b);
 }
 
+/**
+ * 用量进度（前端只消费相对进度）。
+ * 增购算力包（packBalance）不进分母——分母恒为「本月月度额度」，used 也已在 toState 里剔除 pack 消耗；
+ * 但月度用满时若 pack 还有余量，状态最多降到 near_limit：balance 里还有算力、仍然产得出东西，
+ * 报 exhausted 会把「已经买了包的用户」误导去续费。
+ */
 export function usageView(
-  quota: { quota: number; used: number; unlimited: boolean },
+  quota: { quota: number; used: number; unlimited: boolean; packBalance?: number },
   resetsAt: string,
   plan?: PlanRuleFields | null,
 ): PublicUsageView {
+  const packRemaining = Math.max(0, Math.floor(quota.packBalance ?? 0));
   if (quota.unlimited || quota.quota < 0) {
-    return { usagePercent: 0, usageStatus: 'sufficient', resetsAt, unlimited: true };
+    return { usagePercent: 0, usageStatus: 'sufficient', resetsAt, unlimited: true, packRemaining };
   }
   const percent = quota.quota > 0 ? Math.min(100, Math.max(0, Math.round((quota.used / quota.quota) * 100))) : 100;
   const normal = Math.min(79, Math.max(1, Math.round(plan?.usageNormalPercent ?? 50)));
   const near = Math.min(99, Math.max(normal + 1, Math.round(plan?.usageNearPercent ?? 80)));
   let usageStatus: UsageStatus = 'sufficient';
-  if (percent >= 100) usageStatus = 'exhausted';
+  if (percent >= 100) usageStatus = packRemaining > 0 ? 'near_limit' : 'exhausted';
   else if (percent >= near) usageStatus = 'near_limit';
   else if (percent >= normal) usageStatus = 'normal';
-  return { usagePercent: percent, usageStatus, resetsAt, unlimited: false };
+  return { usagePercent: percent, usageStatus, resetsAt, unlimited: false, packRemaining };
 }

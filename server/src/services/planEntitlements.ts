@@ -6,6 +6,7 @@ import { now } from './clock.js';
 import { computeExpiry, daysRemaining, isExpired, renewExpiry } from './planTime.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, type PlanRuleFields } from './planRules.js';
 import { withEffectivePrice, type PlanPricingFields } from './planPricing.js';
+import { packRemainingOf } from './tokenQuota.js';
 
 /** 传进来的 plan **必须已过 withEffectivePrice()**：这里的 price 一律按「此刻的成交价」参与
  *  报价、条款哈希与账本快照。挂牌价不进钱的链路，否则优惠期会按原价折抵/记账。 */
@@ -202,7 +203,12 @@ export async function revokePlanEntitlement(
   const current = active.find((row) => row.startsAt <= at) ?? active[0] ?? null;
   if (!current) {
     await tx.user.update({ where: { id: args.userId }, data: { planId: null, planActivatedAt: null, planExpiresAt: at } });
-    await tx.tokenWallet.updateMany({ where: { userId: args.userId }, data: { quota: 0, balance: 0 } });
+    // 套餐权益全撤 ≠ 撤掉单独买的增购算力包：月度归 0，但 pack 剩余保值（口径见 tokenQuota.packRemainingOf）。
+    const wallet = await tx.tokenWallet.findUnique({ where: { userId: args.userId } });
+    if (wallet) {
+      const pack = packRemainingOf(wallet);
+      await tx.tokenWallet.update({ where: { userId: args.userId }, data: { quota: 0, balance: pack, packBalance: pack } });
+    }
   } else {
     const samePlan = active.filter((row) => row.planId === current.planId);
     const expiresAt = samePlan.some((row) => row.expiresAt === null)
@@ -212,9 +218,14 @@ export async function revokePlanEntitlement(
     const plan = await tx.plan.findUnique({ where: { id: current.planId }, select: { tokenQuotaPerMonth: true } });
     const wallet = await tx.tokenWallet.findUnique({ where: { userId: args.userId } });
     if (plan && wallet) {
-      const used = wallet.quota < 0 ? 0 : Math.max(0, wallet.quota - wallet.balance);
+      // 增购包不参与套餐回退重算：先把 pack 剩余从余额剥出来算月度已用，再原样叠回。
+      const pack = packRemainingOf(wallet);
+      const used = wallet.quota < 0 ? 0 : Math.max(0, wallet.quota - Math.max(0, wallet.balance - pack));
       const quota = plan.tokenQuotaPerMonth;
-      await tx.tokenWallet.update({ where: { userId: args.userId }, data: { quota, balance: quota < 0 ? -1 : quota - used } });
+      await tx.tokenWallet.update({
+        where: { userId: args.userId },
+        data: { quota, balance: quota < 0 ? -1 : quota - used + pack, packBalance: pack },
+      });
     }
   }
   const grants = await tx.monthlyCreditGrant.findMany({ where: { userId: args.userId, sourceOrderId: args.orderId } });
