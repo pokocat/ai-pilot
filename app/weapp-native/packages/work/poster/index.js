@@ -50,6 +50,13 @@ Page({
     proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
     // 档位：premiumOn 为假时整块不渲染（供应商没配好时露出一个必然 422 的选项比不露更糟）。
     tier: 'standard', premiumPrice: 0, premiumOn: false,
+    // 档位示意图是**固定模板图**（说明两档差异，不是每次生成的预览）。
+    // 图还没放进包里时 binderror 会把对应项置 false，卡片退化成纯文字——
+    // 缺图不留破图框（product-ui-completeness：missing media 必须有兜底）。
+    tierArt: { standard: true, premium: true },
+    // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
+    // 有它时表单默认收起（用户刚聊完，不该再对着表把话重打一遍）；没有就退回表单打头。
+    designNote: '', showForm: false,
     assets: [
       { role: 'portrait', label: ROLE_LABEL.portrait, assetId: '', path: '', uploading: false },
       { role: 'logo', label: ROLE_LABEL.logo, assetId: '', path: '', uploading: false },
@@ -100,6 +107,7 @@ Page({
     const [status, draft] = await Promise.all([statusPromise, draftPromise]);
     if (status && !status.enabled) { this.setData({ disabled: true, loading: false }); return; }
     const hasDraftBrief = Boolean(draft && draft.brief && typeof draft.brief === 'object');
+    const draftNote = String((draft && draft.designNote) || '').trim();
     const brief = hasDraftBrief ? draft.brief : {};
     const templates = status ? status.templates : [];
     const recommended = String(brief.templateKey || '');
@@ -115,6 +123,9 @@ Page({
     };
     const updates = {
       loading: false, disabled: false,
+      designNote: draftNote,
+      // 抽不出设计说明 = 没有可确认的东西，直接把表单摊开，否则页面上是一片空白。
+      showForm: !draftNote,
       // 从锦囊直接开工时**没有** messageId（不是从对话成果卡进来的），服务端本来就会 422
       // MESSAGE_ID_REQUIRED —— 那是「没有可预填的东西」，不是「预填失败」。这种情况下弹一条
       // 报错横幅会把一次正常的冷启动说成故障。只有带着 messageId 却没拿到草稿才是真出了事。
@@ -152,6 +163,14 @@ Page({
   },
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
+  /** 示意图加载失败（还没补图 / 路径错）→ 只收起这一张，不影响另一档，也不报错打扰用户。 */
+  tierArtError(event) {
+    const key = String(event.currentTarget.dataset.tier || '');
+    if (key !== 'standard' && key !== 'premium') return;
+    if (!this.data.tierArt[key]) return;
+    this.setData({ [`tierArt.${key}`]: false });
+  },
+  toggleForm() { this.setData({ showForm: !this.data.showForm }); },
   chooseTier(event) { this.setData({ tier: String(event.currentTarget.dataset.key || 'standard') }); },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },
 

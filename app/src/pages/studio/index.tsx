@@ -765,7 +765,10 @@ export default function Studio() {
                   : a.billing === 'metered'
                     ? <Text className="ameta" style={{ color: accent }}>{diamondCost(a.price, true)} · {a.deliverableKey}</Text>
                     : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>擅长 · {a.deliverableKey}</Text>}
-                {a.meterUnit !== 'image' && (a.billingRatio ?? 1) > 1 && (
+                {/* 2026-08-13 计费改造：对话一律扣 token 额度，meterUnit 不再参与判定 ——
+                    这里若还按 meterUnit 过滤，poster/ip 这些库里仍写着 image 的军师会**藏起自己的倍率**，
+                    用户看不到额度为什么掉得快。判据只剩倍率本身。 */}
+                {(a.billingRatio ?? 1) > 1 && (
                   <Text className="ameta" style={{ color: accent, opacity: 0.72 }}>倍率 ×{a.billingRatio} · 额度消耗更快</Text>
                 )}
               </View>

@@ -61,7 +61,15 @@
 .ps-tpl {
   padding: 12px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
 }
-.ps-tpl.on { background: var(--surface-2); }
+/* 选中态**不靠背景色**（2026-08-13）：原先只把底色换成 surface-2，与页面米白底明度差极小，
+   选没选中要盯着看才分得出；再叠一层 accent 描边之后，重点色与背景色糊成一片。
+   现在用「2px 重点色描边 + 标题转重点色」表达选中，背景一律保持中性——
+   重点色只出现在线和字上，面积小、对比强，也不会跟画面里的其它绿抢。
+   补 1px 负外边距抵消描边变粗带来的位移，避免选中瞬间卡片跳一下。 */
+.ps-tpl.on {
+  border-color: var(--accent); border-width: 2px; margin: -1px;
+}
+.ps-tpl.on .ps-tpl-n { color: var(--accent); }
 .ps-tpl-h { display: flex; align-items: center; justify-content: space-between; }
 .ps-tpl-n { font-size: 14px; font-weight: 600; color: var(--ink); }
 .ps-tpl-d { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }

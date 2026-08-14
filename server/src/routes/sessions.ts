@@ -508,12 +508,23 @@ export async function sessionRoutes(app: FastifyInstance) {
     // 项目归属：新建用入参；已存在但未归属则补挂
     const projectId = await resolveProjectId(user.tenantId, req.body.projectId, session?.projectId);
 
-    // 双轴校验（早于建会话/落消息）：unlock 未解锁→403；图片类按张校验钻石→402；文本类校验本月 token 额度→402。
+    // 双轴校验（早于建会话/落消息）：unlock 未解锁→403；**对话一律校验本月 token 额度**→402。
     // 计费/接入一律以「已发布版本」为准（resolveEffectiveAgent）——运营改草稿/调倍率不影响 C 端，直到发布。
+    //
+    // ★ 对话轴恒走 token（2026-08-13 计费改造，`meterUnit` 就此不再参与计费判定）：
+    //   旧行为是 `meterUnit==='image'` 的智能体**按对话轮次扣钻**（poster 8 钻/轮、ip 3 钻/轮），
+    //   且完全不消耗 token 额度。那等于「聊天本身按张卖」——用户还没拿到任何产出物就在扣钻，
+    //   聊 5 轮 40 钻，而真正的产出（海报 PNG）在另一条链路上另收一次。
+    //   现在两条轴各归其位：
+    //     · 对话  = agent 属性，扣月度 token 额度 × Agent.billingRatio（海报对话可设 5x）；
+    //     · 产出物 = 技能×规格 属性，出图/出片时按产出物价格表扣钻（services/artifactPricing.ts）。
+    //   `diamondCost` 因此恒为 0；`reserveCredits(…0…)` 在 credits.ts 里是显式的空操作
+    //   （只读余额、不落流水、refund 是 noop），所以下游那一整套结算/退款/余额回显的形状不变。
+    //   **运营侧必须同步**：把 poster / ip 的 meterUnit 从 image 改回 text 并设好 billingRatio，
+    //   否则库里留着的 `image` 会让人以为还在按张扣钻（值还在，只是不再被读）。
     const effective = await resolveEffectiveAgent(agentKey);
-    const isImage = effective?.meterUnit === 'image';
     const ratio = effective?.billingRatio ?? 1;
-    const diamondCost = effective && isImage ? effective.price : 0; // 文本类不扣钻石（走 token 额度）
+    const diamondCost = 0; // ★ 见下方「对话轴恒走 token」
     let creditReservation: CreditReservation | null = null;
     let quotaReservation: QuotaReservation | null = null;
     try {
@@ -521,7 +532,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       // 复盘保底（M2 PR-6）：复盘类调用（buildReviewPrompt 的确定性前缀）额度耗尽仍每日限次放行
       const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text);
-      if (effective && !isImage) {
+      if (effective) {
         const reserveTokens = await generationQuotaReserveTokens({
           forceLive: effective.providerMode === 'openai',
           model: effective.providerMode === 'openai' ? effective.apiModel : null,
@@ -767,17 +778,17 @@ export async function sessionRoutes(app: FastifyInstance) {
 
     // 双轴校验（起流前，未解锁→403 / 不足→402，正常 JSON 而非 SSE）：图片按张校验钻石，文本校验本月 token 额度。
     // 计费/接入以「已发布版本」为准，与同步产出一致。
+    // 对话轴恒走 token（同上方同步产出那段的说明，meterUnit 不再参与计费判定）。
     const effective = await resolveEffectiveAgent(agentKey);
-    const isImage = effective?.meterUnit === 'image';
     const ratio = effective?.billingRatio ?? 1;
-    const diamondCost = effective && isImage ? effective.price : 0;
+    const diamondCost = 0;
     let creditReservation: CreditReservation | null = null;
     let quotaReservation: QuotaReservation | null = null;
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text); // 复盘保底（M2 PR-6）
-      if (effective && !isImage) {
+      if (effective) {
         const reserveTokens = await generationQuotaReserveTokens({
           forceLive: effective.providerMode === 'openai',
           model: effective.providerMode === 'openai' ? effective.apiModel : null,

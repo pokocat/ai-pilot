@@ -6,7 +6,7 @@
     <view class="chat-safe"></view>
     <view class="chat-headrow">
       <view class="back-hit" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view>
-      <view class="chat-id"><text class="chat-title serif">{{title}}</text><text wx:if="{{alias}}" class="chat-alias">{{alias}}</text></view>
+      <view class="chat-id"><text class="chat-title serif">{{title}}</text><text wx:if="{{alias}}" class="chat-alias">{{alias}}</text><text wx:if="{{quotaRatio}}" class="chat-ratio">额度 {{quotaRatio}} 倍</text></view>
       <view class="chat-head-spacer" bindtap="openChatMenu"><native-icon name="more" tone="ink" size="22"></native-icon></view>
     </view>
   </view>
@@ -15,6 +15,14 @@
     <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent, chapterPending, chapterPendingLabel, historyHasMore, historyLoading}}"></template>
   </scroll-view>
 
+  <!-- 海报会话常驻出图入口（2026-08-13）：报告卡被拿掉后，「生成成品图」失去了宿主。
+       放在输入框正上方而不是标题栏——它是这条会话的下一步动作，不是页面级功能。
+       价格跟着标准档显示；档位真正的选择在确认页（两档带对比图）。 -->
+  <view wx:if="{{posterEnabled&&!showLogin}}" class="chat-poster-bar" bindtap="openPoster">
+    <native-icon name="image" tone="accent" color-key="{{colorKey}}" size="16"></native-icon>
+    <text class="cpb-t">聊清楚了？去出成品图</text>
+    <view class="cpb-cost"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="cpb-c">x{{posterPrice}} 起</text></view>
+  </view>
   <template wx:if="{{!showLogin}}" is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
 
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

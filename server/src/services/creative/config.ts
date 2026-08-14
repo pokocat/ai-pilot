@@ -15,6 +15,7 @@
 // 密钥：供应商 apiKey 经 secretBox 加密后存在 payload 里（与 skillTools 的 encryptHeaderValues 同口径），
 // 对外一律只回 hasKey。
 import { isFeatureEnabled, featureFlagPayload, setFeatureFlag, setFeatureFlagPayload } from '../featureFlag.js';
+import { getArtifactPrices, artifactPrice, updateArtifactPrices } from '../artifactPricing.js';
 import { encryptSecret, decryptSecretSafe } from '../secretBox.js';
 import type { Prisma } from '@prisma/client';
 import type {
@@ -23,6 +24,13 @@ import type {
 } from '../../../../shared/contracts';
 
 export const CREATIVE_FLAG_ID = 'creative-poster';
+/**
+ * 海报这条链路对应的**技能 key**（统一技能库里 kind='artifact' 的那个）。
+ * 定义在 config 这一层而不是 jobs.ts：价格表按技能存，config 读价时要用它，
+ * 而 jobs.ts 反过来依赖 config —— 放在 jobs.ts 会绕成循环 import。jobs.ts 从这里再导出，
+ * 老的 `from './jobs.js'` 引用不受影响。
+ */
+export const POSTER_SKILL_KEY = 'canvas_design';
 
 /** 模板白名单（MVP 三套 3:4）。服务端只认这三个 key，未指定时按 scene 回退默认。 */
 export const TEMPLATE_KEYS = ['person_hero', 'editorial', 'business_launch'] as const;
@@ -210,16 +218,23 @@ function templatesOf(v: unknown): Record<TemplateKey, boolean> {
  * 每分钟一次（别把 fresh 传进热路径）。
  */
 export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise<CreativeRuntimeConfig> {
-  const [enabled, payloadRaw] = await Promise.all([
+  const [enabled, payloadRaw, prices] = await Promise.all([
     isFeatureEnabled(CREATIVE_FLAG_ID, false, opts),
     featureFlagPayload(CREATIVE_FLAG_ID, opts),
+    getArtifactPrices(opts),
   ]);
   const p = (payloadRaw ?? {}) as RawPayload;
   const visualRaw = plainObject(p.visual);
   return {
     enabled,
-    pricePerPoster: num(p.pricePerPoster, DEFAULT_PRICE_PER_POSTER, 0, 10_000),
-    premiumPricePerPoster: num(p.premiumPricePerPoster, DEFAULT_PREMIUM_PRICE_PER_POSTER, 0, 10_000),
+    // 钻石价的**唯一真源是产出物价格表**（artifactPricing，按 技能×规格 存）；
+    // 表里没配才回退到本 flag 的旧字段。回退这一层是迁移期的安全绳：线上 creative-poster
+    // 里已经有 pricePerPoster=10，价目表还空着的那段时间里价格必须一分不变。
+    // 两个默认常量是最后一道（连旧字段也没有时），不写进库、不冒充运营配置。
+    pricePerPoster: artifactPrice(prices, POSTER_SKILL_KEY, 'standard')
+      ?? num(p.pricePerPoster, DEFAULT_PRICE_PER_POSTER, 0, 10_000),
+    premiumPricePerPoster: artifactPrice(prices, POSTER_SKILL_KEY, 'premium')
+      ?? num(p.premiumPricePerPoster, DEFAULT_PREMIUM_PRICE_PER_POSTER, 0, 10_000),
     dailyLimit: num(p.dailyLimit, DEFAULT_DAILY_LIMIT, 0, 1000),
     timeoutMs: num(p.timeoutMs, DEFAULT_TIMEOUT_MS, 10_000, MAX_TIMEOUT_MS),
     // 缺省即 'ai'：这意味着**部署即切 AI 引擎**（运营不需要动配置）。安全性由回落矩阵兜住，
@@ -303,8 +318,14 @@ export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeC
  */
 export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Promise<AdminCreativeConfig> {
   const cur = await getCreativeConfig({ fresh: true });
-  const curEncrypted = ((plainObject((await featureFlagPayload(CREATIVE_FLAG_ID, { fresh: true })) ?? {}).visual as
-    Record<string, unknown> | undefined)?.apiKey ?? '') as string;
+  const rawPayload = plainObject((await featureFlagPayload(CREATIVE_FLAG_ID, { fresh: true })) ?? {});
+  const curEncrypted = ((rawPayload.visual as Record<string, unknown> | undefined)?.apiKey ?? '') as string;
+  // 库里的**原始**旧价（不是 cur 里那个已经过价格表解析的值）：回落层要原样留着，
+  // 写回 cur.pricePerPoster 会把价格表里的新价复制进旧字段，两份数据从此分不开。
+  const legacy = {
+    pricePerPoster: num(rawPayload.pricePerPoster, DEFAULT_PRICE_PER_POSTER, 0, 10_000),
+    premiumPricePerPoster: num(rawPayload.premiumPricePerPoster, DEFAULT_PREMIUM_PRICE_PER_POSTER, 0, 10_000),
+  };
 
   const vp = patch.visual ?? {};
   // 尺寸校验放在**写入口**：跑起来才发现比例不对的代价是一整批被裁坏的成品图，
@@ -314,11 +335,24 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     ? curEncrypted                                  // 不动：保留库内密文
     : vp.apiKey === '' ? '' : encryptSecret(vp.apiKey); // 空串=清空；否则加密
 
+  // 钻石价**写进产出物价格表**（技能×规格），不再写回本 flag 的旧字段。
+  // 旧字段留在库里当迁移期的回退值，只读不写 —— 一旦这里也跟着写，回退层就永远和新表同步，
+  // 那条"表没配就用旧值"的安全绳等于不存在，出问题时也分不清读到的是哪一份。
+  if (patch.pricePerPoster !== undefined || patch.premiumPricePerPoster !== undefined) {
+    await updateArtifactPrices({
+      [POSTER_SKILL_KEY]: {
+        ...(patch.pricePerPoster === undefined
+          ? {} : { standard: num(patch.pricePerPoster, cur.pricePerPoster, 0, 10_000) }),
+        ...(patch.premiumPricePerPoster === undefined
+          ? {} : { premium: num(patch.premiumPricePerPoster, cur.premiumPricePerPoster, 0, 10_000) }),
+      },
+    });
+  }
+
   const payload = {
-    pricePerPoster: patch.pricePerPoster === undefined ? cur.pricePerPoster : num(patch.pricePerPoster, cur.pricePerPoster, 0, 10_000),
-    premiumPricePerPoster: patch.premiumPricePerPoster === undefined
-      ? cur.premiumPricePerPoster
-      : num(patch.premiumPricePerPoster, cur.premiumPricePerPoster, 0, 10_000),
+    // 原样保留库里的旧值（回退层），不受本次改价影响。
+    pricePerPoster: legacy.pricePerPoster,
+    premiumPricePerPoster: legacy.premiumPricePerPoster,
     dailyLimit: patch.dailyLimit === undefined ? cur.dailyLimit : num(patch.dailyLimit, cur.dailyLimit, 0, 1000),
     timeoutMs: patch.timeoutMs === undefined ? cur.timeoutMs : num(patch.timeoutMs, cur.timeoutMs, 10_000, MAX_TIMEOUT_MS),
     layoutEngine: patch.layoutEngine === undefined ? cur.layoutEngine : layoutEngineOf(patch.layoutEngine),

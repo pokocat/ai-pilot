@@ -7,6 +7,19 @@
       <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
       <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
 
+      <!-- 主视图：设计说明 + 档位。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
+           而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染、表单自动摊开。 -->
+      <view wx:if="{{designNote}}" class="ps-note-card">
+        <text class="ps-note-k">这张海报会这么设计</text>
+        <text class="ps-note-b">{{designNote}}</text>
+      </view>
+      <view wx:if="{{premiumOn}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">档位</text></view><view class="ps-tpls"><view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier"><image wx:if="{{tierArt.standard}}" class="ps-tier-art" src="/assets/tier/standard.jpg" mode="aspectFill" lazy-load data-tier="standard" binderror="tierArtError"></image><view class="ps-tpl-h"><text class="ps-tpl-n">标准海报</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 模型用图形与排印现场作画</text></view></view><view class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier"><image wx:if="{{tierArt.premium}}" class="ps-tier-art" src="/assets/tier/premium.jpg" mode="aspectFill" lazy-load data-tier="premium" binderror="tierArtError"></image><view class="ps-tpl-h"><text class="ps-tpl-n">高级海报</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · 顶级图片模型出全幅主视觉，质感更强</text></view></view></view><text wx:if="{{tier==='premium'}}" class="ps-fhint">高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。</text></view>
+
+      <view class="ps-more" bindtap="toggleForm">
+        <text class="ps-more-t">{{showForm?'收起细节':'这些细节要改吗'}}</text>
+        <native-icon name="{{showForm?'up':'down'}}" tone="neutral" size="16"></native-icon>
+      </view>
+      <view wx:if="{{showForm}}">
       <text class="ps-sec">先说清这张图要干什么</text>
       <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">宣传什么</text><text class="ps-count {{goalOver?'over':''}}">{{goalCount}}</text></view><input class="ps-input" value="{{goal}}" placeholder="这张海报要促成什么" data-field="goal" bindinput="fieldInput"/><text wx:if="{{errors.goal}}" class="ps-ferr">{{errors.goal}}</text></view>
       <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">给谁看</text><text class="ps-count {{audienceOver?'over':''}}">{{audienceCount}}</text></view><input class="ps-input" value="{{audience}}" placeholder="目标客群是谁" data-field="audience" bindinput="fieldInput"/><text wx:if="{{errors.audience}}" class="ps-ferr">{{errors.audience}}</text></view>
@@ -19,13 +32,13 @@
 
       <text class="ps-sec">画面长什么样</text>
       <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">视觉方向</text><text class="ps-count {{visualOver?'over':''}}">{{visualCount}}</text></view><text class="ps-fhint">只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图</text><textarea class="ps-area" value="{{visual}}" placeholder="如：干净留白、克制的墨色与暖金、正面柔光" data-field="visual" bindinput="fieldInput"></textarea><text wx:if="{{errors.visual}}" class="ps-ferr">{{errors.visual}}</text></view>
-      <view wx:if="{{premiumOn}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">档位</text></view><view class="ps-tpls"><view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">标准海报</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 模型用图形与排印现场作画</text></view></view><view class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">高级海报</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · 顶级图片模型出全幅主视觉，质感更强</text></view></view></view><text wx:if="{{tier==='premium'}}" class="ps-fhint">高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。</text></view>
       <view wx:if="{{templates.length}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">版式</text></view><view class="ps-tpls"><view wx:for="{{templates}}" wx:key="key" class="ps-tpl {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate"><view class="ps-tpl-h"><text class="ps-tpl-n">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="14"></native-icon></view><text class="ps-tpl-d">{{item.desc}}</text></view></view></view>
 
       <text class="ps-sec">素材（可留空）</text>
       <view class="ps-consent" bindtap="toggleConsent"><view class="ps-check {{consent?'on':''}}"><native-icon wx:if="{{consent}}" name="check" tone="white" size="12"></native-icon></view><view class="ps-consent-b"><text class="ps-consent-t">上传人像前请确认</text><text wx:for="{{consentLines}}" wx:key="*this" class="ps-consent-l">· {{item}}</text></view></view>
       <text wx:if="{{errors.consent}}" class="ps-ferr">{{errors.consent}}</text>
       <view class="ps-slots"><view wx:for="{{assets}}" wx:key="role" class="ps-slot"><view wx:if="{{item.path}}" class="ps-thumb-wrap"><image class="ps-thumb" src="{{item.path}}" mode="aspectFill"></image><view class="ps-thumb-x" data-role="{{item.role}}" catchtap="dropAsset"><native-icon name="close" tone="white" size="13"></native-icon></view></view><view wx:else class="ps-slot-add" data-role="{{item.role}}" bindtap="pickAsset"><native-icon name="image" tone="neutral" size="17"></native-icon><text class="ps-slot-t">{{item.uploading?'上传中':'传'+item.label}}</text></view><text class="ps-slot-k">{{item.label}}</text></view></view>
+      </view>
 
       <view wx:if="{{submitErr}}" class="ps-submit-err"><text class="ps-submit-err-t">{{submitErr}}</text><text wx:if="{{submitErrCredits}}" class="ps-submit-err-a" bindtap="goCredits">去看余额</text></view>
       <view class="ps-foot"><text class="ps-foot-note">出图约一分钟，成品可保存或转发。</text><button class="ps-btn" bindtap="submit"><text class="ps-btn-t">{{submitting?'正在发起':'生成成品图'}}</text><view wx:if="{{price!==null}}" class="ps-price"><native-icon name="diamond" tone="white" size="14"></native-icon><text class="ps-btn-c">x{{premiumOn&&tier==='premium'?premiumPrice:price}}</text></view></button></view>

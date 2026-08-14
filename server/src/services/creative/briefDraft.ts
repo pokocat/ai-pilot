@@ -1,10 +1,12 @@
-// GET /creative/posters/brief-draft 的实现：从「海报设计师」的成果消息 + 已确认 BrandKit 预填 PosterBrief 草稿。
+// GET /creative/posters/brief-draft 的实现：从**客户与海报设计师的整段对话** + 已确认 BrandKit
+// 预填 PosterBrief 草稿，并写一段给客户看的「设计说明」（designNote）。
 //
-// 为什么要预填：让用户在确认页只做增删改，而不是对着空表单从零手填（方案 §5.3）。
+// 为什么要预填：用户刚跟设计师聊完，再让他对着空表把刚说过的话重打一遍，
+// 是把他找军师的理由原样退回给他。确认页的主视图是 designNote，表单收在「改一改」里。
 // 三层兜底，任一层失败都还能给出可用草稿：
-//   ① LLM 结构化抽取（zod 约束）→ 拿到文案 + templateKey + templateReason；
-//   ② 提示词里让设计师直出的「成品图版式推荐：xxx（key）—— 理由」行 → 正则兜住 templateKey/理由；
-//   ③ 全失败：headline=成果标题、scene 按 agent 推断、templateKey 按 scene 默认。
+//   ① LLM 结构化抽取（zod 约束）→ 文案 + templateKey + templateReason + designNote；
+//   ② 老会话里若还留着「成品图版式推荐：xxx（key）—— 理由」行 → 正则兜住 templateKey/理由；
+//   ③ 全失败：字段留空、scene 按 agent 推断、templateKey 按 scene 默认，designNote 不下发。
 // BrandKit 只在 approvedAt 非空时合并（与 BrandKit 现有口径一致：生态产品只读 approved 的资产包）。
 import { z } from 'zod';
 import { prisma } from '../../db.js';
@@ -35,10 +37,14 @@ const DraftSchema = z.object({
   visualDirection: z.string().catch('').default(''),
   templateKey: z.string().catch('').default(''),
   templateReason: z.string().catch('').default(''),
+  designNote: z.string().catch('').default(''),
 });
 
 const DRAFT_SYS = [
-  '你是「军师参谋部」的海报需求整理助手。读一份海报设计方案，抽出可直接填进「成品图需求单」的字段。',
+  '你是「军师参谋部」的海报需求整理助手。读一段**客户与海报设计师的对话**，',
+  '抽出可直接填进「成品图需求单」的字段。',
+  '对话里客户可能改过主意——**以最后一次说法为准**，不要把中途被否掉的版本抽出来。',
+  '设计师替客户拟的措辞（主标题、行动号召等）如果客户没反对，视为已确认，照抽。',
   '三个版式的语义：',
   '- person_hero（人物主视觉）：人物占主要画面，适合创始人/专家做个人品牌与信任背书；',
   '- editorial（编辑杂志）：大留白、强标题，适合观点、定位、专业服务这类需要克制质感的内容；',
@@ -49,15 +55,83 @@ const DRAFT_SYS = [
   `- proofPoints 最多 ${LIMITS.proofPoints} 条、每条不超过 ${LIMITS.proofPoint} 字；`,
   `- cta 不超过 ${LIMITS.cta} 字；visualDirection 不超过 ${LIMITS.visualDirection} 字，只写画面属性`,
   '  （结构/色彩/材质/光线/构图），不指名任何在世创作者；',
-  '- 方案里若已有「成品图版式推荐」，原样采纳它的 key 与理由；没有则你自己判断并写一句给客户看的理由',
+  '- templateKey 由你按上面三条语义判断，并写一句**给客户看**的理由',
   '  （不出现参数、模型、渲染、模板 key 之类技术说法）；',
   '- 抽不出的字段留空字符串，不要编造。',
   '',
-  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","templateKey":"","templateReason":""}',
+  '【designNote：写给客户看的设计说明，2–3 句，确认页会把它放在最上面】',
+  '用人话讲清这张海报会长什么样，让客户**不用看下面的表格**就知道对不对。要说到：',
+  '① 这张讲的是什么（主题）；② 画面上会放哪些内容（主标题、几条卖点、行动号召、有没有二维码）；',
+  '③ 什么气质与配色；④ 为什么用这个版式（一句话）。',
+  '按海报的通用设计原则来描述，别写成参数清单：',
+  '- 对齐：元素咬住同一条轴，不是各摆各的；',
+  '- 分组：相关的信息贴在一起、不相关的拉开，间距本身在表达从属关系；',
+  '- 识别性：主标题一眼可读，层级靠字号与位置拉开；',
+  '- 颜色搭配：一主色一辅色一强调色，强调色只用在最该被看见的那一处；',
+  '- 风格统一：整张图只有一套形状语言（圆角、线宽、字体族保持一致）。',
+  '不要出现「渲染」「模板」「参数」「模型」这类技术说法，也不要复述客户原话。',
+  '对话太短、信息不足以描述画面时，designNote 留空字符串——**宁可不写，也不要编一个看起来很像的**。',
+  '',
+  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","templateKey":"","templateReason":"","designNote":""}',
 ].join('\n');
 
 function isTemplateKey(v: unknown): v is TemplateKey {
   return typeof v === 'string' && (TEMPLATE_KEYS as readonly string[]).includes(v);
+}
+
+/**
+ * 定位要读的会话。**归属校验一次都不能省**：sessionId 与 messageId 都是客户端传来的，
+ * 不校验就等于允许任何人读别人的对话去拼海报。
+ */
+async function resolveDraftSession(opts: {
+  userId: string; sessionId?: string | null; messageId?: string | null;
+}): Promise<{ id: string; agentKey: string } | null> {
+  if (opts.sessionId) {
+    return prisma.session.findFirst({
+      where: { id: opts.sessionId, userId: opts.userId },
+      select: { id: true, agentKey: true },
+    });
+  }
+  if (opts.messageId) {
+    const msg = await prisma.message.findFirst({
+      where: { id: opts.messageId, session: { userId: opts.userId } },
+      select: { session: { select: { id: true, agentKey: true } } },
+    });
+    return msg?.session ?? null;
+  }
+  return null;
+}
+
+/** 抽取素材的上限：够覆盖一轮需求澄清，又不至于把整段长对话塞进抽取模型。 */
+const DRAFT_MESSAGE_LIMIT = 24;
+const DRAFT_TEXT_LIMIT = 6000;
+
+/**
+ * 把会话末尾若干条消息拼成抽取素材。
+ *
+ * 取**最后** N 条而不是最前 N 条：需求是在对话里逐步收敛的，最后几轮才是结论
+ * （用户中途改主意说"主标题换成 X"，只有末尾那句是对的）。拼装顺序仍按时间正序，
+ * 让抽取模型读得到"先说什么后说什么"。
+ */
+async function loadConversationText(sessionId: string): Promise<string> {
+  const rows = await prisma.message.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: 'desc' },
+    take: DRAFT_MESSAGE_LIMIT,
+    select: { role: true, contentJson: true },
+  });
+  const lines: string[] = [];
+  for (const r of rows.reverse()) {
+    const c = (r.contentJson ?? {}) as Record<string, unknown>;
+    // 普通消息是 { text }；成果消息是 Deliverable（老会话里可能还有）——两种都收。
+    const body = typeof c.text === 'string' && c.text
+      ? c.text
+      : deliverableText(c as unknown as Deliverable);
+    const t = String(body ?? '').trim();
+    if (!t) continue;
+    lines.push(`${r.role === 'user' ? '客户' : '设计师'}：${t}`);
+  }
+  return lines.join('\n').slice(-DRAFT_TEXT_LIMIT);
 }
 
 /** 兜底解析设计师直出的「成品图版式推荐：人物主视觉（person_hero）—— 理由」行。 */
@@ -113,20 +187,16 @@ export async function buildPosterBriefDraft(opts: {
   sessionId?: string | null;
   messageId?: string | null;
 }): Promise<PosterBriefDraft> {
-  if (!opts.messageId) throw new CreativeError('缺少成果消息 id', 'MESSAGE_ID_REQUIRED', 422);
-  const msg = await prisma.message.findFirst({
-    where: {
-      id: opts.messageId,
-      role: 'report',
-      session: { userId: opts.userId, ...(opts.sessionId ? { id: opts.sessionId } : {}) },
-    },
-    select: { id: true, contentJson: true, session: { select: { agentKey: true } } },
-  });
-  if (!msg) throw new CreativeError('成果不存在', 'MESSAGE_NOT_FOUND', 404);
+  // 定位会话：优先 sessionId（常驻入口就是从会话里点进来的），其次由 messageId 反查它所在的会话。
+  // 两个都没有 → 空草稿（不是错误）：确认页会渲染成空白表单让用户手填。
+  const session = await resolveDraftSession(opts);
+  if (!session) return { brief: {} };
 
-  const deliverable = (msg.contentJson ?? {}) as unknown as Deliverable;
-  const text = deliverableText(deliverable);
-  const agentKey = msg.session.agentKey;
+  // ★ 素材是**整段对话**，不再是一条成果消息（2026-08-13：海报设计师不再产出方案报告）。
+  //   旧实现要求 messageId 且 role='report'，那是「先出一份方案、再从方案抽字段」的形态；
+  //   现在海报设计师就是普通对话，需求散落在你问我答里，只能整段读。
+  const text = await loadConversationText(session.id);
+  const agentKey = session.agentKey;
   const fallbackScene = AGENT_SCENE[agentKey] ?? 'personal_brand';
 
   // 兜底层 ②：先从原文抓设计师直出的推荐行（LLM 不可用时也能给出带理由的推荐）。
@@ -148,8 +218,10 @@ export async function buildPosterBriefDraft(opts: {
     scene,
     goal: clip(ai?.goal ?? '', LIMITS.goal),
     audience: clip(ai?.audience ?? '', LIMITS.audience),
-    // headline 兜底 = 成果标题（用户一定认得出这是他刚才那份方案）。
-    headline: clip(ai?.headline || deliverable.title || '', LIMITS.headline),
+    // 抽不出主标题就留空，让用户在确认页自己写。
+    // 旧实现这里兜底成「成果标题」，那是方案报告时代的产物——现在没有报告，也就没有标题可借；
+    // 硬拿会话首句当主标题只会印出一句"帮我做个营销海报"。
+    headline: clip(ai?.headline ?? '', LIMITS.headline),
     ...(ai?.subheadline ? { subheadline: clip(ai.subheadline, LIMITS.subheadline) } : {}),
     proofPoints: (ai?.proofPoints ?? [])
       .map((p) => clip(p, LIMITS.proofPoint))
@@ -168,5 +240,12 @@ export async function buildPosterBriefDraft(opts: {
     if (kit) brief = mergeBrandKit(brief, kit);
   }
 
-  return { brief, ...(templateReason ? { templateReason } : {}) };
+  // designNote 只有真抽出来才下发：抽不出时确认页退回表单打头，
+  // 而不是显示一句模型编的、看起来很像但跟这张海报无关的话。
+  const designNote = clip(ai?.designNote ?? '', 240);
+  return {
+    brief,
+    ...(templateReason ? { templateReason } : {}),
+    ...(designNote ? { designNote } : {}),
+  };
 }

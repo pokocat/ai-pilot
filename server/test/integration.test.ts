@@ -926,14 +926,19 @@ describe('TC-V 智能体权益', () => {
     assert.equal(buy.body.code, 'AGENT_NOT_PURCHASABLE');
   });
 
-  test('V7 metered 智能体免解锁可用，按 price 计费', async () => {
+  // 2026-08-13 计费改造：meterUnit 不再参与计费判定，对话一律走 token 额度，diamondCost 恒为 0——
+  // 这条曾经断言「按次计费应扣 price 算力」，那是 meterUnit='image' 智能体按对话轮次扣钻的旧行为。
+  // 详见 test/billingArtifactPricing.test.ts 的完整覆盖（含 durable 建单里的字段级证据）。
+  test('V7 metered 智能体免解锁可用；对话本身不再按 price 扣钻（钻石只在产出物链路上收）', async () => {
     const t = await login(uniquePhone());
     const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
     const ip = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'ip');
+    assert.ok(ip.price > 0, '这条要测的正是「非零单价」这个前提，价格塌成 0 就测不出对照');
     const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我打造企业 IP', agentKey: 'ip' } });
     assert.equal(gen.status, 200, 'metered 无需解锁即可使用');
     assert.equal(gen.body.kind, 'report');
-    assert.equal(gen.body.creditBalance, before - ip.price, '按次计费应扣 price 算力');
+    assert.equal(gen.body.creditBalance, before, '对话轴恒走 token——钻石余额分毫不动，不再扣 ip.price');
+    assert.ok(gen.body.tokenQuota, '旧代码会因 meterUnit=image 让这个字段恒为 null；新代码必须回填，证明走了 token 结算');
   });
 
   test('V8 后台为用户开通/取消 unlock 智能体', async () => {

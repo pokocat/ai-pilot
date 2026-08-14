@@ -93,17 +93,16 @@ export async function enqueueDurableGeneration(
 
   await assertPlanActive(user.id);
   await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-  const isImage = effective.meterUnit === 'image';
+  // 对话轴恒走 token（2026-08-13 计费改造，见 routes/sessions.ts 里那段完整说明）：
+  // meterUnit 不再参与计费判定，钻石只在产出物那条链路上按「技能×规格」结算。
   const ratio = effective.billingRatio || 1;
-  const creditCost = isImage ? effective.price : 0;
+  const creditCost = 0;
   const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text);
   const grace: GraceKind | undefined = reviewIntent ? 'review' : undefined;
-  const reserveTokens = !isImage
-    ? await generationQuotaReserveTokens({
-      forceLive: effective.providerMode === 'openai',
-      model: effective.providerMode === 'openai' ? effective.apiModel : null,
-    })
-    : undefined;
+  const reserveTokens = await generationQuotaReserveTokens({
+    forceLive: effective.providerMode === 'openai',
+    model: effective.providerMode === 'openai' ? effective.apiModel : null,
+  });
   const isDeliverable = !!effective.deliverableKey;
   const onDemand = isDeliverable
     && (effective.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
