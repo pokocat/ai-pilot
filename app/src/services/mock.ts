@@ -464,7 +464,7 @@ function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
     title: tpl.title,
     icon: tpl.icon,
     meta: metaOf(d),
-    sections: tpl.sections.map((s) => ({ h: s.h, b: s.b ? s.b.replaceAll('{PAIN}', pain) : undefined, list: s.list })),
+    sections: tpl.sections.map((s) => ({ h: s.h, b: s.b ? s.b.split('{PAIN}').join(pain) : undefined, list: s.list })),
     trust: TRUST_NOTE,
     actions: ['save_to_library', 'export_pdf'],
   };
