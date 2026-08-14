@@ -26,13 +26,6 @@
 
       <block wx:else>
         <view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view>
-        <!-- 去出成品图：设计师聊到位时挂在**这条回复**下面（posterActionAt 由 behavior.posterActionIndex 算）。
-             不做成常驻条——常驻会让人以为随时能出，而那时对话还没聊出主标题和客群，出图页只会是空表。 -->
-        <view wx:if="{{messageIndex===posterActionAt}}" class="msg-poster-go" bindtap="openPoster">
-          <native-icon name="image" tone="accent" color-key="{{colorKey}}" size="15"></native-icon>
-          <text class="mpg-t">去出成品图</text>
-          <view class="mpg-cost"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text class="mpg-c">x{{posterPrice}} 起</text></view>
-        </view>
         <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob" bindnextstage="continueDeliveryStage"></report-card>
         <text wx:if="{{item.report&&item.streaming&&item.streamHint}}" class="stream-hint report-note">{{item.streamHint}}</text>
         <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
@@ -44,6 +37,15 @@
           <view wx:elif="{{item.streaming&&!item.text}}" class="stream-wait"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text wx:if="{{item.streamHint}}" class="stream-hint">{{item.streamHint}}</text></view>
           <markdown-text wx:else text="{{item.text}}" streaming="{{item.streaming}}" copyable="{{true}}"></markdown-text>
           <view wx:if="{{item.points&&item.points.length}}" class="points"><view wx:for="{{item.points}}" wx:key="*this" class="point"><view class="point-dot"></view><text user-select>{{item}}</text></view></view>
+        </view>
+        <!-- 去出成品图：设计师聊到位时挂在**这条回复正文之后**（posterActionAt 由 behavior.posterActionIndex 算）。
+             位置这一次是认真的：此前这段排在 report-card / ai-text **前面**，渲染出来的顺序是
+             军师头像行、出图按钮、然后才是这条回复的正文，按钮像凭空插进来的，跟注释写的正相反。
+             不做成常驻条——常驻会让人以为随时能出，而那时对话还没聊出主标题和客群，出图页只会是空表。 -->
+        <view wx:if="{{messageIndex===posterActionAt}}" class="msg-poster-go" bindtap="openPoster">
+          <native-icon name="image" tone="accent" color-key="{{colorKey}}" size="15"></native-icon>
+          <text class="mpg-t">去出成品图</text>
+          <view class="mpg-cost"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text class="mpg-c">x{{posterPrice}} 起</text></view>
         </view>
         <text wx:if="{{item.knowledgeUsed&&item.knowledgeUsed.length}}" class="knowledge-used {{item.report?'report-note':''}}">参考了 {{item.knowledgeUsed.length}} 份资料：{{item.knowledgeUsedText}}</text>
         <text wx:if="{{item.refNotices&&item.refNotices.length}}" class="ref-notices {{item.report?'report-note':''}}">引用提示：{{item.refNoticesText}}</text>

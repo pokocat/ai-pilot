@@ -26,13 +26,27 @@
 }
 .ps-more-t { font-size: 13px; color: var(--ink-3); }
 
-/* 档位示意图：固定模板图，横躺在卡片顶部说明两档差异。
-   16:9 而不是海报本身的 3:4——这里要的是"一眼看出差别"，不是还原成品比例；
-   3:4 会把卡片撑得很高，两档并排时用户还得滚动才能对比。 */
-.ps-tier-art {
-  display: block; width: 100%; height: 96px;
-  border-radius: 8px; margin-bottom: 9px; background: var(--surface-2);
+/* 取需求单骨架：这一步服务端要用模型把整段对话读成需求单，几秒起步。
+   转圈 + 一句「在等什么」 + 表单形状的骨架，别让人对着一行灰字猜页面死没死。 */
+.ps-loading { padding: 56px 4px 0; text-align: center; }
+.ps-spin {
+  width: 26px; height: 26px; margin: 0 auto; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: ps-rot .9s linear infinite;
 }
+@keyframes ps-rot { to { transform: rotate(360deg); } }
+.ps-loading-t { display: block; margin-top: 16px; font-size: 18px; font-weight: 600; color: var(--ink); }
+.ps-loading-d { display: block; margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+.ps-sk-card {
+  height: 92px; margin-top: 26px; border-radius: 10px;
+  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
+}
+.ps-sk-line {
+  height: 12px; margin-top: 12px; border-radius: 6px;
+  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
+}
+.ps-sk-line.short { width: 56%; margin-left: auto; margin-right: auto; }
+@keyframes ps-sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
 /* 选中态不靠背景色（理由见 app/src 同名文件的注释）：重点色只落在描边与标题上。 */
 .ps-tpl.on { border-color: var(--accent); border-width: 2px; margin: -1px; }

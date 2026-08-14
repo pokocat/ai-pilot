@@ -192,8 +192,20 @@ Page({
 
   openParent() { if (this.data.job && this.data.job.parentJobId) this.goJob(this.data.job.parentJobId, false); },
 
+  /**
+   * 缺图闸：wxml 已经在没图时把这两颗按钮收起，这里再挡一道（旧页面栈、快速连点都可能绕过渲染态）。
+   * 关键是**别给会再失败一次的建议**：以前这里落进通用 catch，弹「保存失败，请重试」——
+   * 而重试一百次也没用，链接本身失效了，唯一有用的动作是上面那颗「重新获取」。
+   */
+  posterSource() {
+    const asset = posterAsset(this.data.job);
+    return (asset && (asset.downloadUrl || asset.previewUrl)) || '';
+  },
+  warnNoAsset() { wx.showToast({ title: '成品图链接已失效，先点「重新获取」', icon: 'none' }); },
+
   async saveAlbum() {
     if (this.data.busy || !this.data.job) return;
+    if (!this.posterSource()) { this.warnNoAsset(); return; }
     const asset = posterAsset(this.data.job);
     this.setData({ busy: 'save' }); wx.showLoading({ title: '保存中' });
     try {
@@ -204,20 +216,28 @@ Page({
       const message = String(error && (error.errMsg || error.message) || '');
       if (/auth|deny|permission/i.test(message)) {
         wx.showModal({ title: '需要相册权限', content: '保存成品图要用到相册权限，去设置里打开？', confirmText: '去设置', success: (result) => { if (result.confirm) wx.openSetting(); } });
-      } else wx.showToast({ title: '保存失败，请重试', icon: 'none' });
+      // 链接在保存这一刻过期（600 秒签名）：说清「重试没用、要重新获取」，别只丢一句「请重试」。
+      } else if (/失效|下载失败/.test(message)) this.warnNoAsset();
+      else wx.showToast({ title: '保存失败，请重试', icon: 'none' });
     } finally { wx.hideLoading(); this.setData({ busy: '' }); }
   },
 
   async shareFriend() {
     if (this.data.busy || !this.data.job) return;
+    if (!this.posterSource()) { this.warnNoAsset(); return; }
     const asset = posterAsset(this.data.job);
     this.setData({ busy: 'share' }); wx.showLoading({ title: '准备中' });
     try {
       const path = await fetchPosterFile(asset && (asset.downloadUrl || asset.previewUrl));
       wx.hideLoading();
       await wxAsync('showShareImageMenu', { path });
-    } catch (_) { wx.hideLoading(); wx.showToast({ title: '暂时打不开转发，可先存相册', icon: 'none' }); }
-    finally { this.setData({ busy: '' }); }
+    } catch (error) {
+      wx.hideLoading();
+      // 链接失效时不许说「可先存相册」——存相册走的是同一条链接，一定也失败。
+      const message = String(error && (error.errMsg || error.message) || '');
+      if (/失效|下载失败/.test(message)) this.warnNoAsset();
+      else wx.showToast({ title: '暂时打不开转发，可先存相册', icon: 'none' });
+    } finally { this.setData({ busy: '' }); }
   },
 
   openRevise() {

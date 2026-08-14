@@ -40,9 +40,21 @@
           </view>
         </view></scroll-view>
       </block>
+      <!-- 取数中：给横滑流两张骨架卡。三条作品通道里 /video/works 是服务端到 aidrama 的同步代理
+           （上游预算 15–60s，见 index.js load 注释），首次进 tab 就是这一态——不能是一屏纯白。 -->
+      <block wx:elif="{{loading}}">
+        <text class="section-label">最 近 做 的</text>
+        <view class="pch-flow"><view class="pch-track">
+          <view wx:for="{{[1,2]}}" wx:key="*this" class="pch-work card pch-sk">
+            <view class="pch-w-thumb"></view>
+            <view class="pch-sk-line"></view>
+            <view class="pch-sk-line short"></view>
+          </view>
+        </view></view>
+      </block>
       <!-- 空态（游客或全无作品）：不催登录，只把人指回战局领军令。
            取数失败时不出这张卡——上面已经有重试条，一边说「读不出来」一边说「还没有作品」是自相矛盾。 -->
-      <view wx:elif="{{!loading && !loadFailed}}" class="pouch-empty card">
+      <view wx:elif="{{!loadFailed}}" class="pouch-empty card">
         <text class="pe-t serif">还没有作品</text>
         <text class="pe-d">去战局领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
         <view class="pe-go" bindtap="goBattle"><text>去战局领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
@@ -50,9 +62,19 @@
 
       <!-- ② 手艺：一门手艺一格。固定子应用三格 + 创意 agents 动态格（上新自动多一格）。 -->
       <text class="section-label">手 艺</text>
-      <view class="pch-grid">
+      <!-- 首次取数时 crafts 还是空数组：给四格骨架，不留一片空白让人以为页面坏了。 -->
+      <view wx:if="{{loading && !crafts.length}}" class="pch-grid">
+        <view wx:for="{{[1,2,3,4]}}" wx:key="*this" class="pch-craft card pch-sk">
+          <view class="pch-art"></view>
+          <view class="pch-sk-line"></view>
+          <view class="pch-sk-block"></view>
+          <view class="pch-sk-line short"></view>
+        </view>
+      </view>
+      <view wx:else class="pch-grid">
         <view wx:for="{{crafts}}" wx:key="key" class="pch-craft card {{item.locked?'pch-off':''}}" data-index="{{index}}" bindtap="openCraft">
-          <view class="pch-art"><image class="pch-art-img" src="{{item.art}}" mode="aspectFill" lazy-load></image></view>
+          <!-- 插画取不到就收起 image，留纸底占位（onCraftArtError）——不留破图也不留白框。 -->
+          <view class="pch-art"><image wx:if="{{item.art}}" class="pch-art-img" src="{{item.art}}" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onCraftArtError"></image></view>
           <text class="pch-c-name serif">{{item.name}}</text>
           <text class="pch-c-role">{{item.roleLine}}</text>
           <text wx:if="{{authed || item.locked}}" class="pch-c-meta {{item.worksRoute?'pch-c-meta-link':''}}" data-index="{{index}}" catchtap="openWorks">{{item.metaLine}}</text>

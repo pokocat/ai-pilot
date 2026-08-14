@@ -6,9 +6,12 @@
 .gl-sec-t { font-size: 13px; font-weight: 600; color: var(--ink); letter-spacing: .06em; }
 .gl-sec-n { font-size: 11.5px; color: var(--ink-3); }
 
-/* 两列网格：§7.2 —— space-between + 48.5%，不要用 calc(50% - gap)（亚像素取整会溢出换行成竖排） */
+/* 两列网格：§7.2 —— space-between + 48.5%，不要用 calc(50% - gap)（亚像素取整会溢出换行成竖排）。
+   box-sizing 是这条规则的另一半：.gl-tile 同时带 .card（1px 边）和 8px padding，
+   全局又没有 border-box 复位 —— 少了这一行，单格实占 48.5% + 18px = 191.6pt，
+   两格 383.3 > 容器 358，照样换行塌成单列（2026-08-14 走查量到的实况，右半屏全空）。 */
 .gl-grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
-.gl-tile { width: 48.5%; margin-bottom: 12px; padding: 8px 8px 10px; border-radius: var(--r-md); overflow: hidden; }
+.gl-tile { box-sizing: border-box; width: 48.5%; margin-bottom: 12px; padding: 8px 8px 10px; border-radius: var(--r-md); overflow: hidden; }
 
 /* 3:4 缩略图占位：padding-bottom 撑高 + 绝对定位内容（微信 WebView 对 aspect-ratio 支持不稳） */
 .gl-thumb { position: relative; width: 100%; padding-bottom: 133.33%; border-radius: 10px; overflow: hidden; background: var(--surface-2); }

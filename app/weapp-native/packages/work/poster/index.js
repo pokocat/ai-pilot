@@ -50,10 +50,10 @@ Page({
     proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
     // 档位：premiumOn 为假时整块不渲染（供应商没配好时露出一个必然 422 的选项比不露更糟）。
     tier: 'standard', premiumPrice: 0, premiumOn: false,
-    // 档位示意图是**固定模板图**（说明两档差异，不是每次生成的预览）。
-    // 图还没放进包里时 binderror 会把对应项置 false，卡片退化成纯文字——
-    // 缺图不留破图框（product-ui-completeness：missing media 必须有兜底）。
-    tierArt: { standard: true, premium: true },
+    // 档位卡没有示意图：曾经引 assets 下的两张固定模板图，但它们从没进过 src/assets，
+    // 也就从没打进产物 —— 实测每次进页面两张都触发 binderror、兜底开关立刻全 false，
+    // 「档位卡有插画」这个设计一次都没生效过。与其留一段永远走 catch 的死代码，不如拆掉；
+    // 要恢复就先把图放进 src/assets 下（构建会跟着 ASSET_ROOT 拷进产物），再把 image 与兜底一起加回来。
     // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
     // 有它时表单默认收起（用户刚聊完，不该再对着表把话重打一遍）；没有就退回表单打头。
     designNote: '', showForm: false,
@@ -163,13 +163,6 @@ Page({
   },
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
-  /** 示意图加载失败（还没补图 / 路径错）→ 只收起这一张，不影响另一档，也不报错打扰用户。 */
-  tierArtError(event) {
-    const key = String(event.currentTarget.dataset.tier || '');
-    if (key !== 'standard' && key !== 'premium') return;
-    if (!this.data.tierArt[key]) return;
-    this.setData({ [`tierArt.${key}`]: false });
-  },
   toggleForm() { this.setData({ showForm: !this.data.showForm }); },
   chooseTier(event) { this.setData({ tier: String(event.currentTarget.dataset.key || 'standard') }); },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },

@@ -1289,8 +1289,23 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   // 卡面正在承诺的那件事——有作品就先给作品库，别让人找不到已经生成的资产。
   assert.match(pouch, /const hasWorks = counts\[app\.countKey\] > 0;/, '落点按有无作品分');
   assert.match(pouch, /route: worksRoute \|\| app\.route,/, '有作品时整卡进作品库');
-  assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
-    '带 agentKey 的固定格必须跟着那位军师的启用状态置灰');
+  assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| hasWorks\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
+    '带 agentKey 的固定格跟着那位军师的启用状态置灰，但有成品就一律算已启用');
+  // 2026-08-14 走查：同一屏里「最近做的」摆着海报作品、写着「出自 · 海报快印」，下面那一格
+  // 却置灰写「还没一起用过」，点下去还弹付费启用层。自己已有的资产不许被收费闸挡在外面。
+  assert.match(pouch, /hasWorks/, '有成品必须参与已启用判定');
+  assert.ok(pouch.indexOf('const hasWorks') < pouch.indexOf('const unlocked'),
+    'hasWorks 必须先于 unlocked 求值，否则置灰判定读不到作品数');
+  // 2026-08-14 走查：三条作品通道里 /video/works 是到 aidrama 的同步代理（上游预算 15–60s），
+  // 首次进 tab 必然停在取数态。此前这一态整页只剩两行小标题、一片空白，看着像卡死。
+  assert.match(pouchWxml, /wx:elif="\{\{loading\}\}"[\s\S]{0,400}pch-sk/, '取数中作品流要有骨架');
+  assert.match(pouchWxml, /wx:if="\{\{loading && !crafts\.length\}\}"[\s\S]{0,300}pch-sk/, '取数中手艺格要有骨架');
+  assert.match(pouchWxml, /binderror="onCraftArtError"/, '手艺插画要有缺图兜底');
+  assert.match(pouch, /onCraftArtError\(event\)/, '缺图兜底的 handler 要在');
+  // 作品库两列网格：.gl-tile 同时带 .card（1px 边）和 8px padding，全局没有 border-box 复位，
+  // 少了这一行就是 48.5% + 18px = 191.6pt，两格 383.3 > 容器 358 → 换行塌成单列（走查量到的实况）。
+  const galleryShared = fs.readFileSync(path.join(appRoot, 'src/packages/work/gallery/index.scss'), 'utf8');
+  assert.match(galleryShared, /\.gl-tile \{ box-sizing: border-box;/, '两列网格必须 border-box，否则塌成单列');
   assert.match(pouch, /covered\.has\(text\(agent\.key\)\)/, '被固定格覆盖的军师不许再出一格');
   assert.match(pouchWxml, /catchtap="openWorks"/, '作品数那行是独立点击区，不能冒泡给整卡');
   // 目录读不到时**不许**当成已启用：放行会让人点进确认页、提交时才撞 403，那时已经在扣费路径上。
@@ -1850,6 +1865,10 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   const msgList = fs.readFileSync(path.join(sourceRoot, 'chat-core/message-list.wxml'), 'utf8');
   assert.match(msgList, /messageIndex===posterActionAt[\s\S]{0,200}bindtap="openPoster"/, '出图 action 挂在消息上');
   assert.doesNotMatch(chatWxml, /chat-poster-bar/, '常驻条必须已经拆掉，别两个入口并存');
+  // 2026-08-14 走查：这段 action 原本排在 report-card / ai-text **之前**，渲染出来的顺序是
+  // 军师头像行、出图按钮、然后才是正文——注释写着「挂在这条回复下面」，实际挂在了上面。
+  assert.ok(msgList.indexOf('class="ai-text"') < msgList.indexOf('class="msg-poster-go"'),
+    '出图入口必须排在回复正文之后，不许再挂回正文前面');
   // 派生状态与 ask 走同一个「消息落定」钩子，freshness 保证一致。
   // ★ 两个钩子都要算。实测过只加一个的后果：设计师说了「够了，直接出图」，action 也不出现——
   //   askPatch 才是回复流式结束 / 历史加载 / 会话恢复共用的「消息落定」钩子，
@@ -1874,6 +1893,14 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 冷启动（没有对话上下文）不是故障：服务端现在回空草稿（2026-08-13 前是 422 MESSAGE_ID_REQUIRED），
   // 弹报错横幅会把一次正常的空白表单说成出了事。
   assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
+  // 2026-08-14 走查：取需求单是服务端拿整段对话过模型抽（briefDraft），几秒起步，
+  // 而这一屏此前只有一行灰字「正在取需求单」，看着像卡死。转圈 + 说明 + 表单骨架，一样不能少。
+  assert.match(posterWxml, /wx:if="\{\{loading\}\}" class="ps-loading">[\s\S]{0,400}ps-spin/, '取需求单要有转圈');
+  assert.match(posterWxml, /ps-sk-card/, '取需求单要有表单骨架');
+  // 档位插画引的 /assets/tier/*.jpg 从来没进过 src/assets，也就从没打进产物：实测每次进页面
+  // 两张都触发 binderror、tierArt 立刻全 false。与其留一段永远走 catch 的死代码，不如拆掉。
+  assert.doesNotMatch(posterWxml, /src="[^"]*assets\/tier\//, '不许引用没打进产物的档位插画');
+  assert.doesNotMatch(poster, /tierArt/, 'tierArt 兜底随插画一起拆干净');
   // ★ normalizeStatus 是白名单：没显式搬过去的字段会被整层吃掉。档位上线时就漏了这两个，
   //   于是 premiumOn 恒 false、选择器一次都没渲染出来（页面/契约/服务端全对，中间层吃了字段）。
   const creativeLib = fs.readFileSync(path.join(sourceRoot, 'packages/work/poster/creative.js'), 'utf8');
@@ -1889,6 +1916,20 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.doesNotMatch(posterJob, /this\.setData\(\{ jobId \}\);\s*\n\s*this\.loadNotificationTemplate\(\)/,
     'onLoad 主链上不许挂锦上添花的取数——它一抛，看图整条链就断了');
   assert.match(posterJob, /this\.data\.job && this\.data\.job\.tier === 'premium'/, '档位来自任务详情，不是猜的');
+  // 2026-08-14 走查：成品图取不到（600 秒签名过期 / 资源被清）时，「保存相册 / 分享好友」
+  // 照常摆在那儿当主动作，点下去弹「保存失败，请重试」与「暂时打不开转发，可先存相册」——
+  // 重试一百次也没用，存相册走的还是同一条死链接。缺图态的唯一正解是「重新获取」。
+  const posterJobWxml = fs.readFileSync(path.join(sourceRoot, 'packages/work/posterJob/index.wxml'), 'utf8');
+  assert.match(posterJobWxml, /wx:if="\{\{!assetUrl\}\}" class="pj-btn primary" bindtap="reload"/,
+    '缺图时主动作是「重新获取」');
+  assert.match(posterJobWxml, /<view wx:if="\{\{assetUrl\}\}" class="pj-acts">[\s\S]{0,400}bindtap="saveAlbum"/,
+    '缺图时保存/分享整排收起');
+  assert.match(posterJob, /async saveAlbum\(\) \{[\s\S]{0,200}!this\.posterSource\(\)[\s\S]{0,60}warnNoAsset/,
+    '保存前挡缺图，别落进通用 catch');
+  assert.match(posterJob, /async shareFriend\(\) \{[\s\S]{0,200}!this\.posterSource\(\)[\s\S]{0,60}warnNoAsset/,
+    '分享前挡缺图');
+  assert.doesNotMatch(posterJob, /catch \(_\) \{ wx\.hideLoading\(\); wx\.showToast\(\{ title: '暂时打不开转发，可先存相册'/,
+    '链接失效不许再建议「可先存相册」——那条路走的是同一条链接');
   assert.match(chat, /sessionId=\$\{encodeURIComponent\(this\._sessionId\)\}/);
   assert.match(chat, /openPosterJob\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?item\.deliverable && item\.deliverable\.creativeJobId[\s\S]*?\/packages\/work\/posterJob\/index\?jobId=/);
 

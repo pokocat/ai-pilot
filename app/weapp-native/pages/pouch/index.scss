@@ -81,6 +81,26 @@
   color: var(--accent); font-size: 11.5px; font-weight: 600;
 }
 
+/* —— 取数骨架 ——
+   三条作品通道里 /video/works 是服务端到 aidrama 的同步代理（上游预算 15–60s），
+   首次进 tab 必然停在这一态。此前这里什么都不画，整页只剩两行小标题——看着像卡死。
+   骨架用同一套卡体尺寸，数据回来时不跳版。 */
+.pch-sk { pointer-events: none; }
+.pch-sk .pch-w-thumb, .pch-sk .pch-art { background: var(--surface-2, #F1EFE8); }
+.pch-sk-line {
+  height: 11px; margin-top: 10px; border-radius: 6px;
+  background: var(--surface-2, #F1EFE8);
+  animation: pch-sk-pulse 1.4s ease-in-out infinite;
+}
+.pch-sk-line.short { width: 58%; margin-top: 7px; }
+/* 对齐 .pch-c-role 的固定两行高（34px）：骨架与真卡等高，数据回来不跳版。 */
+.pch-sk-block {
+  height: 34px; margin-top: 4px; border-radius: 6px;
+  background: var(--surface-2, #F1EFE8);
+  animation: pch-sk-pulse 1.4s ease-in-out infinite;
+}
+@keyframes pch-sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
 /* —— 空态：不催登录，只指回战局 —— */
 .pouch-empty { display: flex; flex-direction: column; gap: 8px; margin-bottom: var(--rhythm-block); padding: 22px 18px; }
 .pouch-empty .pe-t { font-size: 18px; font-weight: 600; }

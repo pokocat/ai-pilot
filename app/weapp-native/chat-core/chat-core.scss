@@ -191,9 +191,11 @@
 /* 「去出成品图」：挂在设计师那条回复下面的下一步动作（不是常驻条 —— 常驻会让人以为随时能出，
    而那时对话还没聊出主标题和客群）。做成描边行而不是实心按钮：它是可选的下一步，
    不该抢过输入框的主动作地位。 */
+/* 挂在回复正文之后：上间距要拉开（跟正文分开），下间距收住（还属于这条消息）。
+   左缩进 44px 与 .ai-text 对齐——它是这条回复给出的下一步，不是一条独立的系统条。 */
 .msg-poster-go {
   display: flex; align-items: center; gap: 7px;
-  margin: 8px 0 2px 44px; padding: 9px 12px;
+  margin: 10px 0 2px 44px; padding: 9px 12px;
   border: 1px solid var(--line-strong); border-radius: 11px; background: var(--paper);
 }
 .mpg-t { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--ink-1); }

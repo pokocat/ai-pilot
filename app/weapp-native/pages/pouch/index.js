@@ -252,10 +252,16 @@ Page({
     const crafts = CRAFT_APPS
       .map((app) => {
         const agent = app.agentKey ? this._agentsByKey[app.agentKey] : null;
+        // ★ 有成品 = 已经一起用过（2026-08-14 走查后加）。此前只看目录的 owned/billing，
+        //   结果同一屏自相矛盾：上面「最近做的」摆着这门手艺出的海报、写着「出自 · 海报快印」，
+        //   下面这一格却置灰写「还没一起用过」，点下去弹的是**付费启用层**。
+        //   自己已经有的资产，任何情况下都不许被收费闸挡在外面。
+        const hasWorks = counts[app.countKey] > 0;
         // 没有 agentKey 的格子恒可用（快出片 / 方案报告，本来就不由单个军师驱动）。
         // 有 agentKey 却在目录里查不到（/agents 挂了）→ **按未启用处理**，不臆断成已启用：
         // 直接放行会让人点进确认页，提交时才撞 403 AGENT_LOCKED，那时钻石已经在扣费路径上了。
         const unlocked = !app.agentKey
+          || hasWorks
           || Boolean(agent && (agent.owned || text(agent.billing) !== 'unlock'));
         if (!unlocked) {
           return {
@@ -269,7 +275,6 @@ Page({
         //   零作品 → 点整卡进对话（那时作品库是个空页，先进去只是白跑一趟）。
         //   上一版一律进对话、作品库只挂在一行下划线小字上 —— 结果是卡上明写着「看 1 件作品」，
         //   点下去却进了聊天窗，用户找不到以前生成的图。主路径必须通向卡面正在承诺的那件事。
-        const hasWorks = counts[app.countKey] > 0;
         const worksRoute = hasWorks ? (app.worksRoute || '') : '';
         return {
           key: app.key, name: app.name, art: app.art,
@@ -297,6 +302,18 @@ Page({
     const item = this.data.recent[index];
     if (!item || item.thumb === item.art) return;
     this.setData({ [`recent[${index}].thumb`]: item.art });
+  },
+
+  /**
+   * 手艺插画取不到（资源没打进产物、路径写错）时收起 image，留 .pch-art 的纸底占位。
+   * 本地资源理论上不会 404，但确认页的档位插画就是这么丢的（引了 /assets/tier/*.jpg，
+   * src/assets 下压根没这个目录）——同类风险摆在这里，兜底比"理论上不会"可靠。
+   */
+  onCraftArtError(event) {
+    const index = Number(event.currentTarget.dataset.index);
+    const item = this.data.crafts[index];
+    if (!item || !item.art) return;
+    this.setData({ [`crafts[${index}].art`]: '' });
   },
 
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据（作品流与手艺格计数一起变）。 */

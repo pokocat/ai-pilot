@@ -1,7 +1,16 @@
 <view class="poster-set {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
   <view class="form-header"><view class="form-safe"></view><view class="form-headrow"><view class="form-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><text class="form-title serif">{{disabled?'成品图':'成品图需求单'}}</text><view class="form-spacer"></view></view></view>
   <view class="ps-pad">
-    <view wx:if="{{loading}}" class="ps-loading"><text>正在取需求单</text></view>
+    <!-- 取需求单不是快接口：服务端要把整段对话读成一张需求单（briefDraft 走模型）。
+         此前这里只有一行灰字，看着像卡死——给转圈 + 说明 + 表单骨架，并说清在等什么。 -->
+    <view wx:if="{{loading}}" class="ps-loading">
+      <view class="ps-spin"></view>
+      <text class="ps-loading-t serif">正在整理需求单</text>
+      <text class="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要几秒。</text>
+      <view class="ps-sk-card"></view>
+      <view class="ps-sk-line"></view>
+      <view class="ps-sk-line short"></view>
+    </view>
     <view wx:elif="{{disabled}}" class="ps-empty"><text class="ps-empty-t serif">成品图暂未开放</text><text class="ps-empty-d">海报设计师的文字方案不受影响，可继续在对话里推进。</text></view>
     <block wx:else>
       <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
@@ -13,7 +22,10 @@
         <text class="ps-note-k">这张海报会这么设计</text>
         <text class="ps-note-b">{{designNote}}</text>
       </view>
-      <view wx:if="{{premiumOn}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">档位</text></view><view class="ps-tpls"><view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier"><image wx:if="{{tierArt.standard}}" class="ps-tier-art" src="/assets/tier/standard.jpg" mode="aspectFill" lazy-load data-tier="standard" binderror="tierArtError"></image><view class="ps-tpl-h"><text class="ps-tpl-n">标准海报</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 模型用图形与排印现场作画</text></view></view><view class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier"><image wx:if="{{tierArt.premium}}" class="ps-tier-art" src="/assets/tier/premium.jpg" mode="aspectFill" lazy-load data-tier="premium" binderror="tierArtError"></image><view class="ps-tpl-h"><text class="ps-tpl-n">高级海报</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · 顶级图片模型出全幅主视觉，质感更强</text></view></view></view><text wx:if="{{tier==='premium'}}" class="ps-fhint">高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。</text></view>
+      <!-- 档位卡是纯文字卡：曾经这里各挂一张 /assets/tier/*.jpg 的示意图，但那两张图从没进过
+           src/assets（也就从没打进产物），每次进页面都靠 binderror 收起——等于一段永远走 catch 的死代码。
+           要恢复示意图：把图放进 app/src/assets/tier/，再把 <image class="ps-tier-art"> 与 tierArtError 一起加回来。 -->
+      <view wx:if="{{premiumOn}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">档位</text></view><view class="ps-tpls"><view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">标准海报</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 模型用图形与排印现场作画</text></view></view><view class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier"><view class="ps-tpl-h"><text class="ps-tpl-n">高级海报</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view><view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · 顶级图片模型出全幅主视觉，质感更强</text></view></view></view><text wx:if="{{tier==='premium'}}" class="ps-fhint">高级档的主视觉由图片模型生成，不能同时使用你上传的本人照片；标题等中文仍由军师排版，不会出错字。</text></view>
 
       <view class="ps-more" bindtap="toggleForm">
         <text class="ps-more-t">{{showForm?'收起细节':'这些细节要改吗'}}</text>
