@@ -26,6 +26,13 @@
 
       <block wx:else>
         <view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view>
+        <!-- 去出成品图：设计师聊到位时挂在**这条回复**下面（posterActionAt 由 behavior.posterActionIndex 算）。
+             不做成常驻条——常驻会让人以为随时能出，而那时对话还没聊出主标题和客群，出图页只会是空表。 -->
+        <view wx:if="{{messageIndex===posterActionAt}}" class="msg-poster-go" bindtap="openPoster">
+          <native-icon name="image" tone="accent" color-key="{{colorKey}}" size="15"></native-icon>
+          <text class="mpg-t">去出成品图</text>
+          <view class="mpg-cost"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text class="mpg-c">x{{posterPrice}} 起</text></view>
+        </view>
         <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob" bindnextstage="continueDeliveryStage"></report-card>
         <text wx:if="{{item.report&&item.streaming&&item.streamHint}}" class="stream-hint report-note">{{item.streamHint}}</text>
         <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>

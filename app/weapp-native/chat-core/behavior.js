@@ -2,6 +2,7 @@
 // 供 packages/main/chat 与后续「问策 tab 内嵌总军师对话」共用。
 // 这里只承载与页面宿主无关的逻辑：消息加载/规范化、发送、SSE 流式对接、生成态/停止/重试、
 // 键盘避让、粘贴归卷、asks 问答卡、成果卡闭环。导航参数解析、页头与返回键留在各宿主页。
+const POSTER_READY_RE = /去出图|出成品图|可以出图|够了[^\n]{0,6}出图/;
 const { api } = require('../services/api');
 const store = require('../services/store');
 const { generateStream } = require('../services/streaming');
@@ -367,6 +368,8 @@ const data = {
   chipsSpent: false,
   showPicker: false, pickerLoading: false, pickGroups: [], accepting: false, reportBusy: '',
   posterEnabled: false, posterPrice: 0,
+  // 出图 action 挂在哪一条消息上（-1 = 不显示）。由 posterActionIndex 在消息落定时算。
+  posterActionAt: -1,
   askAnsweredCount: 0, askTotal: 0, askRemaining: 0, askReady: false,
   askComposerOpen: false, askComposerMessage: -1, askComposerQuestion: -1,
   chapterPending: false, chapterPendingLabel: '',
@@ -688,7 +691,36 @@ const methods = {
       askTotal: state.total,
       askRemaining: Math.max(0, state.total - state.answered),
       askReady: state.ready,
+      posterActionAt: this.posterActionIndex(messages),
     }, extra || {});
+  },
+  /**
+   * 「去出成品图」挂在**设计师这条回复**下面，而不是常驻在输入框上方（2026-08-13 改）：
+   * 它是设计师聊到位之后给出的下一步，不是页面级功能——常驻会让人以为随时都能出，
+   * 而那时对话还没聊出主标题和客群，出图页只会是一张空表。
+   *
+   * 触发：提示词里钉了设计师聊够时说「够了，去出图吧」，这里认那个信号。
+   * 但**信号是文本尾部约定，模型的遵从性天生不稳**（同 ask 块那条教训），所以补两层：
+   *   · 粘性：一旦本会话出现过信号，之后一直挂在最后一条回复上，不因下一句没说而消失；
+   *   · 兜底：来回四轮以上仍没出现信号，也放出来——宁可早一点，也不能让人聊了半天找不到出口。
+   * 返回消息下标；-1 = 不显示。
+   */
+  posterActionIndex(messages) {
+    if (this._agentKey !== 'poster' || !this.data.posterEnabled) return -1;
+    const list = Array.isArray(messages) ? messages : [];
+    let last = -1;
+    let replies = 0;
+    let signal = false;
+    for (let i = 0; i < list.length; i += 1) {
+      const item = list[i];
+      if (!item || item.role !== 'assistant') continue;
+      if (item.streaming) continue;   // 还在打字的那条先不挂，等它落定
+      replies += 1;
+      last = i;
+      if (POSTER_READY_RE.test(String(item.text || ''))) signal = true;
+    }
+    if (last < 0) return -1;
+    return signal || replies >= 4 ? last : -1;
   },
   activeAskMessage() {
     const index = this.data.messages.findIndex((item) => item && item.activeAsk && Array.isArray(item.asks) && item.asks.length);
@@ -1854,6 +1886,7 @@ const methods = {
   stop() {},
   toBottom() { const epoch = this._epoch; this.safeSetData({ bottomAnchor: '' }); setTimeout(() => { if (this.isCurrent(epoch)) this.safeSetData({ bottomAnchor: 'chat-bottom' }); }, 20); },
 };
+
 
 module.exports = {
   chatCore: Behavior({ data, methods }),

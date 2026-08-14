@@ -1835,8 +1835,19 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
     '还没开口就点出图 → 抽出来必然是张空表，先拦住');
   assert.doesNotMatch(chat, /openPoster[\s\S]{0,400}messageId=/,
     '需求单改由整段对话抽取，不再挂在某一条成果消息上');
-  assert.match(chatWxml, /class="chat-poster-bar"[\s\S]*?bindtap="openPoster"/, '常驻入口条要在');
-  assert.match(chatWxml, /wx:if="\{\{posterEnabled&&!showLogin\}\}"/, '能力关着或未登录时不露出这条');
+  // 2026-08-13 二次改：入口从**常驻条**改成挂在设计师那条回复下面的 action。
+  // 常驻会让人以为随时能出图，而那时对话还没聊出主标题和客群，出图页只会是一张空表。
+  const msgList = fs.readFileSync(path.join(sourceRoot, 'chat-core/message-list.wxml'), 'utf8');
+  assert.match(msgList, /messageIndex===posterActionAt[\s\S]{0,200}bindtap="openPoster"/, '出图 action 挂在消息上');
+  assert.doesNotMatch(chatWxml, /chat-poster-bar/, '常驻条必须已经拆掉，别两个入口并存');
+  // 派生状态与 ask 走同一个「消息落定」钩子，freshness 保证一致。
+  assert.match(chat, /posterActionAt: this\.posterActionIndex\(messages\)/, '出图 action 的下标要在 askSelectionPatch 里算');
+  assert.match(chat, /if \(item\.streaming\) continue;/, '还在打字的那条不挂 action');
+  assert.match(chat, /signal \|\| replies >= 4/, '信号是文本尾部约定、遵从性不稳，必须有轮次兜底');
+  // 两个宿主页都要把下标传进模板，漏一个那页就永远不显示。
+  for (const [name, markup] of [['chat', chatWxml], ['sessions', fs.readFileSync(path.join(sourceRoot, 'pages/sessions/index.wxml'), 'utf8')]]) {
+    assert.match(markup, /posterEnabled, posterPrice, posterActionAt,/, `${name} 页要把 posterActionAt 传给消息列表`);
+  }
   // （原「出图链路要带 messageId」的断言随 2026-08-13 改造一并作废：需求单改从整段对话抽，
   //   openPoster 只带 sessionId。上面的 doesNotMatch 已经把"不许再挂回某条消息"钉死。）
 
