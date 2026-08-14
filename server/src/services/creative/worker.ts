@@ -11,6 +11,7 @@ import { now } from '../clock.js';
 import { recordAudit } from '../audit.js';
 import { registerJob } from '../scheduler.js';
 import { noteCreativeJobSucceeded, noteCreativeJobFailed, noteCreativeEngine } from '../metrics.js';
+import { notifyPosterReady } from '../wechatSubscribe.js';
 import { PdfUnavailableError } from '../reportPdf.js';
 import { getCreativeConfig, visualProviderConfigured, type CreativeRuntimeConfig } from './config.js';
 import { generatePhilosophy, philosophyText, composeVisualPrompt, type VisualPhilosophy } from './philosophy.js';
@@ -822,6 +823,12 @@ export async function runJobOnce(jobId: string, deps: CreativeWorkerDeps = {}): 
     // 引擎维度单独一个计数器（不往 creativeJobs 那个 counter 上加标签：同名指标的标签集必须稳定，
     // created/failed 事件没有 engine 这一维，混着加会让同一指标出现两种 series 形状）。
     noteCreativeEngine(POSTER_SKILL_KEY, outcome.engineLabel ?? 'template');
+    // 出图是异步的、约一分钟——用户早就切走了。微信订阅消息是唯一能把他叫回来的手段。
+    // 不 await：通知失败绝不能影响一单的收口（内部已吞异常，这里只是表明调用方不等它）。
+    notifyPosterReady({
+      tenantId: input.job.tenantId, userId: input.job.userId,
+      headline: input.brief.headline, jobId, ok: true,
+    });
     await recordAudit({
       tenantId: input.job.tenantId, userId: input.job.userId, action: 'creative.job.succeeded',
       payload: {
@@ -861,6 +868,11 @@ export async function runJobOnce(jobId: string, deps: CreativeWorkerDeps = {}): 
     console.error('[creative] 退款失败（sweep 会重试）：', jobId, (e as Error).message));
   if (outcome.status === 'failed') {
     noteCreativeJobFailed(POSTER_SKILL_KEY, providerLabel, outcome.code ?? 'INTERNAL');
+    // 失败也要通知：钻石已退，但人还在等——不说一声他会一直以为在跑。
+    notifyPosterReady({
+      tenantId: input.job.tenantId, userId: input.job.userId,
+      headline: input.brief.headline, jobId, ok: false,
+    });
     await recordAudit({
       tenantId: input.job.tenantId, userId: input.job.userId, action: 'creative.job.failed',
       payload: { jobId, code: outcome.code ?? null, message: outcome.message?.slice(0, 300) ?? null, attempts: input.job.attempts },

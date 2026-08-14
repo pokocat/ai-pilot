@@ -30,6 +30,13 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
     description: '数字人形象训练完成或失败后提醒',
     env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
   },
+  poster: {
+    title: '成品图出图',
+    description: '海报出好或失败后提醒查看',
+    // 复用「服务进度通知」这类模板即可（字段与 avatar 同构）；没配 env 就退化成不推送，
+    // 出图链路本身不受影响（sendWechatSubscribeMessage 拿不到 templateId 直接返回未发送）。
+    env: ['WECHAT_SUBSCRIBE_POSTER_TEMPLATE_ID', 'WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
+  },
 };
 
 function envFirst(keys: string[]): string {
@@ -119,8 +126,11 @@ function miniprogramState(): 'developer' | 'trial' | 'formal' {
   return v === 'developer' || v === 'trial' ? v : 'formal';
 }
 
-function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null } = {}): string {
+function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null; jobId?: string | null } = {}): string {
   if (scene === 'avatar') return 'packages/video/clone/index?step=2';
+  // 海报：直接落到那一单的详情页；没带 jobId（理论上不该发生）退到作品库，别把人扔到首页。
+  if (scene === 'poster' && opts.jobId) return `packages/work/posterJob/index?jobId=${encodeURIComponent(opts.jobId)}`;
+  if (scene === 'poster') return 'packages/work/gallery/index';
   if (scene === 'report' && opts.reportId) return `packages/work/report/index?id=${encodeURIComponent(opts.reportId)}`;
   if (scene === 'report') return 'packages/work/library/index';
   if (scene === 'payment') return 'packages/work/credits/index'; // 订单明细页（含支付订单段）
@@ -148,6 +158,15 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
 function dataForScene(scene: WechatSubscribeScene, opts: {
   title: string; note?: string; category?: string; userName?: string; amountFen?: number; orderNo?: string; statusText?: string;
 }) {
+  // poster 与 avatar 同构（都用「服务进度通知」那类模板）：业务标题 + 状态 + 提示 + 完成时间。
+  if (scene === 'poster') {
+    return {
+      thing13: { value: clip(opts.title || '成品图', 20) },
+      phrase16: { value: clip(opts.statusText || '已完成', 5) },
+      thing5: { value: clip(opts.note || '海报已出好，点击查看', 20) },
+      time12: { value: timeValue() },
+    };
+  }
   if (scene === 'avatar') {
     return {
       thing13: { value: clip(opts.title || '数字分身训练', 20) },
@@ -239,6 +258,8 @@ export async function sendWechatSubscribeMessage(args: {
   orderNo?: string; // payment 模板的「订单号」位；传微信 transactionId 优先（纯数字）
   statusText?: string; // avatar 模板的「状态」位：已完成 / 训练失败
   reportId?: string | null;
+  /** 海报出图：落地页要带上这一单的 id，用户点通知直接进那张图的详情页。 */
+  jobId?: string | null;
   logSkipped?: boolean;
 }): Promise<{ sent: boolean; reason?: string; retryable?: boolean }> {
   const templateId = templateIdForScene(args.scene);
@@ -280,7 +301,7 @@ export async function sendWechatSubscribeMessage(args: {
   const payload = {
     touser: user.wechatOpenId,
     template_id: templateId,
-    page: pageForScene(args.scene, { reportId: args.reportId }),
+    page: pageForScene(args.scene, { reportId: args.reportId, jobId: args.jobId }),
     miniprogram_state: miniprogramState(),
     lang: 'zh_CN',
     data: dataForScene(args.scene, {
@@ -314,6 +335,28 @@ export async function sendWechatSubscribeMessage(args: {
   await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { lastSentAt: now() } }).catch(() => {});
   await logNotification({ ...args, templateId, status: 'sent', payload: payload as Prisma.InputJsonValue });
   return { sent: true, retryable: false };
+}
+
+/**
+ * 出图完成/失败通知。**永不抛**：通知失败不该影响一单的结算与交付
+ * （sendWechatSubscribeMessage 内部已吞异常，这里再包一层 void 表明调用方不等它）。
+ */
+export function notifyPosterReady(args: {
+  tenantId: string;
+  userId: string;
+  headline: string;
+  jobId: string;
+  ok: boolean;
+}): void {
+  void sendWechatSubscribeMessage({
+    tenantId: args.tenantId,
+    userId: args.userId,
+    scene: 'poster',
+    title: args.headline || '成品图',
+    statusText: args.ok ? '已出图' : '未出图',
+    note: args.ok ? '海报已出好，点击查看' : '这次没出成，钻石已退回',
+    jobId: args.jobId,
+  });
 }
 
 export function notifyReportReady(args: {

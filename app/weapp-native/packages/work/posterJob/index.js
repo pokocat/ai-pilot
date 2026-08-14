@@ -33,7 +33,9 @@ Page({
     jobId: '', loading: true, loadErr: '', showLogin: false, job: null,
     inFlight: false, succeeded: false, failed: false, cancelled: false, timedOut: false,
     stageItems: [], progressLabel: '', assetUrl: '', assetMissingText: '', canCancel: false, canRevise: false, canRegenerate: false,
-    price: null, templates: [], panel: '', headline: '', cta: '', visual: '', templateKey: '',
+    price: null, templates: [], panel: '',
+    // 出图是异步的（约一分钟），用户本来就该走开。这里放订阅模板，让他一键「好了通知我」。
+    posterTemplate: null, subscribing: false, headline: '', cta: '', visual: '', templateKey: '',
     headlineCount: `0/${LIMITS.headline}`, ctaCount: `0/${LIMITS.cta}`, visualCount: `0/${LIMITS.visualDirection}`,
     headlineOver: false, ctaOver: false, visualOver: false, proofs: emptyProofs(), errors: {}, busy: '',
   }),
@@ -46,6 +48,7 @@ Page({
     this._styleKey = '';
     const jobId = String(options && (options.jobId || options.id) || '');
     this.setData({ jobId });
+    this.loadNotificationTemplate();
     if (!store.isAuthed()) { this.setData({ loading: false, showLogin: true }); return; }
     this.loadStatus();
     this.reload();
@@ -59,6 +62,49 @@ Page({
   back() { wx.navigateBack({ fail: () => wx.navigateTo({ url: '/packages/work/gallery/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.loadStatus(); this.reload(); },
+
+  loadNotificationTemplate() {
+    if (api.isMock()) return;
+    api.wechatSubscribeTemplates()
+      .then((result) => {
+        const scenes = result && Array.isArray(result.scenes) ? result.scenes : [];
+        this.setData({ posterTemplate: scenes.find((item) => item && item.scene === 'poster') || null });
+      })
+      .catch(() => {});
+  },
+
+  /**
+   * 「先去忙，好了通知我」——本页在制作中的**主动作**。
+   *
+   * 出图跑在服务端 worker 上，跟这个页面开不开没关系；此前这里唯一的按钮是「取消出图」，
+   * 等于把「我不想干等」和「我不要这张图了」混成了一个动作，用户想走开只能点取消。
+   * 现在：主动作是订阅通知然后退出去，取消降级成一行小字。
+   * 没配模板 / mock / 用户拒绝订阅，都照样让他走——出图不受影响，只是少一条微信提醒。
+   */
+  notifyAndLeave() {
+    if (this.data.subscribing) return;
+    const leave = (tip) => {
+      if (tip) wx.showToast({ title: tip, icon: 'none' });
+      setTimeout(() => this.back(), 600);
+    };
+    const template = this.data.posterTemplate;
+    if (api.isMock() || !template || !template.templateId) { leave('出图会在后台继续'); return; }
+    this.setData({ subscribing: true });
+    wx.requestSubscribeMessage({
+      tmplIds: [template.templateId],
+      success: (result) => {
+        const raw = result && result[template.templateId];
+        const status = ['accept', 'reject', 'ban', 'filter'].includes(raw) ? raw : 'reject';
+        api.recordWechatSubscription([{ scene: 'poster', templateId: template.templateId, status }])
+          .catch(() => null)
+          .then(() => {
+            this.setData({ subscribing: false });
+            leave(status === 'accept' ? '出好了用微信通知你' : '出图继续，本次不发通知');
+          });
+      },
+      fail: () => { this.setData({ subscribing: false }); leave('出图会在后台继续'); },
+    });
+  },
 
   async loadStatus() {
     try {

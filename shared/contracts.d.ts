@@ -1734,7 +1734,7 @@ export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayPa
  *  多为幂等重复调用（already_applied），端上仍应按成功处理并轮询订单状态。 */
 export interface PayMockPayResult { ok: boolean; applied: boolean; reason?: string; status: string }
 
-export type WechatSubscribeScene = 'review' | 'report' | 'payment' | 'avatar';
+export type WechatSubscribeScene = 'review' | 'report' | 'payment' | 'avatar' | 'poster';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
 export interface WechatSubscribeTemplate {
   scene: WechatSubscribeScene;
