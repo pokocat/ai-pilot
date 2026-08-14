@@ -48,7 +48,6 @@ Page({
     this._styleKey = '';
     const jobId = String(options && (options.jobId || options.id) || '');
     this.setData({ jobId });
-    this.loadNotificationTemplate();
     if (!store.isAuthed()) { this.setData({ loading: false, showLogin: true }); return; }
     this.loadStatus();
     this.reload();
@@ -64,7 +63,6 @@ Page({
   loggedIn() { this.setData({ showLogin: false }); this.loadStatus(); this.reload(); },
 
   loadNotificationTemplate() {
-    if (api.isMock()) return;
     api.wechatSubscribeTemplates()
       .then((result) => {
         const scenes = result && Array.isArray(result.scenes) ? result.scenes : [];
@@ -88,7 +86,7 @@ Page({
       setTimeout(() => this.back(), 600);
     };
     const template = this.data.posterTemplate;
-    if (api.isMock() || !template || !template.templateId) { leave('出图会在后台继续'); return; }
+    if (!template || !template.templateId) { leave('出图会在后台继续'); return; }
     this.setData({ subscribing: true });
     wx.requestSubscribeMessage({
       tmplIds: [template.templateId],
@@ -107,6 +105,9 @@ Page({
   },
 
   async loadStatus() {
+    // 通知模板是锦上添花：取不到只少一条微信提醒，绝不能影响看图，所以放在这条已 try 住的路径里，
+    // 不放 onLoad 主链（放主链的后果实测过：它一抛，reload() 就不跑了，页面永远停在加载态）。
+    try { this.loadNotificationTemplate(); } catch (_) { /* 忽略 */ }
     try {
       const status = normalizeStatus(await api.creativeStatus());
       // 两档单价都留着：本单是哪一档要等任务详情回来才知道（见 applyTierPrice）。

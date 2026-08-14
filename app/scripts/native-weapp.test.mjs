@@ -1882,6 +1882,12 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 详情页「换风格」按本单档位定价（regenerate 继承父单 tier、按 priceForTier 扣费）。
   const posterJob = fs.readFileSync(path.join(sourceRoot, 'packages/work/posterJob/index.js'), 'utf8');
   assert.match(posterJob, /applyTierPrice\(\)/, '详情页必须按档位定价');
+  // 2026-08-14 卡死实录：共享 api 没导出 isMock（那是 video 包私有 api 才有的），
+  // 而通知模板的取数被同步放进了 onLoad 主链 → api.isMock() 抛 TypeError → onLoad 中断、
+  // reload() 压根不跑 → 页面永远停在加载态、看不到成品。两条守卫钉住教训：
+  assert.doesNotMatch(posterJob, /api\.isMock\(/, '共享 api 没有 isMock，别调');
+  assert.doesNotMatch(posterJob, /this\.setData\(\{ jobId \}\);\s*\n\s*this\.loadNotificationTemplate\(\)/,
+    'onLoad 主链上不许挂锦上添花的取数——它一抛，看图整条链就断了');
   assert.match(posterJob, /this\.data\.job && this\.data\.job\.tier === 'premium'/, '档位来自任务详情，不是猜的');
   assert.match(chat, /sessionId=\$\{encodeURIComponent\(this\._sessionId\)\}/);
   assert.match(chat, /openPosterJob\(event\)[\s\S]*?!item\.reportReady \|\| !isReportReady\(item\.messageId, item\.deliverable\)[\s\S]*?item\.deliverable && item\.deliverable\.creativeJobId[\s\S]*?\/packages\/work\/posterJob\/index\?jobId=/);

@@ -1,7 +1,7 @@
 <view class="poster-job {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
   <view class="form-header"><view class="form-safe"></view><view class="form-headrow"><view class="form-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><text class="form-title serif">成品图</text><view class="form-spacer"></view></view></view>
   <view class="pj-pad">
-    <view wx:if="{{loading}}" class="pj-making"><view class="pj-spin"></view><text class="pj-making-t serif">正在取出图进度</text><text class="pj-making-d">刚发起的任务可能要几秒才查得到，稍等一下。</text></view>
+    <view wx:if="{{loading}}" class="pj-making"><view class="pj-spin"></view><text class="pj-making-t serif">正在加载</text></view>
     <view wx:elif="{{loadErr}}" class="pj-empty"><text class="pj-empty-t serif">{{loadErr}}</text><button class="pj-btn ghost" bindtap="reload">重试</button></view>
     <block wx:elif="{{job}}">
       <view wx:if="{{inFlight}}" class="pj-making"><view class="pj-spin"></view><text class="pj-making-t serif">{{progressLabel}}</text><text class="pj-making-d">出图约一分钟，可以先去做别的，回来还在这。</text><view class="pj-stages"><view wx:for="{{stageItems}}" wx:key="stage" class="pj-stage"><view class="pj-dot {{item.active?'on':''}}"></view><text class="pj-stage-t {{item.active?'on':''}}">{{item.label}}</text></view></view><text wx:if="{{timedOut}}" class="pj-note">这次出图时间有点久，结果完成后仍会保存在这里，稍后回来查看。</text><button class="pj-btn primary" bindtap="notifyAndLeave">{{subscribing?'正在设置':'先去忙，好了通知我'}}</button><text wx:if="{{canCancel}}" class="pj-cancel-link" bindtap="cancel">{{busy==='cancel'?'取消中…':'不要这张了，取消出图'}}</text></view>
