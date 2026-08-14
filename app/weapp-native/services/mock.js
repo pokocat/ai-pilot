@@ -41,6 +41,13 @@ function mockCreditBalance() {
   if (stored !== '' && stored != null) return Number(stored);
   return currentMockPlan() ? 100 : 0;
 }
+// 增购算力包剩余（永久有效直到用完）。演示态先给 123.5 万，让本地走查看得到「增购算力剩余」这一行；
+// 真实余量只由服务端 /me 下发。
+function mockPackRemaining() {
+  const stored = wx.getStorageSync(storageKey('packRemaining'));
+  if (stored !== '' && stored != null) return Math.max(0, Number(stored) || 0);
+  return 1235000;
+}
 function purchaseAgent(key) {
   const agent = DEFAULT_AGENTS.find((item) => item.key === key);
   if (!agent) return Promise.reject(Object.assign(new Error('智能体不存在'), { code: 'AGENT_NOT_FOUND' }));
@@ -226,7 +233,7 @@ function me() {
     understanding: understandingView({ title: '个人档案', subtitle: '军师有多了解你的生意', maturity, summary, mainContradiction: pain ? summary : null, battleForces, nextQuestions: nextQuestions.slice(0, 4), evidenceCount, sections: [], updatedAt: forcesUpdatedAt }),
     plan,
     creditBalance: mockCreditBalance(),
-    tokenQuota: { limit: plan ? 100 : 0, used: 0, remaining: plan ? 100 : 0, unlimited: false },
+    tokenQuota: { limit: plan ? 100 : 0, used: 0, remaining: (plan ? 100 : 0) + mockPackRemaining(), unlimited: false, packRemaining: mockPackRemaining() },
     usage,
     inviteCode: 'JS2026',
     // mock 包默认展示问策终态（对话即 tab），方便本地走查；线上形态由服务端稳定分桶下发。
@@ -341,7 +348,7 @@ function mockUsage(plan) {
   const resetsAt = new Date();
   resetsAt.setMonth(resetsAt.getMonth() + 1, 1);
   resetsAt.setHours(0, 0, 0, 0);
-  return { usagePercent: 0, usageStatus: 'sufficient', resetsAt: resetsAt.toISOString(), unlimited: false };
+  return { usagePercent: 0, usageStatus: 'sufficient', resetsAt: resetsAt.toISOString(), unlimited: false, packRemaining: mockPackRemaining() };
 }
 function plans() { return Promise.resolve(MOCK_PLANS.map((item) => Object.assign({}, item))); }
 function planOptions() {
@@ -370,6 +377,9 @@ function purchasePlan(id) {
 }
 
 const MOCK_SKUS = [
+  // 增购包（credits/quota）：线上由运营在后台自建、不入 seed；这里两档只为本地走查，价格/数量不作线上口径。
+  { key: 'pack-credits-50', name: '钻石增购包 · 50 颗', desc: '按需补钻石，用于启用专项顾问与出图。', priceFen: 2900, kind: 'credits', amount: 50 },
+  { key: 'pack-quota-1m', name: '算力增购包 · 100 万', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1000000 },
   { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。', priceFen: 3900, kind: 'service' },
   { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
   { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
@@ -472,6 +482,13 @@ function createSkuOrder(key) {
     owned.add(sku.grantsModuleKey);
     setList('ownedModules', Array.from(owned));
   }
+  // 增购包：mock 立即发放，让走查看到余额/剩余量真的变了（钻石进余额，算力进增购池）。
+  const amount = Math.max(0, Number(sku.amount || 0));
+  if (sku.kind === 'credits' && amount > 0) {
+    const balance = mockCreditBalance();
+    if (balance >= 0) wx.setStorageSync(storageKey('creditBalance'), balance + amount);
+  }
+  if (sku.kind === 'quota' && amount > 0) wx.setStorageSync(storageKey('packRemaining'), mockPackRemaining() + amount);
   const outTradeNo = `mock-sku-${Date.now()}-${purchased.size}`;
   return Promise.resolve({ mock: true, demo: true, orderId: outTradeNo, outTradeNo, status: 'applied', appliedAt: new Date().toISOString() });
 }

@@ -746,7 +746,7 @@ export default function Home() {
         kind="power"
         title="算力不足"
         desc="本月额度已用尽，补充算力或升级套餐后再出军令与方案。"
-        onPrimary={() => setExceptionOpen(false)}
+        onPrimary={() => { setExceptionOpen(false); navTo('/packages/work/credits/index'); }}
         onClose={() => setExceptionOpen(false)}
       />
 

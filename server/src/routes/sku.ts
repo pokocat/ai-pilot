@@ -6,10 +6,18 @@ import { resolveUser } from '../services/context.js';
 import { payConfigured, createJsapiOrder, payMockSuccessEnabled, resolvePayerOpenid } from '../services/wechatPay.js';
 import { sandboxEnabled } from '../services/sandbox.js';
 import { parseAttribution } from '../services/activation.js';
+import { skuPackAmount } from '../services/purchase.js';
+import { getBalance } from '../services/credits.js';
 import type { SkuView, SkuOrderResult } from '../../../shared/contracts';
 
-function publicSku(s: { key: string; name: string; desc: string; priceFen: number; kind: string; grantsModuleKey: string | null }): SkuView {
-  return { key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind as SkuView['kind'], grantsModuleKey: s.grantsModuleKey };
+function publicSku(s: { key: string; name: string; desc: string; priceFen: number; kind: string; grantsModuleKey: string | null; metaJson: unknown }): SkuView {
+  // 增购包（credits 钻石 / quota 算力）把数量带给端上展示；其余 kind 不带 amount。
+  const isPack = s.kind === 'credits' || s.kind === 'quota';
+  return {
+    key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen,
+    kind: s.kind as SkuView['kind'], grantsModuleKey: s.grantsModuleKey,
+    ...(isPack ? { amount: skuPackAmount(s.metaJson) } : {}),
+  };
 }
 
 export async function skuRoutes(app: FastifyInstance) {
@@ -28,6 +36,11 @@ export async function skuRoutes(app: FastifyInstance) {
       return reply.code(501).send({ error: '微信支付未配置', code: 'PAYMENT_NOT_CONFIGURED' });
     }
     if (sku.priceFen <= 0) return reply.code(400).send({ error: '免费商品无需支付', code: 'SKU_FREE' });
+    // 钻石不限量（企业版余额哨兵 -1）用户禁买钻石增购包：grantCredits 对不限量余额发放会把 -1
+    // 写成有限值（isUnlimited(bal) ? amount）——收了钱还把权益降级。入账侧另有兜底（applySkuGrant）。
+    if (sku.kind === 'credits' && (await getBalance(user.id)) < 0) {
+      return reply.code(409).send({ error: '当前套餐钻石不限量，无需购买增购包', code: 'CREDITS_UNLIMITED' });
+    }
     // openid 取值与 /plans/:id/order 同一函数（resolvePayerOpenid）：body 值只在等于调用者自己的
     // wechatOpenId 时被采纳，否则忽略 → 落到下面这行 OPENID_REQUIRED。理由见该函数注释。
     const openid = resolvePayerOpenid(user, req.body?.openid);

@@ -3,7 +3,7 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 import { grantCredits } from './credits.js';
-import { setQuota } from './tokenQuota.js';
+import { setQuota, grantQuotaPack } from './tokenQuota.js';
 import { now } from './clock.js';
 import { computeExpiry, renewExpiry } from './planTime.js';
 import { bustPlanGate } from './planGate.js';
@@ -127,12 +127,22 @@ export interface SkuLike {
   key: string; name: string; kind: string; grantsModuleKey: string | null; metaJson: unknown;
 }
 
+/** 增购包数量（credits=钻石颗数 / quota=算力 token 数）。沿用 storage 用 metaJson.bytes 的先例，不加列。 */
+export function skuPackAmount(metaJson: unknown): number {
+  const raw = (metaJson as { amount?: unknown } | null | undefined)?.amount;
+  const v = Number(raw ?? 0);
+  return Number.isFinite(v) ? Math.floor(Math.max(0, v)) : 0;
+}
+
 /**
  * V7-12：发放单次付费商品（SKU）权益。由 markPaidAndApply 在幂等事务内调用（appliedAt 锚点保证恰好一次）。
  *   - module   → upsert UserModule(grantsModuleKey, source='purchase') 启用能力。
  *   - service  → 记一次性服务凭据 UserModule(moduleKey='sku:'+key)（如深度整理，后续核销）。
  *   - storage  → Profile.extraJson.storageBonus 累加 metaJson.bytes（免加列）。
- * 另写一条 delta=0 的 CreditLedger 备注行，让订单流水页零改造即可见（方案 V7-12 §前端2）。
+ *   - credits  → 钻石增购包：**合池**进现有 CreditLedger（grantCredits，reason 标来源）。
+ *   - quota    → 算力增购包：grantQuotaPack 写 TokenWallet.packBalance（永久有效直到用完）。
+ * 另写一条 delta=0 的 CreditLedger 备注行，让订单流水页零改造即可见（方案 V7-12 §前端2）；
+ * credits 包例外——它自己那条 +amount 流水本身就可见，再补备注行就成了双行。
  */
 export async function applySkuGrant(
   user: { id: string; tenantId: string },
@@ -140,6 +150,15 @@ export async function applySkuGrant(
   opts: { reason: string; source: string; orderId?: string },
   tx: Prisma.TransactionClient,
 ): Promise<void> {
+  const isPack = sku.kind === 'credits' || sku.kind === 'quota';
+  const packAmount = isPack ? skuPackAmount(sku.metaJson) : 0;
+  // credits 包自己写了 +amount 流水 → 跳过末尾的 delta=0 备注行（否则订单流水页出双行）。
+  let skipNoteLedger = false;
+  // 不限量余额用户的 credits 包：发放被跳过（防降级），审计里必须留痕供运营处置（退款/解释）。
+  let creditsSkippedUnlimited = false;
+  // 权益账本记「实际发放量」：跳过发放时为 0，退款按它回收（revokeOrderGrant），
+  // 否则「没发出去的 50 颗」会在用户日后变回有限余额时被退款追扣一次。
+  let grantedPackAmount = packAmount;
   if (sku.kind === 'module' && sku.grantsModuleKey) {
     await tx.userModule.upsert({
       where: { userId_moduleKey: { userId: user.id, moduleKey: sku.grantsModuleKey } },
@@ -156,6 +175,26 @@ export async function applySkuGrant(
     const bonus = Number(extra.storageBonus ?? 0) + bytes;
     if (profile) await tx.profile.update({ where: { id: profile.id }, data: { extraJson: { ...extra, storageBonus: bonus } as Prisma.InputJsonValue } });
     else await tx.profile.create({ data: { tenantId: user.tenantId, extraJson: { storageBonus: bonus } as Prisma.InputJsonValue } });
+  } else if (sku.kind === 'credits') {
+    // 钻石增购包：与套餐赠送**合池**（同一个 CreditLedger 余额），只在流水 reason 上标出来源。
+    // grantCredits 自带 `credit:` advisory lock，并发到账不会互相冲掉余额。
+    // 不限量余额（企业版哨兵 -1）兜底：grantCredits 会把 -1 写成有限值（isUnlimited(bal) ? amount），
+    // 等于收了钱还把权益降级。正常路径已在 /skus/:key/order 下单时拦住（CREDITS_UNLIMITED），
+    // 这里兜「下单后才被运营改成不限量」的竞态：跳过发放、保留 delta=0 备注行与审计标记，退款仍可走。
+    if (packAmount > 0) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${user.id}`}))`;
+      const bal = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { balance: true } });
+      if ((bal?.balance ?? 0) < 0) {
+        creditsSkippedUnlimited = true;
+        grantedPackAmount = 0;
+      } else {
+        await grantCredits(user.tenantId, user.id, packAmount, opts.reason, tx);
+        skipNoteLedger = true;
+      }
+    }
+  } else if (sku.kind === 'quota') {
+    // 算力增购包：进 TokenWallet.packBalance（永久有效直到用完，跨周期/续费/过期都不清零）。
+    await grantQuotaPack(tx, user, packAmount);
   } else {
     // service（一次性服务，如深度整理）：记已购凭据，后续 organize 核销。
     await tx.userModule.upsert({
@@ -168,7 +207,12 @@ export async function applySkuGrant(
     const entitlementKey = sku.kind === 'module' && sku.grantsModuleKey ? sku.grantsModuleKey : `sku:${sku.key}`;
     await tx.skuEntitlement.upsert({
       where: { sourceOrderId: opts.orderId }, update: {},
-      create: { tenantId: user.tenantId, userId: user.id, skuKey: sku.key, sourceOrderId: opts.orderId, entitlementKey, kind: sku.kind },
+      // 增购包把**实际发放量**记进 quantity（跳过发放=0，必须显式写掉默认值 1）：
+      // 退款回收以 entitlement 量为准（revokeOrderGrant），快照量只作缺行兜底。
+      create: {
+        tenantId: user.tenantId, userId: user.id, skuKey: sku.key, sourceOrderId: opts.orderId, entitlementKey, kind: sku.kind,
+        ...(isPack ? { quantity: grantedPackAmount } : {}),
+      },
     });
   }
   // 备注型 0 额流水（订单流水页复用 CreditLedger，不加新端点）。
@@ -177,12 +221,21 @@ export async function applySkuGrant(
   // 本处也读到陈旧 B 后写 balance=B/delta=0，等扣费提交后最新行仍是 B，冲掉扣减、破坏 Σdelta==balance 不变式。
   // 上面 storage 分支拿的是 `storage:` 锁（不同命名空间，保护不了 credit 写），故此处单独补 `credit:` 锁；
   // 与外层 markPaidAndApply 的 outTradeNo 锁彼此独立，同一事务内叠加安全。
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${user.id}`}))`;
-  const last = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
-  await tx.creditLedger.create({
-    data: { tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason, balance: last?.balance ?? 0 },
-  }).catch(() => {});
+  if (!skipNoteLedger) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${user.id}`}))`;
+    const last = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    await tx.creditLedger.create({
+      data: { tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason, balance: last?.balance ?? 0 },
+    }).catch(() => {});
+  }
   await tx.auditLog.create({
-    data: { tenantId: user.tenantId, userId: user.id, action: 'user.sku.purchase', payloadJson: { skuKey: sku.key, kind: sku.kind, grantsModuleKey: sku.grantsModuleKey, source: opts.source } },
+    data: {
+      tenantId: user.tenantId, userId: user.id, action: 'user.sku.purchase',
+      payloadJson: {
+        skuKey: sku.key, kind: sku.kind, grantsModuleKey: sku.grantsModuleKey, source: opts.source,
+        ...(isPack ? { amount: packAmount } : {}),
+        ...(creditsSkippedUnlimited ? { skippedUnlimited: true } : {}),
+      },
+    },
   }).catch(() => {});
 }

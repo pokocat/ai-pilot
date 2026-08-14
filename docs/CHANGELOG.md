@@ -25,6 +25,17 @@
 - **验证**：新增 `creativeDirectionSamples.test.ts`，并补 tier 在 AI/template 两种排版引擎、premium 不降级、standard 零生图、premium revise 真实主视觉复用、结构化评审、单次重构与违规回退等回归。server 全量 **1674/1674** 后，新增“资产行存在但文件丢失”守卫并专项 **37/37**；app 原生 **165/165** + H5/共享层 **103/103**、admin **76/76** 全绿。
 - **上线前审查修复（同日，8 角度审查 + 逐条对抗验证后落码）**：① 存量在途单兼容——`loadJobExecutionInput` 补 `directionKey` 归一（按 brief 自身 tier/scene/portrait 推默认方向），`directionFor` 对未知 key 不再裸下标，改动前建的 pending 单不会在宣言阶段崩掉（premium 老单原本会失败退款、standard 老单会静默降模板）；② `aiMode` 旧值兼容读——payload 残留 `aiMode='graphic'`（运营熔断锁）视同 `visual.enabled=false`，运营下次保存配置旧字段自然消失；③ worker 侧免费单硬闸——`parentJobId` 非空且未扣费的单在两条排版路径上都禁调图片供应商（在途老 revise 单可绕过建单侧闸门，防线必须收在 worker）；④ 方向样例安全——公开取图路由只发 `published`（样例源自真实客户成品），id 从手搓时间戳+`Math.random` 改回 cuid，后台预览 draft 走带管理鉴权的专用路由；⑤ 样例性能——方向清单 60s 进程缓存（发布/生成即失效）、签名 URL 按 10 分钟窗口对齐（同窗口逐字节相同，小程序图片缓存能命中）、入库时 sharp 缩短边 360（原 1080×1440 原图直发 124px 宫格）；⑥ 看图评审解析宽收严出——剥导语/围栏、布尔字符串收编、缺 `needsRebuild` 默认 false、缺 `rebuildReason` 降级保留 notes 而非整份丢弃，解析失败在 metrics 里独立记 `unparsed`（与「没配 provider」分桶）；⑦ 机会式重构补两条准入——首版产物就干净、且重构后至少剩一轮补救（原实现修复轮出的干净图也能触发、重构可落在最后一轮白烧）；⑧ 恢复 premium 终态退款断言（原唯一断言随 `describe.skip` 停用且类型已烂，整段删除并在活跃套件重写：扣 25 → 耗尽重试 → failed + refundedAt + 零资产）。修复后全量：server **1693/1693（零 skip）**、app **268/268**、admin build 通过，`tsc` 三端无错。server build、生产 server 模式原生小程序构建、H5 server 构建、admin build + `lint:ui` 与 `git diff --check` 通过；H5 仅保留仓库既有的 bundle/font 体积警告。
 
+### 2026-08-13 · 新增单次购买增购包（算力/钻石），档位由运营后台自建 · 影响面：server 计费与 SKU 体系、运营后台单次付费视图、小程序算力明细页与异常屏、shared 契约、部署需 db push
+
+- **SKU 体系扩两种 kind**：`credits`（钻石增购包）、`quota`（算力增购包），数量放 `Sku.metaJson.amount`（沿 storage 包 `metaJson.bytes` 先例，不加列）。下单/入账/退款复用既有 PaymentOrder 幂等底座与 metaJson 快照——运营改数量只影响新订单。
+- **算力包永久有效直到用完（pack-in-balance）**：`TokenWallet` 加 `packBalance` 列（纯加列带默认值，**部署带 `cd server && npm run db:push`**）；pack 并在同一 `balance` 里，扣费热路径零改动，剩余按 `packRemainingOf` 派生（先吃月度后吃 pack）。保 pack 的同步点：跨周期重置、过期冻结、`setQuota` 硬覆盖、套餐退款回退（`revokePlanEntitlement` 两处原会把单独买的 pack 抹掉，已修）、admin `restore-plan`。用量 % 只算月度；月度用满但 pack>0 不报 exhausted。
+- **钻石包与套餐赠送合池**（流水 reason 标来源）；**不限量余额（-1）用户禁买**：下单口 409 `CREDITS_UNLIMITED`、入账兜底跳过发放（审计 `skippedUnlimited`），防 `grantCredits` 把不限量降成有限值。
+- **退款按实际发放量**：增购包 `SkuEntitlement.quantity` 记实际发放量（跳过发放=0），`revokeOrderGrant` 以 entitlement 量回收、快照量兜底；quota 包只追回未消耗部分（`revokeQuotaPack`），credits 包沿保守口径 `min(余额, 发放量)`。
+- **运营后台自建档**（对外定价归运营不归代码，不进 seedConfig/sync）：新增 `POST /admin/skus`（仅 credits/quota，key 服务端生成，0 元拒建）、`PATCH` 扩 `amount`（仅增购包）、`DELETE`（有订单 409 `SKU_IN_USE` 引导停用），全部 requireSuper+审计；「单次付费」视图支持建档表单/数量编辑/删除，读失败与空态分离（ViewState）。`token-quota-detail` 增 `packBalance`。
+- **端上**：算力明细页新增增购区块（复用 PaySheet mode='sku'，H5+weapp-native 双端镜像；游客走动作级登录门；`creditBalance<0` 隐藏钻石包）、月度进度下展示「增购算力剩余」（`/me` 新增 `tokenQuota.packRemaining`/`usage.packRemaining`）；异常屏 `power`「去购买算力」接到算力明细页；PC 主公区只展示+引导回手机端。
+- **契约**：`SkuKind` 扩两值、`SkuView.amount`、`AdminSku(.amount)/AdminSkuUpdate/AdminSkuCreate`、`TokenQuotaView.packRemaining`、`PublicUsageView.packRemaining`。
+- **验证**：server 全量 1578 例全绿（新增 `test/skuPacks.test.ts` 26 例：合池入账、钱包首建快照、跨期保 pack、续费/过期保 pack、部分消耗退款、快照量入账、不限量禁售/兜底/退款不追扣、admin CRUD 守卫、usageView 口径）+ tsc 绿；admin lint:ui/tsc/vite 绿；app weapp/h5/pc 三端构建绿 + 原生 mock 测试断言补增购包；H5 mock 截图级实测购买/余额/过滤链路。
+
 ### 2026-08-13 · 海报设计师换成真正的设计 skill；确认页从填表改成「看设计说明 + 选档位」 · 影响面：海报设计师提示词、需求单预填、确认页信息架构
 
 - **提示词整份重写**（`POSTER_DESIGNER_PROMPT`，**不是在 seed 模板上打补丁**）。旧版只讲流程不讲手艺——模型知道该问什么，但不知道什么样的海报算好。新版写进三样东西：
@@ -166,7 +177,6 @@
 - H5（`app/src/app.config.ts` 等三处）未同步改版，tab 配置自此与小程序分叉——H5 已排期移除，记录见 `docs/H5_REMOVAL_TODO_2026-08-10.md`。
 
 ### 2026-08-12 · 明确快出片跨服务器生产拓扑与配置归属 · 影响面：部署说明、环境命名、视频服务运维边界
-
 - 明确 `8.136.36.175` 是军师生产宿主机；其上的 `aistareco-clip-preprod :8081` 是与军师预发配套的“共宿主逻辑预发”，不具备独立预发服务器的物理隔离，但也不能按宿主位置冒充 AIStar 生产。
 - 记录当前生产真实链路：`8.136.36.175 / junshi-api` 通过 `https://api.aibuzz.cn` 跨服务器公网调用 `47.98.162.120 / aistareco-server`；预发才走同机 `127.0.0.1:8081`。两台 ECS 实际已在同一 `/20` VPC，目标应改为私网回源并保留两机资源隔离。
 - 记录容量边界：军师宿主为 4 核 / 7.3 GiB、无 Swap、可用内存约 1.4 GiB，现有 Clip 预发 Java 常驻约 644 MiB；当前不应再叠加 Clip 生产与 FFmpeg 峰值负载。

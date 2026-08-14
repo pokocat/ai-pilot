@@ -1393,7 +1393,22 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     await mock.requestDataSourceAuth('crm');
     assert.equal((await mock.dataSources()).sources.find((item) => item.key === 'crm')?.status, 'auth_requested');
 
-    assert.equal((await mock.skus()).length, 6);
+    const mockSkus = await mock.skus();
+    assert.equal(mockSkus.length, 8); // 6 个能力/服务/空间包 + 2 个增购包（credits/quota）
+    // 增购包必须带数量，否则端上只能显示价格、说不出「买到多少」。
+    const creditsPack = mockSkus.find((item) => item.kind === 'credits');
+    const quotaPack = mockSkus.find((item) => item.kind === 'quota');
+    assert.ok(Number(creditsPack?.amount) > 0);
+    assert.ok(Number(quotaPack?.amount) > 0);
+    // 增购包 mock 必须真的发放：钻石进余额、算力进增购池（不能只提示成功）。
+    const balanceBefore = (await mock.me()).creditBalance;
+    // 无套餐时 usage 为 null（现有 mock 口径），增购余量固定看 tokenQuota。
+    const packBefore = (await mock.me()).tokenQuota.packRemaining;
+    await mock.createSkuOrder(creditsPack.key);
+    await mock.createSkuOrder(quotaPack.key);
+    const afterPurchase = await mock.me();
+    assert.equal(afterPurchase.creditBalance, balanceBefore + creditsPack.amount);
+    assert.equal(afterPurchase.tokenQuota.packRemaining, packBefore + quotaPack.amount);
     await mock.createSkuOrder('fin-checkup');
     await mock.enableModule('finance');
     assert.equal((await mock.modules()).modules.find((item) => item.key === 'finance')?.enabled, true);

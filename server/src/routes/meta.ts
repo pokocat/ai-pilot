@@ -101,7 +101,8 @@ export async function metaRoutes(app: FastifyInstance) {
         usageLevel: publicUsageLevel(plan), usageLabel: publicUsageLabel(plan), purchaseMode: 'manual' as const,
       } : null,
       creditBalance: credit?.balance ?? 0,
-      tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited },
+      // packRemaining：增购算力包剩余（永久有效直到用完）；used 只算月度部分，remaining 含 pack。
+      tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited, packRemaining: quota.packBalance },
       usage: usageView(quota, planStatus.nextResetAt, plan),
       planStatus, // { active, expired, expiresAt, daysRemaining, nextResetAt } —— 前端据此切只读态、展示到期/重置日
       onboarded,

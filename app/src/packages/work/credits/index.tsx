@@ -4,9 +4,11 @@ import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import AsyncState from '../../../components/AsyncState';
+import Login from '../../../components/Login';
+import PaySheet from '../../../components/PaySheet';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
-import { api, type MyCreditItem, type PayOrderListItem } from '../../../services/api';
+import { api, type MyCreditItem, type PayOrderListItem, type SkuView } from '../../../services/api';
 import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../../services/pay';
 import { paymentErrorMessage } from '../../../services/paymentFeedback';
 import './index.scss';
@@ -25,7 +27,11 @@ const REFUND_STATUS_LABEL: Record<NonNullable<PayOrderListItem['refundStatus']>,
   refund_abnormal: '退款异常', refunded: '已退款',
 };
 
-// 算力明细：余额 + 本月算力（token 池，只看 %）+ 消耗流水 + 支付订单（P1：状态/继续支付）。
+// 增购包（kind=credits 钻石 / quota 算力）：只认这两类，其余 SKU 归能力目录，不进本页。
+const PACK_KINDS: SkuView['kind'][] = ['credits', 'quota'];
+type PackState = 'loading' | 'ready' | 'failed';
+
+// 算力明细：余额 + 本月算力（token 池，只看 %）+ 增购包 + 消耗流水 + 支付订单（P1：状态/继续支付）。
 // 从「我的」独立成页，避免底部 tab 栏遮挡弹层。
 export default function Credits() {
   const s = useStore();
@@ -36,12 +42,33 @@ export default function Credits() {
   const [orders, setOrders] = useState<PayOrderListItem[]>([]);
   const [loading, setLoading] = useState(true); // D2：首屏加载与空态区分
   const [repaying, setRepaying] = useState('');
+  // 增购区块自成一态：GET /skus 是公开目录，与个人流水成败互不影响，
+  // 拉失败必须显式说「没取到 + 重试」，绝不能退化成「暂无增购包」（那是运营没配的意思）。
+  const [packs, setPacks] = useState<SkuView[]>([]);
+  const [packState, setPackState] = useState<PackState>('loading');
+  const [payPack, setPayPack] = useState<SkuView | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+
+  // 增购包目录：服务端 /skus 已按 sort 排序（SkuView 不带 sort 字段），端上保持返回顺序不重排。
+  const loadPacks = () => {
+    setPackState((prev) => (prev === 'failed' ? 'loading' : prev));
+    return api.skus()
+      .then((list) => { setPacks(list.filter((sku) => PACK_KINDS.includes(sku.kind))); setPackState('ready'); })
+      .catch(() => setPackState('failed'));
+  };
 
   const load = (done?: () => void) => {
+    void loadPacks();
     Promise.all([
       api.myCredits().then((r) => setItems(r.items)),
       api.myOrders().then((r) => setOrders(r.items)).catch(() => {}), // 订单列表失败不阻塞算力明细
     ]).catch((e) => s.handleApiError(e)).finally(() => { setLoading(false); done?.(); });
+  };
+
+  // 点增购：游客走动作级登录门（不清状态、不跳路由），已登录才开 PaySheet 下单。
+  const openPack = (sku: SkuView) => {
+    if (!s.isAuthed()) { setShowLogin(true); return; }
+    setPayPack(sku);
   };
 
   // 继续支付（P1）：对未过支付时限的待支付单重签调起参数 → 到账确认与四个支付触点同口径。
@@ -68,6 +95,13 @@ export default function Credits() {
   // API 单次返回最近 50 条、无分页参数 → 只做下拉刷新（工单：不支持分页则仅下拉刷新）。
   usePullDownRefresh(() => load(() => Taro.stopPullDownRefresh()));
 
+  // 增购算力剩余：usage 与 tokenQuota 同义，取任一有值的（旧服务端两处都缺 → 0 → 不展示）。
+  const packRemaining = me?.usage.packRemaining ?? me?.tokenQuota.packRemaining ?? 0;
+  // 钻石不限量（企业版哨兵 creditBalance<0）买钻石包没有意义，服务端下单口直接 409 CREDITS_UNLIMITED，
+  // 所以端上先隐藏这类包，别把一个必然失败的按钮摆在用户面前；算力包不受影响。
+  const creditsUnlimited = (me?.creditBalance ?? 0) < 0;
+  const visiblePacks = creditsUnlimited ? packs.filter((sku) => sku.kind !== 'credits') : packs;
+
   return (
     <View className={`page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
       <SafeHeader title="算力明细" onBack={() => Taro.navigateBack()} />
@@ -91,8 +125,39 @@ export default function Credits() {
             <View className="cd-track">
               <View className="cd-fill" style={{ width: `${me?.usage.unlimited ? 100 : (me?.usage.usagePercent ?? 0)}%`, background: accent }} />
             </View>
+            {/* 增购算力永久有效、不进月度进度条的分母，所以单独一行显示剩余量（无包/旧服务端=0 时隐藏） */}
+            {packRemaining > 0 && (
+              <View className="cd-pack-left">
+                <Text className="cd-ql">增购算力剩余</Text>
+                <Text className="cd-pv serif">{fmtBig(packRemaining)}</Text>
+              </View>
+            )}
           </View>
         </View>
+
+        {packState !== 'ready' || visiblePacks.length > 0 ? (
+          <>
+            <Text className="cd-sech serif">增购</Text>
+            <Text className="cd-secs">{creditsUnlimited ? '算力包永久有效，用完为止' : '算力包永久有效，用完为止 · 钻石包到账即可启用顾问'}</Text>
+            {packState === 'loading' ? (
+              <AsyncState loading skeletonRows={2} />
+            ) : packState === 'failed' ? (
+              <AsyncState error onRetry={() => loadPacks()} />
+            ) : (
+              <View className="cd-list">
+                {visiblePacks.map((sku) => (
+                  <View key={sku.key} className="cd-row cd-pack" onClick={() => openPack(sku)}>
+                    <View className="cd-rl">
+                      <Text className="cd-rt">{sku.name}</Text>
+                      <Text className="cd-rat">{packAmountLabel(sku)}{sku.desc ? ` · ${sku.desc}` : ''}</Text>
+                    </View>
+                    <View className="cd-buy" style={{ background: accent }}><Text>{fmtFen(sku.priceFen)}</Text></View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+        ) : null}
 
         <Text className="cd-sech serif">算力消耗明细</Text>
         <Text className="cd-secs">启用顾问 / 出图 / 充值赠送</Text>
@@ -144,6 +209,24 @@ export default function Credits() {
           </>
         )}
       </View>
+
+      {/* 增购确认：PaySheet mode='sku' 自带「下单 → 微信支付/模拟支付 → 重拉 /me」阶梯，本页只补账本文案。
+          关闭即重拉本页（成功后要出新流水与订单行；取消时多一次幂等重拉，不会写坏任何状态）。 */}
+      <PaySheet
+        open={!!payPack}
+        mode="sku"
+        skuKey={payPack?.key}
+        title={payPack?.name || '增购'}
+        desc={payPack?.desc}
+        costValue={payPack ? fmtFen(payPack.priceFen) : undefined}
+        balanceValue={payPack ? packBalanceLabel(payPack, me?.creditBalance, packRemaining) : undefined}
+        afterValue={payPack ? packAfterLabel(payPack, me?.creditBalance, packRemaining) : undefined}
+        result={payPack?.kind === 'quota' ? '增购算力永久有效，用完为止；月度额度用尽后自动接着用。' : '钻石到账后可直接用于启用顾问与出图。'}
+        confirmText="确认购买"
+        onClose={() => { setPayPack(null); load(); }}
+      />
+
+      <Login open={showLogin} reason="purchase" onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); setLoading(true); load(); }} />
     </View>
   );
 }
@@ -153,6 +236,42 @@ export default function Credits() {
 function usageLabel(usage?: { usagePercent: number; unlimited: boolean }): string {
   if (!usage) return '—';
   return usage.unlimited ? '不限量' : `本月已用 ${usage.usagePercent}%`;
+}
+// 大数展示：算力 token 数动辄十万百万，原样铺开读不出量级。1 万起走「万」、1 亿起走「亿」，
+// 保留一位小数并去掉无意义的 .0（123.5万 / 200万 / 1.2亿）。
+function fmtBig(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n >= 1e8) return `${trimZero(n / 1e8)}亿`;
+  if (n >= 1e4) return `${trimZero(n / 1e4)}万`;
+  return String(Math.round(n));
+}
+function trimZero(v: number): string {
+  return v.toFixed(1).replace(/\.0$/, '');
+}
+// 分 → ¥xx / ¥xx.xx（整元不拖两位小数）
+function fmtFen(fen: number): string {
+  return `¥${(fen / 100).toFixed(fen % 100 ? 2 : 0)}`;
+}
+// 增购包数量口径：credits=钻石颗数，quota=算力 token 数。运营没填 amount 时不编数字，只留价格。
+function packAmountLabel(sku: SkuView): string {
+  const amount = Number(sku.amount ?? 0);
+  if (!(amount > 0)) return '数量以运营配置为准';
+  return sku.kind === 'credits' ? `+${amount} 钻石` : `+${fmtBig(amount)} 算力`;
+}
+// PaySheet「当前余额」：钻石包看钻石余额，算力包看增购算力剩余（月度额度不在增购口径里）。
+function packBalanceLabel(sku: SkuView, creditBalance: number | undefined, packRemaining: number): string {
+  if (sku.kind === 'credits') return creditBalance == null ? '—' : creditBalance < 0 ? '不限量' : `${creditBalance} 钻石`;
+  return `增购算力 ${fmtBig(packRemaining)}`;
+}
+// PaySheet「扣后状态」：到账即为余额 + 增购量；拿不到余额或数量就不猜结果。
+function packAfterLabel(sku: SkuView, creditBalance: number | undefined, packRemaining: number): string {
+  const amount = Number(sku.amount ?? 0);
+  if (!(amount > 0)) return '到账后按运营配置发放';
+  if (sku.kind === 'credits') {
+    if (creditBalance == null) return `到账 +${amount} 钻石`;
+    return creditBalance < 0 ? '不限量' : `${creditBalance + amount} 钻石`;
+  }
+  return `增购算力 ${fmtBig(packRemaining + amount)}`;
 }
 // ISO → MM-DD HH:mm
 function fmtAt(iso: string): string {

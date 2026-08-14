@@ -107,7 +107,11 @@ const PLANS: Plan[] = [
 ];
 
 // V7-12：单次付费商品目录（前端离线兜底，与服务端 seedConfig.SKUS 同口径）。
-const SKUS: { key: string; name: string; desc: string; priceFen: number; kind: 'module' | 'service' | 'storage'; grantsModuleKey?: string }[] = [
+// 增购包（kind=credits/quota）线上由运营在后台自建、不入 seed；这里只放两个样例档，
+// 让本地 mock 走查看得到增购区块与下单流程，价格/数量不作为线上口径。
+const SKUS: { key: string; name: string; desc: string; priceFen: number; kind: SkuView['kind']; grantsModuleKey?: string; amount?: number }[] = [
+  { key: 'pack-credits-50', name: '钻石增购包 · 50 颗', desc: '按需补钻石，用于启用专项顾问与出图。', priceFen: 2900, kind: 'credits', amount: 50 },
+  { key: 'pack-quota-1m', name: '算力增购包 · 100 万', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1_000_000 },
   { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。', priceFen: 3900, kind: 'service' },
   { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
   { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
@@ -225,6 +229,7 @@ interface UserData {
   name: string; company: string; phone: string; benmingColor: string; onboarded: boolean;
   avatarUrl?: string; wechatLinked?: boolean;
   planId: string; creditBalance: number; tokenUsed: number; ownedAgents: string[];
+  packRemaining?: number; // 增购算力包剩余 token（永久有效直到用完；月度额度用尽后才动它）
   creditLog: MyCreditItem[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
@@ -254,6 +259,7 @@ function load(token: string): UserData {
       d.creditBalance ??= 68;
       d.tokenUsed ??= 0;
       d.creditLog ??= [];
+      d.packRemaining ??= 1_235_000; // 旧存档补增购算力余量（演示值）
       d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已启用两个专项智能体
       d.ownedModules ??= [];
       d.skuServices ??= [];
@@ -274,6 +280,9 @@ function load(token: string): UserData {
     planId: 'mock-plan-decision',
     creditBalance: 68,
     tokenUsed: 0,
+    // 演示态先给一份增购算力余量（123.5万），让本地走查能看到「增购算力剩余」这一行；
+    // 真实余量只由服务端 /me 下发。
+    packRemaining: 1_235_000,
     creditLog: [],
     ownedAgents: ['intel', 'brand'],
     profile: null,
@@ -414,21 +423,31 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
 // —— 双轴计费 mock 辅助：钻石(creditBalance) 管解锁；月度 token 额度按 tokenUsed/limit 计 ——
 function planOf(d: UserData): Plan { return PLANS.find((p) => p.id === d.planId) ?? PLANS[1]; }
 function mockQuota(d: UserData): TokenQuotaView {
+  const pack = Math.max(0, d.packRemaining ?? 0);
   const limit = planOf(d).tokenQuotaPerMonth;
-  if (limit < 0) return { limit: -1, used: 0, remaining: -1, unlimited: true };
+  if (limit < 0) return { limit: -1, used: 0, remaining: -1, unlimited: true, packRemaining: pack };
   const used = d.tokenUsed ?? 0;
-  return { limit, used, remaining: limit - used, unlimited: false };
+  // remaining 含增购包（契约口径）；used/limit 仍只算月度部分，所以进度 % 不被增购包稀释。
+  return { limit, used, remaining: limit - used + pack, unlimited: false, packRemaining: pack };
 }
 function ensureMockQuota(d: UserData): void {
   const limit = planOf(d).tokenQuotaPerMonth;
-  if (limit >= 0 && (d.tokenUsed ?? 0) >= limit) {
+  // 增购包有余量时月度用满也不拦（永久有效直到用完，与契约口径一致）。
+  if (limit >= 0 && (d.tokenUsed ?? 0) >= limit && (d.packRemaining ?? 0) <= 0) {
     throw Object.assign(new Error('本月额度已用尽，可在「我的」升级套餐，或下月再用'), { code: 'INSUFFICIENT_QUOTA', data: { code: 'INSUFFICIENT_QUOTA' } });
   }
 }
 function chargeMockQuota(d: UserData, ratio: number, inputLen: number, outputLen: number): TokenQuotaView {
-  if (planOf(d).tokenQuotaPerMonth >= 0) {
+  const limit = planOf(d).tokenQuotaPerMonth;
+  if (limit >= 0) {
     const pseudo = Math.max(80, Math.round((inputLen + outputLen) / 3));
-    d.tokenUsed = (d.tokenUsed ?? 0) + Math.ceil(pseudo * (ratio > 0 ? ratio : 1));
+    const cost = Math.ceil(pseudo * (ratio > 0 ? ratio : 1));
+    const used = d.tokenUsed ?? 0;
+    const monthlyLeft = Math.max(0, limit - used);
+    // 先扣月度额度，超出部分才动增购包（月度进度 % 不被增购包稀释）。
+    d.tokenUsed = used + Math.min(cost, monthlyLeft);
+    const overflow = cost - Math.min(cost, monthlyLeft);
+    if (overflow > 0) d.packRemaining = Math.max(0, (d.packRemaining ?? 0) - overflow);
   }
   return mockQuota(d);
 }
@@ -1003,7 +1022,12 @@ export const mock = {
       usage: (() => {
         const q = mockQuota(d);
         const usagePercent = q.unlimited ? 0 : q.limit > 0 ? Math.min(100, Math.max(0, Math.round((q.used / q.limit) * 100))) : 100;
-        return { usagePercent, usageStatus: usagePercent >= 100 ? 'exhausted' as const : usagePercent >= 80 ? 'near_limit' as const : usagePercent >= 50 ? 'normal' as const : 'sufficient' as const, resetsAt: new Date(Date.now() + 30 * 86400000).toISOString(), unlimited: q.unlimited };
+        const pack = q.packRemaining ?? 0;
+        // 月度用满但增购包还有余量 → 仍能产出，不报 exhausted（契约口径）。
+        const usageStatus = usagePercent >= 100
+          ? (pack > 0 ? 'near_limit' as const : 'exhausted' as const)
+          : usagePercent >= 80 ? 'near_limit' as const : usagePercent >= 50 ? 'normal' as const : 'sufficient' as const;
+        return { usagePercent, usageStatus, resetsAt: new Date(Date.now() + 30 * 86400000).toISOString(), unlimited: q.unlimited, packRemaining: pack };
       })(),
       planStatus: { active: true, expired: false, none: false, expiresAt: null, daysRemaining: null, nextResetAt: new Date(Date.now() + 30 * 86400000).toISOString() },
       onboarded: d.onboarded,
@@ -1113,7 +1137,10 @@ export const mock = {
 
   // V7-12：单次付费商品目录 + 假支付成功流（mock 直接发放权益并记备注流水）。
   async skus(): Promise<SkuView[]> {
-    return delay(SKUS.map((s) => ({ key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null })));
+    return delay(SKUS.map((s) => ({
+      key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind,
+      grantsModuleKey: s.grantsModuleKey ?? null, ...(s.amount != null ? { amount: s.amount } : {}),
+    })));
   },
   async createSkuOrder(key: string): Promise<SkuOrderResult> {
     const { token, d } = current();
@@ -1126,7 +1153,12 @@ export const mock = {
       d.skuServices ??= [];
       if (!d.skuServices.includes(sku.key)) d.skuServices.push(sku.key);
     }
-    (d.creditLog ??= []).push({ at: now(), reason: `${sku.name} · 微信支付`, delta: 0, balance: d.creditBalance });
+    // 增购包：mock 立即发放，让走查能看到余额/剩余量真的变了（钻石进流水，算力进增购池）。
+    const amount = Math.max(0, Number(sku.amount ?? 0));
+    if (sku.kind === 'credits' && amount > 0 && d.creditBalance >= 0) d.creditBalance += amount;
+    if (sku.kind === 'quota' && amount > 0) d.packRemaining = Math.max(0, d.packRemaining ?? 0) + amount;
+    const delta = sku.kind === 'credits' ? amount : 0;
+    (d.creditLog ??= []).push({ at: now(), reason: `${sku.name} · 微信支付`, delta, balance: d.creditBalance });
     save(token, d);
     return delay({ orderId: uid('sku-'), demo: true });
   },
