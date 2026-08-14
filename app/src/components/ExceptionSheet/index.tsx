@@ -1,7 +1,11 @@
 import { View, Text } from '@tarojs/components';
 import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
+import { navTo } from '../../services/nav';
 import './index.scss';
+
+// kind='power' 的「去购买算力」目标页：算力明细页（余额 / 本月算力 / 增购包）。
+const POWER_TARGET = '/packages/work/credits/index';
 
 export interface ExceptionSheetProps {
   open: boolean;
@@ -22,11 +26,18 @@ const KIND_META: Record<NonNullable<ExceptionSheetProps['kind']>, KindMeta> = {
 };
 
 // V7-03 ExceptionSheet：异常屏（上传失败 / 算力不足 / SKU 备选），红色 hero + 统一四格 + 主按钮。
-// onPrimary 由调用方自持（upload=重开文件选择 / power=去能力页 / sku=改用微信支付）。
+// onPrimary 由调用方自持（upload=重开文件选择 / power=去算力明细页增购 / sku=改用微信支付）。
+// 没传 onPrimary 时 kind='power' 有兜底目标：关闭后跳算力明细页——「去购买算力」这枚按钮
+// 曾经只是关掉弹层（有文案没目标页），点了等于什么都没发生。
 export default function ExceptionSheet({ open, kind = 'upload', title, desc, onPrimary, onClose }: ExceptionSheetProps) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const meta = KIND_META[kind] || KIND_META.upload;
+  const primary = () => {
+    if (onPrimary) { onPrimary(); return; }
+    onClose?.();
+    if (kind === 'power') navTo(POWER_TARGET);
+  };
 
   return (
     <Sheet
@@ -36,7 +47,7 @@ export default function ExceptionSheet({ open, kind = 'upload', title, desc, onP
       footer={
         <View className="exception-actions">
           <View className="btn btn-ghost ex-secondary" onClick={onClose}><Text>返回</Text></View>
-          <View className="btn btn-primary ex-primary" style={{ background: accent }} onClick={() => onPrimary?.()}><Text>{meta.primary}</Text></View>
+          <View className="btn btn-primary ex-primary" style={{ background: accent }} onClick={primary}><Text>{meta.primary}</Text></View>
         </View>
       }
     >
