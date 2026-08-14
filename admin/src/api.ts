@@ -145,7 +145,7 @@ export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsCon
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
-export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
+export type { AdminSku, AdminSkuCreate, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
 export type { AiPreset, AiTestResult, AiProvider, AiThinkingMode, AiRouting, AiRoutingStatus, AiDialectMeta, AiEndpointCaps, AiConfigIssue, AiProbeReport, AiProbeItem, AiV2Status, AiV2View, AiEndpointView, AiCredentialView, AiRouteView, AiEndpointUpsert, AiEndpointTest, AiRouteUpsert, AiRouteBudget, AiVendorOption } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
@@ -167,7 +167,7 @@ import type {
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
-  AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
+  AdminSku, AdminSkuCreate, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
   AdminFeatureFlag, AdminMonitorNotify,
   AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
@@ -284,9 +284,15 @@ export const api = {
   createPlan: (body: AdminPlanCreate) => req<AdminPlan>('/admin/plans', 'POST', body),
   // 删除仅限「无用户在册」的档（后端 409 PLAN_IN_USE 兜底）；停售请用 hidden。
   deletePlan: (id: string) => req<{ ok: boolean }>(`/admin/plans/${id}`, 'DELETE'),
-  // —— 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，不在此改）——
+  // —— 单次付费 SKU：改价 / 启停 / 展示（module·service·storage 的 key、kind、解锁模块走代码目录，不在此改）——
   adminSkus: () => req<AdminSku[]>('/admin/skus'),
+  // 增购包（credits=钻石 / quota=算力）是**运营自建**的商品：数量与定价全在后台配，代码侧不 seed。
+  // key 由服务端生成（运营不需要也不该编 key）。
+  createSku: (body: AdminSkuCreate) => req<AdminSku>('/admin/skus', 'POST', body),
+  // amount 只对增购包可改，且只影响新订单（已购订单按下单时的数量发放，服务端保证）。
   updateSku: (key: string, body: AdminSkuUpdate) => req<AdminSku>(`/admin/skus/${key}`, 'PATCH', body),
+  // 删除仅限增购包且无订单（服务端 409 SKU_IN_USE 兜底）；已有订单要下架请用 enabled=false。
+  deleteSku: (key: string) => req<{ ok: boolean }>(`/admin/skus/${encodeURIComponent(key)}`, 'DELETE'),
   // —— D-1/WO-12 处方多来源漏斗（六态聚合 + 开通来源计数）——
   prescriptionFunnel: (days = 30) => req<AdminPrescriptionFunnel>(`/admin/prescriptions/funnel?days=${days}`),
   // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——

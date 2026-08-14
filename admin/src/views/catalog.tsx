@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, type AdminPlan, type AdminSku, type AdminEcoTool } from '../api';
-import { PageHead, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 
 // 套餐目录：**线上套餐的唯一维护入口**。2026-08-01 起代码侧不再有 syncPlans 之类的同步脚本
@@ -201,70 +201,166 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
-// 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，只读）——镜像 PlansView 的行内编辑。
-const SKU_KIND_LABEL: Record<string, string> = { module: '模块解锁', service: '社群服务', storage: '存储扩容' };
+// 单次付费 SKU：改价 / 启停 / 展示。
+//   · module / service / storage：key、kind、解锁模块走代码目录，只读；这里只改文案价格与上下架。
+//   · credits（钻石）/ quota（算力）**增购包**：运营自建的商品——数量 + 定价全在后台配（代码侧不 seed，
+//     同「对外数据归运营不归代码」），可新建、可改数量、无订单时可删。key 由服务端生成。
+const SKU_KIND_LABEL: Record<string, string> = {
+  module: '模块解锁', service: '社群服务', storage: '存储扩容',
+  credits: '钻石增购包', quota: '算力增购包',
+};
+
+/** 增购包＝运营可自建/可删/可改数量的那两类；其余 kind 的行为一个字都不变。 */
+const PACK_KINDS = ['credits', 'quota'] as const;
+type PackKind = (typeof PACK_KINDS)[number];
+const isPack = (kind: string): kind is PackKind => (PACK_KINDS as readonly string[]).includes(kind);
+
+/** 数量列：钻石论「颗」、算力论 token（千分位，不做缩写——运营核价要看原值）。非增购包无数量概念。 */
+function amountText(s: Pick<AdminSku, 'kind' | 'amount'>): string {
+  if (!isPack(s.kind) || s.amount == null) return '—';
+  return s.kind === 'credits' ? `${s.amount.toLocaleString()} 颗` : `${s.amount.toLocaleString()} token`;
+}
+
+const PACK_BLANK = { kind: 'credits' as PackKind, name: '', desc: '', amount: 0, priceYuan: 0, enabled: true, sort: 0 };
 
 export function SkusView({ toast }: { toast: (m: string) => void }) {
 
   const [editKey, setEditKey] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', desc: '', priceYuan: 0, enabled: true, sort: 0 });
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: '', desc: '', amount: 0, priceYuan: 0, enabled: true, sort: 0 });
+  const [pack, setPack] = useState(PACK_BLANK);
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
   const res = useResource(api.adminSkus, []);
   const list = res.data ?? [];
   const load = () => res.reload();
+  const setPackForm = (p: Partial<typeof PACK_BLANK>) => setPack((f) => ({ ...f, ...p }));
+  const yuanText = (fen: number) => `¥${(fen / 100).toLocaleString()}`;
   const startEdit = (s: AdminSku) => {
+    setAdding(false);
     setEditKey(s.key);
-    setForm({ name: s.name, desc: s.desc, priceYuan: s.priceFen / 100, enabled: s.enabled, sort: s.sort });
+    setForm({ name: s.name, desc: s.desc, amount: s.amount ?? 0, priceYuan: s.priceFen / 100, enabled: s.enabled, sort: s.sort });
   };
   const toggleEnabled = async (s: AdminSku) => {
     try { await api.updateSku(s.key, { enabled: !s.enabled }); await load(); toast(s.enabled ? '已下架' : '已上架'); }
     catch (e) { toast((e as Error)?.message || '操作失败'); } // 同 requireSuper：403 文案要原样透出
   };
-  const save = async (key: string) => {
+  const save = async (s: AdminSku) => {
+    // amount 只对增购包提交：其它 kind 没有数量概念，多传一个字段会被服务端 400 挡下。
+    if (isPack(s.kind) && !Number.isInteger(form.amount)) return toast('数量需填正整数');
+    if (isPack(s.kind) && form.amount <= 0) return toast(s.kind === 'credits' ? '钻石颗数需大于 0' : 'token 数需大于 0');
     try {
-      await api.updateSku(key, {
+      await api.updateSku(s.key, {
         name: form.name.trim(),
         desc: form.desc.trim(),
         priceFen: Math.max(0, Math.round(form.priceYuan * 100)),
+        ...(isPack(s.kind) ? { amount: form.amount } : {}),
         enabled: form.enabled,
         sort: form.sort,
       });
       setEditKey(null); await load(); toast('SKU 已更新');
     } catch (e) { toast((e as Error)?.message || '保存失败'); }
   };
+  const create = async () => {
+    if (!pack.name.trim()) return toast('请先填增购包名称');
+    if (!Number.isInteger(pack.amount) || pack.amount <= 0) return toast(pack.kind === 'credits' ? '钻石颗数需填正整数' : 'token 数需填正整数');
+    try {
+      await api.createSku({
+        kind: pack.kind,
+        name: pack.name.trim(),
+        desc: pack.desc.trim(),
+        amount: pack.amount,
+        priceFen: Math.max(0, Math.round(pack.priceYuan * 100)),
+        enabled: pack.enabled,
+        sort: pack.sort,
+      });
+      setAdding(false); setPack(PACK_BLANK); await load(); toast('增购包已创建');
+    } catch (e) { toast((e as Error)?.message || '创建失败'); }
+  };
+  // 删除只对「无订单」的增购包放行：服务端 409 SKU_IN_USE 兜底。已有订单的包想下架 → 用「停用」，
+  // 否则历史订单会失去它对应的商品档（对账时查不到买的是什么）。
+  const remove = (s: AdminSku) => setConfirmSpec({
+    title: '删除增购包',
+    desc: '仅当这个包还没有任何订单时可删。已经卖出过的包请改用「停用」——前台立即不再展示、不可购买，已购用户的权益不受影响。',
+    echo: [{ k: '增购包', v: `${s.name} · ${SKU_KIND_LABEL[s.kind] ?? s.kind}` }, { k: '数量', v: amountText(s) }, { k: '价格', v: yuanText(s.priceFen), amount: true }],
+    confirmText: '删除',
+    danger: true,
+    onConfirm: async () => {
+      try { await api.deleteSku(s.key); }
+      catch (e) {
+        // 409 = 已有订单：不是失败重试的事，直接把出路（停用）说清楚，文案留在弹层里。
+        if ((e as { code?: string }).code === 'SKU_IN_USE') throw new Error('这个增购包已有订单，不能删除；请改用「停用」下架（已购用户不受影响）');
+        throw e;
+      }
+      await load(); toast('已删除');
+    },
+  });
+  const amountLabel = (kind: PackKind) => kind === 'credits' ? '数量（钻石颗数，正整数）' : '数量（token 数，正整数）';
   return (
     <>
       <PageHead k="sku" res={res} badge={`${list.filter((x) => x.enabled).length}/${list.length} 在售`} />
-      <div className="pad">
-        {list.length === 0 && <div className="empty">暂无 SKU。</div>}
-        {list.map((s) => editKey === s.key ? (
-          <div key={s.id} className="crd new-agent">
-            <div className="ai-field"><div className="ai-fl">标识 key · {SKU_KIND_LABEL[s.kind] ?? s.kind}（代码目录，不可改）</div><input className="ai-input" value={s.key} disabled /></div>
-            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div className="ai-field"><div className="ai-fl">描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
-            <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
-            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => setForm({ ...form, sort })} /></div>
-            {s.grantsModuleKey && <div className="ai-field"><div className="ai-fl">解锁模块（代码目录，不可改）</div><input className="ai-input" value={s.grantsModuleKey} disabled /></div>}
-            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => setForm({ ...form, enabled: !form.enabled })}><i /></div></div></div>
-            <div className="ai-actions">
-              <button className="ai-btn ghost" onClick={() => setEditKey(null)}>取消</button>
-              <button className="ai-btn primary" onClick={() => save(s.key)}><Icon name="check" size={14} /> 保存</button>
-            </div>
-          </div>
-        ) : (
-          <div key={s.id} className="crd" onClick={() => startEdit(s)}>
-            <div className="crd-row">
-              <span className="crd-ic"><Icon name="crown" size={18} /></span>
-              <div className="crd-b">
-                <div className="ct">{s.name} <span className="tag off">{SKU_KIND_LABEL[s.kind] ?? s.kind}</span>{!s.enabled && <span className="tag off">停用</span>}</div>
-                <div className="cs">{s.key}{s.grantsModuleKey ? ` · 解锁 ${s.grantsModuleKey}` : ''}{s.desc ? ` · ${s.desc}` : ''}</div>
+      {/* 加载失败绝不能长成「暂无商品」：ViewState 把 loading / 失败（可重试）/ 真空态分开。 */}
+      <ViewState res={res}>
+        {(all) => (
+          <div className="pad">
+            {!adding ? (
+              <button className="add-btn full" onClick={() => { setEditKey(null); setPack(PACK_BLANK); setAdding(true); }}><Icon name="spark" size={15} /> 新建增购包</button>
+            ) : (
+              <div className="crd new-agent">
+                <div className="ai-field">
+                  <div className="ai-fl">类型（决定买到手的是什么，创建后不可改）</div>
+                  <select className="ai-input" value={pack.kind} onChange={(e) => setPackForm({ kind: e.target.value === 'quota' ? 'quota' : 'credits' })}>
+                    <option value="credits">钻石增购包（按颗发放钻石）</option>
+                    <option value="quota">算力增购包（按 token 加算力额度）</option>
+                  </select>
+                </div>
+                <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={pack.name} onChange={(e) => setPackForm({ name: e.target.value })} placeholder={pack.kind === 'credits' ? '如 100 钻小包' : '如 100 万 token 加油包'} /></div>
+                <div className="ai-field"><div className="ai-fl">描述（前台展示的一句话）</div><textarea className="ta" rows={2} value={pack.desc} onChange={(e) => setPackForm({ desc: e.target.value })} /></div>
+                <div className="ai-field"><div className="ai-fl">{amountLabel(pack.kind)}</div><NumInput className="ai-input" min={1} step={1} value={pack.amount} onChange={(amount) => setPackForm({ amount })} /></div>
+                <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={pack.priceYuan} onChange={(priceYuan) => setPackForm({ priceYuan })} /></div>
+                <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={pack.sort} onChange={(sort) => setPackForm({ sort })} /></div>
+                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${pack.enabled ? 'on' : ''}`} onClick={() => setPackForm({ enabled: !pack.enabled })}><i /></div></div></div>
+                <div className="ai-actions">
+                  <button className="ai-btn ghost" onClick={() => { setAdding(false); setPack(PACK_BLANK); }}>取消</button>
+                  <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建增购包</button>
+                </div>
               </div>
-              <span className="user-balance">¥{(s.priceFen / 100).toLocaleString()}</span>
-              <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
-              <span className="edit"><Icon name="pen" size={15} /></span>
-            </div>
+            )}
+            {all.length === 0 && !adding && <div className="empty">还没有任何单次付费商品。钻石 / 算力增购包可以在这里新建。</div>}
+            {all.map((s) => editKey === s.key ? (
+              <div key={s.id} className="crd new-agent">
+                <div className="ai-field"><div className="ai-fl">标识 key · {SKU_KIND_LABEL[s.kind] ?? s.kind}（{isPack(s.kind) ? '服务端生成' : '代码目录'}，不可改）</div><input className="ai-input" value={s.key} disabled /></div>
+                <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+                <div className="ai-field"><div className="ai-fl">描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
+                {isPack(s.kind) && <div className="ai-field"><div className="ai-fl">{amountLabel(s.kind)}——改动只影响新订单，已购订单按下单时的数量发放</div><NumInput className="ai-input" min={1} step={1} value={form.amount} onChange={(amount) => setForm({ ...form, amount })} /></div>}
+                <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
+                <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => setForm({ ...form, sort })} /></div>
+                {s.grantsModuleKey && <div className="ai-field"><div className="ai-fl">解锁模块（代码目录，不可改）</div><input className="ai-input" value={s.grantsModuleKey} disabled /></div>}
+                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => setForm({ ...form, enabled: !form.enabled })}><i /></div></div></div>
+                <div className="ai-actions">
+                  <button className="ai-btn ghost" onClick={() => setEditKey(null)}>取消</button>
+                  {isPack(s.kind) && <button className="ai-btn ghost" onClick={() => remove(s)}><Icon name="alert" size={14} /> 删除</button>}
+                  <button className="ai-btn primary" onClick={() => save(s)}><Icon name="check" size={14} /> 保存</button>
+                </div>
+              </div>
+            ) : (
+              <div key={s.id} className="crd" onClick={() => startEdit(s)}>
+                <div className="crd-row">
+                  <span className="crd-ic"><Icon name="crown" size={18} /></span>
+                  <div className="crd-b">
+                    <div className="ct">{s.name} <span className="tag off">{SKU_KIND_LABEL[s.kind] ?? s.kind}</span>{!s.enabled && <span className="tag off">停用</span>}</div>
+                    <div className="cs">{s.key}{s.grantsModuleKey ? ` · 解锁 ${s.grantsModuleKey}` : ''}{s.desc ? ` · ${s.desc}` : ''}</div>
+                  </div>
+                  <span className="tag off">{amountText(s)}</span>
+                  <span className="user-balance">{yuanText(s.priceFen)}</span>
+                  <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
+                  <span className="edit"><Icon name="pen" size={15} /></span>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+      </ViewState>
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );
 }
