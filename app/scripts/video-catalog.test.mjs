@@ -106,7 +106,9 @@ test('快出片数字分身按石榴直传创建，authId 可选且较长时长�
   assert.match(style, /\.cl-video-card\s*\{[\s\S]*height: 238px;/);
   assert.match(source, /wx\.authorize\([\s\S]*scope: 'scope\.record'/);
   assert.match(source, /manager\.onStart\(/);
-  assert.equal(appConfig.permission['scope.record'].desc.includes('数字分身声音'), true);
+  // app.json.permission 的官方白名单目前只有 scope.userLocation；录音用途在管理后台
+  // 《用户隐私保护指引》申报，运行时仍由上面的 wx.authorize 主动申请。
+  assert.equal(appConfig.permission?.['scope.record'], undefined);
 });
 
 test('快出片所有页面只占一层原生导航高度', () => {

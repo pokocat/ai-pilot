@@ -72,11 +72,6 @@
     "uploadFile": 120000,
     "downloadFile": 120000
   },
-  "permission": {
-    "scope.record": {
-      "desc": "用于录制并克隆你主动提交的数字分身声音"
-    }
-  },
   "tabBar": {
     "custom": true,
     "color": "#969BA1",

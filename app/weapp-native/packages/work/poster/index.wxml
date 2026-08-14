@@ -39,13 +39,15 @@
 
       <view wx:if="{{activeDirections.length}}" class="ps-field">
         <view class="ps-flabel"><text class="ps-fl">想往哪个方向做</text></view>
-        <view class="ps-dir-grid">
-          <view wx:for="{{activeDirections}}" wx:key="key" class="ps-dir {{directionKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseDirection">
-            <image wx:if="{{item.previewUrl}}" class="ps-dir-img" src="{{item.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
-            <view wx:else class="ps-dir-placeholder"><native-icon name="image" tone="neutral" size="20"></native-icon><text>样例待发布</text></view>
-            <view class="ps-dir-body"><view class="ps-dir-name"><text>{{item.name}}</text><native-icon wx:if="{{directionKey===item.key}}" name="check" tone="green" size="13"></native-icon></view><text class="ps-dir-desc">{{item.desc}}</text><text wx:if="{{item.note}}" class="ps-dir-note">{{item.note}}</text></view>
+        <scroll-view class="ps-dir-scroll" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+          <view class="ps-dir-grid">
+            <view wx:for="{{activeDirections}}" wx:key="key" class="ps-dir {{directionKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseDirection">
+              <image wx:if="{{item.previewUrl}}" class="ps-dir-img" src="{{item.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
+              <view wx:else class="ps-dir-placeholder"><native-icon name="image" tone="neutral" size="20"></native-icon><text>样例待发布</text></view>
+              <view class="ps-dir-body"><view class="ps-dir-name"><text>{{item.name}}</text><native-icon wx:if="{{directionKey===item.key}}" name="check" tone="green" size="13"></native-icon></view><text class="ps-dir-desc">{{item.desc}}</text><text wx:if="{{item.note}}" class="ps-dir-note">{{item.note}}</text></view>
+            </view>
           </view>
-        </view>
+        </scroll-view>
         <text wx:if="{{errors.direction}}" class="ps-ferr">{{errors.direction}}</text>
       </view>
 

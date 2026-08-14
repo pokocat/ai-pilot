@@ -7,7 +7,7 @@
 // 2) 字数超限**前置校验**、标红提示，不静默截断——口径与服务端 zod LIMITS 完全一致（超限服务端 422）；
 // 3) 费用文案克制：只写 `💎xN`，不写促销话术。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { View, Text, Textarea, Image } from '@tarojs/components';
+import { View, Text, Textarea, Image, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
@@ -534,25 +534,27 @@ export default function PosterConfirmPage() {
 
             {directions.some((item) => item.tier === tier) ? (
               <Field label="想往哪个方向做" err={errors.direction}>
-                <View className="ps-dir-grid">
-                  {directions.filter((item) => item.tier === tier).map((item) => {
-                    const on = item.key === directionKey;
-                    return (
-                      <View key={item.key} className={`ps-dir${on ? ' on' : ''}`} onClick={() => { setDirectionKey(item.key); setErrors((cur) => ({ ...cur, direction: '' })); }}>
-                        {item.previewUrl ? (
-                          <Image className="ps-dir-img" src={item.previewUrl} mode="aspectFill" />
-                        ) : (
-                          <View className="ps-dir-placeholder"><Icon name="image" size={18} color="#7E848B" /><Text>样例待发布</Text></View>
-                        )}
-                        <View className="ps-dir-body">
-                          <View className="ps-dir-name"><Text>{item.name}</Text>{on ? <Icon name="check" size={12} color={accent} /> : null}</View>
-                          <Text className="ps-dir-desc">{item.desc}</Text>
-                          {item.note ? <Text className="ps-dir-note">{item.note}</Text> : null}
+                <ScrollView className="ps-dir-scroll" scrollX enhanced showScrollbar={false}>
+                  <View className="ps-dir-grid">
+                    {directions.filter((item) => item.tier === tier).map((item) => {
+                      const on = item.key === directionKey;
+                      return (
+                        <View key={item.key} className={`ps-dir${on ? ' on' : ''}`} onClick={() => { setDirectionKey(item.key); setErrors((cur) => ({ ...cur, direction: '' })); }}>
+                          {item.previewUrl ? (
+                            <Image className="ps-dir-img" src={item.previewUrl} mode="aspectFill" />
+                          ) : (
+                            <View className="ps-dir-placeholder"><Icon name="image" size={18} color="#7E848B" /><Text>样例待发布</Text></View>
+                          )}
+                          <View className="ps-dir-body">
+                            <View className="ps-dir-name"><Text>{item.name}</Text>{on ? <Icon name="check" size={12} color={accent} /> : null}</View>
+                            <Text className="ps-dir-desc">{item.desc}</Text>
+                            {item.note ? <Text className="ps-dir-note">{item.note}</Text> : null}
+                          </View>
                         </View>
-                      </View>
-                    );
-                  })}
-                </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
               </Field>
             ) : null}
 

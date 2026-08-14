@@ -7,7 +7,7 @@
 // 表单（改文字 / 换方向）就地展开在页面里，不用 fixed 弹层、不套 ScrollView——AGENTS.md §7.2：
 // Android 真机的普通表单 Input 不得放在全屏纵向 ScrollView 或 fixed 弹层中。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { View, Text, Textarea, Image } from '@tarojs/components';
+import { View, Text, Textarea, Image, ScrollView } from '@tarojs/components';
 import Taro, { useDidHide, useDidShow, useRouter } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
@@ -536,21 +536,23 @@ export default function PosterJobPage() {
                 <Text className="pj-panel-d">会按原路线重新创作并再扣一次钻石。旧版本不会被覆盖，随时能回看。</Text>
                 {activeDirections.length ? (
                   <Field label="创作方向（留空 = 沿用）">
-                    <View className="pj-dir-grid">
-                      {activeDirections.map((item) => {
-                        const on = item.key === directionKey;
-                        return (
-                          <View key={item.key} className={`pj-dir${on ? ' on' : ''}`} onClick={() => setDirectionKey(on ? '' : item.key)}>
-                            {item.previewUrl ? <Image className="pj-dir-img" src={item.previewUrl} mode="aspectFill" /> : <View className="pj-dir-empty">样例待发布</View>}
-                            <View className="pj-dir-b">
-                              <Text className="pj-dir-n">{item.name}</Text>
-                              <Text className="pj-dir-d">{item.desc}</Text>
-                              {item.note ? <Text className="pj-dir-note">{item.note}</Text> : null}
+                    <ScrollView className="pj-dir-scroll" scrollX enhanced showScrollbar={false}>
+                      <View className="pj-dir-grid">
+                        {activeDirections.map((item) => {
+                          const on = item.key === directionKey;
+                          return (
+                            <View key={item.key} className={`pj-dir${on ? ' on' : ''}`} onClick={() => setDirectionKey(on ? '' : item.key)}>
+                              {item.previewUrl ? <Image className="pj-dir-img" src={item.previewUrl} mode="aspectFill" /> : <View className="pj-dir-empty">样例待发布</View>}
+                              <View className="pj-dir-b">
+                                <Text className="pj-dir-n">{item.name}</Text>
+                                <Text className="pj-dir-d">{item.desc}</Text>
+                                {item.note ? <Text className="pj-dir-note">{item.note}</Text> : null}
+                              </View>
                             </View>
-                          </View>
-                        );
-                      })}
-                    </View>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
                   </Field>
                 ) : null}
                 {/* 版式清单来自 /creative/status（只含启用中的）；不选 = 沿用上一版的版式。

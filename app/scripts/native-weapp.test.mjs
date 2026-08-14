@@ -76,6 +76,10 @@ test('原生 402 保留业务错误码，额度耗尽只给方案入口不再诱
 
 test('原生小程序覆盖 app.json 声明的全部路由', () => {
   const app = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.json'), 'utf8'));
+  // 官方 app.json 的 permission 目前只接受 scope.userLocation；scope.record 放进去会被
+  // 开发者工具直接报 invalid。录音仍在用户点击时走 getSetting/authorize，隐私用途在
+  // 小程序管理后台《用户隐私保护指引》申报，不在这里伪造一个无效配置。
+  assert.equal(app.permission?.['scope.record'], undefined, 'app.json 不得声明无效的 permission.scope.record');
   const routes = [...app.pages];
   for (const pkg of app.subPackages || []) for (const page of pkg.pages || []) routes.push(`${pkg.root}/${page}`);
   for (const route of routes) {
@@ -1936,6 +1940,10 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 照常摆在那儿当主动作，点下去弹「保存失败，请重试」与「暂时打不开转发，可先存相册」——
   // 重试一百次也没用，存相册走的还是同一条死链接。缺图态的唯一正解是「重新获取」。
   const posterJobWxml = fs.readFileSync(path.join(sourceRoot, 'packages/work/posterJob/index.wxml'), 'utf8');
+  assert.match(posterWxml, /<scroll-view class="ps-dir-scroll"[^>]*scroll-x="\{\{true\}\}"/,
+    '三张方向样例要用横向大图卡，不能在手机上挤成三列小字');
+  assert.match(posterJobWxml, /<scroll-view class="pj-dir-scroll"[^>]*scroll-x="\{\{true\}\}"/,
+    '收费换方向面板也必须沿用可读的大图卡');
   assert.match(posterJobWxml, /wx:if="\{\{!assetUrl\}\}" class="pj-btn primary" bindtap="reload"/,
     '缺图时主动作是「重新获取」');
   assert.match(posterJobWxml, /<view wx:if="\{\{assetUrl\}\}" class="pj-acts">[\s\S]{0,400}bindtap="saveAlbum"/,

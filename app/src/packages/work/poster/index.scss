@@ -77,24 +77,25 @@
    原生端 native-weapp.test.mjs 有守卫直接拦 emoji 回退）。 */
 .ps-tpl-cost { display: flex; align-items: center; gap: 4px; margin-top: 5px; }
 .ps-tpl-cost .ps-tpl-d { margin-top: 0; }
-.ps-dir-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ps-dir-scroll { width: 100%; }
+.ps-dir-grid { display: flex; width: max-content; gap: 10px; padding: 1px; }
 .ps-dir {
-  min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px;
+  flex: none; width: 150px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px;
   background: var(--surface); box-sizing: border-box;
 }
 .ps-dir.on { border-color: var(--accent); border-width: 2px; }
-.ps-dir-img, .ps-dir-placeholder { width: 100%; height: 124px; }
+.ps-dir-img, .ps-dir-placeholder { width: 100%; height: 200px; }
 .ps-dir-img { display: block; background: var(--surface-2); }
 .ps-dir-placeholder {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   color: var(--ink-3); background: var(--surface-2); font-size: 10px;
 }
-.ps-dir-body { padding: 8px; }
+.ps-dir-body { padding: 10px; }
 .ps-dir-name { display: flex; align-items: center; justify-content: space-between; gap: 3px; }
-.ps-dir-name text { min-width: 0; font-size: 12px; font-weight: 600; color: var(--ink); }
+.ps-dir-name text { min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
 .ps-dir.on .ps-dir-name text { color: var(--accent); }
-.ps-dir-desc { display: block; margin-top: 5px; font-size: 10px; line-height: 1.45; color: var(--ink-3); }
-.ps-dir-note { display: block; margin-top: 5px; font-size: 9px; color: var(--warn); }
+.ps-dir-desc { display: block; margin-top: 6px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.ps-dir-note { display: block; margin-top: 6px; font-size: 10px; line-height: 1.45; color: var(--warn); }
 
 /* 肖像确认 */
 .ps-consent {
