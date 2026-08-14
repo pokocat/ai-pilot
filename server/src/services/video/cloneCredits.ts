@@ -29,11 +29,13 @@ export class CloneCreditConflictError extends Error {
  * 端上传的是「用户做了什么选择」（kind / voiceId / voiceSource），能不能据此收钱由服务端决定；
  * 否则改一个表单字段就能把 200 的档位说成 60。
  *
- * 三种组合，与 model.js `cloneCostRows` 展示的明细一一对应（端上显示什么，这里就收什么）：
+ * 四种组合，与 model.js `cloneCostRows` 展示的明细一一对应（端上显示什么，这里就收什么）：
  * - kind=voice + voiceId  → 重训那一条已有声音（供应商 4 次免费，但我方仍有运营成本，收 voiceRetrain）
  * - kind=voice 无 voiceId → 新建一条专属声音（voiceCreate）
  * - kind=avatar           → 训数字人（avatarVideo）；若用户选的是「视频原声」而不是复用已有声音，
  *                           上游会再新训一条声音，那是**另一档实打实的开销**，一并计入 voiceCreate。
+ * - kind=avatarImage      → 用照片训数字人（avatarImage）。**只收这一档**：照片里没有声音，
+ *                           它必须关联一条已经训好的声音，那条声音训练时已经单独收过费了。
  */
 export function cloneChargeItems(
   input: { kind: string; voiceId?: string; voiceSource?: string },
@@ -43,6 +45,10 @@ export function cloneChargeItems(
   if (input.kind === 'voice') {
     const action: CloneAction = voiceId ? 'voiceRetrain' : 'voiceCreate';
     return [{ action, targetKind: 'voice', credits: pricing[action] }];
+  }
+  if (input.kind === 'avatarImage') {
+    // 照片没有声音，必须关联一条已训好的（在别处已付费）。这里绝不再收一次声音的钱。
+    return [{ action: 'avatarImage', targetKind: 'avatar', credits: pricing.avatarImage }];
   }
   const items: CloneChargeItem[] = [{ action: 'avatarVideo', targetKind: 'avatar', credits: pricing.avatarVideo }];
   // 复用已有声音不额外扣费；只有「视频原声」= 新训一条时才加这一档。

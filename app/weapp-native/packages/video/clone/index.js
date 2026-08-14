@@ -48,6 +48,11 @@ Page({
     voiceFile: null,
     voiceSubmitted: false,
     faceFile: null,
+    /**
+     * 形象素材来源：'video' = 一段出镜视频（能顺带提音色）；'image' = 一张照片（**没有声音**）。
+     * 照片模式必须关联一条已训好的声音，否则会建出一个永远出不了片的分身。
+     */
+    faceSource: 'video',
     avatarId: '',
     avatarName: '',
     voices: [],
@@ -127,6 +132,8 @@ Page({
 
   onShow() {
     if (this.data.step === 2 && !this.trainingTimer) this.startTrainingPolling();
+    // 从录音页训完一条声音回来时，它必须立刻出现在「关联声音」里，否则用户以为白录了。
+    else if (this.data.step === 1 && this.voicesLoadedOnce) this.loadVoices();
   },
   onHide() { this.stopTrainingPolling(); },
   onUnload() { this.stopTrainingPolling(); this.stopRecordStartTimer(); this.stopRecordTimer(); this.stopRecorder(); },
@@ -145,7 +152,9 @@ Page({
    * 否则又会出现「界面显示一个价、实际按另一个价扣」。
    */
   chargeState(selectedVoiceId) {
-    const { mode, pricing, retrainVoiceId } = this.data;
+    const { pricing, retrainVoiceId } = this.data;
+    // 计价口径按「素材来源」分，不按页面 mode 分：同一个 avatar 页，选视频和选照片是两档不同的价。
+    const mode = this.data.mode === 'avatar' && this.data.faceSource === 'image' ? 'image' : this.data.mode;
     const items = model.cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId);
     return {
       costRows: cloneCostRows(mode, pricing, selectedVoiceId, retrainVoiceId),
@@ -159,7 +168,8 @@ Page({
    * 所以统一收口到这里重算一次，谁后到都能补齐文案。
    */
   applyVoiceChoices() {
-    const { options, defaultVoiceId, hasReusable } = voiceChoices(this.data.voices, this.data.pricing);
+    const imageMode = this.data.mode === 'avatar' && this.data.faceSource === 'image';
+    const { options, defaultVoiceId, hasReusable } = voiceChoices(this.data.voices, this.data.pricing, imageMode);
     // 只在用户还没动过选择时才落默认值：用户主动选了「视频原声」之后，
     // 价格接口姗姗来迟不能把他的选择改回复用。
     const selectedVoiceId = this.voiceTouched ? this.data.selectedVoiceId : defaultVoiceId;
@@ -169,9 +179,13 @@ Page({
       selectedVoiceId,
       avatarCostText: cloneCostText(this.data.pricing, 'avatarVideo'),
       voiceCostText: cloneCostText(this.data.pricing, 'voiceCreate'),
-      voiceNoteText: hasReusable
-        ? '已默认复用你现有的声音，复用不额外扣费。只有主动选「视频原声」才会新训练一条并扣费。'
-        : '还没有可复用的声音，这段视频会用来训练一条新的声音。',
+      voiceNoteText: imageMode
+        ? (hasReusable
+          ? '照片里没有声音，成片用你选的这条已有声音说话，复用不额外扣费。'
+          : '照片里没有声音，需要先有一条声音才能建分身 —— 去录一段或传一个音频训练一条。')
+        : (hasReusable
+          ? '已默认复用你现有的声音，复用不额外扣费。只有主动选「视频原声」才会新训练一条并扣费。'
+          : '还没有可复用的声音，这段视频会用来训练一条新的声音。'),
     }, this.chargeState(selectedVoiceId)));
   },
 
@@ -179,6 +193,7 @@ Page({
     if (!host.isLoggedIn()) return;
     api.voices()
       .then((voices) => {
+        this.voicesLoadedOnce = true;
         this.setData({ voices: (Array.isArray(voices) ? voices : []).filter((item) => item.status === 'ready') });
         this.applyVoiceChoices();
       })
@@ -506,11 +521,26 @@ Page({
 
   recordFace() { this.chooseFace('camera'); },
   pickFace() { this.chooseFace('album'); },
+  pickPhoto() { this.chooseFace('album', 'image'); },
+  shootPhoto() { this.chooseFace('camera', 'image'); },
 
-  chooseFace(sourceType) {
+  /**
+   * 切换形象素材来源。换来源要重算账单：视频训练和照片训练是两个不同的档位，
+   * 价格差不少，界面上的数字必须当场跟着变（同 d70e1bb 那类回归）。
+   */
+  switchFaceSource(event) {
+    const source = String(event.currentTarget.dataset.source || 'video');
+    if (source === this.data.faceSource) return;
+    this.setData({ faceSource: source, faceFile: null });
+    // 照片模式没有「视频原声」这一项，可选声音集合变了，整块重算。
+    this.applyVoiceChoices();
+  },
+
+  chooseFace(sourceType, kind) {
+    const image = (kind || this.data.faceSource) === 'image';
     host.chooseMedia({
       count: 1,
-      mediaType: ['video'],
+      mediaType: [image ? 'image' : 'video'],
       sourceType: [sourceType],
       // ★ 上传分辨率 = 成片分辨率（石榴技术 2026-08-13 明确）。不写 sizeType 时微信默认
       //   ['original','compressed'] 并**实际取压缩版**，等于在源头把成片画质砍掉。
@@ -527,19 +557,31 @@ Page({
       success: (res) => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
-        if (!this.validateCapture('avatar', file)) return;
+        // 照片没有时长，走不了 avatar 那套时长校验；分辨率与真实格式由服务端按 image 档判。
+        if (!image && !this.validateCapture('avatar', file)) return;
+        if (image && Number(file.size || 0) > 10 * 1024 * 1024) { host.toast('照片不能超过 10MB'); return; }
         this.setData({
           faceFile: Object.assign(
-            { path: file.tempFilePath, duration: file.duration || 0, size: file.size || 0 },
+            { path: file.tempFilePath, duration: file.duration || 0, size: file.size || 0, image },
             mediaDimensions(file),
           ),
         });
       },
       fail: (error) => {
         if (String(error && error.errMsg || '').indexOf('cancel') >= 0) return;
-        host.toast(sourceType === 'camera' ? '打开相机失败' : '选择视频失败');
+        host.toast(sourceType === 'camera' ? '打开相机失败' : (image ? '选择照片失败' : '选择视频失败'));
       },
     });
+  },
+
+  /**
+   * 去单独训练一条声音。**复用现成的录音页**，不在这一屏塞第二个文件上传 ——
+   * 录音有自己的时长/音质校验、隐私授权和训练等待，硬揉进建分身页只会两头都做不好。
+   * 训完回来 onShow 会重新拉一次声音列表，新声音自动出现在可选项里。
+   */
+  goRecordVoice() {
+    const suffix = this.data.avatarId ? '&avatarId=' + encodeURIComponent(this.data.avatarId) : '';
+    host.go('clone/index?mode=voice' + suffix);
   },
 
   retakeFace() { this.setData({ faceFile: null }); },
@@ -557,8 +599,14 @@ Page({
     if (!this.data.agreed) { host.toast('请先确认素材使用权'); return; }
     if (this.data.submitting) return;
     if (!this.assertQuoteReady()) return;
+    const image = this.data.faceSource === 'image';
+    // 照片里没有声音：没选声音就提交服务端会 400，但更早挡住、并说清怎么办才是对的。
+    if (image && !this.data.selectedVoiceId) {
+      host.toast('照片没有声音，请先选一条声音，或去录一段');
+      return;
+    }
     this.setData({ submitting: true });
-    api.startClone('avatar', {
+    api.startClone(image ? 'avatarImage' : 'avatar', {
       filePath: this.data.faceFile.path,
       avatarId: this.data.avatarId,
       voiceId: this.data.selectedVoiceId,

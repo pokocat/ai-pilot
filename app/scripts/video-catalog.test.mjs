@@ -92,7 +92,8 @@ test('快出片数字分身按石榴直传创建，authId 可选且较长时长�
   assert.doesNotMatch(source, /key: 'voice'[\s\S]*key: 'avatar'/);
   assert.match(source, /requestedMode === 'voice' \|\| requestedMode === 'avatar'/);
   assert.match(source, /api\.startClone\('voice'/);
-  assert.match(source, /api\.startClone\('avatar'/);
+  // 形象提交的 kind 跟着素材来源走：视频 → 'avatar'，照片 → 'avatarImage'。
+  assert.match(source, /api\.startClone\(image \? 'avatarImage' : 'avatar'/);
 
   const view = fs.readFileSync(path.join(videoRoot, 'clone/index.wxml'), 'utf8');
   const style = fs.readFileSync(path.join(videoRoot, 'clone/index.scss'), 'utf8');
@@ -381,4 +382,29 @@ test('免费重训余额：查不到不许编数字，用完了必须挡住而�
   assert.equal(retrainQuotaState(null).text, '', '没有数据时整行不渲染');
   // total/remaining 缺字段时按「查不到」处理，不许算出 NaN 次
   assert.match(retrainQuotaState({ available: true, retrainable: true }).text, /查不到/);
+});
+
+test('照片建分身：不给「视频原声」这种点了必失败的选项，且只收形象一档', () => {
+  const { voiceChoices, cloneChargeItems } = model;
+  const pricing = { voiceCreate: 200, voiceRetrain: 60, avatarVideo: 200, avatarImage: 100, configured: true };
+  const voices = [{ id: 'VC-1', name: '我的声音', status: 'ready', source: 'dedicated' }];
+
+  // 视频模式仍然有「视频原声」（空 id 那一项）
+  const video = voiceChoices(voices, pricing, false);
+  assert.ok(video.options.some((o) => o.id === ''), '视频模式保留「视频原声」');
+
+  // 照片模式没有：一张照片里根本没有声音，给了就是给一个点了会失败的选项
+  const image = voiceChoices(voices, pricing, true);
+  assert.equal(image.options.some((o) => o.id === ''), false, '照片模式不得出现「视频原声」');
+  assert.equal(image.options.length, 1, '照片模式只剩可复用的已有声音');
+
+  // 一条可复用的都没有时，默认值必须是空（= 还没选），不能像视频模式那样落到「视频原声」
+  const none = voiceChoices([], pricing, true);
+  assert.equal(none.defaultVoiceId, '');
+  assert.equal(none.hasReusable, false);
+
+  // 计价：照片只收形象这一档。声音是复用的，它的钱在训练那条声音时已经收过。
+  const items = cloneChargeItems('image', pricing, 'VC-1', '');
+  assert.deepEqual(items.map((i) => i.action), ['avatarImage']);
+  assert.equal(items[0].credits, 100);
 });

@@ -45,7 +45,11 @@ function rewriteBody(body: unknown) {
   return { scope, no: typeof row.no === 'number' ? row.no : null, text };
 }
 
+/** 采集类型。avatarImage = 用照片训数字人（与 AIStar 侧 kind 同名），白名单与视频那两类完全不同。 */
+type CaptureKind = 'consent' | 'avatar' | 'voice' | 'avatarImage';
+
 const VIDEO_CAPTURE_MIMES = new Set(['video/mp4', 'video/quicktime']);
+const IMAGE_CAPTURE_MIMES = new Set(['image/jpeg', 'image/png']);
 const VOICE_CAPTURE_MIMES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a']);
 
 /**
@@ -103,10 +107,16 @@ function resolveAssetMime(declared: string, buf: Buffer): string {
   return sniffed === 'application/mp4' ? 'video/mp4' : sniffed;
 }
 
+function captureMimeWhitelist(kind: CaptureKind): Set<string> {
+  if (kind === 'voice') return VOICE_CAPTURE_MIMES;
+  if (kind === 'avatarImage') return IMAGE_CAPTURE_MIMES;
+  return VIDEO_CAPTURE_MIMES;
+}
+
 /** 声明 MIME 不可信时（缺失 / octet-stream / 与魔数矛盾），以魔数为准。 */
-function resolveCaptureMime(kind: 'consent' | 'avatar' | 'voice', declared: string, buf: Buffer): string {
+function resolveCaptureMime(kind: CaptureKind, declared: string, buf: Buffer): string {
   const voice = kind === 'voice';
-  const allowed = voice ? VOICE_CAPTURE_MIMES : VIDEO_CAPTURE_MIMES;
+  const allowed = captureMimeWhitelist(kind);
   const lower = String(declared || '').toLowerCase();
   if (allowed.has(lower)) return lower;
 
@@ -117,21 +127,24 @@ function resolveCaptureMime(kind: 'consent' | 'avatar' | 'voice', declared: stri
   return sniffed;
 }
 
-function assertCaptureUpload(kind: 'consent' | 'avatar' | 'voice', mimeType: string, bytes: number, truncated: boolean) {
+function assertCaptureUpload(kind: CaptureKind, mimeType: string, bytes: number, truncated: boolean) {
   const voice = kind === 'voice';
-  const maxBytes = voice ? 20 * 1024 * 1024 : 100 * 1024 * 1024;
-  const allowed = voice ? VOICE_CAPTURE_MIMES : VIDEO_CAPTURE_MIMES;
-  if (!allowed.has(String(mimeType || '').toLowerCase())) {
-    throw Object.assign(new Error(voice ? '声音只支持 WAV、MP3、OGG、M4A 或 AAC' : '视频只支持 MP4 或 MOV'), { statusCode: 422, code: 'CLIP_CAPTURE_FORMAT_INVALID' });
+  const image = kind === 'avatarImage';
+  const maxBytes = voice ? 20 * 1024 * 1024 : image ? 10 * 1024 * 1024 : 100 * 1024 * 1024;
+  const formatError = voice ? '声音只支持 WAV、MP3、OGG、M4A 或 AAC' : image ? '照片只支持 JPG 或 PNG' : '视频只支持 MP4 或 MOV';
+  const sizeError = voice ? '声音文件不能超过 20MB' : image ? '照片不能超过 10MB' : '视频文件不能超过 100MB';
+  if (!captureMimeWhitelist(kind).has(String(mimeType || '').toLowerCase())) {
+    throw Object.assign(new Error(formatError), { statusCode: 422, code: 'CLIP_CAPTURE_FORMAT_INVALID' });
   }
   if (truncated || bytes <= 0 || bytes > maxBytes) {
-    throw Object.assign(new Error(voice ? '声音文件不能超过 20MB' : '视频文件不能超过 100MB'), { statusCode: 413, code: 'CLIP_CAPTURE_TOO_LARGE' });
+    throw Object.assign(new Error(sizeError), { statusCode: 413, code: 'CLIP_CAPTURE_TOO_LARGE' });
   }
 }
 
-function captureFileName(kind: 'consent' | 'avatar' | 'voice', fileName: string | undefined, mimeType: string) {
+function captureFileName(kind: CaptureKind, fileName: string | undefined, mimeType: string) {
   const supplied = String(fileName || '').trim();
   if (/\.[a-z0-9]{2,5}$/i.test(supplied)) return supplied;
+  if (kind === 'avatarImage') return String(mimeType || '').includes('png') ? 'avatar.png' : 'avatar.jpg';
   if (kind !== 'voice') return kind === 'consent' ? 'consent.mp4' : 'avatar.mp4';
   const mime = String(mimeType || '').toLowerCase();
   if (mime.includes('wav')) return 'voice.wav';
@@ -503,7 +516,7 @@ export async function videoRoutes(app: FastifyInstance) {
       const fields = data.fields as Record<string, { value?: unknown }> | undefined;
       const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
-      if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
+      if (!['avatar', 'voice', 'avatarImage'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
       // 这两个字段只有带计费的那版小程序才会发。老版本发不出来 —— 它们在界面上也没给用户看过价，
       // 那就绝不能替它静默扣钱；只能明确请用户更新，文案要让用户看得懂该干什么，
       // 而不是甩一句「缺少合法的 clientRequestId」。
@@ -530,8 +543,8 @@ export async function videoRoutes(app: FastifyInstance) {
       await assertCloneAffordable(user.id, total);
 
       // 同 consent：录音临时文件常被 wx.uploadFile 标成 octet-stream，必须按魔数纠正后再校验。
-      const mimeType = resolveCaptureMime(kind as 'avatar' | 'voice', data.mimetype, buffer);
-      assertCaptureUpload(kind as 'avatar' | 'voice', mimeType, buffer.length, data.file.truncated);
+      const mimeType = resolveCaptureMime(kind as CaptureKind, data.mimetype, buffer);
+      assertCaptureUpload(kind as CaptureKind, mimeType, buffer.length, data.file.truncated);
       await assertVideoMediaModerationReady(mimeType);
       await assertVideoUploadContent(buffer, mimeType, identityOf(user));
 
@@ -556,7 +569,7 @@ export async function videoRoutes(app: FastifyInstance) {
       }
       ownsSubmission = true;
 
-      const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, mimeType), mimeType }, {
+      const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as CaptureKind, data.filename, mimeType), mimeType }, {
         kind,
         // 声音来源的显式意图：'video' = 只从本次视频提取，服务端据此禁止回退到旧声音。
         voiceSource,

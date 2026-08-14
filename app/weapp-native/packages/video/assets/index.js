@@ -129,9 +129,12 @@ Page({
   swallow() {},
 
   /** 长按改标签（浏览态）。 */
+  /** 内置素材不属于用户：长按菜单也不该出现「改标签 / 删除」。 */
   longPressAsset(event) {
     if (this.data.picking) return;
     const id = String(event.currentTarget.dataset.id || '');
+    const asset = this.data.assets.find((item) => item.id === id);
+    if (asset && asset.preset) { host.toast('这是内置素材，不能改名也不能删除'); return; }
     wx.showActionSheet({
       itemList: ['改标签', '删除'],
       success: (res) => {

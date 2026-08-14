@@ -61,7 +61,8 @@
                  model.formatResolution 里拼好，wxml 不碰字符串算术（乘号本身也是本目录的违禁字形）。 -->
             <text wx:if="{{item.resolutionText}}" class="ac-res">{{item.resolutionText}}</text>
             <text wx:if="{{item.durationText}}" class="ac-dur">{{item.durationText}}</text>
-            <view wx:if="{{!picking}}" class="ac-del" data-id="{{item.id}}" catchtap="deleteFromCard"><native-icon name="trash" tone="white" size="13"></native-icon></view>
+            <!-- 内置素材属于平台、不属于用户，删不掉也改不了名：不给按钮，比给了再报错好。 -->
+            <view wx:if="{{!picking && !item.preset}}" class="ac-del" data-id="{{item.id}}" catchtap="deleteFromCard"><native-icon name="trash" tone="white" size="13"></native-icon></view>
             <view class="ac-preview" data-id="{{item.id}}" catchtap="previewAsset">{{item.kind === 'video' ? '播放' : '预览'}}</view>
           </view>
           <text class="ac-label">{{item.label}}</text>

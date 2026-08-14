@@ -44,6 +44,15 @@ test('voiceSource=video 压过 voiceId：用户明确选了视频原声就按新
   assert.deepEqual(items.map((i) => i.action), ['avatarVideo', 'voiceCreate']);
 });
 
+test('照片建分身只收形象一档：照片里没有声音，那条声音的钱在训练它的时候已经收过了', () => {
+  const items = cloneChargeItems({ kind: 'avatarImage', voiceId: 'VC-1' }, PRICING);
+  assert.deepEqual(items, [{ action: 'avatarImage', targetKind: 'avatar', credits: 100 }]);
+  // 关联的是一条已训好的声音（在别处付过费），这里再收一次就是重复收费。
+  assert.equal(items.some((i) => i.action === 'voiceCreate'), false);
+  assert.ok(cloneChargeTotal(items) < cloneChargeTotal(cloneChargeItems({ kind: 'avatar', voiceSource: 'video' }, PRICING)),
+    '图片训练是低成本入口，必须便宜于「视频训练 + 新训声音」');
+});
+
 test('内测免费靠把单价配成 0 实现，不靠代码分支：档位照排、金额为 0', () => {
   const free: ClonePricing = { ...PRICING, voiceCreate: 0, avatarVideo: 0 };
   const items = cloneChargeItems({ kind: 'avatar', voiceSource: 'video' }, free);

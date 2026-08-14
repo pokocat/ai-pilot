@@ -2099,3 +2099,15 @@ test('发版顺序：小程序先发时克隆不能被自家的报价闸挡死',
   // 反过来：其它失败（网络/5xx）仍然必须挡住 —— 不知道要扣多少就提交，等于回到「界面没说、系统照扣」。
   assert.match(cloneJs, /expectedCredits == null/);
 });
+
+test('内置素材不给删除入口：删不掉的动作就不该出现在界面上', () => {
+  const wxml = read('weapp-native/packages/video/assets/index.wxml');
+  const js = read('weapp-native/packages/video/assets/index.js');
+  // 素材库把内置素材和自有素材混在一个库里展示，但内置的不属于用户、删不掉也改不了名。
+  // 此前卡片上照给删除按钮，点下去服务端抛「素材不存在或无权访问」——
+  // 听起来像 bug 或权限故障，真实原因只是「这条本来就删不得」。（2026-08-14 真机复现）
+  assert.match(wxml, /!picking && !item\.preset[\s\S]{0,120}?deleteFromCard/,
+    '内置素材卡片不得渲染删除按钮');
+  assert.match(js, /asset\.preset\)\s*\{[\s\S]{0,80}?内置素材/,
+    '长按菜单也要挡住，否则删除入口只是换了个地方');
+});

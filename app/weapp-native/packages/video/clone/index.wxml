@@ -76,9 +76,15 @@
 
       <!-- ① 只需一段视频就创建 Avatar；speakerId / authId 都不再做前置。 -->
       <block wx:elif="{{mode === 'avatar' && step === 1}}">
-        <text class="cl-kicker">一段视频即可创建</text>
-        <text class="cl-h">上传你的出镜视频</text>
-        <text class="cl-s">录满 {{requirements.avatar.minDurationSec}} 秒即可提交，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。直接创建形象；视频里有清楚人声时，还会同步生成基础声音。</text>
+        <text class="cl-kicker">{{faceSource === 'image' ? '一张照片即可创建' : '一段视频即可创建'}}</text>
+        <text class="cl-h">{{faceSource === 'image' ? '上传你的正脸照片' : '上传你的出镜视频'}}</text>
+        <text class="cl-s">{{faceSource === 'image' ? '一张清晰正脸照就能建分身。照片里没有声音，成片说话用的是你另外训练或已有的那条声音。' : '录满 ' + requirements.avatar.minDurationSec + ' 秒即可提交，建议 ' + requirements.avatar.recommendedMinDurationSec + '–' + requirements.avatar.recommendedMaxDurationSec + ' 秒。直接创建形象；视频里有清楚人声时，还会同步生成基础声音。'}}</text>
+
+        <!-- 素材来源二选一。两者是不同的计价档，切换会当场重算下面的账单。 -->
+        <view class="cl-source-tabs">
+          <view class="cl-source {{faceSource === 'video' ? 'on' : ''}}" data-source="video" bindtap="switchFaceSource"><text>用视频</text></view>
+          <view class="cl-source {{faceSource === 'image' ? 'on' : ''}}" data-source="image" bindtap="switchFaceSource"><text>用照片</text></view>
+        </view>
 
         <view class="cl-profile vd-card">
           <text class="cl-profile-label">给这个形象起个名字</text>
@@ -102,6 +108,9 @@
             </view>
           </scroll-view>
           <text class="cl-profile-note">{{voiceNoteText}}</text>
+          <!-- 照片没有声音，且一条可复用的都没有：这时不给「视频原声」那种假选项，
+               直接把唯一可行的路给出来 —— 去录一段，训好回来自动出现在上面。 -->
+          <view wx:if="{{faceSource === 'image' && !hasReusableVoice}}" class="cc-switch" bindtap="goRecordVoice">去录一段声音</view>
         </view>
 
         <!-- 成本明示：价格来自服务端（运营后台可配），costRows 为空 = 还没读到价格，整块不渲染。 -->
@@ -117,15 +126,16 @@
           <text class="cc-note">训练一条新声音在供应商侧成本很高，内测期请优先复用已有声音。</text>
         </view>
 
-        <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="pickFace">
+        <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="{{faceSource === 'image' ? 'pickPhoto' : 'pickFace'}}">
           <view class="cl-upload-plus"><native-icon name="plus" tone="neutral" size="24"></native-icon></view>
-          <text class="cl-upload-title">选择或录制视频</text>
-          <text class="cl-upload-meta">支持竖屏 · MP4/MOV · H.264 · 360p–4K</text>
+          <text class="cl-upload-title">{{faceSource === 'image' ? '选择或拍一张照片' : '选择或录制视频'}}</text>
+          <text class="cl-upload-meta">{{faceSource === 'image' ? 'JPG/PNG · 360p–4K · 不超过 10MB' : '支持竖屏 · MP4/MOV · H.264 · 360p–4K'}}</text>
         </view>
 
         <view wx:else class="cl-video-card">
-          <video class="cl-video" src="{{faceFile.path}}" object-fit="contain" controls show-center-play-btn enable-progress-gesture></video>
-          <view class="cl-video-meta"><text>形象视频已选择</text><text>{{faceFile.duration ? faceFile.duration + ' 秒' : '等待提交检查'}}</text></view>
+          <image wx:if="{{faceFile.image}}" class="cl-video" src="{{faceFile.path}}" mode="aspectFit"></image>
+          <video wx:else class="cl-video" src="{{faceFile.path}}" object-fit="contain" controls show-center-play-btn enable-progress-gesture></video>
+          <view class="cl-video-meta"><text>{{faceFile.image ? '形象照片已选择' : '形象视频已选择'}}</text><text>{{faceFile.image ? '提交后会检查清晰度与分辨率' : (faceFile.duration ? faceFile.duration + ' 秒' : '等待提交检查')}}</text></view>
         </view>
 
         <view class="cl-guide vd-card">

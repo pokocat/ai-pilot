@@ -168,7 +168,7 @@ function cloneCostText(pricing, action) {
  * @returns {{options: object[], defaultVoiceId: string, hasReusable: boolean}}
  *   `defaultVoiceId` 为空串表示「视频原声」——与既有 voiceSource='video' 契约一致，不要改成 null。
  */
-function voiceChoices(voices, pricing) {
+function voiceChoices(voices, pricing, imageMode) {
   const ready = (Array.isArray(voices) ? voices : []).filter((item) => item && item.status === 'ready');
   const createText = cloneCostText(pricing, 'voiceCreate');
   // 可复用的排在前面：默认选中项必须一眼看得见，不能藏在横向滚动的右边。
@@ -182,17 +182,23 @@ function voiceChoices(voices, pricing) {
     free: true,
     recommended: index === 0,
   }));
-  options.push({
-    key: 'video_original',
-    id: '',
-    name: '视频原声',
-    meta: '从这段视频新训练',
-    costText: createText ? `新训练 · ${createText}` : '要新训练一条声音',
-    free: false,
-    recommended: false,
-  });
+  // ★ 照片模式没有「视频原声」这一项：一张照片里根本没有声音，给了就是给一个点了会失败的选项。
+  //   这时唯一的新建路径是「去录一段声音」——单独训练一条，训好了再回来关联（见 clone 页 goRecordVoice）。
+  if (!imageMode) {
+    options.push({
+      key: 'video_original',
+      id: '',
+      name: '视频原声',
+      meta: '从这段视频新训练',
+      costText: createText ? `新训练 · ${createText}` : '要新训练一条声音',
+      free: false,
+      recommended: false,
+    });
+  }
   return {
     options,
+    // 照片模式下没有可复用的声音时，defaultVoiceId 只能是空串（= 还没选），
+    // 而不是像视频模式那样落到「视频原声」。端上据此挡住提交并引导去录音。
     defaultVoiceId: ready.length ? String(ready[0].id || '') : '',
     hasReusable: ready.length > 0,
   };
@@ -218,6 +224,10 @@ function cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId) {
     return String(retrainVoiceId || '')
       ? [{ action: 'voiceRetrain', key: 'voice', label: '重新训练这条声音', credits: pricing.voiceRetrain }]
       : [{ action: 'voiceCreate', key: 'voice', label: '训练专属声音', credits: pricing.voiceCreate }];
+  }
+  if (mode === 'image') {
+    // 照片只收形象这一档：它关联的是一条已经训好的声音，那条声音的钱在训练它的时候收过了。
+    return [{ action: 'avatarImage', key: 'avatar', label: '用照片训练数字人', credits: pricing.avatarImage }];
   }
   const items = [{ action: 'avatarVideo', key: 'avatar', label: '用视频训练数字人', credits: pricing.avatarVideo }];
   // 复用已有声音不额外扣费；「视频原声」要新训一条，那是实打实的另一档开销。
@@ -273,7 +283,7 @@ function cloneCostRows(mode, pricing, selectedVoiceId, retrainVoiceId) {
     costText: item.credits === 0 ? '免费' : formatCredits(item.credits),
     free: item.credits === 0,
   }));
-  // avatar 模式下复用已有声音是一条「不扣费」的说明行：不能让用户以为声音那一档没算过。
+  // avatar/image 模式下复用已有声音是一条「不扣费」的说明行：不能让用户以为声音那一档没算过。
   if (mode !== 'voice' && String(selectedVoiceId || '') && rows.length) {
     rows.push({ key: 'voice', label: '关联已有声音', costText: '不额外扣费', free: true });
   }
