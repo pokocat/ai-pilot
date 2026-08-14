@@ -525,6 +525,10 @@ const methods = {
     const state = activeAskState(decorated);
     return {
       messages: decorated,
+      // ★ 出图 action 的下标必须在**这里**也算一次：askPatch 才是回复流式结束、
+      //   历史加载、会话恢复共用的「消息落定」钩子（askSelectionPatch 只在 ask 交互时走）。
+      //   只加在那一个的后果实测过：设计师说了「够了，直接出图」，action 也不出现。
+      posterActionAt: this.posterActionIndex(decorated),
       askAnsweredCount: state.answered,
       askTotal: state.total,
       askRemaining: Math.max(0, state.total - state.answered),

@@ -1841,7 +1841,11 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(msgList, /messageIndex===posterActionAt[\s\S]{0,200}bindtap="openPoster"/, '出图 action 挂在消息上');
   assert.doesNotMatch(chatWxml, /chat-poster-bar/, '常驻条必须已经拆掉，别两个入口并存');
   // 派生状态与 ask 走同一个「消息落定」钩子，freshness 保证一致。
-  assert.match(chat, /posterActionAt: this\.posterActionIndex\(messages\)/, '出图 action 的下标要在 askSelectionPatch 里算');
+  // ★ 两个钩子都要算。实测过只加一个的后果：设计师说了「够了，直接出图」，action 也不出现——
+  //   askPatch 才是回复流式结束 / 历史加载 / 会话恢复共用的「消息落定」钩子，
+  //   askSelectionPatch 只在 ask 交互时走。漏掉前者 = 正常聊天路径永远不刷新这个下标。
+  assert.match(chat, /posterActionAt: this\.posterActionIndex\(decorated\)/, 'askPatch 里要算（回复落定路径）');
+  assert.match(chat, /posterActionAt: this\.posterActionIndex\(messages\)/, 'askSelectionPatch 里也要算（ask 交互路径）');
   assert.match(chat, /if \(item\.streaming\) continue;/, '还在打字的那条不挂 action');
   assert.match(chat, /signal \|\| replies >= 4/, '信号是文本尾部约定、遵从性不稳，必须有轮次兜底');
   // 两个宿主页都要把下标传进模板，漏一个那页就永远不显示。
