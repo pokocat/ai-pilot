@@ -69,8 +69,16 @@ Page({
     pricing: null,
     /** 本次提交的合计报价；null = 价格还没读到，此时不许提交（提交要带确认报价）。 */
     expectedCredits: null,
+    /**
+     * 服务端**还没有**克隆计费这一版（/clone-pricing 回 404）。
+     * 此时后端既不收钱也不要求确认报价，所以不能把用户挡在提交之外。
+     * 与「价格没读到」是两件事，见 loadPricing。
+     */
+    pricingUnavailable: false,
     /** 「还剩几次免费重训」；空串 = 不适用或还没读到，界面据此不渲染这一行。 */
     retrainQuotaText: '',
+    /** 这条声音重训不了（额度用尽 / 无引擎记录）。true 时挡住提交，请用户显式改成新建。 */
+    retrainBlocked: false,
     /** 本次动作的扣费文案（形象/声音各一档），JS 预算好给 wxml 直接渲染。 */
     avatarCostText: '',
     voiceCostText: '',
@@ -177,11 +185,24 @@ Page({
       .catch(() => {});
   },
 
-  /** 价格读失败不阻断创建流程：pricing 保持 null，界面不显示价格，而不是显示 0 或假数字。 */
+  /**
+   * 读四档单价。**两种失败必须分开**，否则发版顺序上会踩空：
+   *
+   * - 404 = 服务端还没上计费这一版。小程序要过审、服务端是脚本发布，两者无法同时到位，
+   *   所以只能「小程序先发、服务端后发」。这段时间里后端根本不收钱、也不校验确认报价——
+   *   把用户挡在提交之外会让这个唯一可行的发版顺序变成「克隆全挂」。
+   * - 其它失败（网络 / 5xx）= 服务端可能是要收钱的，只是这次没读到。必须挡住：
+   *   不知道要扣多少就提交，等于回到「界面没说、系统照扣」。
+   *
+   * 两种情况下 pricing 都保持 null，界面一律不显示价格，而不是显示 0 或编一个数字。
+   */
   loadPricing() {
     api.clonePricing()
-      .then((pricing) => { this.setData({ pricing: pricing || null }); this.applyVoiceChoices(); })
-      .catch(() => {});
+      .then((pricing) => {
+        this.setData({ pricing: pricing || null, pricingUnavailable: false });
+        this.applyVoiceChoices();
+      })
+      .catch((error) => this.setData({ pricingUnavailable: !!(error && error.statusCode === 404) }));
   },
 
   /**
@@ -191,8 +212,25 @@ Page({
   loadRetrainQuota() {
     if (!this.data.retrainVoiceId || !host.isLoggedIn()) return;
     api.retrainQuota(this.data.retrainVoiceId)
-      .then((quota) => this.setData({ retrainQuotaText: model.retrainQuotaText(quota) }))
+      .then((quota) => {
+        const state = model.retrainQuotaState(quota);
+        this.setData({ retrainQuotaText: state.text, retrainBlocked: state.blocked });
+      })
       .catch(() => {});
+  },
+
+  /**
+   * 显式改成「新建一条声音」。
+   *
+   * ★ 绝不自动改：重训 60、新建 200，价格差三倍多，替用户切等于替他花钱。
+   *   额度用尽时只挡住提交并把原因说清，改不改由他按这个按钮决定。
+   */
+  switchToNewVoice() {
+    this.setData(Object.assign(
+      { retrainVoiceId: '', retrainBlocked: false, retrainQuotaText: '' },
+      this.chargeState(this.data.selectedVoiceId),
+    ));
+    host.toast('已改为新建一条声音');
   },
 
   changeAvatarName(event) { this.setData({ avatarName: String(event.detail.value || '').slice(0, 20) }); },
@@ -414,6 +452,8 @@ Page({
 
   /** 价格没读到就不许提交 —— 服务端要求带确认报价，硬编个 0 上去只会换来一个看不懂的 409。 */
   assertQuoteReady() {
+    // 服务端没有计费这一版：它不收钱、也不要求确认报价，不该拦。
+    if (this.data.pricingUnavailable) return true;
     if (this.data.expectedCredits == null) {
       host.toast('还没拿到训练价格，请稍后重试');
       this.loadPricing();
@@ -445,6 +485,8 @@ Page({
   submitVoice() {
     if (!this.data.voiceFile) { host.toast('先录一段声音或上传音频'); return; }
     if (this.data.submitting) return;
+    // 上游重训额度用尽会直接报错（不再回落成新建），所以这里提前挡住，别让用户白等一次上传。
+    if (this.data.retrainBlocked) { host.toast(this.data.retrainQuotaText || '这条声音无法重新训练'); return; }
     if (!this.assertQuoteReady()) return;
     this.setData({ submitting: true });
     api.startClone('voice', {

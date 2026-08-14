@@ -175,3 +175,11 @@
 .cl-acts.retry { margin: 12px 0 0; }
 .cl-acts.retry .vd-btn { flex: 1; }
 .cl-preset-btn { margin-top: 12px; }
+
+/* 重训额度用尽/无引擎记录：这不是提示，是一条走不通的路，得比普通说明更显眼 */
+.cc-note.warn { color: #9B3E34; }
+.cc-switch {
+  margin-top: 10px; padding: 9px 0; border-radius: 10px;
+  border: 1px solid rgba(155, 62, 52, .28); color: #9B3E34;
+  font-size: 12px; text-align: center;
+}

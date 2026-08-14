@@ -2085,3 +2085,17 @@ test('老板页服务双卡内部节奏一致（图标对整卡居中，两行�
   assert.doesNotMatch(scss, /\.sa-qr\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(wxml, /class="sa-qr"><native-icon name="group" tone="green" size="16"/, '群图标与消息图标做过光学配平');
 });
+
+test('发版顺序：小程序先发时克隆不能被自家的报价闸挡死', () => {
+  const cloneJs = read('weapp-native/packages/video/clone/index.js');
+  // 小程序要过审、服务端是脚本发布，两者无法同时到位，所以只能「小程序先发、服务端后发」。
+  // 这段时间里 /clone-pricing 是 404：服务端既不收钱也不校验确认报价。
+  // 若把 404 和普通读失败混为一谈，新版小程序打到老服务端会被自己的 assertQuoteReady 挡死 ——
+  // 唯一可行的发版顺序就变成了「克隆全挂」。
+  assert.match(cloneJs, /statusCode === 404/, '必须把「服务端没有计费这一版」与「价格没读到」分开');
+  assert.match(cloneJs, /pricingUnavailable/);
+  assert.match(cloneJs, /assertQuoteReady\(\)\s*\{[\s\S]{0,300}?pricingUnavailable\) return true/,
+    '服务端没有计费这一版时不许拦提交');
+  // 反过来：其它失败（网络/5xx）仍然必须挡住 —— 不知道要扣多少就提交，等于回到「界面没说、系统照扣」。
+  assert.match(cloneJs, /expectedCredits == null/);
+});

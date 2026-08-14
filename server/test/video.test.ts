@@ -24,6 +24,8 @@ let jobStatus = 'queued';
 let voiceStatus = 'ready';
 let cloneCalls = 0;
 let cloneUpstream: Record<string, unknown> = { voiceId: 'VC-new' };
+/** 非 null 时让上游 clone 直接报错，用来验「上游失败 → 预扣必须退回」。 */
+let cloneUpstreamError: { status: number; code: string; error: string } | null = null;
 let renderCalls = 0;
 let seenHeaders: Headers | null = null;
 let renderBlock: Promise<void> | null = null;
@@ -75,6 +77,7 @@ before(async () => {
     }
     if (url.pathname === '/api/me/clip/avatar/clone') {
       cloneCalls += 1;
+      if (cloneUpstreamError) return json({ error: cloneUpstreamError.error, code: cloneUpstreamError.code }, cloneUpstreamError.status);
       return json({ ok: true, kind: 'voice', status: 'training', ...cloneUpstream });
     }
     if (url.pathname === '/api/me/clip/avatars/DH-scene' && init?.method === 'DELETE') {
@@ -105,6 +108,7 @@ beforeEach(async () => {
   voiceStatus = 'ready';
   cloneCalls = 0;
   cloneUpstream = { voiceId: 'VC-new' };
+  cloneUpstreamError = null;
   jobStatus = 'queued';
   renderCalls = 0;
   seenHeaders = null;
@@ -417,7 +421,8 @@ test('缺幂等标识 / 报价对不上，一律挡在调用上游之前', async
 
   const noId = await postClone(token, { kind: 'voice', expectedCredits: '200' });
   assert.equal(noId.status, 422);
-  assert.equal(noId.body.code, 'CLIENT_REQUEST_ID_REQUIRED');
+  assert.equal(noId.body.code, 'CLIP_CLONE_CLIENT_OUTDATED');
+  assert.match(noId.body.error, /更新/, '老客户端要看得懂该干什么，不能甩字段名');
 
   // 端上看到 60（重训档）却按新建提交 —— 停下来重新确认，绝不按另一个数字静默扣。
   const wrongQuote = await postClone(token, {
@@ -482,4 +487,32 @@ test('训练成功则结清，不会被后续查询误退', async () => {
   voiceStatus = 'failed';                                  // 之后这条声音被重训并失败
   await api('GET', '/api/video/voices', { token });
   assert.equal(await getBalance(token), before - 200, '已结算的那一单不该被后来的失败退掉');
+});
+
+test('重训额度用尽：上游报错不回落成新建，预扣当场退回', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  // 上游 retrainVoice 已去掉「回落成新建」：额度用尽直接 409，绝不悄悄多建一条声音。
+  cloneUpstreamError = { status: 409, code: 'CLIP_VOICE_RETRAIN_QUOTA_EXHAUSTED', error: '这条声音的 4 次免费重新训练已经用完，请新建一条声音' };
+
+  const res = await postClone(token, {
+    kind: 'voice', voiceId: 'VC-scene', clientRequestId: 'clone-req-0007', expectedCredits: '60',
+  });
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'CLIP_VOICE_RETRAIN_QUOTA_EXHAUSTED');
+  assert.match(res.body.error, /用完/, '错误文案要说清是额度用完，而不是笼统的失败');
+  assert.equal(await getBalance(token), before, '上游没干成活，扣掉的必须原样退回');
+  assert.equal(await prisma.videoCloneHold.count({ where: { userId: token, status: 'refunded' } }), 1);
+});
+
+test('同一请求标识在失败退款后不许复用：必须换一单重来', async () => {
+  const token = await cloneUser(1000);
+  cloneUpstreamError = { status: 409, code: 'CLIP_VOICE_RETRAIN_QUOTA_EXHAUSTED', error: '已经用完' };
+  await postClone(token, { kind: 'voice', voiceId: 'VC-scene', clientRequestId: 'clone-req-0008', expectedCredits: '60' });
+
+  // 退过款的 hold 再被复用，会卡在「既不扣费也不建单」的死角上。
+  cloneUpstreamError = null;
+  const retry = await postClone(token, { kind: 'voice', voiceId: 'VC-scene', clientRequestId: 'clone-req-0008', expectedCredits: '60' });
+  assert.equal(retry.status, 409);
+  assert.equal(retry.body.code, 'CLIP_CLONE_REQUEST_CLOSED');
 });

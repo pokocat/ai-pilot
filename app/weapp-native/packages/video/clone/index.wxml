@@ -38,7 +38,9 @@
             <text class="cc-label">{{item.label}}</text>
             <text class="cc-value {{item.free ? 'free' : ''}}">{{item.costText}}</text>
           </view>
-          <text wx:if="{{retrainQuotaText}}" class="cc-note">{{retrainQuotaText}}</text>
+          <text wx:if="{{retrainQuotaText}}" class="cc-note {{retrainBlocked ? 'warn' : ''}}">{{retrainQuotaText}}</text>
+          <!-- 重训走不通时给一个显式改道入口。不自动切：重训与新建差三倍多的价，替用户切等于替他花钱。 -->
+          <view wx:if="{{retrainBlocked}}" class="cc-switch" bindtap="switchToNewVoice">改为新建一条声音</view>
           <text class="cc-note">{{retrainVoiceId ? '重新训练比新建一条便宜，也不会多占一份克隆权益。' : '已经有可用声音的话，直接在创建数字人时复用它，不额外扣费。'}}</text>
         </view>
 
@@ -68,7 +70,7 @@
 
         <view wx:if="{{voiceFile}}" class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeVoice">重新选择</view>
-          <view class="vd-btn cl-act" bindtap="submitVoice">{{submitting ? '提交中…' : '提交声音增强'}}</view>
+          <view class="vd-btn cl-act {{retrainBlocked ? 'disabled' : ''}}" bindtap="submitVoice">{{submitting ? '提交中…' : (retrainBlocked ? '这条声音训不了' : '提交声音增强')}}</view>
         </view>
       </block>
 

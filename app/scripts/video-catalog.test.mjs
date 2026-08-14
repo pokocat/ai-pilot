@@ -357,17 +357,28 @@ test('封面页已注册、从确认页可达，且不填就不加封面', async
   assert.match(coverStyle, /#F6C544/, '落款金色');
 });
 
-test('免费重训余额：查不到就不许编数字，用完了要说清会新训一条', () => {
-  const { retrainQuotaText } = model;
-  assert.match(retrainQuotaText({ available: true, retrainable: true, used: 1, total: 4, remaining: 3 }), /还剩 3 次/);
-  // 用完了 ≠ 不能重训：我们会新训一条替换它，成本落在我方，但用户得知道发生了什么。
-  assert.match(retrainQuotaText({ available: true, retrainable: true, used: 4, total: 4, remaining: 0 }), /已用完/);
-  // 读失败必须说「查不到」，绝不能退化成「还剩 4 次」——那是把读失败说成有额度。
-  const unknown = retrainQuotaText({ available: false, retrainable: true });
-  assert.match(unknown, /查不到/);
-  assert.doesNotMatch(unknown, /[0-9]+ 次/);
-  assert.match(retrainQuotaText({ available: false, retrainable: false }), /无法直接重训/);
-  assert.equal(retrainQuotaText(null), '', '没有数据时整行不渲染');
-  // total/remaining 缺字段时同样按「查不到」处理，不许算出 NaN 次
-  assert.match(retrainQuotaText({ available: true, retrainable: true }), /查不到/);
+test('免费重训余额：查不到不许编数字，用完了必须挡住而不是悄悄新建', () => {
+  const { retrainQuotaState } = model;
+  const ok = retrainQuotaState({ available: true, retrainable: true, used: 1, total: 4, remaining: 3 });
+  assert.match(ok.text, /还剩 3 次/);
+  assert.equal(ok.blocked, false);
+
+  // 用尽 = 这条路走不通。上游已去掉「回落成新建」，端上必须提前挡住，
+  // 不能让用户录完 15 秒再撞一堵墙，更不能替他改成贵三倍多的新建。
+  const used = retrainQuotaState({ available: true, retrainable: true, used: 4, total: 4, remaining: 0 });
+  assert.match(used.text, /用完/);
+  assert.equal(used.blocked, true);
+  assert.doesNotMatch(used.text, /会重新训练一条|自动/, '不许暗示系统会替他新建');
+
+  // 读失败必须说「查不到」，且**不挡提交**——读失败不是没额度。
+  const unknown = retrainQuotaState({ available: false, retrainable: true });
+  assert.match(unknown.text, /查不到/);
+  assert.equal(unknown.blocked, false);
+  assert.doesNotMatch(unknown.text, /[0-9]+ 次/, '不许退化成一个编出来的次数');
+
+  const dead = retrainQuotaState({ available: false, retrainable: false });
+  assert.equal(dead.blocked, true);
+  assert.equal(retrainQuotaState(null).text, '', '没有数据时整行不渲染');
+  // total/remaining 缺字段时按「查不到」处理，不许算出 NaN 次
+  assert.match(retrainQuotaState({ available: true, retrainable: true }).text, /查不到/);
 });

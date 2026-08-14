@@ -3,7 +3,7 @@
 // 这组用例存在的理由：此前端上明码标价「这次要扣 200 钻石」，服务端却一分不扣 ——
 // 界面承诺了系统不兑现的东西。下面每一条都在钉「显示的价 = 实际扣的账」，
 // 以及「扣了钱没拿到东西必须退」。
-import test, { beforeEach } from 'node:test';
+import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyCloneSettlements, cloneChargeItems, cloneChargeTotal, refundCloneHold,
@@ -12,7 +12,7 @@ import {
 import type { ClonePricing } from '../src/services/video/pricing.js';
 import { getBalance } from '../src/services/credits.js';
 import { prisma } from '../src/db.js';
-import { cleanBusiness, seedBaseline, uniquePhone } from './helpers.js';
+import { cleanBusiness, closeApp, seedBaseline, uniquePhone } from './helpers.js';
 
 const PRICING: ClonePricing = {
   voiceCreate: 200, voiceRetrain: 60, avatarVideo: 200, avatarImage: 100, configured: true,
@@ -114,6 +114,10 @@ beforeEach(async () => {
   await cleanBusiness();
   await seedBaseline();
 });
+
+// 本文件直接打库、不起 app，但仍然握着 prisma 连接；不断开的话这个子进程会拖着连接不退，
+// 后面的测试文件容易在共享测试库上撞见半开的连接。closeApp 对「没起过 app」是安全的。
+after(async () => { await closeApp(); });
 
 test('提交训练即扣钱，同一请求标识重试不重复扣', async () => {
   const { tenantId, userId } = await userWithBalance(1000);

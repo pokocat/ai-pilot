@@ -228,23 +228,31 @@ function cloneChargeItems(mode, pricing, selectedVoiceId, retrainVoiceId) {
 }
 
 /**
- * 「还剩几次免费重训」的一句话。
+ * 「还剩几次免费重训」+ 这条路还走不走得通。
  *
- * 供应商每条 speaker 给 4 次 recreate（不消耗克隆权益），用尽后我们会回落成新建 —— 用户看不出
- * 差别，所以必须在他开录之前就说清楚。
+ * 供应商每条 speaker 给 4 次 recreate（不消耗克隆权益）。**用尽后不会回落成新建** ——
+ * 上游会直接报错（CLIP_VOICE_RETRAIN_QUOTA_EXHAUSTED）。所以额度用尽必须在用户开录之前
+ * 就挡住并说清楚，而不是让他录完 15 秒再撞一堵墙。
  *
- * ★ 查不到余额时**不许编一个数字**（例如默认写 4）：这是「读失败」，不是「还剩 4 次」。
- *   同 [空态 vs 读失败不许混] 那条口径。
+ * ★ 查不到余额时**不许编一个数字**（例如默认写 4），也不许因此挡住提交：
+ *   这是「读失败」，不是「没额度」。同 [空态 vs 读失败不许混] 那条口径。
+ *
+ * @returns {{text: string, blocked: boolean}} blocked = 这条声音重训不了，得改成新建
  */
-function retrainQuotaText(quota) {
-  if (!quota) return '';
-  if (quota.retrainable === false) return '这条声音无法直接重训，会训练一条新的替代它。';
-  if (!quota.available) return '暂时查不到免费重训余额，不影响提交。';
+function retrainQuotaState(quota) {
+  if (!quota) return { text: '', blocked: false };
+  if (quota.retrainable === false) {
+    return { text: '这条声音没有可重新训练的记录，需要新建一条来替代它。', blocked: true };
+  }
+  const unknown = { text: '暂时查不到免费重训余额，可以直接提交试试。', blocked: false };
+  if (!quota.available) return unknown;
   const remaining = Number(quota.remaining);
   const total = Number(quota.total);
-  if (!Number.isFinite(remaining) || !Number.isFinite(total)) return '暂时查不到免费重训余额，不影响提交。';
-  if (remaining <= 0) return `这条声音的 ${total} 次免费重训已用完，这次会重新训练一条音色来替换它。`;
-  return `这条声音还剩 ${remaining} 次免费重训（共 ${total} 次）。`;
+  if (!Number.isFinite(remaining) || !Number.isFinite(total)) return unknown;
+  if (remaining <= 0) {
+    return { text: `这条声音的 ${total} 次免费重新训练已经用完，需要新建一条声音。`, blocked: true };
+  }
+  return { text: `这条声音还剩 ${remaining} 次免费重训（共 ${total} 次）。`, blocked: false };
 }
 
 function cloneChargeTotal(items) {
@@ -821,7 +829,7 @@ module.exports = {
   truncateCoverText, normalizeCover, coverHasText, coverSummary,
   estimateSeconds, segmentSeconds, formatDuration, formatBytes, formatAssetDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
   mediaDimensions, formatResolution,
-  formatCredits, cloneCostText, voiceChoices, cloneCostRows, cloneChargeItems, cloneChargeTotal, retrainQuotaText,
+  formatCredits, cloneCostText, voiceChoices, cloneCostRows, cloneChargeItems, cloneChargeTotal, retrainQuotaState,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   scriptToText, applyBulkScript, splitScriptText,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,

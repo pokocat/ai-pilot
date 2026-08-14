@@ -504,9 +504,12 @@ export async function videoRoutes(app: FastifyInstance) {
       const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
       if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
+      // 这两个字段只有带计费的那版小程序才会发。老版本发不出来 —— 它们在界面上也没给用户看过价，
+      // 那就绝不能替它静默扣钱；只能明确请用户更新，文案要让用户看得懂该干什么，
+      // 而不是甩一句「缺少合法的 clientRequestId」。
       const clientRequestId = String(fields?.clientRequestId?.value ?? '').trim();
       if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) {
-        return reply.code(422).send({ error: '缺少合法的 clientRequestId', code: 'CLIENT_REQUEST_ID_REQUIRED' });
+        return reply.code(422).send({ error: '请把小程序更新到最新版本后再创建数字分身', code: 'CLIP_CLONE_CLIENT_OUTDATED' });
       }
       const voiceId = String(fields?.voiceId?.value ?? '');
       const voiceSource = String(fields?.voiceSource?.value ?? '');
@@ -517,7 +520,7 @@ export async function videoRoutes(app: FastifyInstance) {
       const total = cloneChargeTotal(items);
       const expectedCredits = Number(fields?.expectedCredits?.value);
       if (!Number.isSafeInteger(expectedCredits) || expectedCredits < 0) {
-        return reply.code(422).send({ error: '缺少合法的确认报价', code: 'CLIP_EXPECTED_CREDITS_REQUIRED' });
+        return reply.code(422).send({ error: '请把小程序更新到最新版本后再创建数字分身', code: 'CLIP_CLONE_CLIENT_OUTDATED' });
       }
       // 端上看到的价 ≠ 服务端要收的价 → 停下来重新确认。运营改价后正在填表的人不该被静默按新价扣。
       if (expectedCredits !== total) {
@@ -565,19 +568,16 @@ export async function videoRoutes(app: FastifyInstance) {
       // 没产出对应对象的那一档在这里就退（典型：选了「视频原声」但视频里提不出可用音色）。
       holds = await attachCloneTargets(holds, result);
 
-      // 上游把重训回落成了新建：说明这条 speaker 的 4 次免费重训已用尽或调用失败，我方按新建
-      // 付了供应商成本，却只收了重训价。差额由我方承担（用户看到的价必须兑现），但**不能不留痕** ——
-      // 长期只能靠把重训余额透出到端上、让用户一开始就看见正确的价来根治。
-      const retrainFellBack = items.some((item) => item.action === 'voiceRetrain')
-        && !!voiceId && !!result?.voiceId && result.voiceId !== voiceId;
-      if (retrainFellBack) {
-        req.log.warn({ userId: user.id, requestedVoiceId: voiceId, createdVoiceId: result.voiceId },
-          '[video-clone] 重训回落为新建，按重训价计费，差额由我方承担');
+      // 重训只会「成功」或「报错」，不会变成新建（上游 retrainVoice 已去掉回落）。
+      // 万一上游回了另一条 id，那是契约被破坏，不能当正常情况吞掉。
+      if (items.some((item) => item.action === 'voiceRetrain') && result?.voiceId && result.voiceId !== voiceId) {
+        req.log.error({ userId: user.id, requestedVoiceId: voiceId, createdVoiceId: result.voiceId },
+          '[video-clone] 重训返回了另一条声音，上游契约被破坏');
       }
       await recordAudit({
         tenantId: user.tenantId, userId: user.id, action: 'user.video.clone',
         payload: {
-          kind, clientRequestId, credits: total, retrainFellBack,
+          kind, clientRequestId, credits: total,
           items: items.map((item) => ({ action: item.action, credits: item.credits })),
           avatarId: result?.avatarId, voiceId: result?.voiceId,
         },
