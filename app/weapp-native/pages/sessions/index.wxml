@@ -26,6 +26,7 @@
             <view class="wh-entry" bindtap="openHistory">
               <native-icon name="clock" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
               <text>历史</text>
+              <view wx:if="{{historyUnreadText}}" class="unread wh-entry-badge"><text>{{historyUnreadText}}</text></view>
             </view>
           </view>
         </view>

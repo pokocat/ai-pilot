@@ -105,7 +105,7 @@ Page({
     quickCards: QUICK, rows: [], historyRows: [], councilRows: [], searchGroups: [], query: '',
     showHistory: false, showLogin: false, loginReason: 'chat', unlockAgent: null, loading: true, error: false, searching: false,
     // 终态专属
-    isleTabs: visualTabs('theme-green'), unread: 0, councilUnreadText: '',
+    isleTabs: visualTabs('theme-green'), unread: 0, councilUnreadText: '', historyUnreadText: '',
     headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false,
     hintText: '', hintId: '', hintFade: false,
   }),
@@ -359,15 +359,30 @@ Page({
         unreadText: badgeText(Number(item.unreadCount) || 0),
       };
     });
-    // 未读三层引导链：① 浮岛/底栏问策角标 = 全会话聚合；② 军师团按钮 = 除 general 外之和；③ 抽屉行内各自。
-    const councilUnread = (this._sessions || []).filter((item) => item.agentKey !== 'general')
-      .reduce((sum, item) => sum + (Number(item.unreadCount) || 0), 0);
+    // 未读三层引导链：① 浮岛/底栏问策角标 = 全会话聚合；② 军师团 / 历史 两个入口各管自己那批；
+    //   ③ 抽屉行内各自。
+    //
+    // ★ ② 必须**按"点进去看得见"来分**（2026-08-14 实测踩到）：军师团抽屉渲染的是
+    //   `type !== 'creative'` 的军师，而 councilUnread 此前只排除了 general —— 于是海报设计师
+    //   （type='creative'）这类会话的未读被算到军师团头上，用户点进去那个抽屉里**根本没有这一行**，
+    //   角标只能一直亮着、无从消掉。创意军师的会话只出现在「历史」里，未读就该记在「历史」上。
+    // 军师团抽屉渲染的正是下面那行算出来的 councilRows（rows 去掉 general）——
+    // 这里必须用**同一个 rows**，不能另起一份判据，否则两边一分叉这个 bug 就会原样复发。
+    const advisorKeys = new Set((rows || []).map((item) => item && item.key).filter(Boolean));
+    const sumUnread = (list) => list.reduce((sum, item) => sum + (Number(item.unreadCount) || 0), 0);
+    const councilSessions = (this._sessions || [])
+      .filter((item) => item.agentKey !== 'general' && advisorKeys.has(item.agentKey));
+    const historySessions = (this._sessions || [])
+      .filter((item) => item.agentKey !== 'general' && !advisorKeys.has(item.agentKey));
+    const councilUnread = sumUnread(councilSessions);
+    const historyUnread = sumUnread(historySessions);
     store.syncUnread(this._sessions || []);
     this.setData({
       rows, historyRows,
       councilRows: rows.filter((row) => row.key !== 'general'),
       unread: store.snapshot().unread,
       councilUnreadText: badgeText(councilUnread),
+      historyUnreadText: badgeText(historyUnread),
     });
     if (this.data.form === 'chat') syncTabBar(this, 0);
   },

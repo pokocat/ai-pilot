@@ -856,7 +856,13 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
   // —— 未读三层引导链 ——
   assert.match(wxml, /index === 0 && unread > 0[\s\S]*?class="tab-badge"/, '① 浮岛问策角标 = 全会话聚合');
   assert.match(wxml, /councilUnreadText[\s\S]*?class="unread wh-entry-badge"/, '② 军师团按钮聚合角标');
-  assert.match(js, /filter\(\(item\) => item\.agentKey !== 'general'\)\s*\n?\s*\.reduce/, '② 只聚合 general 以外的未读');
+  // 2026-08-14：② 拆成两个入口各管自己那批。原断言钉的是「除 general 外全算军师团」——
+  // 而军师团抽屉只渲染 type!=='creative' 的军师，海报设计师那类会话的未读被算进去后，
+  // 用户点进抽屉根本找不到那一行，角标只能一直亮着。现在按「点进去看得见」分。
+  assert.match(js, /advisorKeys = new Set\(\(rows \|\| \[\]\)/, '② 军师团聚合必须用抽屉同源的 rows');
+  assert.match(js, /advisorKeys\.has\(item\.agentKey\)/, '② 军师团只算抽屉里真有的那几行');
+  assert.match(js, /!advisorKeys\.has\(item\.agentKey\)/, '② 其余（创意军师）归历史');
+  assert.match(wxml, /historyUnreadText[\s\S]*?class="unread wh-entry-badge"/, '② 历史入口也要有角标');
   assert.match(js, /markGeneralRead\(\)/, '装载 general 会话后本地掉掉这份未读');
   assert.match(wxml, /class="wx-id"[\s\S]*?class="unread"/, '③ 抽屉行内各自角标');
 

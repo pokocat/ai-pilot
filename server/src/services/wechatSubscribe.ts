@@ -28,14 +28,19 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
   avatar: {
     title: '数字分身训练',
     description: '数字人形象训练完成或失败后提醒',
+    // 这个 env 承载的是**统一异步任务完成模板**（见下面 poster 的注释），名字是历史原因
+    // ——它最早只给数字人用。新增异步任务复用它，不要再申请新模板。
     env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
   },
   poster: {
     title: '成品图出图',
     description: '海报出好或失败后提醒查看',
-    // 复用「服务进度通知」这类模板即可（字段与 avatar 同构）；没配 env 就退化成不推送，
-    // 出图链路本身不受影响（sendWechatSubscribeMessage 拿不到 templateId 直接返回未发送）。
-    env: ['WECHAT_SUBSCRIBE_POSTER_TEMPLATE_ID', 'WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
+    // ★ 与 avatar **共用同一个模板 id**（2026-08-14 拍板）：微信后台那个「服务进度通知」
+    //   就是**所有异步任务完成的统一通知模板**，不为每类任务再申请一个。
+    //   理由：模板申请要审、要维护，而这些任务对用户只是「那件事办完了」这一件事；
+    //   字段也天然同构（thing13 业务标题 / phrase16 状态 / thing5 提示 / time12 完成时间）。
+    //   以后新增异步任务（视频出片、批量导出…）照抄这一行即可，**不要**再加新的 env。
+    env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
   },
 };
 
