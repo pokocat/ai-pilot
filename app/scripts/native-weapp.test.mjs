@@ -2111,3 +2111,21 @@ test('内置素材不给删除入口：删不掉的动作就不该出现在界�
   assert.match(js, /asset\.preset\)\s*\{[\s\S]{0,80}?内置素材/,
     '长按菜单也要挡住，否则删除入口只是换了个地方');
 });
+
+test('存储空间：素材与成片共用一份额度，扩容价来自服务端且不许硬编码', () => {
+  const js = read('weapp-native/packages/video/assets/index.js');
+  const wxml = read('weapp-native/packages/video/assets/index.wxml');
+  const api = read('weapp-native/packages/video/api.js');
+  // 口径改了（2026-08-14）：不再是「素材库空间」，成片也占同一份额度。
+  assert.match(wxml, /空间快满了[\s\S]{0,40}?成片/, '提示必须说清成片也占空间');
+  // 扩容价一律来自服务端（运营后台可配），端上只显示。
+  assert.match(api, /'\/assets\/storage\/expand'/);
+  assert.match(js, /storage\.packCredits/);
+  assert.doesNotMatch(js, /[0-9]{2,}\s*钻石(?!`)/, '扩容价不得硬编码在端上');
+  // 价没读到 / 已买到上限 → 整块不渲染，而不是显示一个编出来的价
+  assert.match(js, /canExpand = Number\(storage\.packBytes\) > 0 && Number\(storage\.packs\) < Number\(storage\.maxPacks\)/);
+  assert.match(wxml, /wx:if="\{\{storage\.canExpand\}\}"/);
+  // 花钱路径必须先确认再扣
+  assert.match(js, /host\.confirm\([\s\S]{0,200}?扣 \$\{storage\.packCredits\} 钻石/);
+  assert.match(js, /INSUFFICIENT_CREDITS/, '钻石不够要引到充值，而不是甩一句失败');
+});

@@ -2533,6 +2533,26 @@ export interface ClipJobView {
 }
 /** 素材库存储占用（GET /video/assets/storage）。预置素材由平台提供，不计入用户配额。 */
 export interface ClipAssetStorage { usedBytes: number; limitBytes: number; count: number; }
+/**
+ * 端上看到的存储视图。limitBytes 已经把用户买过的扩容包算进去了。
+ *
+ * 口径：**素材与作品共用一份额度**，已用量按总量向上取整到整 MB
+ * （不按单文件取整——那会让一堆小图凭空吃掉半个额度）。
+ */
+export interface ClipStorageView extends ClipAssetStorage {
+  /** 默认额度（不含扩容），用于告诉用户「基础空间有多大」 */
+  baseBytes: number;
+  /** 已购扩容合计字节 */
+  purchasedBytes: number;
+  /** 已购包数 / 上限 */
+  packs: number;
+  maxPacks: number;
+  /** 一个扩容包给多少字节、扣多少钻石 */
+  packBytes: number;
+  packCredits: number;
+  /** 定价是否经运营核定。false = 当前是代码兜底价 */
+  configured: boolean;
+}
 export interface ClipAsset {
   id: string; label: string; tag?: string | null; kind: 'video' | 'image' | 'bgm'; durationSec?: number; usedCount?: number;
   /** 文件字节数；素材列表的大小标签与容量条都读它。上游恒发（Java 侧是 long），本地 mock 不发。 */

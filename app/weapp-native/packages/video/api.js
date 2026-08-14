@@ -76,6 +76,10 @@ const api = {
     ? mock.updateAsset(id, patch)
     : call(`/assets/${q(id)}`, { method: 'PATCH', data: patch || {} })),
   assetStorage: () => (useMock() ? mock.assetStorage() : call('/assets/storage')),
+  /** 买一个存储扩容包。带幂等标识：连点两下 / 重试不能扣两次钻石。 */
+  expandStorage: (clientRequestId) => (useMock()
+    ? mock.expandStorage()
+    : call('/assets/storage/expand', { method: 'POST', data: { clientRequestId } })),
   deleteAsset: (id) => (useMock()
     ? mock.deleteAsset(id)
     : call(`/assets/${q(id)}`, { method: 'DELETE' })),

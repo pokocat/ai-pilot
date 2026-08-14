@@ -15,6 +15,7 @@ Page({
     tags: [],
     /** 素材库容量。null = 还没读到，不显示容量条而不是显示 0（读失败 ≠ 没占用）。 */
     storage: null,
+    expanding: false,
     activeTag: '',
     /** 挑选态 */
     picking: false,
@@ -52,12 +53,19 @@ Page({
     this.loadStorage();
   },
 
-  /** 容量单独拉：它失败不该让整页素材也看不到。 */
+  /**
+   * 容量单独拉：它失败不该让整页素材也看不到。
+   *
+   * 口径（2026-08-14）：**素材与作品共用一份额度**，所以文案说的是「空间」不是「素材库」。
+   * 扩容价来自服务端（运营后台可配），端上不自带常量；价没读到就不显示扩容按钮，
+   * 不显示一个编出来的价。
+   */
   loadStorage() {
     api.assetStorage()
       .then((storage) => {
         if (!storage || typeof storage.limitBytes !== 'number' || storage.limitBytes <= 0) return;
         const percent = Math.min(100, Math.round((storage.usedBytes / storage.limitBytes) * 100));
+        const canExpand = Number(storage.packBytes) > 0 && Number(storage.packs) < Number(storage.maxPacks);
         this.setData({
           storage: Object.assign({}, storage, {
             percent,
@@ -65,10 +73,43 @@ Page({
             limitText: formatBytes(storage.limitBytes),
             // 90% 起变红：等真正满了才提示，用户已经白拍了一段素材
             nearFull: percent >= 90,
+            canExpand,
+            expandText: canExpand
+              ? `扩容 ${formatBytes(storage.packBytes)} · ${storage.packCredits} 钻石`
+              : '',
           }),
         });
       })
       .catch(() => { /* 容量读不到就不显示容量条，不显示 0 —— 读失败不等于没占用 */ });
+  },
+
+  /**
+   * 买一个扩容包。**先让用户看清要花多少**再确认 —— 花钱的路径不许静默发生。
+   * 幂等标识按「当前已购包数」派生：连点两下是同一单，买成之后包数变了才是新的一单。
+   */
+  expandStorage() {
+    const storage = this.data.storage;
+    if (!storage || !storage.canExpand || this.data.expanding) return;
+    if (!host.requireLogin(this, 'execute')) return;
+    host.confirm({
+      title: '扩容空间',
+      content: `增加 ${formatBytes(storage.packBytes)}，扣 ${storage.packCredits} 钻石。素材和成片共用这份空间。`,
+      confirmText: '确认扩容',
+    }).then((ok) => {
+      if (!ok) return;
+      this.setData({ expanding: true });
+      api.expandStorage(`storage:${storage.packs || 0}:${Date.now()}`)
+        .then(() => { this.setData({ expanding: false }); host.toast('空间已增加'); this.loadStorage(); })
+        .catch((error) => {
+          this.setData({ expanding: false });
+          if (error && error.code === 'INSUFFICIENT_CREDITS') {
+            host.confirm({ title: '钻石不够', content: `扩容需要 ${storage.packCredits} 钻石。去充值吗？`, confirmText: '去充值' })
+              .then((go) => { if (go) host.goHost('/packages/work/credits/index'); });
+            return;
+          }
+          host.toast(error && error.message ? error.message : '扩容失败');
+        });
+    });
   },
 
   decorate(item) {

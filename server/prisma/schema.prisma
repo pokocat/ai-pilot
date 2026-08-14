@@ -2133,3 +2133,24 @@ model VideoCloneHold {
   @@index([userId, targetKind, targetId])
   @@map("video_clone_hold")
 }
+
+/// 用户用钻石买的存储扩容包。每买一次追加一行，有效额度 = 默认额度 + 本表之和。
+///
+/// 为什么记成流水而不是在用户上放一个 extraBytes 字段：扩容是花钱行为，必须留得下
+/// 「什么时候、按什么价、买了多少」——退款争议、价格变更追溯、异常放大排查都要靠它。
+/// 一个可变字段只能回答「现在多少」，回答不了「怎么来的」。
+model VideoStoragePack {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  /// 本次扩容增加的字节数（下单时的档位快照，之后运营改档位不影响已买的）
+  bytes           BigInt
+  /// 本次实扣钻石（同样是快照：改价不能追溯改写已成交的订单）
+  credits         Int
+  clientRequestId String
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@map("video_storage_pack")
+}

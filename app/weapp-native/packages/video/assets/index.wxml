@@ -13,7 +13,9 @@
     <view wx:if="{{storage && !picking}}" class="as-storage {{storage.nearFull ? 'warn' : ''}}">
       <view class="ast-line"><text class="ast-text">已用 {{storage.usedText}} / {{storage.limitText}}</text><text class="ast-count">{{storage.count}} 条</text></view>
       <view class="ast-bar"><view class="fill" style="width:{{storage.percent}}%"></view></view>
-      <text wx:if="{{storage.nearFull}}" class="ast-warn">快满了，删掉用不上的素材再传新的</text>
+      <text wx:if="{{storage.nearFull}}" class="ast-warn">空间快满了，删掉用不上的素材或成片，也可以扩容</text>
+      <!-- 扩容价来自服务端（运营后台可配）；价没读到或已买到上限时整块不渲染，不显示编出来的价。 -->
+      <view wx:if="{{storage.canExpand}}" class="ast-expand" bindtap="expandStorage">{{expanding ? '处理中…' : storage.expandText}}</view>
     </view>
 
     <scroll-view class="as-tags" scroll-x enable-flex>

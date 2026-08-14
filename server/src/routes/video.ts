@@ -13,6 +13,7 @@ import {
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import { clonePricing, clonePricingView } from '../services/video/pricing.js';
+import { buyStoragePack, purchasedPackCount, purchasedStorageBytes, storagePlan } from '../services/video/storagePlan.js';
 import type {
   ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
@@ -368,11 +369,50 @@ export async function videoRoutes(app: FastifyInstance) {
   });
 
   // 素材库容量：端上据此显示容量条，并在满之前就提示，而不是等上传被拒。
+  /**
+   * 存储视图 = AIStar 的真实占用 + 军师这边的扩容权益。
+   *
+   * 有效额度必须由军师算好后**传给 AIStar**：默认额度在那边，扩容权益（钻石）在这边。
+   * 两边各算各的就会出现「军师说还能传、AIStar 说满了」——用户无从解释的状态。
+   */
   app.get('/video/assets/storage', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try { return await aidramaJson<ClipAssetStorage>('/api/me/clip/assets/storage', identityOf(user)); }
-    catch (e) { return sendErr(reply, e, 502); }
+    try {
+      const [plan, purchased, packs] = await Promise.all([
+        storagePlan(), purchasedStorageBytes(user.id), purchasedPackCount(user.id),
+      ]);
+      // 传增量，AIStar 自己加上默认额度后回一个已经算好的 limitBytes。
+      const view = await aidramaJson<ClipAssetStorage>(
+        `/api/me/clip/assets/storage?extraQuotaBytes=${purchased}`, identityOf(user));
+      return {
+        ...view,
+        baseBytes: view.limitBytes - purchased,
+        purchasedBytes: purchased,
+        packs,
+        maxPacks: plan.maxPacks,
+        packBytes: plan.packBytes,
+        packCredits: plan.packCredits,
+        configured: plan.configured,
+      };
+    } catch (e) { return sendErr(reply, e, 502); }
   });
+
+  app.post<{ Body: { clientRequestId?: string } }>('/video/assets/storage/expand',
+    { config: { rateLimit: { max: 10, timeWindow: '1 hour' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        const clientRequestId = String(req.body?.clientRequestId ?? '').trim();
+        if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) {
+          return reply.code(422).send({ error: '缺少合法的 clientRequestId', code: 'CLIENT_REQUEST_ID_REQUIRED' });
+        }
+        const result = await buyStoragePack({ tenantId: user.tenantId, userId: user.id, clientRequestId });
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.storage.expand',
+          payload: { ...result.pack, clientRequestId, reused: result.reused },
+        });
+        return { ok: true, ...result.pack, reused: result.reused };
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
 
   app.post('/video/assets', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
@@ -386,6 +426,9 @@ export async function videoRoutes(app: FastifyInstance) {
       if (data.file.truncated || buffer.length > 100 * 1024 * 1024) return reply.code(413).send({ error: '素材超过 100MB', code: 'CLIP_ASSET_TOO_LARGE' });
       await assertVideoUploadContent(buffer, mimeType, identityOf(user));
       const fields = Object.fromEntries(Object.entries(data.fields as Record<string, { value?: unknown }>).map(([key, value]) => [key, String(value?.value ?? '')]));
+      // 扩容权益在军师这边，上传闸在 AIStar 那边：把增量带上，两边才用同一个额度判断。
+      // 少了这一行，买过扩容的用户仍然会在默认额度上被拦住 —— 花了钱没拿到东西。
+      fields.extraQuotaBytes = String(await purchasedStorageBytes(user.id));
       return await aidramaUpload<ClipAsset>('/api/me/clip/assets', identityOf(user), { buffer, fileName: data.filename || 'asset', mimeType }, fields);
     } catch (e) { return sendErr(reply, e, 422); }
   });

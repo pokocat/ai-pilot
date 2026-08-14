@@ -253,7 +253,13 @@ module.exports = {
     assets[index] = Object.assign({}, assets[index], clone(patch || {}));
     return delay(clone(assets[index]));
   },
-  assetStorage: () => delay({ usedBytes: 412 * 1024 * 1024, limitBytes: 2 * 1024 * 1024 * 1024, count: 5 }),
+  // 口径同真服务端：默认 200MB，素材与作品共用；已用按总量向上取整到整 MB。
+  // 数值特意贴近上限，让扩容入口在 mock 下也能被验到。
+  assetStorage: () => delay({
+    usedBytes: 173 * 1024 * 1024, limitBytes: 200 * 1024 * 1024, count: 5,
+    baseBytes: 200 * 1024 * 1024, purchasedBytes: 0, packs: 0, maxPacks: 20,
+    packBytes: 100 * 1024 * 1024, packCredits: 50, configured: false,
+  }),
   deleteAsset: (id) => {
     assets = assets.filter((item) => item.id !== id);
     return delay({ ok: true });
@@ -289,6 +295,7 @@ module.exports = {
   // 数值取服务端兜底价，configured=false —— mock 环境本来就没有运营配置，谎报 true 会让端上
   // 把兜底价当成线上价来渲染口径。mock 不得比真服务端「友好」。
   retrainQuota: (id) => delay({ voiceId: id, available: true, retrainable: true, used: 1, total: 4, remaining: 3 }),
+  expandStorage: () => delay({ ok: true, bytes: 100 * 1024 * 1024, credits: 50, reused: false }),
   clonePricing: () => delay({ voiceCreate: 200, voiceRetrain: 60, avatarVideo: 200, avatarImage: 100, configured: false }),
   startConsent: () => {
     const record = { id: `cc_mock_${Date.now()}`, status: 'submitted', accepted: true, verified: false, createdText: '刚刚', scope: '本人形象与声音出片' };
