@@ -3,6 +3,7 @@ import { prisma } from '../../db.js';
 import { ossConfigured, ossSignedUrl } from '../ossUpload.js';
 import {
   creativeDirectionSampleKey,
+  deleteCreativeObject,
   getCreativeObject,
   putCreativeObject,
 } from './storage.js';
@@ -49,7 +50,8 @@ export function sampleUrlExpiresAt(nowSec: number): number {
  * 回退路由分两条：C 端那条无鉴权、只发已发布样例，后台预览（含草稿）必须走管理鉴权那条。
  */
 export function directionSampleUrl(row: Pick<SampleRow, 'id' | 'ossKey'>, scope: 'public' | 'admin' = 'public'): string {
-  if (ossConfigured()) {
+  // 空 key 绝不能交给 OSS SDK：signatureUrl('') 会签出桶根地址，若凭证权限过宽甚至可能列桶。
+  if (row.ossKey && ossConfigured()) {
     // 用 Date.now() 而不是 clock.now()：过期时刻最终由 OSS SDK 按系统时钟算，两边必须同一口径，
     // 否则窗口对齐会错位（测试时钟偏移会把签名 URL 的有效期算歪）。
     const nowSec = Math.floor(Date.now() / 1000);
@@ -155,7 +157,9 @@ export async function createDirectionSampleFromJob(input: {
   directionKey: PosterDirectionKey;
   sourceJobId: string;
   createdBy?: string | null;
-}): Promise<AdminCreativeDirectionSample> {
+}, deps: {
+  putObject?: typeof putCreativeObject;
+} = {}): Promise<AdminCreativeDirectionSample> {
   if (!isPosterDirectionKey(input.directionKey)) throw new DirectionSampleError('未知创作方向');
   const job = await prisma.creativeJob.findUnique({ where: { id: input.sourceJobId } });
   if (!job || job.status !== 'succeeded') throw new DirectionSampleError('只能从已成功的海报任务生成样例', 'SOURCE_JOB_INVALID');
@@ -168,6 +172,18 @@ export async function createDirectionSampleFromJob(input: {
   if (jobTier !== direction.tier) throw new DirectionSampleError('来源任务的创作路线与样例方向不匹配', 'SOURCE_TIER_MISMATCH');
   if (brief.directionKey && brief.directionKey !== input.directionKey) {
     throw new DirectionSampleError('来源任务记录的创作方向不匹配', 'SOURCE_DIRECTION_MISMATCH');
+  }
+  const result = job.resultJson && typeof job.resultJson === 'object' && !Array.isArray(job.resultJson)
+    ? job.resultJson as Record<string, unknown> : {};
+  if (result.directionKey && result.directionKey !== input.directionKey) {
+    throw new DirectionSampleError('来源任务实际交付的创作方向不匹配', 'SOURCE_DIRECTION_MISMATCH');
+  }
+  const actualMode = result.aiMode === 'photo' || result.aiMode === 'graphic'
+    ? result.aiMode
+    : typeof result.visualAssetId === 'string' && result.visualAssetId ? 'photo' : 'graphic';
+  const expectedMode = direction.tier === 'premium' ? 'photo' : 'graphic';
+  if (result.degraded === true || actualMode !== expectedMode) {
+    throw new DirectionSampleError('来源任务实际交付的创作路线与样例方向不匹配', 'SOURCE_ROUTE_MISMATCH');
   }
   const asset = await prisma.creativeAsset.findFirst({
     where: { jobId: job.id, kind: 'poster_png' },
@@ -197,8 +213,18 @@ export async function createDirectionSampleFromJob(input: {
     select: { id: true },
   });
   const ossKey = creativeDirectionSampleKey({ sampleId: created.id, mimeType: thumb.mimeType });
-  await putCreativeObject(ossKey, thumb.buffer, thumb.mimeType);
-  const row = await prisma.creativeDirectionSample.update({ where: { id: created.id }, data: { ossKey } });
+  let row: SampleRow;
+  try {
+    await (deps.putObject ?? putCreativeObject)(ossKey, thumb.buffer, thumb.mimeType, {
+      cacheControl: `private, max-age=${SAMPLE_URL_WINDOW_SEC}`,
+    });
+    row = await prisma.creativeDirectionSample.update({ where: { id: created.id }, data: { ossKey } });
+  } catch (error) {
+    // DB 与对象存储无法做同一事务：任一步失败都补偿两边，不能留下 ossKey='' 的幽灵草稿。
+    await deleteCreativeObject(ossKey).catch(() => {});
+    await prisma.creativeDirectionSample.deleteMany({ where: { id: created.id, status: 'draft' } }).catch(() => {});
+    throw error;
+  }
   invalidateDirectionOptions();
   return view(row);
 }
@@ -206,6 +232,15 @@ export async function createDirectionSampleFromJob(input: {
 export async function publishDirectionSample(id: string): Promise<AdminCreativeDirectionSample> {
   const source = await prisma.creativeDirectionSample.findUnique({ where: { id } });
   if (!source || source.status === 'archived') throw new DirectionSampleError('样例不存在', 'DIRECTION_SAMPLE_NOT_FOUND', 404);
+  if (!source.ossKey) throw new DirectionSampleError('样例文件尚未上传完成，请重新生成', 'DIRECTION_SAMPLE_FILE_MISSING');
+  const sourceBytes = await getCreativeObject(source.ossKey);
+  if (!sourceBytes?.length) throw new DirectionSampleError('样例文件已不可用，请重新生成', 'DIRECTION_SAMPLE_FILE_MISSING');
+  try {
+    const meta = await sharp(sourceBytes, { animated: false, failOn: 'error' }).metadata();
+    if (!meta.width || !meta.height || !meta.format) throw new Error('missing image metadata');
+  } catch {
+    throw new DirectionSampleError('样例文件不是可用图片，请重新生成', 'DIRECTION_SAMPLE_FILE_INVALID');
+  }
   // ⚠️ 归档只改状态，**不删 OSS 对象**：已发出的签名 URL 在窗口内仍能打开旧样例（最长 20 分钟），
   // 之后也只是「无人引用但仍在桶里」。删不删涉及产品取舍（发布回滚 / 留证 vs 物料清理），是待决项。
   const row = await prisma.$transaction(async (tx) => {

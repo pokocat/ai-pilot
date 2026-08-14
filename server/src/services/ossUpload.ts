@@ -51,10 +51,19 @@ export async function ossPutPublic(key: string, buf: Buffer, contentType: string
  * 上传任意二进制到 OSS `key`，以 **private** ACL 存（用户上传的业务资料原件，不公开）。返回对象 key。
  * 预览/下载请用 ossSignedUrl() 取有时限的签名链接，避免裸链外泄。失败抛出。
  */
-export async function ossPutBuffer(key: string, buf: Buffer, contentType: string): Promise<string> {
+export async function ossPutBuffer(
+  key: string,
+  buf: Buffer,
+  contentType: string,
+  opts: { cacheControl?: string } = {},
+): Promise<string> {
   await oss().put(key, buf, {
     mime: contentType,
-    headers: { 'Content-Type': contentType, 'x-oss-object-acl': 'private', 'Cache-Control': 'private, max-age=0' },
+    headers: {
+      'Content-Type': contentType,
+      'x-oss-object-acl': 'private',
+      'Cache-Control': opts.cacheControl ?? 'private, max-age=0',
+    },
   });
   return key;
 }

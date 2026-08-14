@@ -1974,6 +1974,8 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 详情页「换方向」的清单 = 路线 ∩ 照片事实，两个条件缺一不可。
   assert.match(posterJob, /item\.tier === tier && \(!item\.requiresPortrait \|\| hasPortrait\)/,
     '换方向清单必须同时按路线和 hasPortrait 过滤');
+  assert.match(posterJob, /async refreshTemplates\(\)[\s\S]{0,700}activeDirectionsFor\(status\.directions, this\.data\.job\)/,
+    '刷新方向清单也必须复用照片门禁，不能把「本人形象」死选项重新放出来');
   // 照片刚选定 / 刚清除的那一刻才拨方向；不许在渲染里强制，否则用户手动改选会被反复顶回去。
   assert.match(poster, /syncDirectionForPortrait\(hasPortrait\)/, '确认页要有照片→方向的同步');
   assert.match(poster, /this\.setData\(\{ assets \}\);\s*\n\s*if \(role === 'portrait'\) this\.syncDirectionForPortrait\(true\);/,

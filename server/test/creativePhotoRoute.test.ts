@@ -16,6 +16,8 @@ import { grantCredits } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
 import { runJobOnce, MAX_ATTEMPTS, type CreativeWorkerDeps } from '../src/services/creative/worker.js';
 import { CREATIVE_FLAG_ID } from '../src/services/creative/config.js';
+import { POSTER_SKILL_KEY } from '../src/services/creative/jobs.js';
+import { updateArtifactPrices } from '../src/services/artifactPricing.js';
 import {
   POSTER_STYLES, POSTER_STYLE_KEYS, POSTER_STYLE_LIST, SAFE_ZONES, SAFE_ZONE_HINTS,
   SCENE_DEFAULT_STYLE, normalizeStyleKey, styleCatalogDigest,
@@ -648,6 +650,57 @@ describe('tier 权威执行与免费 revise 复用', () => {
     assert.equal(await prisma.creativeJob.count(), before, '原文件不存在时不该先建一张必失败的免费任务');
   });
 
+  test('不限量 premium regenerate：chargedAt 为空仍是收费重出语义，必须重新调用图片供应商', async () => {
+    const { token, tenantId } = await posterUser(0);
+    await grantCredits(tenantId, token, -1, '测试不限量');
+    const parentId = await createJob(token, 'unlimited-regen-parent', {
+      tier: 'premium', directionKey: 'photo_product',
+    });
+    await prisma.creativeJob.update({ where: { id: parentId }, data: { status: 'succeeded', completedAt: new Date() } });
+
+    const regenerated = await api('POST', `/api/creative/jobs/${parentId}/regenerate`, {
+      token,
+      body: { directionKey: 'photo_scene', idempotencyKey: 'regen:unlimited-child' },
+    });
+    assert.equal(regenerated.status, 200, JSON.stringify(regenerated.body));
+    const childBefore = await prisma.creativeJob.findUniqueOrThrow({ where: { id: regenerated.body.jobId } });
+    assert.equal(childBefore.creditCost, 25, '不限量仍记录名义成本');
+    assert.equal(childBefore.chargedAt, null, '不限量没有真实扣款');
+    assert.equal((childBefore.requestJson as { operation?: string }).operation, 'regenerate');
+
+    const { deps: d, calls } = deps({ photoVisual: 'ok', composeOk: 'photo-only' });
+    await runOne(childBefore.id, d);
+    const child = await prisma.creativeJob.findUniqueOrThrow({ where: { id: childBefore.id } });
+    assert.equal(child.status, 'succeeded', `${child.errorCode} ${child.errorMessage}`);
+    assert.equal(calls.visual, 1, 'regenerate 必须重出主视觉，不能被 chargedAt=null 误判为免费改字');
+  });
+
+  test('premium 单价显式为 0 的 regenerate：按 operation 执行重出，不按零费用误判 revise', async () => {
+    await updateArtifactPrices({ [POSTER_SKILL_KEY]: { premium: 0 } });
+    __clearFeatureCache();
+    const { token } = await posterUser();
+    const parentId = await createJob(token, 'zero-price-regen-parent', {
+      tier: 'premium', directionKey: 'photo_product',
+    });
+    await prisma.creativeJob.update({ where: { id: parentId }, data: { status: 'succeeded', completedAt: new Date() } });
+
+    const regenerated = await api('POST', `/api/creative/jobs/${parentId}/regenerate`, {
+      token,
+      body: { idempotencyKey: 'custom-zero-price-key' },
+    });
+    assert.equal(regenerated.status, 200, JSON.stringify(regenerated.body));
+    const childBefore = await prisma.creativeJob.findUniqueOrThrow({ where: { id: regenerated.body.jobId } });
+    assert.equal(childBefore.creditCost, 0);
+    assert.equal(childBefore.chargedAt, null, '零价任务没有真实扣款时间');
+    assert.equal((childBefore.requestJson as { operation?: string }).operation, 'regenerate');
+
+    const { deps: d, calls } = deps({ photoVisual: 'ok', composeOk: 'photo-only' });
+    await runOne(childBefore.id, d);
+    const child = await prisma.creativeJob.findUniqueOrThrow({ where: { id: childBefore.id } });
+    assert.equal(child.status, 'succeeded', `${child.errorCode} ${child.errorMessage}`);
+    assert.equal(calls.visual, 1, '零价是运营定价，不等于 revise');
+  });
+
   // 建单侧的 SOURCE_VISUAL_MISSING 拦不住**在途单与历史数据**：它们进 worker 时，建单闸门早已
   // 成为过去。没有 worker 侧那道硬闸，这种单会真去调图片供应商出图，还按重试策略调三次 ——
   // 而它 creditCost=0，一分钱没收。
@@ -658,11 +711,13 @@ describe('tier 权威执行与免费 revise 复用', () => {
 
     // 手工造一张「改造前遗留」的在途免费单：有父单、没扣费、requestJson 里也没有来源主视觉。
     const parent = await prisma.creativeJob.findUniqueOrThrow({ where: { id: parentId } });
+    const parentRequest = parent.requestJson as { operation?: string; brief: Record<string, unknown> };
+    const { operation: _newField, ...legacyRequest } = parentRequest;
     const orphan = await prisma.creativeJob.create({
       data: {
         tenantId: parent.tenantId, userId: parent.userId, agentKey: parent.agentKey, skillKey: parent.skillKey,
         kind: parent.kind, status: 'pending', engine: parent.engine, parentJobId: parentId,
-        requestJson: parent.requestJson as object, idempotencyKey: 'orphan-revise-child',
+        requestJson: legacyRequest as object, idempotencyKey: 'orphan-revise-child',
         creditCost: 0, chargedAt: null,
       },
       select: { id: true },

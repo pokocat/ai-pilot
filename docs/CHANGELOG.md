@@ -6,6 +6,13 @@
 
 ## 变更日志
 
+### 2026-08-14 · 海报双路线合并前复审补漏：操作类型、样例完整性、评审指标与换方向刷新 · 影响面：CreativeJob request 快照、worker 成本闸、方向样例存储/发布、Prometheus、小程序任务详情与回归测试
+
+- **计费动作不再靠扣费时间猜**：`requestJson.operation=create|revise|regenerate` 成为 worker 的显式真值。不限量用户和运营把高级档定为 0 时都可能 `chargedAt=null`，但 regenerate 仍须重新调用图片供应商；只有 operation=revise 才走免费复用硬闸。存量在途单按父链来源资产、幂等键前缀与名义成本兼容推断。零价任务不再伪造 `chargedAt` 或进入退款语义。
+- **方向样例全链补完整性闸**：生成草稿除 brief 档位/方向外，还核对 `resultJson.aiMode/visualAssetId/degraded/directionKey` 的实际交付路线；上传或落 key 任一步失败都会补偿删除对象与 draft 行；发布前必须确认非空 key、对象存在且能被 sharp 解码，空 key 永不交给 OSS SDK 签名。样例私有对象带 10 分钟客户端缓存头，与窗口对齐签名 URL 同口径。
+- **可观测性与端上死选项**：`junshi_creative_critique_total` 正式进入 `/metrics` 输出与测试 reset；任务详情刷新模板/方向后继续复用 `tier ∩ portrait` 过滤，不会把没有本人照片时必 422 的「本人形象」重新放出来。
+- **回归**：新增不限量 regenerate、显式零价 regenerate、历史孤儿 revise、样例实际路线错配、上传失败补偿、空/丢失/损坏样例发布、评审指标导出/reset 与刷新照片门禁用例；专项 72/72、原生守护 71/71、server TypeScript build 通过。
+
 ### 2026-08-14 · 海报从“标准/高级”重构为双路线内三种创作方向，并封死免费重生图与跨档降级 · 影响面：shared 契约、CreativeJob/方向样例数据模型、worker 路线与 revise、宣言/看图评审、小程序与 H5 确认/换方向、运营后台、测试与工程文档
 
 - **背景与线上发现**：原产品把价格档位与生成方式混在一起，用户只能看到抽象的“标准/高级”；同时生产只读核查确认 `layoutEngine=ai`、旧 `aiMode=auto`，4 个 standard 任务里 3 个实际带主视觉，说明标准价任务会机会式调用图片供应商。代码审计还发现默认 AI 排版下 premium 的免费 revise 会重新生图，以及 `layoutEngine=template` 可绕过 premium 的“不降级”保护。这不是单纯换文案，而是路线契约、成本与体验已经漂移。

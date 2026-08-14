@@ -308,8 +308,7 @@ Page({
     try {
       const status = normalizeStatus(await api.creativeStatus());
       this._prices = { standard: status.pricePerPoster, premium: status.premiumPricePerPoster };
-      const tier = this.data.job && this.data.job.tier === 'premium' ? 'premium' : 'standard';
-      const activeDirections = status.directions.filter((item) => item.tier === tier);
+      const activeDirections = activeDirectionsFor(status.directions, this.data.job);
       this.setData({
         templates: status.templates,
         directions: status.directions,

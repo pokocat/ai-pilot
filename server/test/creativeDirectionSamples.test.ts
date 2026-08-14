@@ -10,6 +10,7 @@ import { __clearFeatureCache, setFeatureFlag } from '../src/services/featureFlag
 import { putCreativeObject } from '../src/services/creative/storage.js';
 import {
   SAMPLE_URL_WINDOW_SEC, sampleUrlExpiresAt, __clearDirectionSampleCache,
+  createDirectionSampleFromJob, getDirectionSampleFile,
 } from '../src/services/creative/directionSamples.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
@@ -17,8 +18,8 @@ process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 async function seedSucceededPoster(
   directionKey: string,
   tier: 'standard' | 'premium' = 'standard',
-  // 默认灌一段假字节：缩略走不通时的兜底路径（存原图）也要被测到。
   imageBytes?: Buffer,
+  resultJson?: Record<string, unknown>,
 ) {
   const token = await login(uniquePhone(), '方向样例来源');
   const { tenantId } = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
@@ -31,14 +32,16 @@ async function seedSucceededPoster(
       kind: 'poster',
       status: 'succeeded',
       requestJson: { brief: { tier, directionKey, headline: '真实成品样例' } },
-      resultJson: { aiMode: tier === 'premium' ? 'photo' : 'graphic', directionKey },
+      resultJson: resultJson ?? { aiMode: tier === 'premium' ? 'photo' : 'graphic', directionKey, degraded: false },
       idempotencyKey: `direction-sample-${Date.now()}-${Math.random()}`,
       creditCost: tier === 'premium' ? 25 : 10,
       completedAt: new Date(),
     },
   });
   const ossKey = `test/creative/direction-samples/${job.id}.png`;
-  const bytes = imageBytes ?? Buffer.from(`real-poster-${directionKey}`);
+  const bytes = imageBytes ?? await sharp({
+    create: { width: 36, height: 48, channels: 3, background: { r: 12, g: 34, b: 56 } },
+  }).png().toBuffer();
   await putCreativeObject(ossKey, bytes, 'image/png');
   await prisma.creativeAsset.create({
     data: {
@@ -98,7 +101,10 @@ describe('海报创作方向真实样例', () => {
     assert.match(liveDirection.previewUrl, /^\/api\/creative\/direction-samples\//);
     const file = await api('GET', liveDirection.previewUrl, { adminToken: false });
     assert.equal(file.status, 200);
-    assert.equal(file.body, source.bytes.toString(), '对外样例必须是来源任务成品的真实复制件');
+    const stored = await getDirectionSampleFile(created.body.id);
+    assert.ok(stored?.buffer.length, '公开路由与服务层都必须读到真实图片');
+    const meta = await sharp(stored!.buffer).metadata();
+    assert.deepEqual([meta.width, meta.height], [36, 48]);
   });
 
   test('来源任务档位或方向不匹配时拒绝创建', async () => {
@@ -115,6 +121,58 @@ describe('海报创作方向真实样例', () => {
     assert.equal(wrongDirection.status, 422);
     assert.equal(wrongDirection.body.code, 'SOURCE_DIRECTION_MISMATCH');
     assert.equal(await prisma.creativeDirectionSample.count(), 0);
+  });
+
+  test('来源 brief 写 premium、实际却降级 graphic 时拒绝成为高级样例', async () => {
+    const source = await seedSucceededPoster('photo_product', 'premium', undefined, {
+      aiMode: 'graphic', directionKey: 'photo_product', degraded: true, visualAssetId: null,
+    });
+    const created = await api('POST', '/api/admin/creative/direction-samples', {
+      body: { directionKey: 'photo_product', sourceJobId: source.jobId },
+    });
+    assert.equal(created.status, 422, JSON.stringify(created.body));
+    assert.equal(created.body.code, 'SOURCE_ROUTE_MISMATCH');
+    assert.equal(await prisma.creativeDirectionSample.count(), 0);
+  });
+
+  test('上传失败会补偿删除草稿，不留下 ossKey 为空的幽灵记录', async () => {
+    const source = await seedSucceededPoster('graphic_symbol');
+    await assert.rejects(
+      createDirectionSampleFromJob(
+        { directionKey: 'graphic_symbol', sourceJobId: source.jobId },
+        { putObject: async () => { throw new Error('simulated upload failure'); } },
+      ),
+      /simulated upload failure/,
+    );
+    assert.equal(await prisma.creativeDirectionSample.count(), 0);
+  });
+
+  test('发布前校验 ossKey、对象存在性与图片可解码性，失败保持 draft', async () => {
+    const source = await seedSucceededPoster('graphic_symbol');
+    const sourceJob = await prisma.creativeJob.findUniqueOrThrow({ where: { id: source.jobId } });
+    const empty = await prisma.creativeDirectionSample.create({
+      data: {
+        directionKey: 'graphic_symbol', tier: 'standard', status: 'draft', sourceJobId: source.jobId,
+        ossKey: '', mimeType: 'image/png', bytes: 0,
+      },
+    });
+    const missing = await api('POST', `/api/admin/creative/direction-samples/${empty.id}/publish`);
+    assert.equal(missing.status, 422, JSON.stringify(missing.body));
+    assert.equal(missing.body.code, 'DIRECTION_SAMPLE_FILE_MISSING');
+
+    const corruptKey = `test/creative/direction-samples/corrupt-${sourceJob.id}.png`;
+    await putCreativeObject(corruptKey, Buffer.from('not-an-image'), 'image/png');
+    const corrupt = await prisma.creativeDirectionSample.create({
+      data: {
+        directionKey: 'graphic_symbol', tier: 'standard', status: 'draft', sourceJobId: source.jobId,
+        ossKey: corruptKey, mimeType: 'image/png', bytes: 12,
+      },
+    });
+    const invalid = await api('POST', `/api/admin/creative/direction-samples/${corrupt.id}/publish`);
+    assert.equal(invalid.status, 422, JSON.stringify(invalid.body));
+    assert.equal(invalid.body.code, 'DIRECTION_SAMPLE_FILE_INVALID');
+    const rows = await prisma.creativeDirectionSample.findMany({ select: { status: true } });
+    assert.deepEqual(rows.map((row) => row.status), ['draft', 'draft']);
   });
 
   test('公开取图只发已发布：草稿 404，后台预览走管理鉴权那条', async () => {

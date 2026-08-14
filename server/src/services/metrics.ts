@@ -672,6 +672,7 @@ export async function renderMetrics(): Promise<string> {
   creativeJobs.renderInto(ms);
   creativeFailures.renderInto(ms);
   creativeEngines.renderInto(ms);
+  creativeCritiques.renderInto(ms);
 
   /* —— 支付 —— */
   payOrdersCreated.renderInto(ms);
@@ -803,7 +804,7 @@ export function __resetMetrics(): void {
   chatGenerations.reset(); chatGenerationDuration.reset(); chatGenerationRecovered.reset(); chatUsageEstimated.reset();
   sessionDigestUpdates.reset(); sessionDigestCompactions.reset(); sessionDigestItems.reset(); sessionDigestPending.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
-  creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
+  creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset(); creativeCritiques.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };

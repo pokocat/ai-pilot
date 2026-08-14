@@ -25,9 +25,14 @@ export function creativeDirectionSampleKey(opts: { sampleId: string; mimeType: s
 }
 
 /** 存一份资产字节（OSS 私有 or 内存回退）。 */
-export async function putCreativeObject(key: string, buf: Buffer, mimeType: string): Promise<void> {
+export async function putCreativeObject(
+  key: string,
+  buf: Buffer,
+  mimeType: string,
+  opts: { cacheControl?: string } = {},
+): Promise<void> {
   if (ossConfigured()) {
-    await ossPutBuffer(key, buf, mimeType);
+    await ossPutBuffer(key, buf, mimeType, opts);
     return;
   }
   memStore.set(key, buf);

@@ -70,12 +70,19 @@ export class JobNotFoundError extends CreativeError {
  */
 interface RequestSnapshot {
   brief: NormalizedPosterBrief;
+  /**
+   * 本任务的业务动作。不能再用 chargedAt 推断：不限量用户与运营显式定价 0 的 regenerate
+   * 同样不会产生扣费时间，但仍必须重新调用图片供应商。
+   */
+  operation?: PosterJobOperation;
   /** revise 复用父任务主视觉时记来源资产 id（worker 据此跳过 visual 阶段）。 */
   sourceVisualAssetId?: string | null;
   /** 与来源主视觉一起钉死；revise 不得重跑风格抽签导致叠层语法漂移。 */
   sourceVisualStyleKey?: string | null;
   sourceVisualSubject?: string | null;
 }
+
+export type PosterJobOperation = 'create' | 'revise' | 'regenerate';
 
 type JobRow = {
   id: string; tenantId: string; userId: string; sessionId: string | null; messageId: string | null;
@@ -386,6 +393,7 @@ async function insertJob(input: {
   sessionId: string | null;
   messageId: string | null;
   brief: NormalizedPosterBrief;
+  operation: PosterJobOperation;
   idempotencyKey: string;
   parentJobId?: string | null;
   sourceVisualAssetId?: string | null;
@@ -398,6 +406,7 @@ async function insertJob(input: {
   const visualReady = visualProviderConfigured(cfg);
   const request: RequestSnapshot = {
     brief: input.brief,
+    operation: input.operation,
     ...(input.sourceVisualAssetId ? { sourceVisualAssetId: input.sourceVisualAssetId } : {}),
     ...(input.sourceVisualStyleKey ? { sourceVisualStyleKey: input.sourceVisualStyleKey } : {}),
     ...(input.sourceVisualSubject ? { sourceVisualSubject: input.sourceVisualSubject } : {}),
@@ -439,12 +448,12 @@ async function insertJob(input: {
           // chargedAt 的语义严格是「真的扣到钻石了」（schema 注释：非空=已扣，退款前置条件）。
           // 因此不扣费路径（revise）与不限量用户（零流水）都保持 null → refundJob 天然不给它们退钱。
           // creditCost 仍记名义价，成本统计看 creditCost，是否退钱看 chargedAt，两件事分开。
-          chargedAt: input.charge && !unlimited ? now() : null,
+          chargedAt: input.charge && !unlimited && nominalCost > 0 ? now() : null,
           ...(input.parentJobId ? { parentJobId: input.parentJobId } : {}),
         },
         select: { id: true, status: true, creditCost: true },
       });
-      if (input.charge && !unlimited) {
+      if (input.charge && !unlimited && nominalCost > 0) {
         // 同事务扣费：余额不足在这里抛 402，整个事务回滚 → 不会留下一个没付钱的任务。
         await chargeCredits(input.tenantId, input.userId, nominalCost, `海报成品图 · ${input.brief.templateKey}`, tx);
       }
@@ -536,6 +545,7 @@ export async function createPosterJob(
     sessionId,
     messageId: opts.messageId ?? null,
     brief,
+    operation: 'create',
     idempotencyKey,
     charge: true,
   });
@@ -653,6 +663,7 @@ export async function reviseJob(
     sessionId: parent.sessionId,
     messageId: parent.messageId,
     brief,
+    operation: 'revise',
     idempotencyKey,
     parentJobId: parent.id,
     sourceVisualAssetId: sourceVisual?.assetId ?? null,
@@ -711,6 +722,7 @@ export async function regenerateJob(
     sessionId: parent.sessionId,
     messageId: parent.messageId,
     brief,
+    operation: 'regenerate',
     idempotencyKey,
     parentJobId: parent.id,
     charge: true, // 重出主视觉再扣一次
@@ -777,10 +789,25 @@ export async function cancelJob(user: { id: string; tenantId: string }, jobId: s
 export interface JobExecutionInput {
   job: JobRow;
   brief: NormalizedPosterBrief;
+  operation: PosterJobOperation;
   sourceVisualAssetId: string | null;
   sourceVisualStyleKey: string | null;
   sourceVisualSubject: string | null;
   brandKit: Awaited<ReturnType<typeof getBrandKit>> | null;
+}
+
+function operationOf(job: JobRow, req: RequestSnapshot): PosterJobOperation {
+  if (req.operation === 'create' || req.operation === 'revise' || req.operation === 'regenerate') {
+    return req.operation;
+  }
+  // 存量单兼容：旧 requestJson 没有 operation。没有父任务就是首次创建；有来源主视觉就是改字。
+  if (!job.parentJobId) return 'create';
+  if (req.sourceVisualAssetId) return 'revise';
+  // 旧客户端默认幂等键可直接区分；最后才用名义价兜底。creditCost>0 的不限量 regenerate
+  // 必须判为重出，不能因为 chargedAt=null 被错当免费改字。
+  if (/^regen(?:erate)?[:_.-]/i.test(job.idempotencyKey)) return 'regenerate';
+  if (/^revise[:_.-]/i.test(job.idempotencyKey)) return 'revise';
+  return job.creditCost === 0 ? 'revise' : 'regenerate';
 }
 
 /**
@@ -807,6 +834,7 @@ export async function loadJobExecutionInput(jobId: string): Promise<JobExecution
   return {
     job: row,
     brief: withDirectionKey(req.brief),
+    operation: operationOf(row, req),
     sourceVisualAssetId: req.sourceVisualAssetId ?? null,
     sourceVisualStyleKey: req.sourceVisualStyleKey ?? null,
     sourceVisualSubject: req.sourceVisualSubject ?? null,

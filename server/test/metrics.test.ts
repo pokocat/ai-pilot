@@ -20,6 +20,7 @@ import {
   notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep,
   noteChatFirstToken, noteChatGenerationFinalized,
   noteSessionDigestState, noteSessionDigestCompaction,
+  noteCreativeCritique,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -216,6 +217,15 @@ describe('指标内容', () => {
     assert.match(body, /junshi_moderation_checks_total\{ref="input",verdict="block"\} 1/);
     assert.match(body, /junshi_moderation_checks_total\{ref="output",verdict="pass"\} 1/);
     assert.match(body, /junshi_plan_gate_blocked_total\{state="none"\} 1/);
+  });
+
+  test('海报视觉评审指标会导出，reset 后不残留上一轮样本', async () => {
+    noteCreativeCritique('unparsed');
+    const body = await get();
+    assert.match(body, /junshi_creative_critique_total\{verdict="unparsed"\} 1/);
+    __resetMetrics();
+    const reset = await get();
+    assert.doesNotMatch(reset, /junshi_creative_critique_total\{verdict="unparsed"\} 1/);
   });
 
   test('业务事件：注册 / 算力（reason 取 · 首段）/ 支付金额折元', async () => {

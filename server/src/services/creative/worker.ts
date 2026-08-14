@@ -268,13 +268,9 @@ export interface CreativeWorkerDeps {
   compose?: typeof generateCanvasPoster;
 }
 
-/**
- * 免费单（沿版本链的子单，且从未扣费）。这类单的全部产出必须由复用得来，
- * 任何一次图片供应商调用都是白花的成本。判据取 job 行本身（parentJobId + chargedAt），
- * 不取 brief —— brief 是建单时的快照，历史单的 tier/来源字段都可能对不上现在的口径。
- */
+/** 免费改字任务的全部产出必须由复用得来，任何一次图片供应商调用都是白花的成本。 */
 function freeReviseJob(input: JobExecutionInput): boolean {
-  return !!input.job.parentJobId && !input.job.chargedAt;
+  return input.operation === 'revise';
 }
 
 /**
@@ -298,7 +294,7 @@ async function runPipeline(input: JobExecutionInput, deps: CreativeWorkerDeps = 
   // 位置刻意选在两条排版路径之前（AI 的 runPhotoVisual 与模板路径的生图分支同时被它覆盖）。
   // **为什么闸门必须在 worker，而不能只信建单侧**：建单时 revise 会校验父单主视觉可复用，
   // 但在途单与历史数据从来没经过那次校验 —— 改造前建的 premium revise 单可能
-  // sourceVisualAssetId 与 chargedAt 双双为空，它们进 worker 时建单闸门早已成为过去。
+  // sourceVisualAssetId 为空，它们进 worker 时建单闸门早已成为过去。
   // 放行的代价是真调供应商出图、还按重试策略调三次，而这单收费为 0。
   // 有 sourceVisualAssetId 就照常复用（下面两条路径本就复用）；没有则以既有 SOURCE_VISUAL_MISSING
   // 口径整单失败（creditCost=0，refundJob 抢占后无流水可退）。
