@@ -190,6 +190,7 @@ import type {
   AdminUserQuotaView, AdminQuotaAdjustRequest,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
+  AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   PosterDirectionKey,
   AdminClonePricing, AdminClonePricingUpdate,
 } from '../../shared/contracts';
@@ -205,6 +206,7 @@ export type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
   AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
+  AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   PosterDirectionKey,
 } from '../../shared/contracts';
 // —— 短视频克隆动作定价（数字人 / 专属声音的钻石单价）——
@@ -376,6 +378,9 @@ export const api = {
   },
   // 重试失败任务（仅 owner/master）：failed → pending、attempts 清零，不重复扣费。
   retryCreativeJob: (id: string) => req<{ ok: boolean; jobId: string; status: string }>(`/admin/creative/jobs/${encodeURIComponent(id)}/retry`, 'POST', {}),
+  // 切换用户作品 / 内部任务（仅 owner/master）：内部任务不会进入 C 端作品库，也不能被用户详情/改字/重出/取消。
+  setCreativeJobAudience: (id: string, body: AdminCreativeJobAudienceRequest) =>
+    req<AdminCreativeJobAudienceResult>(`/admin/creative/jobs/${encodeURIComponent(id)}/audience`, 'POST', body),
   // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
   // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。
   clonePricing: () => req<AdminClonePricing>('/admin/video/clone-pricing'),

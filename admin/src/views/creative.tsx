@@ -451,7 +451,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
   const createSample = async (directionKey: PosterDirectionKey) => {
     const sourceJobId = String(sampleJobIds[directionKey] ?? '').trim();
-    if (!sourceJobId) { toast('请先填写已成功的来源任务 ID'); return; }
+    if (!sourceJobId) { toast('请先填写已设为内部任务的成功任务 ID'); return; }
     setBusy(`sample:${directionKey}`);
     try {
       await api.createCreativeDirectionSample({ directionKey, sourceJobId });
@@ -494,6 +494,30 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       finally { setBusy(''); }
     },
   });
+
+  const changeAudience = (j: AdminCreativeJobItem) => {
+    const next = j.audience === 'internal' ? 'user' : 'internal';
+    setConfirmSpec({
+      title: next === 'internal' ? '设为内部任务' : '恢复到用户作品',
+      desc: next === 'internal'
+        ? '内部任务只留在运营任务台；用户作品库、详情、改文字、换方向和取消都将不可达。适用于方向样例源图、E2E 和运营验收。'
+        : '恢复后该任务会重新遵循用户作品口径：制作中或有成品的成功任务会出现在本人作品库。',
+      echo: [
+        { k: '用户', v: j.userLabel },
+        { k: '任务 ID', v: j.id },
+        { k: '当前归属', v: j.audience === 'internal' ? '内部任务' : '用户作品' },
+      ],
+      confirmText: next === 'internal' ? '确认隐藏' : '确认恢复',
+      onConfirm: async () => {
+        setBusy(`audience:${j.id}`);
+        try {
+          await api.setCreativeJobAudience(j.id, { audience: next });
+          toast(next === 'internal' ? '已设为内部任务' : '已恢复到用户作品');
+          jobsReload();
+        } finally { setBusy(''); }
+      },
+    });
+  };
 
   const jobData = jobs.data;
   const pages = jobData ? Math.max(1, Math.ceil(jobData.total / (jobData.pageSize || 20))) : 1;
@@ -742,7 +766,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       )}
 
       {/* ── 创作方向真实样例 ── */}
-      <div className="sec-h"><span className="t">创作方向样例</span><span className="s">从真实成功任务生成草稿 / 审核 / 发布到小程序缩略图</span></div>
+      <div className="sec-h"><span className="t">创作方向样例</span><span className="s">从已归为内部的成功任务生成草稿 / 审核 / 发布到小程序缩略图</span></div>
       <div className="pad">
         <div className="ai-note">
           样例必须来自真实成功任务，不能上传一张与实际能力无关的宣传图。生成草稿会把该任务成品复制为全局运营物料，
@@ -812,7 +836,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       </div>
 
       {/* ── 任务台 ── */}
-      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 排版引擎与创作路线 / 降级 / 失败原因</span></div>
+      <div className="sec-h"><span className="t">任务台</span><span className="s">用户可见性 / 脱敏标识 / 成本 / 退款态 / 排版引擎与创作路线 / 降级 / 失败原因</span></div>
       <div className="pad">
         <div className="filter-bar">
           <div className="chip-row">
@@ -869,6 +893,9 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   </div>
                   <div className="usage-meta">
                     <span className={statusTag(j.status)}>{STATUS_LABEL[j.status] ?? j.status}</span>
+                    {j.sampleSource
+                      ? <span className="tag off">方向样例源任务</span>
+                      : j.audience === 'internal' && <span className="tag off">内部任务</span>}
                     {j.status === 'running' && j.progress && <span className="tag off">{j.progress}</span>}
                     {/* 实际排版引擎。null（老任务/未完成）不显示——冒充「模板」会让回落率失真。 */}
                     {eng && <span className={eng.cls} title={eng.title}>{eng.label}</span>}
@@ -921,6 +948,16 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                     {isSuper && j.status === 'failed' && (
                       <button type="button" className="mini-btn primary" disabled={busy === j.id} onClick={() => retry(j)}>
                         {busy === j.id ? '重排中…' : '重试'}
+                      </button>
+                    )}
+                    {isSuper && !j.sampleSource && (
+                      <button
+                        type="button"
+                        className="mini-btn"
+                        disabled={busy === `audience:${j.id}`}
+                        onClick={() => changeAudience(j)}
+                      >
+                        {busy === `audience:${j.id}` ? '处理中…' : j.audience === 'internal' ? '恢复用户作品' : '设为内部任务'}
                       </button>
                     )}
                   </div>

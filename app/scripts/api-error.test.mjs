@@ -65,3 +65,8 @@ test('4xx 行为不变：优先 code 表，其次服务端中文原因', () => {
     '声音模型不存在了，请重新采集声音。');
   assert.equal(httpErrorInfo(422, { error: '录音太短了' }, '提交').message, '录音太短了');
 });
+
+test('微信身份冲突有明确说明，不被压成通用 409', () => {
+  const info = httpErrorInfo(409, { code: 'WECHAT_ACCOUNT_CONFLICT' }, '登录');
+  assert.equal(info.message, '当前登录身份已关联其他账号，请改用原账号登录或联系客服。');
+});

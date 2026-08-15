@@ -384,9 +384,23 @@ export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devC
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 /** 本机号一键登录（POST /auth/wechat-phone）：phoneCode=getPhoneNumber 的 code；loginCode=wx.login 的 code（可选，用于关联 openid）。 */
 export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
+/**
+ * 手机号快捷登录与账号既有绑定号的核对结果。
+ *
+ * 账号归属真源始终是不可变的 User.id；openid 与手机号只是登录凭证。服务端只有在历史
+ * `wx_<openid>` 占位号首次补成真实手机号时才自动写库。已有真实号与本次授权号不一致时，
+ * 登录仍进入原 openid 账号，但只下发脱敏提示，不得静默换绑。
+ */
+export interface LoginPhoneBinding {
+  status: 'matched' | 'placeholder_upgraded' | 'mismatch';
+  accountPhoneMasked: string;
+  observedPhoneMasked: string;
+}
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;
   user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
+  /** 仅手机号快捷登录需要；旧客户端忽略即可。mismatch 是登录成功后的非阻断提醒。 */
+  phoneBinding?: LoginPhoneBinding;
 }
 
 /* ────────────── 建档 ────────────── */
@@ -920,7 +934,7 @@ export interface AdminCreativeDirectionSample {
 }
 export interface CreateCreativeDirectionSampleRequest {
   directionKey: PosterDirectionKey;
-  /** 必须是该方向/路线下已成功的真实任务；服务端复制成独立全局物料。 */
+  /** 必须是已显式归为 internal、且在该方向/路线下成功的运营任务；服务端复制成独立全局物料。 */
   sourceJobId: string;
 }
 export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'visual'>> & {
@@ -930,6 +944,10 @@ export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'visua
 export interface AdminCreativeDryRunResult { ok: boolean; message: string; ms: number }
 export interface AdminCreativeJobItem {
   id: string;
+  /** user=进入本人作品库；internal=仅运营任务台可见，C 端列表/详情/改字/重出全部不可达。 */
+  audience: 'user' | 'internal';
+  /** 已被复制为全局方向样例的来源任务；此类任务必须保持 internal，不允许人工恢复进用户作品域。 */
+  sampleSource: boolean;
   userLabel: string;         // 脱敏用户标识（昵称 + 手机号掩码）
   agentKey: string;
   kind: string;
@@ -992,6 +1010,8 @@ export interface AdminCreativeJobItem {
   createdAt: string;
   completedAt: string | null;
 }
+export interface AdminCreativeJobAudienceRequest { audience: 'user' | 'internal'; }
+export interface AdminCreativeJobAudienceResult { ok: true; jobId: string; audience: 'user' | 'internal'; }
 export interface AdminCreativeJobsView {
   items: AdminCreativeJobItem[];
   total: number;

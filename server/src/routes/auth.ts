@@ -3,7 +3,7 @@
 // 登录态 token 经 services/userToken.ts：配 APP_JWT_SECRET 后签发 HS256 JWT，
 // 未配则回退历史口径 token=userId（校验侧同样兼容，平滑过渡）。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env, registrationDefaultPlanName } from '../env.js';
@@ -16,6 +16,7 @@ import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
+import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
 const loginSchema = z.object({
@@ -148,7 +149,12 @@ async function onboardedOf(user: AuthUser): Promise<boolean> {
   return hasCompletedOnboarding(user);
 }
 
-function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
+function loginResult(
+  user: AuthUser,
+  isNew: boolean,
+  onboarded: boolean,
+  phoneBinding?: LoginPhoneBinding,
+): LoginResult {
   return {
     token: signUserToken(user.id), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
     isNew,
@@ -161,6 +167,7 @@ function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
       benmingColor: user.benmingColor,
       wechatLinked: !!user.wechatOpenId,
     },
+    ...(phoneBinding ? { phoneBinding } : {}),
   };
 }
 
@@ -176,11 +183,25 @@ async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ u
   return { user, isNew: true };
 }
 
-/** 尽力把 openid 关联到当前手机号账号；若该 openid 已被其他账号占用（唯一约束冲突）则跳过，不阻断登录。 */
-async function linkWechatBestEffort(user: AuthUser, openid: string, unionid?: string): Promise<AuthUser> {
-  if (user.wechatOpenId && (!unionid || user.wechatUnionId)) return user;
+type WechatLinkResult = { user: AuthUser; status: 'already_linked' | 'linked' | 'conflict' };
+
+function isUniqueConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/**
+ * 把微信凭证关联到手机号账号。
+ *
+ * 旧实现 catch 所有异常后继续登录：唯一键竞争与数据库故障都会被伪装成“登录成功但没关联”，
+ * 用户随后在微信登录与短信登录之间横跳。现在只把可识别的身份冲突作为业务结果返回；
+ * 数据库故障继续抛出，由路由明确失败并落 auth attempt。
+ */
+async function linkWechatIdentity(user: AuthUser, openid: string, unionid?: string): Promise<WechatLinkResult> {
+  if (user.wechatOpenId && user.wechatOpenId !== openid) return { user, status: 'conflict' };
+  if (unionid && user.wechatUnionId && user.wechatUnionId !== unionid) return { user, status: 'conflict' };
+  if (user.wechatOpenId && (!unionid || user.wechatUnionId)) return { user, status: 'already_linked' };
   try {
-    return await prisma.user.update({
+    const linked = await prisma.user.update({
       where: { id: user.id },
       data: {
         wechatOpenId: user.wechatOpenId || openid,
@@ -188,9 +209,19 @@ async function linkWechatBestEffort(user: AuthUser, openid: string, unionid?: st
         wechatLinkedAt: user.wechatLinkedAt || new Date(),
       },
     });
-  } catch {
-    return user; // 唯一约束冲突等 → 保持未关联，手机号登录已成功
+    return { user: linked, status: 'linked' };
+  } catch (error) {
+    if (isUniqueConflict(error)) return { user, status: 'conflict' };
+    throw error;
   }
+}
+
+function phoneBinding(status: LoginPhoneBinding['status'], accountPhone: string, observedPhone: string): LoginPhoneBinding {
+  return {
+    status,
+    accountPhoneMasked: maskAuditPhone(accountPhone) ?? '',
+    observedPhoneMasked: maskAuditPhone(observedPhone) ?? '',
+  };
 }
 
 export async function authRoutes(app: FastifyInstance) {
@@ -392,26 +423,49 @@ export async function authRoutes(app: FastifyInstance) {
 
       let user: AuthUser;
       let isNew: boolean;
+      let binding: LoginPhoneBinding | undefined;
       if (byWechat) {
         isNew = false;
         if (byWechat.phone === phone) {
           user = byWechat;
+          binding = phoneBinding('matched', byWechat.phone, phone);
         } else {
           const taken = await prisma.user.findUnique({ where: { phone } });
           if (taken && taken.id !== byWechat.id) {
             await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
             return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
           }
-          try {
-            user = await prisma.user.update({ where: { id: byWechat.id }, data: { phone } });
-          } catch {
-            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
-            return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+          // 只允许历史纯微信占位号首次升级成真实手机号。已有真实号与本次授权号不同，
+          // 仍进入同一个 openid 账号，但绝不在登录动作里静默换绑；换号必须去设置用新号验证码显式确认。
+          if (byWechat.phone.startsWith('wx_')) {
+            try {
+              user = await prisma.user.update({ where: { id: byWechat.id }, data: { phone } });
+              binding = phoneBinding('placeholder_upgraded', phone, phone);
+            } catch (error) {
+              if (isUniqueConflict(error)) {
+                await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
+                return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+              }
+              throw error;
+            }
+          } else {
+            user = byWechat;
+            binding = phoneBinding('mismatch', byWechat.phone, phone);
           }
         }
       } else {
         ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
-        user = openid ? await linkWechatBestEffort(user, openid, unionid) : user;
+        if (openid) {
+          const linked = await linkWechatIdentity(user, openid, unionid);
+          if (linked.status === 'conflict') {
+            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
+              ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'WECHAT_ACCOUNT_CONFLICT',
+            }, user);
+            return reply.code(409).send({ error: '当前登录身份已关联其他账号，请改用原账号登录或联系客服', code: 'WECHAT_ACCOUNT_CONFLICT' });
+          }
+          user = linked.user;
+        }
+        binding = phoneBinding('matched', user.phone, phone);
       }
 
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });
@@ -423,8 +477,10 @@ export async function authRoutes(app: FastifyInstance) {
         linked: !!openid,
         unionid: !!unionid,
         isNew,
+        phoneBindingStatus: binding.status,
+        accountPhoneMasked: binding.accountPhoneMasked,
       }, user);
-      return loginResult(user, isNew, await onboardedOf(user));
+      return loginResult(user, isNew, await onboardedOf(user), binding);
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
@@ -480,10 +536,16 @@ export async function authRoutes(app: FastifyInstance) {
     let updated: AuthUser;
     try {
       updated = await prisma.user.update({ where: { id: user.id }, data: { phone } });
-    } catch {
+    } catch (error) {
+      if (!isUniqueConflict(error)) throw error;
       return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
     }
-    await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: true, statusCode: 200, ...phoneAudit(phone) }, updated);
+    await recordAuthAttempt(req, 'auth.bind_phone.attempt', {
+      ok: true,
+      statusCode: 200,
+      ...phoneAudit(phone),
+      previousPhoneMasked: maskAuditPhone(user.phone),
+    }, updated);
     return { ok: true, phone, wechatLinked: !!updated.wechatOpenId };
   });
 

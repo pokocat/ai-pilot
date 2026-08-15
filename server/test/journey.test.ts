@@ -3,7 +3,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.ts';
-import { deriveNextStep } from '../src/services/journey.ts';
+import { prisma } from '../src/db.ts';
+import { applyJourneyEvent, deriveNextStep } from '../src/services/journey.ts';
 
 const base = { diagRound: 0, todayOrdersTotal: 0, todayOrdersDone: 0, todayReviewed: false, hour: 10 };
 
@@ -48,5 +49,22 @@ describe('journey 端到端进程', () => {
     const j1 = await api('GET', '/api/journey', { token });
     assert.equal(j1.body.stage, 'scanned');
     assert.equal(j1.body.nextStep?.key, 'continue_diagnosis');
+  });
+
+  test('首次并发事件只建一条 journey，且不再撞 userId 唯一键', async () => {
+    const token = await login(uniquePhone(), '并发 journey 用户');
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+    const errors: unknown[][] = [];
+    const realConsoleError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args); };
+    try {
+      await Promise.all(Array.from({ length: 16 }, () => applyJourneyEvent(token, user.tenantId, 'diag.round')));
+    } finally {
+      console.error = realConsoleError;
+    }
+
+    assert.deepEqual(errors, [], `并发建行不应被 best-effort 吞错：${JSON.stringify(errors)}`);
+    assert.equal(await prisma.userJourney.count({ where: { userId: token } }), 1);
+    assert.equal((await prisma.userJourney.findUniqueOrThrow({ where: { userId: token } })).stage, 'diagnosing');
   });
 });

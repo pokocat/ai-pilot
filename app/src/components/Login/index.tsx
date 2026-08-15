@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { View, Text, Input, Image, Button } from '@tarojs/components';
 import Taro from '@tarojs/taro';
-import { api } from '../../services/api';
+import { api, type LoginResult } from '../../services/api';
 import { authReasonText, type AuthReason } from '../../services/authGate';
 import Icon from '../Icon';
 import logo from '../../assets/logo.png';
@@ -123,6 +123,22 @@ export default function Login({ open, reason, onClose, onLoggedIn }: Props) {
     finishAuth(onboarded);
   };
 
+  const presentPhoneBindingNotice = (result: LoginResult) => {
+    const binding = result.phoneBinding;
+    if (!binding || binding.status !== 'mismatch') return;
+    const accountPhone = binding.accountPhoneMasked || '原绑定号';
+    const observedPhone = binding.observedPhoneMasked || '本次授权号';
+    // 登录本身已经成功；这里只解释账号归属，并把换号动作留给设置里的新号短信验证。
+    setTimeout(() => {
+      void Taro.showModal({
+        title: '手机号未自动更换',
+        content: `已进入 ${accountPhone} 对应的原账号。本次授权的 ${observedPhone} 未自动绑定；如需更换，请到设置验证新号码。`,
+        showCancel: false,
+        confirmText: '知道了',
+      });
+    }, 120);
+  };
+
   const submitWechat = async () => {
     if (busy || !ensureAgreed()) return;
     setWechatLoading(true);
@@ -131,6 +147,7 @@ export default function Login({ open, reason, onClose, onLoggedIn }: Props) {
       const result = await api.wechatLogin(wxCode);
       await store.afterLogin(result.token, result.onboarded, result.user.benmingColor);
       presentAfterAuth(result.onboarded);
+      presentPhoneBindingNotice(result);
     } catch (e) {
       const err = e as Error & { data?: { code?: string } };
       const message = err?.data?.code === 'WECHAT_CONFIG_MISSING'

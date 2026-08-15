@@ -23,7 +23,14 @@ const TRANSITIONS: Transition[] = [
 ];
 
 async function loadOrCreate(userId: string, tenantId: string) {
-  return prisma.userJourney.upsert({ where: { userId }, update: {}, create: { userId, tenantId, stage: 'new' } });
+  // Prisma 的 upsert 在同一 user 首次并发进入时可能退化成「先查后建」，两个事务同时看不到行，
+  // 其中一个会撞 userId 唯一键。createMany(skipDuplicates) 在 PostgreSQL 下落成 ON CONFLICT DO NOTHING，
+  // 再统一读取即可让 8 路首次对话都继续执行各自的状态迁移，而不是让一条事件被 best-effort 吞掉。
+  await prisma.userJourney.createMany({
+    data: [{ userId, tenantId, stage: 'new' }],
+    skipDuplicates: true,
+  });
+  return prisma.userJourney.findUniqueOrThrow({ where: { userId } });
 }
 
 /** 触发一个 journey 事件（确定性迁移 + 首次落时间戳）。内部吞错——绝不打断宿主流程（fire-and-forget 安全）。 */
@@ -32,7 +39,7 @@ export async function applyJourneyEvent(userId: string, tenantId: string, event:
     // 每个事件恰有一条迁移（TRANSITIONS 内 on 唯一），故按事件直接取 t，不再读当前态来选迁移。
     const t = TRANSITIONS.find((x) => x.on === event);
     if (!t) return;
-    await loadOrCreate(userId, tenantId); // 确保行存在（幂等 upsert，update:{}——不触碰既有态）
+    await loadOrCreate(userId, tenantId); // 幂等确保初始行存在，不触碰既有态
     // 单语句条件迁移替代 read-then-update：把「起始态校验 + 首次落戳」下推进 updateMany 的 where，
     // 由 DB 在写时原子重判，消除读改之间的竞态（并发事件不再互相覆盖 stage / 首次时间戳）。
     // 有时间戳的迁移只匹配「该戳尚为 null」的行 → 天然只落一次首戳且幂等（重复触发不覆盖首值）。

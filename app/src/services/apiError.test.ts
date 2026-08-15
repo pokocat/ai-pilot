@@ -27,6 +27,12 @@ test('限流、校验、冲突和审核不提供立即重试，服务异常才�
   assert.equal(apiErrorPresentation({ code: 'QUOTE_CHANGED' }).action, 'refresh');
   assert.equal(apiErrorPresentation({ code: 'MODERATION_BLOCK' }).action, 'edit');
   assert.equal(apiErrorPresentation({ code: 'AI_UNAVAILABLE' }).retryable, true);
+  assert.deepEqual(apiErrorPresentation({ code: 'WECHAT_ACCOUNT_CONFLICT' }), {
+    kind: 'conflict',
+    message: '当前登录身份已关联其他账号，请改用原账号登录或联系客服。',
+    retryable: false,
+    action: 'refresh',
+  });
 });
 
 test('未知 4xx 保留自然中文业务原因，英文技术文本退回动作兜底', () => {

@@ -45,6 +45,7 @@ async function seedJob(opts: {
   templateKey?: string;
   progress?: string | null;
   parentJobId?: string | null;
+  audience?: 'user' | 'internal';
   /** true = 连带一条 poster_png 资产（succeeded 行的收录条件）。 */
   withPoster?: boolean;
   createdAt: Date;
@@ -56,6 +57,7 @@ async function seedJob(opts: {
       agentKey: 'poster',
       skillKey: 'canvas_design',
       kind: 'poster',
+      audience: opts.audience ?? 'user',
       status: opts.status,
       progress: opts.progress ?? null,
       parentJobId: opts.parentJobId ?? null,
@@ -100,8 +102,13 @@ function at(minutes: number): Date {
 
 describe('作品库 · 历史成品图列表', () => {
   before(async () => { await getApp(); await seedBaseline(); });
-  after(async () => { await closeApp(); });
-  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); await enableCreative(); });
+  after(async () => { await prisma.creativeDirectionSample.deleteMany(); await closeApp(); });
+  beforeEach(async () => {
+    await prisma.creativeDirectionSample.deleteMany();
+    await cleanBusiness();
+    await seedBaseline();
+    await enableCreative();
+  });
 
   test('未登录 → 401', async () => {
     const r = await api('GET', '/api/creative/posters');
@@ -231,6 +238,69 @@ describe('作品库 · 历史成品图列表', () => {
     // 详情页同口径：越权一律 404（不区分「不存在」与「不是你的」）。
     const detail = await api('GET', `/api/creative/jobs/${hers}`, { token: a.token });
     assert.equal(detail.status, 404);
+  });
+
+  test('内部任务与方向样例来源不得进入 C 端，也不能从详情或派生动作绕过', async () => {
+    const u = await posterUser();
+    const visible = await seedJob({ ...u, status: 'succeeded', withPoster: true, headline: '用户真实作品', createdAt: at(1) });
+    const internal = await seedJob({
+      ...u, status: 'succeeded', withPoster: true, headline: 'E2E 验收夹具', audience: 'internal', createdAt: at(2),
+    });
+    const legacySampleSource = await seedJob({
+      ...u, status: 'succeeded', withPoster: true, headline: '旧版方向样例源图', createdAt: at(3),
+    });
+    await prisma.creativeDirectionSample.create({
+      data: {
+        directionKey: 'graphic_bold_type', tier: 'standard', status: 'published',
+        sourceJobId: legacySampleSource, ossKey: 'test/direction-sample.png', mimeType: 'image/png',
+      },
+    });
+
+    const listed = await listPosters(u.token);
+    assert.deepEqual(listed.body.items.map((item) => item.jobId), [visible], '内部任务和旧样例来源必须都被过滤');
+
+    for (const jobId of [internal, legacySampleSource]) {
+      const detail = await api('GET', `/api/creative/jobs/${jobId}`, { token: u.token });
+      assert.equal(detail.status, 404, '内部来源详情不可达');
+      const asset = await prisma.creativeAsset.findFirstOrThrow({ where: { jobId }, select: { id: true } });
+      const file = await api('GET', `/api/creative/assets/${asset.id}/file`, { token: u.token });
+      assert.equal(file.status, 404, '内部来源资产也不可直取');
+    }
+
+    const revise = await api('POST', `/api/creative/jobs/${internal}/revise`, {
+      token: u.token,
+      body: { headline: '试图改字', idempotencyKey: `internal-revise-${Date.now()}` },
+    });
+    assert.equal(revise.status, 404, JSON.stringify(revise.body));
+    const regenerate = await api('POST', `/api/creative/jobs/${internal}/regenerate`, {
+      token: u.token,
+      body: { visualDirection: '试图重出', idempotencyKey: `internal-regen-${Date.now()}` },
+    });
+    assert.equal(regenerate.status, 404, JSON.stringify(regenerate.body));
+    const cancel = await api('POST', `/api/creative/jobs/${internal}/cancel`, { token: u.token });
+    assert.equal(cancel.status, 404, JSON.stringify(cancel.body));
+
+    const restoreSampleSource = await api('POST', `/api/admin/creative/jobs/${legacySampleSource}/audience`, {
+      body: { audience: 'user' },
+    });
+    assert.equal(restoreSampleSource.status, 409, '全局样例还在时不得把来源任务恢复进用户域');
+    assert.equal(restoreSampleSource.body.code, 'DIRECTION_SAMPLE_SOURCE_INTERNAL');
+  });
+
+  test('运营可把验收任务切为内部并恢复，C 端可见性随权威字段变化', async () => {
+    const u = await posterUser();
+    const jobId = await seedJob({ ...u, status: 'succeeded', withPoster: true, createdAt: at(1) });
+    assert.deepEqual((await listPosters(u.token)).body.items.map((item) => item.jobId), [jobId]);
+
+    const hidden = await api('POST', `/api/admin/creative/jobs/${jobId}/audience`, { body: { audience: 'internal' } });
+    assert.equal(hidden.status, 200, JSON.stringify(hidden.body));
+    assert.equal(hidden.body.audience, 'internal');
+    assert.deepEqual((await listPosters(u.token)).body.items, []);
+
+    const restored = await api('POST', `/api/admin/creative/jobs/${jobId}/audience`, { body: { audience: 'user' } });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.equal(restored.body.audience, 'user');
+    assert.deepEqual((await listPosters(u.token)).body.items.map((item) => item.jobId), [jobId]);
   });
 
   test('端到端：刚建的单立刻以「制作中」出现在作品库', async () => {

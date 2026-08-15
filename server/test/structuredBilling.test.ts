@@ -37,11 +37,17 @@ describe('P1-3 structured() 计费口径（真实调用发生但校验失败）'
     await seedBaseline();
     // 全局配成 openai 兼容端点（明文 key，isRealKey=true）→ liveProvider=openai。
     await __wipeAiV2();
-  await configurePurpose('chat', { label: '测试端点', provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
+    await configurePurpose('chat', { label: '测试端点', provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
   });
   after(async () => {
     delete process.env.AI_ALLOW_REAL_PROVIDER;
     globalThis.fetch = realFetch;
+    // 复位，避免污染后续测试：AI v2 四表不在 resetBusinessData 的清理清单里（它只删 aiSetting），
+    // 这里配的 openai 主端点会**跨进程**留在 junshi_test 里。后果不是「下一个用例读到脏配置」这么轻——
+    // effectiveProvider 不再是 mock → generationQuotaReserveTokens 从 2000 跳到 136000，
+    // 入门版 40 万额度只够 3 次并发预留，integration.test.ts 的 TC-L 并发冒烟（8 并发）必然 402。
+    // 全量 npm test 看不出来：glob 按字母序，aiV2Admin/aiProbe 会先 __wipeAiV2，而本文件排在 integration 之后。
+    await __wipeAiV2();
     await closeApp();
   });
   afterEach(() => { globalThis.fetch = realFetch; });

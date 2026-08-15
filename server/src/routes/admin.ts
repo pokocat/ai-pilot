@@ -74,6 +74,7 @@ import type {
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
+  AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
@@ -1238,6 +1239,12 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.creativeJob.count({ where: { refundedAt: { not: null } } }),
     ]);
     const userIds = [...new Set(rows.map((r) => r.userId))];
+    const sampleSources = rows.length
+      ? await prisma.creativeDirectionSample.findMany({
+        where: { sourceJobId: { in: rows.map((r) => r.id) } }, select: { sourceJobId: true },
+      })
+      : [];
+    const sampleSourceIds = new Set(sampleSources.map((row) => row.sourceJobId));
     const users = userIds.length
       ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
       : [];
@@ -1257,6 +1264,8 @@ export async function adminRoutes(app: FastifyInstance) {
         };
         return {
           id: j.id,
+          audience: j.audience === 'internal' ? 'internal' : 'user',
+          sampleSource: sampleSourceIds.has(j.id),
           // 脱敏：昵称 + 掩码手机号（与订单列表同口径，不出全量手机号）。
           userLabel: `${u?.name ?? '—'}${u?.phone ? ` · ${maskAuditPhone(u.phone) ?? ''}` : ''}`,
           agentKey: j.agentKey,
@@ -1303,6 +1312,38 @@ export async function adminRoutes(app: FastifyInstance) {
       },
     };
   });
+
+  // 运营验收 / E2E 任务只能在任务台排障，不得出现在手机号用户的作品库或详情页。
+  // 默认 user，只有超管能显式切 internal；恢复 user 同样留审计，避免“作品怎么没了”无从追溯。
+  app.post<{ Params: { id: string }; Body: AdminCreativeJobAudienceRequest }>(
+    '/admin/creative/jobs/:id/audience',
+    async (req, reply): Promise<AdminCreativeJobAudienceResult | void> => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const audience = req.body?.audience;
+      if (audience !== 'user' && audience !== 'internal') {
+        return reply.code(422).send({ error: 'audience 只能是 user 或 internal', code: 'AUDIENCE_INVALID' });
+      }
+      const existing = await prisma.creativeJob.findUnique({ where: { id: req.params.id }, select: { id: true, audience: true } });
+      if (!existing) return reply.code(404).send({ error: '任务不存在', code: 'NOT_FOUND' });
+      if (audience === 'user') {
+        const sampleSource = await prisma.creativeDirectionSample.findFirst({
+          where: { sourceJobId: existing.id }, select: { id: true },
+        });
+        if (sampleSource) {
+          return reply.code(409).send({
+            error: '该任务已作为方向样例来源，必须保持内部任务', code: 'DIRECTION_SAMPLE_SOURCE_INTERNAL',
+          });
+        }
+      }
+      await prisma.creativeJob.update({ where: { id: existing.id }, data: { audience } });
+      await recordAudit({
+        action: 'admin.creative.job.audience',
+        payload: { by: actorName(actor), jobId: existing.id, before: existing.audience, after: audience },
+      });
+      return { ok: true, jobId: existing.id, audience };
+    },
+  );
 
   // 重试失败任务：failed → pending + attempts 清零。**不重复扣费**，也**不动 chargedAt/refundedAt**。
   //

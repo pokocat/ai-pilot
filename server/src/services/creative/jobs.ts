@@ -39,6 +39,9 @@ import type {
 export { POSTER_SKILL_KEY } from './config.js';
 export const POSTER_AGENT_KEY = 'poster';
 export const POSTER_JOB_KIND = 'poster';
+export const CREATIVE_AUDIENCE_USER = 'user';
+export const CREATIVE_AUDIENCE_INTERNAL = 'internal';
+export type CreativeJobAudience = typeof CREATIVE_AUDIENCE_USER | typeof CREATIVE_AUDIENCE_INTERNAL;
 /**
  * CreativeJob.engine 的唯一取值。曾由 env CANVAS_DESIGN_ENGINE 决定，但全仓没有一处
  * `engine === ...` 分支、anthropic_skill 也没有实现 → 那个 env 只会让运维以为自己能切引擎。
@@ -86,7 +89,7 @@ export type PosterJobOperation = 'create' | 'revise' | 'regenerate';
 
 type JobRow = {
   id: string; tenantId: string; userId: string; sessionId: string | null; messageId: string | null;
-  agentKey: string; skillKey: string; kind: string; status: string; progress: string | null;
+  agentKey: string; skillKey: string; kind: string; audience: string; status: string; progress: string | null;
   parentJobId: string | null; engine: string; provider: string | null; providerTaskId: string | null;
   requestJson: unknown; resultJson: unknown; promptSnapshot: string | null; idempotencyKey: string;
   creditCost: number; chargedAt: Date | null; refundedAt: Date | null;
@@ -164,8 +167,15 @@ function toView(job: JobRow, assets: Parameters<typeof assetView>[0][]): Creativ
 
 /** 任务视图（越权一律 404）。 */
 export async function getJobView(jobId: string, userId: string): Promise<CreativeJobView> {
-  const job = await prisma.creativeJob.findFirst({ where: { id: jobId, userId } });
-  if (!job) throw new JobNotFoundError();
+  const [job, sampleSource] = await Promise.all([
+    prisma.creativeJob.findFirst({
+      where: { id: jobId, userId, audience: CREATIVE_AUDIENCE_USER },
+    }),
+    // 兼容 audience 字段上线前已经存在的方向样例来源：它们属于全局运营物料的制作过程，
+    // 即使老行仍是 user，也不能靠已知 jobId 从 C 端详情绕过作品库过滤。
+    prisma.creativeDirectionSample.findFirst({ where: { sourceJobId: jobId }, select: { id: true } }),
+  ]);
+  if (!job || sampleSource) throw new JobNotFoundError();
   const assets = await prisma.creativeAsset.findMany({
     where: { jobId: job.id },
     orderBy: { createdAt: 'asc' },
@@ -227,10 +237,20 @@ export async function listPosterJobs(
   const rawCursor = String(opts.cursor ?? '').trim();
   const cur = rawCursor ? decodeCursor(rawCursor) : null;
 
+  // 方向样例复制链上线前，来源任务还没有 audience 字段；按全局样例的 sourceJobId 反查并排除，
+  // 可让存量运营物料在加列前后都不混进用户作品库。新样例创建成功后还会把来源任务显式标 internal。
+  const sampleSources = await prisma.creativeDirectionSample.findMany({
+    select: { sourceJobId: true },
+    distinct: ['sourceJobId'],
+  });
+  const internalSourceJobIds = sampleSources.map((row) => row.sourceJobId).filter(Boolean);
+
   const rows = await prisma.creativeJob.findMany({
     where: {
       userId,
       kind: POSTER_JOB_KIND,
+      audience: CREATIVE_AUDIENCE_USER,
+      ...(internalSourceJobIds.length ? { id: { notIn: internalSourceJobIds } } : {}),
       AND: [
         {
           OR: [
@@ -566,8 +586,13 @@ export async function createPosterJob(
 /* ───────────────── revise / regenerate ───────────────── */
 
 async function loadOwnedJob(jobId: string, userId: string): Promise<JobRow> {
-  const job = await prisma.creativeJob.findFirst({ where: { id: jobId, userId } });
-  if (!job) throw new JobNotFoundError();
+  const [job, sampleSource] = await Promise.all([
+    prisma.creativeJob.findFirst({
+      where: { id: jobId, userId, audience: CREATIVE_AUDIENCE_USER },
+    }),
+    prisma.creativeDirectionSample.findFirst({ where: { sourceJobId: jobId }, select: { id: true } }),
+  ]);
+  if (!job || sampleSource) throw new JobNotFoundError();
   return job as JobRow;
 }
 

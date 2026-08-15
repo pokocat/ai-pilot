@@ -1022,7 +1022,12 @@ const MOCK_POSTER_PAGE_MAX = 50;
 const MOCK_POSTER_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAB2klEQVR42tXOW0vTcQCH8edVBBFUkoghggzzkJlhmeKBMRhmaYllBzWGMjxgJqZ4RpNhiWklw5KRNUYmZqiMxViZ5hFLLKSuvO4N9Ap+eiV/vvC5fx6O2E7I4WhilByOJUXL4XhqjBxOpp2Ww6n0ODnEZMTLITYzQQ5xl2xyiL+cKIeEnGQ52PJS5XCm4JwcUuzn5XDWcUEO6c6LcsgozJJDZlGOHLKu5cohuyTf5N9exFqmMXJL7SaWT5vGyC9zmFg+bRrDfstpYvm0aQzH7UITy6dNYzjvFcnhSmWxHK7evy6HElepHG7U3JRDmbvcJBLyH559ugeivPauyaFO79M9EHfqK+RQ0Vglh6omlxxczdVyqG5xy8HdWiuHuvZ6OTR0NsrhQXeTHB72Nsuhpf+RHNoG2uTQ7umQQ9dglxx6hnrk0DfcJ4eBkcdy8Dz3yOHJ2KAchrxP5fBsfFgOo69H5PDS90IO3jdjchh/65XDhP+VHHyBCTlMTvnk4J+elENg5p0cpmYDcpieey+Hjwsf5PApOCOH+dCsHILhOTmEIgtyCH8NyiHy7bMcFr+H5bC8+kUOK+uLcljfXJLD5taKHH5sr8lhe2dDDr9+b8lhd/enHP783ZHzHwStB5oWBI+zAAAAAElFTkSuQmCC';
 function loadCreativeJobs() {
   const rows = getList('creativeJobs');
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+  // 旧 mock 曾给每个「经营中」账号自动塞两张假海报。升级后不仅不再生成，也要从已有
+  // 本地 storage 中剔除，避免开发者切账号时继续把夹具误认成真实作品。
+  const clean = rows.filter((row) => !String(row && row.id || '').startsWith('mock-poster-seed-'));
+  if (clean.length !== rows.length) setList('creativeJobs', clean);
+  return clean;
 }
 function saveCreativeJobs(rows) { setList('creativeJobs', rows.slice(-30)); }
 function creativePhase(row) {
@@ -1129,26 +1134,10 @@ function creativePosterItem(row) {
     parentJobId: row.parentJobId || undefined,
   };
 }
-// 档案 · 海报作品种子：createdAt 拉到一两天前，creativePhase 直接判 succeeded，
-// 不用等本地那 3.2 秒的假进度条。两条都带 headline，锦囊作品流才有可读标题。
-function seedCreativeJobs() {
-  const day = 24 * 60 * 60 * 1000;
-  return [
-    { id: 'mock-poster-seed-1', createdAt: Date.now() - day * 2, terminalAt: Date.now() - day * 2 + 3200, idempotencyKey: 'seed:poster:store-gift', creditCost: MOCK_POSTER_PRICE, brief: { headline: '开学季到店礼 · 只做三天', templateKey: 'business_launch' } },
-    { id: 'mock-poster-seed-2', createdAt: Date.now() - day, terminalAt: Date.now() - day + 3200, idempotencyKey: 'seed:poster:old-customer', creditCost: MOCK_POSTER_PRICE, brief: { headline: '她第 3 次回来 · 老客见证', templateKey: 'editorial' } },
-  ];
-}
-function ensureCreativeJobs() {
-  const rows = loadCreativeJobs();
-  if (rows.length) return rows;
-  const seeded = seedCreativeJobs();
-  saveCreativeJobs(seeded);
-  return seeded;
-}
-/** 档案分叉点：creativePosters。空态回空且不落种子；经营中已有任务照读，没有才落两张已出图海报。 */
+/** mock 作品库也只展示当前 mock 账号亲手创建的任务；任何档案状态都不自动塞成品。 */
 function creativePosters(cursor, limit) {
   if (isEmptyProfile()) return Promise.resolve({ items: [] });
-  const all = ensureCreativeJobs().map(creativePosterItem).filter(Boolean).sort((a, b) => {
+  const all = loadCreativeJobs().map(creativePosterItem).filter(Boolean).sort((a, b) => {
     const time = Date.parse(b.createdAt) - Date.parse(a.createdAt);
     return time || (a.jobId < b.jobId ? 1 : -1);
   });

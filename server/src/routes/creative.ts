@@ -14,6 +14,7 @@ import { getCreativeConfig, enabledTemplateOptions, premiumTierAvailable } from 
 import { buildPosterBriefDraft } from '../services/creative/briefDraft.js';
 import { getDirectionSampleFile, publishedDirectionOptions } from '../services/creative/directionSamples.js';
 import {
+  CREATIVE_AUDIENCE_USER,
   createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView, listPosterJobs,
 } from '../services/creative/jobs.js';
 import { ingestSourceAsset } from '../services/creative/uploads.js';
@@ -206,9 +207,17 @@ export async function creativeRoutes(app: FastifyInstance) {
     // 越权一律 404（不回 403：403 会告诉探测者「这个 id 存在」）。
     const asset = await prisma.creativeAsset.findFirst({
       where: { id: req.params.id, userId: user.id },
-      select: { ossKey: true, mimeType: true },
+      select: { jobId: true, job: { select: { audience: true } }, ossKey: true, mimeType: true },
     });
     if (!asset?.ossKey) return reply.code(404).send({ error: '资产不存在', code: 'NOT_FOUND' });
+    if (asset.jobId) {
+      const sampleSource = await prisma.creativeDirectionSample.findFirst({
+        where: { sourceJobId: asset.jobId }, select: { id: true },
+      });
+      if (asset.job?.audience !== CREATIVE_AUDIENCE_USER || sampleSource) {
+        return reply.code(404).send({ error: '资产不存在', code: 'NOT_FOUND' });
+      }
+    }
     // fastify 5 的签名是 redirect(url, code)（4.x 的 (code, url) 已移除）。
     if (ossConfigured()) return reply.redirect(ossSignedUrl(asset.ossKey, 600), 302);
     const buf = await getCreativeObject(asset.ossKey);

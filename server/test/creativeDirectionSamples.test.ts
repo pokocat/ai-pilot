@@ -30,6 +30,7 @@ async function seedSucceededPoster(
       agentKey: 'poster',
       skillKey: 'canvas_design',
       kind: 'poster',
+      audience: 'internal',
       status: 'succeeded',
       requestJson: { brief: { tier, directionKey, headline: '真实成品样例' } },
       resultJson: resultJson ?? { aiMode: tier === 'premium' ? 'photo' : 'graphic', directionKey, degraded: false },
@@ -86,6 +87,17 @@ describe('海报创作方向真实样例', () => {
     // id 必须是 schema 的 cuid，不是手搓的时间戳+短随机（那种能枚举，而公开取图路由只靠 id 不可猜）。
     assert.ok(!String(created.body.id).startsWith('pds_'), 'id 不得再手搓');
     assert.match(created.body.id, /^[a-z0-9]{20,}$/);
+    const sourceJob = await prisma.creativeJob.findUniqueOrThrow({ where: { id: source.jobId }, select: { audience: true } });
+    assert.equal(sourceJob.audience, 'internal', '方向样例只允许使用预先归类的内部任务');
+    const adminJobs = await api('GET', '/api/admin/creative/jobs');
+    const adminSource = adminJobs.body.items.find((item: { id: string }) => item.id === source.jobId);
+    assert.equal(adminSource?.audience, 'internal');
+    assert.equal(adminSource?.sampleSource, true, '任务台必须明确标出方向样例来源，且不提供恢复用户作品的误导动作');
+
+    const sourceDetail = await api('GET', `/api/creative/jobs/${source.jobId}`, { token: source.token });
+    assert.equal(sourceDetail.status, 404, '方向样例来源不得再从 C 端详情访问');
+    const sourceGallery = await api('GET', '/api/creative/posters', { token: source.token });
+    assert.equal(sourceGallery.body.items.some((item: { jobId: string }) => item.jobId === source.jobId), false);
 
     const draftStatus = await api('GET', '/api/creative/status', { token: source.token });
     assert.equal(draftStatus.status, 200);
@@ -123,6 +135,20 @@ describe('海报创作方向真实样例', () => {
     assert.equal(await prisma.creativeDirectionSample.count(), 0);
   });
 
+  test('真实用户作品未先归为内部任务时拒绝拿去做公开样例', async () => {
+    const source = await seedSucceededPoster('graphic_symbol');
+    await prisma.creativeJob.update({ where: { id: source.jobId }, data: { audience: 'user' } });
+
+    const created = await api('POST', '/api/admin/creative/direction-samples', {
+      body: { directionKey: 'graphic_symbol', sourceJobId: source.jobId },
+    });
+    assert.equal(created.status, 422, JSON.stringify(created.body));
+    assert.equal(created.body.code, 'SOURCE_JOB_NOT_INTERNAL');
+    const sourceJob = await prisma.creativeJob.findUniqueOrThrow({ where: { id: source.jobId }, select: { audience: true } });
+    assert.equal(sourceJob.audience, 'user', '拒绝创建时不得顺手隐藏真实用户作品');
+    assert.equal(await prisma.creativeDirectionSample.count(), 0);
+  });
+
   test('来源 brief 写 premium、实际却降级 graphic 时拒绝成为高级样例', async () => {
     const source = await seedSucceededPoster('photo_product', 'premium', undefined, {
       aiMode: 'graphic', directionKey: 'photo_product', degraded: true, visualAssetId: null,
@@ -145,6 +171,8 @@ describe('海报创作方向真实样例', () => {
       /simulated upload failure/,
     );
     assert.equal(await prisma.creativeDirectionSample.count(), 0);
+    const sourceJob = await prisma.creativeJob.findUniqueOrThrow({ where: { id: source.jobId }, select: { audience: true } });
+    assert.equal(sourceJob.audience, 'internal', '复制失败不应篡改来源任务既有归类');
   });
 
   test('发布前校验 ossKey、对象存在性与图片可解码性，失败保持 draft', async () => {

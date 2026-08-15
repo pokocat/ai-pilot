@@ -13,7 +13,7 @@ import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import { ingestUploadedFile, getKnowledgeDetail } from '../src/services/knowledge.js';
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
-import { createEndpoint, deleteEndpoint } from '../src/services/aiV2Admin.js';
+import { createEndpoint, deleteEndpoint, __wipeAiV2 } from '../src/services/aiV2Admin.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
 import { loadConversationHistory, loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
@@ -37,10 +37,15 @@ const setQuotaAnchored = async (tenantId: string, token: string, quota: number) 
 
 before(async () => {
   process.env.ADMIN_TOKEN = 'test-admin-token';
+  // 本文件的生成用例约定全程走 mock。AI v2 四表是运营配置，不属于 cleanBusiness() 的清理范围；
+  // 若其它测试进程曾留下真实 provider 路由，动态额度预留会从 2k 跳到 13.6w，TC-L 的第 4 个并发
+  // 请求起就会被 402 拦截。套件入口显式复位，确保单跑也不依赖测试库历史状态。
+  await __wipeAiV2();
   await cleanBusiness();
   await seedBaseline();
 });
 after(async () => {
+  await __wipeAiV2();
   await closeApp();
 });
 
@@ -187,6 +192,7 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
       assert.equal(r.body.user.phone, phone);
       const again = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-456' } });
       assert.equal(again.body.token, r.body.token, '同号应复用同一账号');
+      assert.equal(again.body.phoneBinding.status, 'matched');
     } finally {
       globalThis.fetch = oldFetch;
       delete process.env.WECHAT_MINI_APPID;
@@ -241,8 +247,10 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
     process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
     _resetTokenCache();
     const fragOpenid = 'openid-frag-' + Math.random().toString(36).slice(2);
+    const otherOpenid = 'openid-other-' + Math.random().toString(36).slice(2);
     const conflictPhone = uniquePhone();
     const realPhone = uniquePhone();
+    const nextPhone = uniquePhone();
     const phoneByCode: Record<string, string> = {};
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
@@ -250,7 +258,7 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
         return new Response(JSON.stringify({ access_token: 'tok-frag', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.includes('jscode2session')) {
-        return new Response(JSON.stringify({ openid: fragOpenid }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ openid: url.includes('wx-code-other') ? otherOpenid : fragOpenid }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.includes('getuserphonenumber')) {
         const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -287,8 +295,32 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
       assert.equal(onetap.body.isNew, false);
       assert.equal(onetap.body.token, tokenA, '同一微信身份的本机号一键登录应复用微信一键登录建的账号，而非另建新号');
       assert.equal(onetap.body.user.phone, realPhone);
+      assert.deepEqual(onetap.body.phoneBinding, {
+        status: 'placeholder_upgraded',
+        accountPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
+        observedPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
+      });
 
-      // 5) 之后再用「微信一键登录」复登，应仍是同一账号且能看到真实手机号（已从占位号更新）。
+      // 5) 同一 openid 已有真实号后，本次授权另一个未占用号码：仍登录 A，但不得静默换绑。
+      phoneByCode['pc-mismatch'] = nextPhone;
+      const mismatch = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-mismatch', loginCode: 'wx-code-frag-again' } });
+      assert.equal(mismatch.status, 200);
+      assert.equal(mismatch.body.token, tokenA);
+      assert.equal(mismatch.body.user.phone, realPhone, '响应必须展示账号既有绑定号，不得冒充本次授权号');
+      assert.deepEqual(mismatch.body.phoneBinding, {
+        status: 'mismatch',
+        accountPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
+        observedPhoneMasked: `${nextPhone.slice(0, 3)}****${nextPhone.slice(-4)}`,
+      });
+      assert.equal((await prisma.user.findUnique({ where: { id: tokenA } }))?.phone, realPhone, '登录动作不得改写真实绑定号');
+
+      // 6) 另一微信身份拿同一个手机号来登录：手机号能定位 A，但微信凭证不能静默忽略，明确报身份冲突。
+      phoneByCode['pc-other-wechat'] = realPhone;
+      const identityConflict = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-other-wechat', loginCode: 'wx-code-other' } });
+      assert.equal(identityConflict.status, 409);
+      assert.equal(identityConflict.body.code, 'WECHAT_ACCOUNT_CONFLICT');
+
+      // 7) 之后再用「微信一键登录」复登，应仍是同一账号且能看到真实手机号（已从占位号更新）。
       const wxAgain = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-frag-2' } });
       assert.equal(wxAgain.body.token, tokenA);
       assert.equal(wxAgain.body.user.phone, realPhone);
@@ -304,7 +336,8 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
 // ───────────────────────── TC-G 绑定手机号（登录后可选） / 头像 ─────────────────────────
 describe('TC-G 绑定手机号 / 头像', () => {
   test('G1 已登录用户绑定手机号：scene=bind 验证码通过 → 写入并可在 /me 看到', async () => {
-    const token = await login(uniquePhone());
+    const oldPhone = uniquePhone();
+    const token = await login(oldPhone);
     const newPhone = uniquePhone();
     const sent = await api('POST', '/api/auth/sms/send', { body: { phone: newPhone, scene: 'bind' } });
     assert.equal(sent.status, 200);
@@ -313,6 +346,13 @@ describe('TC-G 绑定手机号 / 头像', () => {
     assert.equal(r.body.phone, newPhone);
     const me = await api('GET', '/api/me', { token });
     assert.equal(me.body.user.phone, newPhone);
+    const attempt = await prisma.auditLog.findFirst({
+      where: { action: 'auth.bind_phone.attempt', userId: token },
+      orderBy: { createdAt: 'desc' },
+    });
+    const payload = attempt?.payloadJson as any;
+    assert.equal(payload?.previousPhoneMasked, `${oldPhone.slice(0, 3)}****${oldPhone.slice(-4)}`);
+    assert.equal(payload?.phoneMasked, `${newPhone.slice(0, 3)}****${newPhone.slice(-4)}`);
   });
 
   test('G2 bind 场景与 login 场景的验证码相互独立（错码 → 400）', async () => {
@@ -983,7 +1023,8 @@ describe('TC-L 并发冒烟', () => {
     const results = await Promise.all(
       Array.from({ length: 8 }, (_, i) => api('POST', '/api/generate-sync', { token: t, body: { text: `并发问题 ${i}`, agentKey: 'general' } })),
     );
-    assert.ok(results.every((r) => r.status === 200), '全部应成功');
+    const failures = results.flatMap((r, i) => r.status === 200 ? [] : [{ i, status: r.status, code: r.body?.code, error: r.body?.error }]);
+    assert.deepEqual(failures, [], `全部应成功；失败响应=${JSON.stringify(failures)}`);
     const ids = new Set(results.map((r) => r.body.sessionId));
     assert.equal(ids.size, 8, '8 次应产生 8 个独立会话，无串号');
   });

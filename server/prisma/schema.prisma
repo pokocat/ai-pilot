@@ -2029,6 +2029,9 @@ model CreativeJob {
   agentKey       String
   skillKey       String // 'canvas_design'
   kind           String // 'poster'（本表通用，二期扩封面/长图时再加取值）
+  /// user = 用户真实作品；internal = 方向样例源图 / E2E / 运营验收，只能在运营任务台查看。
+  /// C 端作品库、详情、改字、重出与取消均必须只认 user，严禁把内部夹具混进真实账号。
+  audience       String    @default("user")
   status         String    @default("pending") // pending | running | succeeded | failed | cancelled
   progress       String? // 用户可读阶段：philosophy | visual | render | upload
   parentJobId    String? // revise/regenerate 版本链：新任务指向来源任务，成功任务的资产永不被覆盖
@@ -2060,6 +2063,7 @@ model CreativeJob {
 
   @@unique([userId, idempotencyKey]) // 幂等键按用户隔离：客户端生成的 key 不做全局唯一，避免跨用户撞键/探测
   @@index([userId, createdAt])
+  @@index([userId, audience, createdAt])
   @@index([status, createdAt]) // worker 抢占 pending + sweep 捞超时 running
   @@index([tenantId])
   @@map("creative_job")

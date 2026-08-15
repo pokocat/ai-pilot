@@ -600,6 +600,8 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(nativeLoginWxml, /完成并开始入局/);
   assert.match(nativeLogin, /presentAfterAuth\(result\)[\s\S]*?if \(!name\)[\s\S]*?stage: 'complete'/);
   assert.match(nativeLogin, /submitWechatPhone\(event\)[\s\S]*?wx\.login[\s\S]*?api\.wechatPhoneLogin\(phoneCode, loginResult\.code\)/);
+  assert.match(nativeLogin, /phoneBinding[\s\S]*?status !== 'mismatch'[\s\S]*?手机号未自动更换/, '同一微信身份授权了不同手机号时必须非阻断说明，不能静默换绑');
+  assert.match(nativeLogin, /presentAfterAuth\(result\);[\s\S]*?presentPhoneBindingNotice\(result\);/, '身份不一致提醒必须发生在登录成功之后');
   assert.match(nativeLogin, /finishAuth\(onboarded\)[\s\S]*?packages\/main\/onboarding\/index/);
   assert.match(nativeMock, /Object\.assign\(\{ id:[^}]*name: '', company: ''/, 'mock 新账号不得用兜底称呼跳过注册补全');
   assert.match(nativeMock, /function wechatPhoneLogin\(phoneCode\)/);
@@ -1477,11 +1479,11 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     values.set('junshi.userId', 'mock-truth-b');
     assert.equal((await mock.dataSources()).sources.find((item) => item.key === 'crm')?.status, 'unbound');
     assert.equal((await mock.modules()).modules.find((item) => item.key === 'finance')?.enabled, false);
-    // 换账号看到的不是 A 号写下的东西，而是「经营中」档案给每个账号各落一份的种子
-    // （services/mockProfile.js：6 天连胜 + 2 张已出图海报）；A 号自己造的任务不会串过来。
+    // 换账号后经营数据仍有独立夹具，但作品库必须是严格空态：不再给任何账号自动塞假海报，
+    // A 号自己造的任务也不能串过来。
     assert.equal((await mock.reviews()).streak, 6);
     const seededPosters = await mock.creativePosters('', 20);
-    assert.equal(seededPosters.items.length, 2);
+    assert.equal(seededPosters.items.length, 0);
     assert.equal(seededPosters.items.some((item) => item.jobId === created.jobId), false, 'A 号的海报任务不得串到 B 号');
   } finally {
     Date.now = realNow;

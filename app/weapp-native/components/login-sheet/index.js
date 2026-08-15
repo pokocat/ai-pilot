@@ -92,6 +92,19 @@ Component({
       }
       this.finishAuth(result && result.onboarded);
     },
+    presentPhoneBindingNotice(result) {
+      const binding = result && result.phoneBinding;
+      if (!binding || binding.status !== 'mismatch') return;
+      const accountPhone = String(binding.accountPhoneMasked || '原绑定号');
+      const observedPhone = String(binding.observedPhoneMasked || '本次授权号');
+      // 登录已经成功，提醒只解释“为什么还是原账号”，不把用户挡在登录门外。
+      setTimeout(() => wx.showModal({
+        title: '手机号未自动更换',
+        content: `已进入 ${accountPhone} 对应的原账号。本次授权的 ${observedPhone} 未自动绑定；如需更换，请到「主公－设置」验证新号码。`,
+        showCancel: false,
+        confirmText: '知道了',
+      }), 120);
+    },
     async submitWechatPhone(event) {
       if (this.data.busy || !this.ensureAgreed()) return;
       const phoneCode = event && event.detail && event.detail.code;
@@ -110,6 +123,7 @@ Component({
         const result = await api.wechatPhoneLogin(phoneCode, loginResult.code);
         await store.afterLogin(result);
         this.presentAfterAuth(result);
+        this.presentPhoneBindingNotice(result);
       } catch (error) {
         const code = error && error.data && error.data.code;
         wx.showToast({

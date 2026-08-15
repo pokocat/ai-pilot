@@ -163,6 +163,11 @@ export async function createDirectionSampleFromJob(input: {
   if (!isPosterDirectionKey(input.directionKey)) throw new DirectionSampleError('未知创作方向');
   const job = await prisma.creativeJob.findUnique({ where: { id: input.sourceJobId } });
   if (!job || job.status !== 'succeeded') throw new DirectionSampleError('只能从已成功的海报任务生成样例', 'SOURCE_JOB_INVALID');
+  // 方向样例是公开运营物料，只允许从已经显式归类的内部任务复制。
+  // 不能在这里自动改 audience：否则运营误填真实客户任务 ID，会让客户自己的作品突然消失。
+  if (job.audience !== 'internal') {
+    throw new DirectionSampleError('请先在任务台把来源任务设为内部任务', 'SOURCE_JOB_NOT_INTERNAL');
+  }
   const request = job.requestJson && typeof job.requestJson === 'object' && !Array.isArray(job.requestJson)
     ? job.requestJson as Record<string, unknown> : {};
   const brief = request.brief && typeof request.brief === 'object' && !Array.isArray(request.brief)
