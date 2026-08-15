@@ -1,0 +1,83 @@
+<view class="vd vd-voices {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">我的声音</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="vc-body">
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
+
+      <!-- 读失败：明说是我们没读到，并给重试。不许伪装成「你还没有声音」。 -->
+      <view wx:elif="{{loadFailed}}" class="vd-empty">
+        <text class="t">没能读到你的声音</text>
+        <text class="s">这是加载失败，不是你没有录过。已有的声音和训练进度都还在，重试一下就好。</text>
+        <view class="vd-btn vc-empty-btn" bindtap="retry">重新加载</view>
+      </view>
+
+      <view wx:elif="{{!loggedIn}}" class="vd-empty">
+        <text class="t">登录后查看你的声音</text>
+        <text class="s">声音训练完成后会一直留在这里，随时可以复用到新的数字分身上。</text>
+        <view class="vd-btn vc-empty-btn" bindtap="startVoice">去录一段</view>
+      </view>
+
+      <view wx:elif="{{!voices.length}}" class="vd-empty">
+        <text class="t">还没有专属声音</text>
+        <text class="s">录一段 8~15 秒的清晰说话就能训练。训好的声音可以给多个数字分身复用，不用重复录。</text>
+        <view class="vd-btn vc-empty-btn" bindtap="startVoice">录一段声音</view>
+      </view>
+
+      <block wx:else>
+        <view class="vc-list-head">
+          <view>
+            <text class="vc-list-kicker">你的音色库</text>
+            <text class="vc-list-title">{{voices.length}} 条声音</text>
+          </view>
+          <view class="vc-add" bindtap="startVoice">+ 新建</view>
+        </view>
+
+        <view wx:for="{{voices}}" wx:key="id" class="vd-card vc-item">
+          <view class="vc-item-head">
+            <view class="vc-wave">
+              <view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:for-item="bar" wx:key="*this" style="height:{{bar}}px"></view>
+            </view>
+            <view class="vc-copy">
+              <text class="vc-name">{{item.name}}</text>
+              <view class="vc-meta">
+                <text class="vc-source">{{item.sourceText}}</text>
+                <text class="vc-status {{item.status}}">{{item.statusText}}</text>
+              </view>
+            </view>
+          </view>
+
+          <text class="vc-desc">{{item.sourceDesc}}</text>
+
+          <view wx:if="{{item.training}}" class="vc-progress">
+            <view class="vc-progress-fill" style="width:{{item.progress}}%"></view>
+          </view>
+          <text wx:if="{{item.training}}" class="vc-hint">正在云端训练，完成后这里会自动更新。可以先去做别的。</text>
+          <text wx:elif="{{item.completedText}}" class="vc-completed">{{item.completedText}}</text>
+          <text wx:elif="{{item.failed}}" class="vc-hint failed">这次训练没成功，重新录一段就行，失败不扣钻石。</text>
+
+          <view class="vc-actions">
+            <view class="vc-act {{item.training ? 'disabled' : ''}}" data-id="{{item.id}}" bindtap="retrain">{{item.actionText}}</view>
+          </view>
+        </view>
+
+        <view class="vc-rows">
+          <view class="vc-row" bindtap="openAvatars"><text class="vr-t">我的数字分身</text><native-icon class="vr-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+        </view>
+
+        <text class="vc-note">请只使用本人或已获合法使用权的声音素材。声音可随时重录覆盖，重录后新的出片会使用新音色。</text>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

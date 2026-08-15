@@ -7,7 +7,7 @@ import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyCloneSettlements, cloneChargeItems, cloneChargeTotal, refundCloneHold,
-  reserveCloneCredits, resolveCloneSettlements, attachCloneTargets,
+  refundStalledCloneHolds, reserveCloneCredits, resolveCloneSettlements, attachCloneTargets,
 } from '../src/services/video/cloneCredits.js';
 import type { ClonePricing } from '../src/services/video/pricing.js';
 import { getBalance } from '../src/services/credits.js';
@@ -201,4 +201,70 @@ test('免费档（单价 0）照样建 hold 留审计，但不产生钻石流水
     await prisma.creditLedger.count({ where: { userId, reason: { contains: '快出片' } } }), 0,
     '0 元动作不该在用户账单里留一条「扣 0 钻石」的噪音',
   );
+});
+
+/* ── 4. 卡死兜底：退钱之前先核实，别把已经出货的训练退掉 ──────────────────────
+ *
+ * 2026-08-15 的事故：一条独立声音上游 16:16 就训好了，但状态刷不回来，六小时兜底照退
+ * 200 钻 —— 货出了、钱退了。下面这组把新规则钉住：到点只是「开始核实」，不是「到点就退」。
+ */
+
+/** 造一笔已提交、且已经卡了 age 毫秒的在途 hold。 */
+async function stalledHold(balance: number, ageMs: number, targetId = 'VC-3d19e730') {
+  const { tenantId, userId } = await userWithBalance(balance);
+  const items = cloneChargeItems({ kind: 'voice' }, PRICING);
+  const { holds } = await reserveCloneCredits({ tenantId, userId, clientRequestId: `req-${targetId}`, items });
+  const [attached] = await attachCloneTargets(holds, { voiceId: targetId });
+  // attach 会把 updatedAt 刷成现在，所以必须在它之后再把时间拨老。
+  await prisma.videoCloneHold.update({ where: { id: attached.id }, data: { updatedAt: new Date(Date.now() - ageMs) } });
+  return { userId, holdId: attached.id };
+}
+
+const HOUR = 3600_000;
+
+test('上游说「已经训好了」→ 结算，一分不退（本次事故的正例）', async () => {
+  const { userId, holdId } = await stalledHold(1000, 7 * HOUR);
+  assert.equal(await getBalance(userId), 800);
+
+  const result = await refundStalledCloneHolds(6 * HOUR, async () => 'ready');
+  assert.deepEqual(result, { settled: 1, refunded: 0 });
+  assert.equal(await getBalance(userId), 800, '声音已经出货，兜底绝不能把钱退回去');
+  assert.equal((await prisma.videoCloneHold.findUnique({ where: { id: holdId } }))?.status, 'settled');
+});
+
+test('上游说「训练失败」→ 照退，退款能力没有被削弱', async () => {
+  const { userId, holdId } = await stalledHold(1000, 7 * HOUR);
+  const result = await refundStalledCloneHolds(6 * HOUR, async () => 'failed');
+  assert.deepEqual(result, { settled: 0, refunded: 1 });
+  assert.equal(await getBalance(userId), 1000);
+  assert.equal((await prisma.videoCloneHold.findUnique({ where: { id: holdId } }))?.lastTrainStatus, 'failed');
+});
+
+test('上游问不出来 → 这一轮不动，留给下一次 sweep 再问', async () => {
+  const { userId, holdId } = await stalledHold(1000, 7 * HOUR);
+  const result = await refundStalledCloneHolds(6 * HOUR, async () => null);
+  assert.deepEqual(result, { settled: 0, refunded: 0 });
+  assert.equal(await getBalance(userId), 800, '上游查询超时不是「训练失败」，不能据此退钱');
+  assert.equal((await prisma.videoCloneHold.findUnique({ where: { id: holdId } }))?.status, 'submitted');
+});
+
+test('上游说还在训 → 也先不动：6 小时只是开始核实，不是判死', async () => {
+  const { userId } = await stalledHold(1000, 7 * HOUR);
+  const result = await refundStalledCloneHolds(6 * HOUR, async () => 'training');
+  assert.deepEqual(result, { settled: 0, refunded: 0 });
+  assert.equal(await getBalance(userId), 800);
+});
+
+test('一直问不出结果 → 熬到硬止损照样退，钻石不会被无限期占住', async () => {
+  const { userId } = await stalledHold(1000, 30 * HOUR);
+  const result = await refundStalledCloneHolds(6 * HOUR, async () => null, 24 * HOUR);
+  assert.deepEqual(result, { settled: 0, refunded: 1 });
+  assert.equal(await getBalance(userId), 1000, '无限期占着用户的钱，和扣了钱不给东西没区别');
+});
+
+test('不传 probe 时保持旧的「到点就退」，裸调这个函数依然安全', async () => {
+  const { userId } = await stalledHold(1000, 7 * HOUR);
+  const result = await refundStalledCloneHolds(6 * HOUR);
+  assert.deepEqual(result, { settled: 0, refunded: 1 });
+  assert.equal(await getBalance(userId), 1000);
 });

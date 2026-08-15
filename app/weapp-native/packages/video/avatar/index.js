@@ -114,6 +114,8 @@ Page({
     host.go('clone/index');
   },
 
+  openVoices() { host.go('voices/index'); },
+
   openCredits() { host.goHost('/packages/work/credits/index'); },
 
   openConsentLog() { this.openLog('授权记录', api.consentLogs); },

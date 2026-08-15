@@ -8,7 +8,7 @@ import {
 import {
   applyCloneSettlements, assertCloneAffordable, attachCloneTargets, cloneChargeItems, cloneChargeTotal,
   pendingCloneHolds, refundCloneHold, refundStaleUnsubmittedCloneHolds, refundStalledCloneHolds,
-  reserveCloneCredits, resolveCloneSettlements,
+  reserveCloneCredits, resolveCloneSettlements, type CloneStatusProbe,
 } from '../services/video/cloneCredits.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
@@ -182,13 +182,35 @@ async function settleCloneHolds(
   ));
 }
 
+/**
+ * 兜底退款前，直接问上游这个目标现在是什么状态。
+ *
+ * 卡死兜底以前是「超时就退」，而独立声音训完后状态刷不回来（上游只在形象视图里刷新），
+ * 于是「已经出货」的声音会被当成超时退掉。退钱这种不可逆动作，能问就不许猜。
+ * 问不出来（上游超时/报错）一律返回 null —— 让兜底继续等下一轮，而不是当成失败退掉。
+ */
+const stalledCloneProbe: CloneStatusProbe = async (hold) => {
+  const targetId = String(hold.targetId ?? '').trim();
+  if (!targetId || !validId(targetId)) return null;
+  const identity: Identity = { userId: hold.userId, tenantId: hold.tenantId };
+  try {
+    if (hold.targetKind === 'voice') {
+      const view = await aidramaJson<ClipVoiceView>(`/api/me/clip/voices/${enc(targetId)}`, identity, { timeoutCapMs: 10_000 });
+      return view?.status ?? null;
+    }
+    const view = await aidramaJson<ClipAvatarView>(`/api/me/clip/avatars/${enc(targetId)}`, identity, { timeoutCapMs: 10_000 });
+    return view?.imageStatus ?? null;
+  } catch { return null; }
+};
+
 export async function videoRoutes(app: FastifyInstance) {
   // 扣费后尚未拿到上游 jobId 的崩溃窗口有界自动退款。
   const sweep = () => {
     void refundStaleUnsubmittedVideoHolds().catch(() => {});
     void refundStaleUnsubmittedCloneHolds().catch(() => {});
     // 上游可能永远不给终态；不设这道闸，用户的钻石会被一笔不会结算的 hold 无限期占住。
-    void refundStalledCloneHolds().catch(() => {});
+    // 带上 probe：到点先核实再决定退还是结，别把已经出货的训练退成「超时失败」。
+    void refundStalledCloneHolds(undefined, stalledCloneProbe).catch(() => {});
   };
   sweep();
   const sweepTimer = setInterval(sweep, 5 * 60_000);
@@ -514,6 +536,16 @@ export async function videoRoutes(app: FastifyInstance) {
       await settleCloneHolds(user.id, { voices: views });
       return views;
     } catch (e) { return sendErr(reply, e, 502); }
+  });
+  // 单条声音。声音训练页轮询这条 —— 只训声音不建形象时，形象接口根本没有这条记录可轮。
+  app.get<{ Params: { id: string } }>('/video/voices/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const view = await aidramaJson<ClipVoiceView>(`/api/me/clip/voices/${enc(req.params.id)}`, identityOf(user));
+      await settleCloneHolds(user.id, { voices: view ? [view] : [] });
+      return view;
+    } catch (e) { return sendErr(reply, e, 404); }
   });
   // 克隆定价：端上在克隆入口明示要扣多少钻石。价格由运营在后台配（FeatureFlag
   // `video-clone-pricing`），代码只给保守兜底 —— 对外定价数据不进代码常量。

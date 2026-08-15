@@ -99,6 +99,11 @@ const api = {
   avatars: () => (useMock() ? mock.avatars() : call('/avatars')),
   avatarById: (id) => (useMock() ? mock.avatars().then((rows) => rows.find((item) => item.id === id) || null) : call(`/avatars/${q(id)}`)),
   voices: () => (useMock() ? mock.voices() : call('/voices')),
+  /**
+   * 单条声音。声音训练页靠它轮询 —— 只训声音不建形象时，形象接口里根本没有这条记录，
+   * 拿形象轮声音会永远停在「训练中」（2026-08-15 事故即此）。
+   */
+  voiceById: (id) => (useMock() ? mock.voiceById(id) : call(`/voices/${q(id)}`)),
   renameVoice: (id, name) => (useMock()
     ? Promise.resolve({ id, name })
     : call(`/voices/${q(id)}`, { method: 'PATCH', data: { name } })),
