@@ -38,6 +38,11 @@
 }
 .pj-img { width: 100%; height: 420px; }
 
+/* 成品图下面的事实行（本次风格 / 已预留贴码位）。是说明不是操作：不做按钮相，
+   也不给「怎么贴」的教程链接——用户拿到图自己会贴，这里只负责说清图里留了位置。 */
+.pj-meta { margin-top: 10px; }
+.pj-meta-l { display: block; margin-top: 4px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+
 .pj-acts { display: flex; align-items: center; gap: 9px; margin-top: 12px; }
 .pj-act {
   flex: 1; height: 46px; border-radius: 13px;

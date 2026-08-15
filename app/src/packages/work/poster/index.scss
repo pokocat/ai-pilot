@@ -6,7 +6,27 @@
 }
 .ps-pad { padding: 0 18px; }
 
-.ps-loading { padding: 60px 0; text-align: center; color: var(--ink-3); font-size: 14px; }
+/* 取需求单骨架：这一步服务端要用模型把整段对话读成需求单，几秒起步。
+   转圈 + 一句「在等什么」 + 表单形状的骨架，别让人对着一行灰字猜页面死没死。 */
+.ps-loading { padding: 56px 4px 0; text-align: center; color: var(--ink-3); font-size: 14px; }
+.ps-spin {
+  width: 26px; height: 26px; margin: 0 auto; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: ps-rot .9s linear infinite;
+}
+@keyframes ps-rot { to { transform: rotate(360deg); } }
+.ps-loading-t { display: block; margin-top: 16px; font-size: 18px; font-weight: 600; color: var(--ink); }
+.ps-loading-d { display: block; margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+.ps-sk-card {
+  height: 92px; margin-top: 26px; border-radius: 10px;
+  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
+}
+.ps-sk-line {
+  height: 12px; margin-top: 12px; border-radius: 6px;
+  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
+}
+.ps-sk-line.short { width: 56%; margin-left: auto; margin-right: auto; }
+@keyframes ps-sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
 .ps-empty { padding: 70px 8px; text-align: center; }
 .ps-empty-t { display: block; font-size: 20px; font-weight: 600; color: var(--ink); }
@@ -28,6 +48,55 @@
   display: block; margin: 26px 0 4px;
   font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink);
 }
+
+/* 设计说明卡：本页主视图。用左侧一道重点色竖线而不是整块底色 ——
+   底色一铺就会跟下面的档位卡抢，而这块要的是「先读我」，不是「我最花哨」。 */
+.ps-note-card {
+  margin: 12px 0 4px; padding: 12px 14px;
+  border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0;
+  background: var(--surface-2);
+}
+.ps-note-k { display: block; font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
+.ps-note-b { display: block; margin-top: 6px; font-size: 14px; line-height: 1.7; color: var(--ink); }
+
+/* ── 分组（2026-08-15 重排）──
+   每块 = 标题 + 一句辅助说明（可选右侧动词入口）。入口用动词（「编辑」），不用疑问句：
+   「这些细节要改吗」那种问法会让人以为不点开就漏了什么，而绝大多数人本来就不需要点开。 */
+.ps-group { margin-top: 26px; }
+.ps-group-h {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.ps-group-hl { flex: 1; min-width: 0; }
+.ps-group-t {
+  display: block; font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink);
+}
+.ps-group-d { display: block; margin-top: 4px; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.ps-group-act { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 2px 0 2px 8px; }
+.ps-group-act-t { font-size: 13.5px; font-weight: 600; color: var(--accent); }
+
+/* 「编辑内容」收起态：三行摘要（主标题 / 卖点 / 行动号召），一眼扫完就能决定要不要点「编辑」。 */
+.ps-sum { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.ps-sum-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 13px; border-top: 1px solid var(--line);
+}
+.ps-sum-row:first-child { border-top: 0; }
+.ps-sum-k { flex: 0 0 auto; width: 60px; font-size: 12.5px; color: var(--ink-3); }
+.ps-sum-v { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+.ps-sum-v.empty { color: var(--ink-3); }
+
+/* 展开态里的小节标题：比分组标题轻一级，别跟分组抢层级。 */
+.ps-sub {
+  display: block; margin: 18px 0 2px;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .06em; color: var(--ink-3);
+}
+.ps-edit { padding-top: 2px; }
+
+/* 版式密度分组标签（留白 / 均衡 / 信息量）。组由 status 下发的 density 驱动，不下发就不分组。 */
+.ps-tpl-group { margin-top: 12px; }
+.ps-tpl-group:first-child { margin-top: 0; }
+.ps-tpl-gk { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 
 .ps-field { margin-top: 14px; }
 .ps-flabel { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
@@ -119,6 +188,9 @@
   height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   border: 1px dashed var(--line); border-radius: 12px; background: var(--surface-2);
 }
+/* 主视觉大片下的人像槽：**置灰而不是消失**。消失了用户只会以为「这功能没了」，
+   置灰再配一次点击解释，才说得清「不是没有，是这一档用不上」。 */
+.ps-slot-add.off { opacity: .45; }
 .ps-slot-t { font-size: 12px; color: var(--ink-3); }
 .ps-thumb-wrap { position: relative; height: 88px; border-radius: 12px; overflow: hidden; background: var(--surface-2); }
 .ps-thumb { width: 100%; height: 88px; }
@@ -127,7 +199,10 @@
   width: 20px; height: 20px; line-height: 20px; text-align: center;
   border-radius: 999px; background: rgba(0, 0, 0, .45); color: #fff; font-size: 14px;
 }
-.ps-slot-k { display: block; margin-top: 6px; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+.ps-slot-k { display: block; margin-top: 6px; text-align: center; font-size: 11.5px; color: var(--ink); font-weight: 600; }
+/* 每槽一句用途说明：空框本身说不清「传了会被怎么用」。 */
+.ps-slot-h { display: block; margin-top: 3px; text-align: center; font-size: 10.5px; line-height: 1.4; color: var(--ink-3); }
+.ps-slot-h.reserve { color: var(--accent); }
 
 .ps-submit-err {
   margin-top: 18px; padding: 11px 13px;

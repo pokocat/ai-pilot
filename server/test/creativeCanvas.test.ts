@@ -11,8 +11,10 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone 
 import { grantCredits } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
 import { tickCreativeWorker } from '../src/services/creative/worker.js';
-import { CREATIVE_FLAG_ID, DEFAULT_LAYOUT_ENGINE } from '../src/services/creative/config.js';
-import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS } from '../src/services/creative/templates.js';
+import { CREATIVE_FLAG_ID, DEFAULT_LAYOUT_ENGINE, TEMPLATE_KEYS } from '../src/services/creative/config.js';
+import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS, renderPosterHtml } from '../src/services/creative/templates.js';
+import { normalizePosterBrief } from '../src/services/creative/schema.js';
+import { renderHtmlToPng } from '../src/services/reportPdf.js';
 import {
   sanitizeCanvasHtml, stripHtmlFence, fillPlaceholders, ensureAiMark, availablePlaceholders,
   CANVAS_PLACEHOLDER,
@@ -1152,6 +1154,201 @@ describe('AI 排版引擎 · 量测器（真实渲染）', { skip: realBrowser ?
       !vs.some((v) => v.code === 'headline_missing'),
       '脚本若执行，标题会被改成 HACKED → 会报 headline_missing。没报说明脚本确实没跑',
     );
+  });
+});
+
+/* ───────────────── ⑥b 版式池的真实渲染量测（同上，需真实 Chromium） ───────────────── */
+
+// 为什么模板路径也要过一遍量测器：模板是**确定性排版**，但"确定"的只有 HTML，不是布局 ——
+// 一个 padding 写成满宽内缩、一个二维码外框少 4px，产出的仍是合法 HTML，却是贴边的字和扫不出的码。
+// 2026-08-15 扩容到 8 套时，头一轮量测就抓出 3 类这样的缺陷（sub/quote 包围盒贴边、码本体 56px）。
+// 常规回归靠 creative.test.ts 那组结构断言，这一组是真布局的下限。
+describe('海报版式池 · 真实渲染量测', { skip: realBrowser ? false : '需要真实 Chromium：用 PUPPETEER_REAL=1 npm test 跑这组' }, () => {
+  /** 1×1 透明 PNG（素材本体不重要，重要的是"有这个素材"这条分支）。 */
+  const PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
+
+  /** 短文案：只有必填项。airy 档的留白率就是在这个输入上量的。 */
+  const SHORT = {
+    scene: 'service', goal: '获客', audience: '酒店老板', headline: '直客为王',
+    proofPoints: [], cta: '扫码', visualDirection: '', ratio: '3:4',
+  };
+  /**
+   * 长文案：**顶到 schema 上限**（主标题 20 / 副标 30 / 每条卖点 20 / CTA 15 / 3 条卖点）。
+   * 这不是"随便长一点"——版面预算的最坏情况就是这一份，它过了才谈得上任何文案都排得下。
+   */
+  const LONG = {
+    scene: 'event', goal: '让本地酒店老板来聊直客运营', audience: '单体酒店与民宿老板',
+    headline: '不再靠平台活着从今天开始转型直客',
+    subheadline: '直客占比从一成二做到四成五平均降佣九个点九十天',
+    proofPoints: ['时间：八月二十日晚八点整开场', '地点：杭州西湖区文三路九九号', '平均降佣九个点九十天见首批复购'],
+    cta: '扫码立刻领取诊断名额', visualDirection: '', ratio: '3:4',
+  };
+
+  const posterHtml = (key: string, raw: Record<string, unknown>, assets: Record<string, string>): string => {
+    const nb = normalizePosterBrief({ ...raw, templateKey: key });
+    return renderPosterHtml({ brief: nb, philosophy: fallbackPhilosophy(nb), assets });
+  };
+
+  const measureTemplate = async (
+    key: string, raw: Record<string, unknown>, assets: Record<string, string>,
+  ): Promise<PosterViolation[]> => {
+    const nb = normalizePosterBrief({ ...raw, templateKey: key });
+    const r = await renderCanvasPoster(posterHtml(key, raw, assets), {
+      headline: nb.headline, expectQr: !!assets.qrUrl, allowInTestMode: true, timeoutMs: 30_000,
+    });
+    assert.equal(r.measured, true, '量测必须真的跑起来了（否则下面的断言全是假绿）');
+    return r.rendered.violations;
+  };
+
+  const label = (vs: PosterViolation[]): string =>
+    vs.map((v) => `[${v.code}] ${v.selector} — ${v.detail}`).join(' | ');
+
+  /**
+   * 留白率量测（airy 档的验收口径）。在页面上下文按 4px 网格扫一遍，统计"被内容盖住"的格子占比：
+   * 有自身文字的叶子块、图片、以及任何画了背景色的块都算内容，其余算留白。
+   * ⚠️ 与 posterScanFn 同一条硬约束：**必须自包含**（会被序列化后在浏览器里 eval）。
+   */
+  const inkScanFn = (arg: { cls: string; step: number; w: number; h: number }): { inkRatio: number } => {
+    const g = globalThis as unknown as {
+      document: { querySelector(s: string): Element | null };
+      getComputedStyle(el: Element): Record<string, string>;
+    };
+    type Box = { l: number; t: number; r: number; b: number };
+    const canvas = g.document.querySelector('.' + arg.cls);
+    if (!canvas) return { inkRatio: 1 };
+    const all = canvas.querySelectorAll('*');
+    const boxes: Box[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const st = g.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) continue;
+      const own = el.children.length === 0 ? (el.textContent || '').trim() : '';
+      const isImg = el.tagName.toLowerCase() === 'img';
+      const bg = st.backgroundColor;
+      const painted = !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+      if (!own && !isImg && !painted) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      boxes.push({
+        l: Math.max(0, r.left), t: Math.max(0, r.top),
+        r: Math.min(arg.w, r.right), b: Math.min(arg.h, r.bottom),
+      });
+    }
+    let filled = 0;
+    let total = 0;
+    for (let y = 0; y < arg.h; y += arg.step) {
+      for (let x = 0; x < arg.w; x += arg.step) {
+        total++;
+        for (let i = 0; i < boxes.length; i++) {
+          const bx = boxes[i];
+          if (x >= bx.l && x < bx.r && y >= bx.t && y < bx.b) { filled++; break; }
+        }
+      }
+    }
+    return { inkRatio: total ? filled / total : 1 };
+  };
+
+  const inkRatio = async (html: string): Promise<number> => {
+    const r = await renderHtmlToPng(html, {
+      width: 540, height: 720, deviceScaleFactor: 1, measureSelector: `.${CANVAS_CLASS}`,
+      javaScriptEnabled: false, allowInTestMode: true, timeoutMs: 30_000,
+      domScan: {
+        fn: inkScanFn as unknown as (arg: never) => unknown,
+        arg: { cls: CANVAS_CLASS, step: 4, w: 540, h: 720 },
+      },
+    });
+    const ratio = (r.scan as { inkRatio?: unknown } | undefined)?.inkRatio;
+    assert.equal(typeof ratio, 'number', '留白量测没跑起来');
+    return ratio as number;
+  };
+
+  // 主网格：每套版式 × 长短文案 × 有码/无码，全部零违规。
+  // 无码那一档尤其重要 —— 贴码位与真码占同一块面积，这条断言就是它的证据。
+  for (const key of TEMPLATE_KEYS) {
+    test(`${key}：长短文案 × 有码/无码 四种组合零违规（不越界 / 不压字 / 字号达标 / 静区够）`, async () => {
+      const full = { visualUrl: PX, portraitUrl: PX, logoUrl: PX, qrUrl: PX };
+      const noQr = { visualUrl: PX, portraitUrl: PX, logoUrl: PX };
+      for (const [copy, raw] of [['短文案', SHORT], ['长文案（顶到 schema 上限）', LONG]] as const) {
+        for (const [assetLabel, assets] of [['有码', full], ['无码（贴码位）', noQr]] as const) {
+          const vs = await measureTemplate(key, raw, assets);
+          assert.deepEqual(vs, [], `${key} · ${copy} · ${assetLabel}：${label(vs)}`);
+        }
+      }
+    });
+  }
+
+  // 三档密度各出一张长文案 + 短文案的量测（代表版式：airy / balanced / dense）。
+  // 这一组盯的不是"有没有违规"（上面已经全覆盖），而是**密度本身有没有兑现**：
+  // airy 说了大留白就必须真的留出来，dense 说了一屏说完就必须真的把行都排上。
+  test('三档密度兑现：airy 真的大留白，balanced 密度居中，dense 长文案排满信息行', async () => {
+    const noQr = { visualUrl: PX, portraitUrl: PX, logoUrl: PX };
+
+    // airy —— 留白要真的留出来，否则它只是一套"字小一点的均衡版式"。
+    // ⚠️ 这个比例是**保守估计**：整块文字元素按包围盒整个算作内容，而一行字实际只占其中一小部分
+    //（大引号那种一个字符占满一行的更甚）。所以真实留白只会比这里量到的更多，阈值按量到的定。
+    // manifesto_min 是产品明确要求 ≥55% 的那一套，长短文案都必须达标；
+    // quote_card 多了署名行与头像位，文案顶格时合理地更密一些，单独给一档。
+    const airy: [string, number, number][] = [
+      // [key, 短文案留白下限, 顶格文案留白下限]
+      ['manifesto_min', 0.55, 0.55],
+      ['quote_card', 0.55, 0.48],
+    ];
+    for (const [key, minShort, minLong] of airy) {
+      for (const [copy, raw, floor] of [['短文案', SHORT, minShort], ['长文案', LONG, minLong]] as const) {
+        const ink = await inkRatio(posterHtml(key, raw, noQr));
+        const white = 1 - ink;
+        assert.ok(white >= floor, `${key} · ${copy} 留白只有 ${(white * 100).toFixed(1)}%（下限 ${floor * 100}%）`);
+      }
+    }
+
+    // balanced —— data_stat：长短文案都零违规，且主视觉带真的在画面上（不是被压没了）。
+    for (const [copy, raw] of [['短文案', SHORT], ['长文案', LONG]] as const) {
+      const vs = await measureTemplate('data_stat', raw, noQr);
+      assert.deepEqual(vs, [], `data_stat · ${copy}：${label(vs)}`);
+      const ink = await inkRatio(posterHtml('data_stat', raw, noQr));
+      assert.ok(ink >= 0.35 && ink <= 0.8, `data_stat · ${copy} 的信息密度 ${(ink * 100).toFixed(1)}% 不像 balanced`);
+    }
+
+    // dense —— info_list：长文案要真的把 3 条卖点全排上，短文案（0 条）不许留空行。
+    const dense = posterHtml('info_list', LONG, noQr);
+    assert.equal(dense.split('class="li"').length - 1, 3, 'dense 长文案应排满 3 条卖点');
+    const sparse = posterHtml('info_list', SHORT, noQr);
+    assert.equal(sparse.split('class="li"').length - 1, 0, '没有卖点时不许留空编号行');
+    assert.deepEqual(await measureTemplate('info_list', SHORT, noQr), [], 'dense 版式在空文案下也不许出违规');
+  });
+
+  // 贴码位是「用户可自行粘贴二维码」这句提示的物理依据：那块白底必须真的在画面上、
+  // 真的有静区、真的够大。只查 HTML 里有没有那个 class 是不够的（CSS 写错照样什么都看不见）。
+  test('贴码位真的占住了一块可粘贴的白底（尺寸与静区按二维码同一口径）', async () => {
+    const holdBoxFn = (arg: { cls: string }): { w: number; h: number; pad: number; bg: string } | null => {
+      const g = globalThis as unknown as {
+        document: { querySelector(s: string): Element | null };
+        getComputedStyle(el: Element): Record<string, string>;
+      };
+      const el = g.document.querySelector('.' + arg.cls);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const st = g.getComputedStyle(el);
+      const pads = [st.paddingTop, st.paddingRight, st.paddingBottom, st.paddingLeft].map((v) => parseFloat(v) || 0);
+      return { w: r.width, h: r.height, pad: Math.min(pads[0], pads[1], pads[2], pads[3]), bg: st.backgroundColor };
+    };
+    for (const key of TEMPLATE_KEYS) {
+      const r = await renderHtmlToPng(posterHtml(key, LONG, { visualUrl: PX, logoUrl: PX }), {
+        width: 540, height: 720, deviceScaleFactor: 1, measureSelector: `.${CANVAS_CLASS}`,
+        javaScriptEnabled: false, allowInTestMode: true, timeoutMs: 30_000,
+        domScan: { fn: holdBoxFn as unknown as (arg: never) => unknown, arg: { cls: 'hold' } },
+      });
+      const box = r.scan as { w: number; h: number; pad: number; bg: string } | null;
+      assert.ok(box, `${key} 没有渲染出贴码位`);
+      // 码位内框 = 外框 - 两侧静区，必须仍高于量测器的可扫下限（贴上去的码才扫得动）。
+      const inner = box!.w - box!.pad * 2;
+      assert.ok(
+        inner >= MEASURE_LIMITS.qrMinPx,
+        `${key} 贴码位内框只有 ${inner}px，低于可扫下限 ${MEASURE_LIMITS.qrMinPx}px`,
+      );
+      assert.ok(box!.pad >= MEASURE_LIMITS.qrQuietPx, `${key} 贴码位静区只有 ${box!.pad}px`);
+      assert.match(box!.bg, /255, 255, 255/, `${key} 贴码位必须是白底（当前 ${box!.bg}）`);
+    }
   });
 });
 

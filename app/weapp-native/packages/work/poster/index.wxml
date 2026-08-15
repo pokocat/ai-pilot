@@ -13,17 +13,18 @@
     </view>
     <view wx:elif="{{disabled}}" class="ps-empty"><text class="ps-empty-t serif">成品图暂未开放</text><text class="ps-empty-d">海报设计师的文字方案不受影响，可继续在对话里推进。</text></view>
     <block wx:else>
-      <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
-      <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
-
-      <!-- 主视图：设计说明 + 创作方式。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
-           而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染、表单自动摊开。 -->
+      <!-- ① 设计说明卡：本页主视图。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
+           而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染。 -->
       <view wx:if="{{designNote}}" class="ps-note-card">
         <text class="ps-note-k">这张海报会这么设计</text>
         <text class="ps-note-b">{{designNote}}</text>
       </view>
-      <view class="ps-field">
-        <view class="ps-flabel"><text class="ps-fl">这次怎么创作</text></view>
+      <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
+      <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
+
+      <!-- ② 创作方式 -->
+      <view class="ps-group">
+        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">创作方式</text><text class="ps-group-d">决定这张图怎么出，价格不同</text></view></view>
         <view class="ps-tpls">
           <view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier">
             <view class="ps-tpl-h"><text class="ps-tpl-n">创意排版</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view>
@@ -34,11 +35,11 @@
             <view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · AI 先创作全幅主视觉，再由军师排中文</text></view>
           </view>
         </view>
-        <text wx:if="{{tier==='premium'}}" class="ps-fhint">主视觉大片不使用你上传的本人照片；人物方向是 AI 演绎，并非本人。标题等中文仍由军师排版。</text>
       </view>
 
-      <view wx:if="{{activeDirections.length}}" class="ps-field">
-        <view class="ps-flabel"><text class="ps-fl">想往哪个方向做</text></view>
+      <!-- ③ 创作方向 -->
+      <view wx:if="{{activeDirections.length}}" class="ps-group">
+        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">创作方向</text><text class="ps-group-d">决定画面里的主角是什么</text></view></view>
         <scroll-view class="ps-dir-scroll" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
           <view class="ps-dir-grid">
             <view wx:for="{{activeDirections}}" wx:key="key" class="ps-dir {{directionKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseDirection">
@@ -51,29 +52,61 @@
         <text wx:if="{{errors.direction}}" class="ps-ferr">{{errors.direction}}</text>
       </view>
 
-      <view class="ps-more" bindtap="toggleForm">
-        <text class="ps-more-t">{{showForm?'收起细节':'这些细节要改吗'}}</text>
-        <native-icon name="{{showForm?'up':'down'}}" tone="neutral" size="16"></native-icon>
+      <!-- ④ 版式：按密度分组，组与卡全由 status 下发的清单驱动（没下发 density 就退回单组平铺）。 -->
+      <view wx:if="{{templateGroups.length}}" class="ps-group">
+        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">版式</text><text class="ps-group-d">画面的信息密度与排布</text></view></view>
+        <view wx:for="{{templateGroups}}" wx:for-item="group" wx:key="key" class="ps-tpl-group">
+          <text wx:if="{{group.label}}" class="ps-tpl-gk">{{group.label}}</text>
+          <view class="ps-tpls">
+            <view wx:for="{{group.items}}" wx:key="key" class="ps-tpl {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate">
+              <view class="ps-tpl-h"><text class="ps-tpl-n">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="14"></native-icon></view>
+              <text class="ps-tpl-d">{{item.desc}}</text>
+            </view>
+          </view>
+        </view>
       </view>
-      <view wx:if="{{showForm}}">
-      <text class="ps-sec">先说清这张图要干什么</text>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">宣传什么</text><text class="ps-count {{goalOver?'over':''}}">{{goalCount}}</text></view><input class="ps-input" value="{{goal}}" placeholder="这张海报要促成什么" data-field="goal" bindinput="fieldInput"/><text wx:if="{{errors.goal}}" class="ps-ferr">{{errors.goal}}</text></view>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">给谁看</text><text class="ps-count {{audienceOver?'over':''}}">{{audienceCount}}</text></view><input class="ps-input" value="{{audience}}" placeholder="目标客群是谁" data-field="audience" bindinput="fieldInput"/><text wx:if="{{errors.audience}}" class="ps-ferr">{{errors.audience}}</text></view>
 
-      <text class="ps-sec">画面上的字</text>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">主标题</text><text class="ps-count {{headlineOver?'over':''}}">{{headlineCount}}</text></view><text class="ps-fhint">一张海报只讲一件事</text><input class="ps-input" value="{{headline}}" placeholder="最想让人记住的一句" data-field="headline" bindinput="fieldInput"/><text wx:if="{{errors.headline}}" class="ps-ferr">{{errors.headline}}</text></view>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">副标题</text><text class="ps-count {{subheadlineOver?'over':''}}">{{subheadlineCount}}</text></view><input class="ps-input" value="{{subheadline}}" placeholder="可留空" data-field="subheadline" bindinput="fieldInput"/><text wx:if="{{errors.subheadline}}" class="ps-ferr">{{errors.subheadline}}</text></view>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">卖点</text></view><text class="ps-fhint">最多 3 条，每条一句话</text><view wx:for="{{proofs}}" wx:key="index" class="ps-proof"><view class="ps-flabel"><text class="ps-fl sm">{{item.label}}</text><text class="ps-count {{item.over?'over':''}}">{{item.count}}</text></view><input class="ps-input" value="{{item.value}}" placeholder="{{index===0?'可留空':''}}" data-index="{{index}}" bindinput="proofInput"/><text wx:if="{{item.err}}" class="ps-ferr">{{item.err}}</text></view></view>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">行动号召</text><text class="ps-count {{ctaOver?'over':''}}">{{ctaCount}}</text></view><input class="ps-input" value="{{cta}}" placeholder="如：扫码来聊" data-field="cta" bindinput="fieldInput"/><text wx:if="{{errors.cta}}" class="ps-ferr">{{errors.cta}}</text></view>
+      <!-- ⑤ 编辑内容：默认收起为摘要行 + 「编辑」入口。入口用动词，不用疑问句 ——
+           问句会让人以为不点开就漏了什么，而绝大多数人本来就不需要点开。 -->
+      <view class="ps-group">
+        <view class="ps-group-h">
+          <view class="ps-group-hl"><text class="ps-group-t">编辑内容</text><text class="ps-group-d">海报上会出现的字，军师已按对话填好</text></view>
+          <view class="ps-group-act" bindtap="toggleEdit"><text class="ps-group-act-t">{{showEdit?'收起':'编辑'}}</text><native-icon name="{{showEdit?'up':'down'}}" tone="green" size="14"></native-icon></view>
+        </view>
+        <view wx:if="{{!showEdit}}" class="ps-sum">
+          <view wx:for="{{summaryRows}}" wx:key="key" class="ps-sum-row"><text class="ps-sum-k">{{item.label}}</text><text class="ps-sum-v {{item.empty?'empty':''}}">{{item.value}}</text></view>
+        </view>
+        <view wx:else class="ps-edit">
+          <text class="ps-sub">这张图要干什么</text>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">宣传什么</text><text class="ps-count {{goalOver?'over':''}}">{{goalCount}}</text></view><input class="ps-input" value="{{goal}}" placeholder="这张海报要促成什么" data-field="goal" bindinput="fieldInput"/><text wx:if="{{errors.goal}}" class="ps-ferr">{{errors.goal}}</text></view>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">给谁看</text><text class="ps-count {{audienceOver?'over':''}}">{{audienceCount}}</text></view><input class="ps-input" value="{{audience}}" placeholder="目标客群是谁" data-field="audience" bindinput="fieldInput"/><text wx:if="{{errors.audience}}" class="ps-ferr">{{errors.audience}}</text></view>
 
-      <text class="ps-sec">画面长什么样</text>
-      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">视觉方向</text><text class="ps-count {{visualOver?'over':''}}">{{visualCount}}</text></view><text class="ps-fhint">只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图</text><textarea class="ps-area" value="{{visual}}" placeholder="如：干净留白、克制的墨色与暖金、正面柔光" data-field="visual" bindinput="fieldInput"></textarea><text wx:if="{{errors.visual}}" class="ps-ferr">{{errors.visual}}</text></view>
-      <view wx:if="{{templates.length}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">版式</text></view><view class="ps-tpls"><view wx:for="{{templates}}" wx:key="key" class="ps-tpl {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate"><view class="ps-tpl-h"><text class="ps-tpl-n">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="14"></native-icon></view><text class="ps-tpl-d">{{item.desc}}</text></view></view></view>
+          <text class="ps-sub">画面上的字</text>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">主标题</text><text class="ps-count {{headlineOver?'over':''}}">{{headlineCount}}</text></view><text class="ps-fhint">一张海报只讲一件事</text><input class="ps-input" value="{{headline}}" placeholder="最想让人记住的一句" data-field="headline" bindinput="fieldInput"/><text wx:if="{{errors.headline}}" class="ps-ferr">{{errors.headline}}</text></view>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">副标题</text><text class="ps-count {{subheadlineOver?'over':''}}">{{subheadlineCount}}</text></view><input class="ps-input" value="{{subheadline}}" placeholder="可留空" data-field="subheadline" bindinput="fieldInput"/><text wx:if="{{errors.subheadline}}" class="ps-ferr">{{errors.subheadline}}</text></view>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">卖点</text></view><text class="ps-fhint">最多 3 条，每条一句话</text><view wx:for="{{proofs}}" wx:key="index" class="ps-proof"><view class="ps-flabel"><text class="ps-fl sm">{{item.label}}</text><text class="ps-count {{item.over?'over':''}}">{{item.count}}</text></view><input class="ps-input" value="{{item.value}}" placeholder="{{index===0?'可留空':''}}" data-index="{{index}}" bindinput="proofInput"/><text wx:if="{{item.err}}" class="ps-ferr">{{item.err}}</text></view></view>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">行动号召</text><text class="ps-count {{ctaOver?'over':''}}">{{ctaCount}}</text></view><input class="ps-input" value="{{cta}}" placeholder="如：扫码来聊" data-field="cta" bindinput="fieldInput"/><text wx:if="{{errors.cta}}" class="ps-ferr">{{errors.cta}}</text></view>
 
-      <text class="ps-sec">素材（可留空）</text>
-      <view class="ps-consent" bindtap="toggleConsent"><view class="ps-check {{consent?'on':''}}"><native-icon wx:if="{{consent}}" name="check" tone="white" size="12"></native-icon></view><view class="ps-consent-b"><text class="ps-consent-t">上传人像前请确认</text><text wx:for="{{consentLines}}" wx:key="*this" class="ps-consent-l">· {{item}}</text></view></view>
-      <text wx:if="{{errors.consent}}" class="ps-ferr">{{errors.consent}}</text>
-      <view class="ps-slots"><view wx:for="{{assets}}" wx:key="role" class="ps-slot"><view wx:if="{{item.path}}" class="ps-thumb-wrap"><image class="ps-thumb" src="{{item.path}}" mode="aspectFill"></image><view class="ps-thumb-x" data-role="{{item.role}}" catchtap="dropAsset"><native-icon name="close" tone="white" size="13"></native-icon></view></view><view wx:else class="ps-slot-add" data-role="{{item.role}}" bindtap="pickAsset"><native-icon name="image" tone="neutral" size="17"></native-icon><text class="ps-slot-t">{{item.uploading?'上传中':'传'+item.label}}</text></view><text class="ps-slot-k">{{item.label}}</text></view></view>
+          <text class="ps-sub">画面长什么样</text>
+          <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">视觉方向</text><text class="ps-count {{visualOver?'over':''}}">{{visualCount}}</text></view><text class="ps-fhint">只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图</text><textarea class="ps-area" value="{{visual}}" placeholder="如：干净留白、克制的墨色与暖金、正面柔光" data-field="visual" bindinput="fieldInput"></textarea><text wx:if="{{errors.visual}}" class="ps-ferr">{{errors.visual}}</text></view>
+        </view>
+      </view>
+
+      <!-- ⑥ 上传素材：常驻显示，不再藏在折叠区里。每槽一句用途说明，说清传了会怎么被用。 -->
+      <view class="ps-group">
+        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">上传素材</text><text class="ps-group-d">都可以留空，传了军师会排进画面</text></view></view>
+        <text wx:if="{{tier==='premium'}}" class="ps-fhint">Logo 与二维码会由军师排进成品；本人照片暂不进入主视觉（人物方向为 AI 演绎）</text>
+        <view class="ps-consent" bindtap="toggleConsent"><view class="ps-check {{consent?'on':''}}"><native-icon wx:if="{{consent}}" name="check" tone="white" size="12"></native-icon></view><view class="ps-consent-b"><text class="ps-consent-t">上传人像前请确认</text><text wx:for="{{consentLines}}" wx:key="*this" class="ps-consent-l">· {{item}}</text></view></view>
+        <text wx:if="{{errors.consent}}" class="ps-ferr">{{errors.consent}}</text>
+        <view class="ps-slots">
+          <view wx:for="{{assets}}" wx:key="role" class="ps-slot">
+            <view wx:if="{{item.path}}" class="ps-thumb-wrap"><image class="ps-thumb" src="{{item.path}}" mode="aspectFill"></image><view class="ps-thumb-x" data-role="{{item.role}}" catchtap="dropAsset"><native-icon name="close" tone="white" size="13"></native-icon></view></view>
+            <view wx:else class="ps-slot-add {{item.disabled?'off':''}}" data-role="{{item.role}}" bindtap="pickAsset"><native-icon name="image" tone="neutral" size="17"></native-icon><text class="ps-slot-t">{{item.uploading?'上传中':item.disabled?'本档不用':'传'+item.label}}</text></view>
+            <text class="ps-slot-k">{{item.label}}</text>
+            <text class="ps-slot-h">{{item.hint}}</text>
+            <text wx:if="{{item.role==='qr'&&!item.path}}" class="ps-slot-h reserve">不传也会预留贴码位</text>
+          </view>
+        </view>
       </view>
 
       <view wx:if="{{submitErr}}" class="ps-submit-err"><text class="ps-submit-err-t">{{submitErr}}</text><text wx:if="{{submitErrCredits}}" class="ps-submit-err-a" bindtap="goCredits">去看余额</text></view>

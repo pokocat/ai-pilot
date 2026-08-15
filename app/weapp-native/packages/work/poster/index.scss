@@ -8,45 +8,15 @@
 .form-title { font-size: 16px; font-weight: 600; }
 .ps-pad { padding-top: 10px; }
 .ps-reason { border-color: var(--accent); }
-/* 设计说明卡：本页主视图。用左侧一道重点色竖线而不是整块底色 ——
-   底色一铺就会跟下面的档位卡抢，而这块要的是"先读我"，不是"我最花哨"。 */
-.ps-note-card {
-  margin: 4px 0 14px; padding: 12px 14px;
-  border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0;
-  background: var(--surface-2);
-}
-.ps-note-k { display: block; font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
-.ps-note-b { display: block; margin-top: 6px; font-size: 14px; line-height: 1.7; color: var(--ink-1); }
+/* 设计说明卡的样式在 src 同名文件里（两端共用一份，`@use` 引进来）。 */
 
-/* 「这些细节要改吗」：表单的开关。做成一行弱化的文字 + 箭头，不做成按钮 ——
-   它是逃生口不是主动作，主动作是底部那个「生成成品图」。 */
-.ps-more {
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  margin: 2px 0 12px; padding: 9px 0;
-}
-.ps-more-t { font-size: 13px; color: var(--ink-3); }
+/* 分组头 + 「编辑」入口（原生端补 flex 与图标对齐；其余样式在 src 同名文件里）。 */
+.ps-group-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ps-group-act { display: flex; align-items: center; gap: 3px; padding: 2px 0 2px 8px; }
+.ps-group-act-t { color: var(--accent); }
+.ps-slot-add.off { opacity: .45; }
 
-/* 取需求单骨架：这一步服务端要用模型把整段对话读成需求单，几秒起步。
-   转圈 + 一句「在等什么」 + 表单形状的骨架，别让人对着一行灰字猜页面死没死。 */
-.ps-loading { padding: 56px 4px 0; text-align: center; }
-.ps-spin {
-  width: 26px; height: 26px; margin: 0 auto; border-radius: 50%;
-  border: 2px solid var(--line); border-top-color: var(--accent);
-  animation: ps-rot .9s linear infinite;
-}
-@keyframes ps-rot { to { transform: rotate(360deg); } }
-.ps-loading-t { display: block; margin-top: 16px; font-size: 18px; font-weight: 600; color: var(--ink); }
-.ps-loading-d { display: block; margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
-.ps-sk-card {
-  height: 92px; margin-top: 26px; border-radius: 10px;
-  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
-}
-.ps-sk-line {
-  height: 12px; margin-top: 12px; border-radius: 6px;
-  background: var(--surface-2); animation: ps-sk-pulse 1.4s ease-in-out infinite;
-}
-.ps-sk-line.short { width: 56%; margin-left: auto; margin-right: auto; }
-@keyframes ps-sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+/* 取需求单骨架（.ps-loading / .ps-spin / .ps-sk-*）的样式在 src 同名文件里，两端共用一份。 */
 
 /* 选中态不靠背景色（理由见 app/src 同名文件的注释）：重点色只落在描边与标题上。 */
 .ps-tpl.on { border-color: var(--accent); border-width: 2px; margin: -1px; }

@@ -29,6 +29,7 @@ import {
 } from './canvasSanitize.js';
 import { renderCanvasPoster } from './renderer.js';
 import { SAFE_ZONE_HINTS, type PosterStyle } from './styleLibrary.js';
+import { artDirectionNote, mergeArtDirection } from './imagePrompt.js';
 import { critiqueDirective, requestVisualCritique, type VisualCritique } from './visualCritique.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
@@ -327,6 +328,9 @@ function canvasUserPrompt(o: {
     `目标客群：${brief.audience}`,
     `创作方向：${directionFor(brief.directionKey).name}`,
     `【正向 Art Direction】${directionFor(brief.directionKey).artDirection}`,
+    // 一套机制两条路线：photo 用同一份 merged 去合成生图提示词，graphic 只有这份中文摘要。
+    // 只念方案真的聊到的字段——缺省是骨架的事，替它念一遍等于给排版层下一道没人许过的约束。
+    artDirectionNote(mergeArtDirection(o.photo ?? null, manifesto.artDirection), o.photo?.name),
     brief.visualDirection ? `视觉方向：${brief.visualDirection}` : '',
     brief.negativePrompt ? `排除项（画面里不要出现）：${brief.negativePrompt}` : '',
     '',

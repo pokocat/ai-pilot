@@ -35,6 +35,39 @@ const PORTRAIT_CONSENT = [
 ];
 
 const ROLE_LABEL: Record<CreativeUploadRole, string> = { portrait: '人像', logo: 'Logo', qr: '二维码' };
+// 每个素材槽一句用途说明：说清「传了会被怎么用」，而不是只摆一个空框让人猜。
+const ROLE_HINT: Record<CreativeUploadRole, string> = {
+  portrait: '本人照片，用于「本人形象」方向',
+  logo: '排在画面角落，做品牌落款',
+  qr: '排在成品下方，扫码找到你',
+};
+const UPLOAD_ROLES: CreativeUploadRole[] = ['portrait', 'logo', 'qr'];
+
+/**
+ * 版式密度 → 中文档位标签。版式扩到 8 套之后，一列平铺八张卡读不出「这些是同一类」；
+ * 按密度分组是唯一不需要用户先懂设计术语就能选的分法。
+ * 密度值本身来自 `PosterTemplateOption.density`（服务端下发），本地只负责翻译成中文。
+ */
+type PosterDensity = 'airy' | 'balanced' | 'dense';
+type TemplateOption = PosterTemplateOption & { density?: PosterDensity };
+const DENSITY_LABEL: Record<PosterDensity, string> = { airy: '留白', balanced: '均衡', dense: '信息量' };
+const DENSITY_ORDER: PosterDensity[] = ['airy', 'balanced', 'dense'];
+
+/**
+ * 版式分组：**完全数据驱动**——status 下发什么就渲染什么，本地不补目录、不猜密度。
+ * 一套都没带 density（老服务端）时退回单组平铺，不给用户凭空造出三个空档位标签。
+ */
+function groupTemplates(list: TemplateOption[]): Array<{ key: string; label: string; items: TemplateOption[] }> {
+  if (!list.length) return [];
+  const known = (t: TemplateOption) => !!t.density && !!DENSITY_LABEL[t.density];
+  if (!list.some(known)) return [{ key: 'all', label: '', items: list }];
+  const groups: Array<{ key: string; label: string; items: TemplateOption[] }> = DENSITY_ORDER
+    .map((density) => ({ key: String(density), label: DENSITY_LABEL[density], items: list.filter((t) => t.density === density) }))
+    .filter((g) => g.items.length);
+  const rest = list.filter((t) => !known(t));
+  if (rest.length) groups.push({ key: 'other', label: '其他', items: rest });
+  return groups;
+}
 
 type AssetSlot = { assetId: string; path: string };
 
@@ -80,6 +113,11 @@ export default function PosterConfirmPage() {
   const [disabled, setDisabled] = useState(false);      // 能力已关闭：整页收成说明态，不给提交
   const [price, setPrice] = useState<number | null>(null);
   const [reason, setReason] = useState('');
+  // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
+  const [designNote, setDesignNote] = useState('');
+  // 「编辑内容」分组默认收起成摘要行（2026-08-15 重排）：入口是动词「编辑」，
+  // 不是此前那句「这些细节要改吗」——问句会让人以为不点开就漏了什么。
+  const [showEdit, setShowEdit] = useState(false);
   const [scene, setScene] = useState<PosterScene>('personal_brand');
   const [goal, setGoal] = useState('');
   const [audience, setAudience] = useState('');
@@ -90,7 +128,7 @@ export default function PosterConfirmPage() {
   const [visual, setVisual] = useState('');
   // 启用中的版式清单由 /creative/status 下发（不再硬编码本地目录）。取不到就不渲染版式选择器，
   // 也不带 templateKey 提交——服务端按 scene 回退默认版式，比让用户选到一个必然 422 的版式好。
-  const [templates, setTemplates] = useState<PosterTemplateOption[]>([]);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [templateKey, setTemplateKey] = useState('');
   // 档位。**高级档只在服务端说可用时才露出来**（premiumAvailable）——供应商没配好时显示一个
   // 必然 422 的选项，比不显示更糟（同版式清单的教训）。缺省恒为标准档。
@@ -183,11 +221,19 @@ export default function PosterConfirmPage() {
         setTemplateKey(tpls.length ? (tpls.some((t) => t.key === rec) ? rec : (tpls[0]?.key ?? '')) : rec);
         if (b.directionKey) setDirectionKey(b.directionKey);
         setReason(draft.templateReason ?? '');
-      } else if (messageId) {
+        const note = String(draft.designNote ?? '').trim();
+        setDesignNote(note);
+        // 抽不出设计说明 = 没有可确认的东西，直接把「编辑内容」摊开，
+        // 否则页面上少了主视图又没东西可看。
+        setShowEdit(!note);
+      } else {
+        // 一个字都没预填时「编辑内容」必须摊开：收起态的三行摘要全是「未填」，
+        // 而用户看不出该点哪儿才能开始。
+        setShowEdit(true);
         // 只有**带着 messageId 却没拿到草稿**才是真出了事。冷启动（没有 messageId，例如从锦囊
         // 直接开工）服务端本来就 422 MESSAGE_ID_REQUIRED —— 那是「没有可预填的东西」，
         // 不是「预填失败」，弹报错横幅会把一次正常的空白表单说成故障。
-        setLoadErr('需求单预填没取到，可以直接手填后生成。');
+        if (messageId) setLoadErr('需求单预填没取到，可以直接手填后生成。');
       }
       setLoading(false);
     })();
@@ -243,6 +289,10 @@ export default function PosterConfirmPage() {
     if (tier === 'premium' && assets.portrait) next.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     setErrors(next);
     if (Object.keys(next).length) {
+      // 报错的字段大多躺在收起的「编辑内容」里：不摊开就等于让用户对着一句「还有几处要改」
+      // 找一个他根本看不见的输入框。
+      const inEdit = Object.keys(next).some((k) => k !== 'consent' && k !== 'direction');
+      if (inEdit) setShowEdit(true);
       Taro.showToast({ title: '还有几处需要改一下', icon: 'none' });
       return false;
     }
@@ -276,6 +326,16 @@ export default function PosterConfirmPage() {
 
   const pickAsset = async (role: CreativeUploadRole) => {
     if (uploading || submitting) return;
+    // 置灰槽点得动，只是点了给解释：一个不响应的灰框跟坏掉的按钮长得一模一样。
+    if (role === 'portrait' && tier === 'premium') {
+      void Taro.showModal({
+        title: '主视觉大片不用本人照片',
+        content: '这一档由 AI 整幅创作主视觉，人物方向是 AI 演绎、并非本人。想让本人出镜，请切回「创意排版」。',
+        showCancel: false,
+        confirmText: '知道了',
+      }).catch(() => undefined);
+      return;
+    }
     if (role === 'portrait' && !consent) {
       setErrors((e) => ({ ...e, consent: '请先确认肖像使用权' }));
       Taro.showToast({ title: '请先勾选肖像确认', icon: 'none' });
@@ -400,6 +460,15 @@ export default function PosterConfirmPage() {
     if (!ok) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
   };
 
+  // ── 派生视图数据（两端同口径；原生端的对应物是 refreshSummary / groupTemplates）──
+  const summaryRows = [
+    { key: 'headline', label: '主标题', value: headline.trim() },
+    { key: 'proofs', label: '卖点', value: proofs.map((p) => p.trim()).filter(Boolean).join(' · ') },
+    { key: 'cta', label: '行动号召', value: cta.trim() },
+  ];
+  const templateGroups = groupTemplates(templates);
+  const tierDirections = directions.filter((item) => item.tier === tier);
+
   if (disabled) {
     return (
       <View className={`page poster-set ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -419,9 +488,26 @@ export default function PosterConfirmPage() {
       <SafeHeader title="成品图需求单" onBack={() => Taro.navigateBack()} />
       <View className="ps-pad">
         {loading ? (
-          <View className="ps-loading"><Text>正在取需求单…</Text></View>
+          /* 取需求单不是快接口：服务端要把整段对话读成一张需求单（briefDraft 走模型）。
+             此前这里只有一行灰字，看着像卡死——给转圈 + 说明 + 表单骨架，并说清在等什么。 */
+          <View className="ps-loading">
+            <View className="ps-spin" style={{ borderTopColor: accent }} />
+            <Text className="ps-loading-t serif">正在整理需求单</Text>
+            <Text className="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要几秒。</Text>
+            <View className="ps-sk-card" />
+            <View className="ps-sk-line" />
+            <View className="ps-sk-line short" />
+          </View>
         ) : (
           <>
+            {/* ① 设计说明卡：本页主视图。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
+                而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染。 */}
+            {designNote ? (
+              <View className="ps-note-card">
+                <Text className="ps-note-k">这张海报会这么设计</Text>
+                <Text className="ps-note-b">{designNote}</Text>
+              </View>
+            ) : null}
             {/* 版式推荐理由 = 设计师的「为什么这样设计」，原样展示（惊喜感文案位） */}
             {reason ? (
               <View className="ps-reason" style={{ borderColor: accent }}>
@@ -434,109 +520,53 @@ export default function PosterConfirmPage() {
             ) : null}
             {loadErr ? <Text className="ps-note">{loadErr}</Text> : null}
 
-            <Text className="ps-sec">先说清这张图要干什么</Text>
-            <Field label="宣传什么" err={errors.goal} count={<Counter value={goal} max={LIMITS.goal} />}>
-              <KbInput anchorId="ps-goal" className="ps-input" value={goal} placeholder="这张海报要促成什么" onInput={(e) => setGoal(e.detail.value)} />
-            </Field>
-            <Field label="给谁看" err={errors.audience} count={<Counter value={audience} max={LIMITS.audience} />}>
-              <KbInput anchorId="ps-aud" className="ps-input" value={audience} placeholder="目标客群是谁" onInput={(e) => setAudience(e.detail.value)} />
-            </Field>
-
-            <Text className="ps-sec">画面上的字</Text>
-            <Field label="主标题" hint="一张海报只讲一件事" err={errors.headline} count={<Counter value={headline} max={LIMITS.headline} />}>
-              <KbInput anchorId="ps-head" className="ps-input" value={headline} placeholder="最想让人记住的一句" onInput={(e) => setHeadline(e.detail.value)} />
-            </Field>
-            <Field label="副标题" err={errors.subheadline} count={<Counter value={subheadline} max={LIMITS.subheadline} />}>
-              <KbInput anchorId="ps-sub" className="ps-input" value={subheadline} placeholder="可留空" onInput={(e) => setSubheadline(e.detail.value)} />
-            </Field>
-            <Field label="卖点" hint="最多 3 条，每条一句话">
-              {proofs.map((p, i) => (
-                <View key={`proof-${i}`} className="ps-proof">
-                  <View className="ps-flabel">
-                    <Text className="ps-fl sm">{`第 ${i + 1} 条`}</Text>
-                    <Counter value={p} max={LIMITS.proofPoint} />
-                  </View>
-                  <KbInput
-                    anchorId={`ps-proof-${i}`}
-                    className="ps-input"
-                    value={p}
-                    placeholder={i === 0 ? '可留空' : ''}
-                    onInput={(e) => setProof(i, e.detail.value)}
-                  />
-                  {errors[`proof${i}`] ? <Text className="ps-ferr">{errors[`proof${i}`]}</Text> : null}
+            {/* ② 创作方式 */}
+            <View className="ps-group">
+              <View className="ps-group-h">
+                <View className="ps-group-hl">
+                  <Text className="ps-group-t">创作方式</Text>
+                  <Text className="ps-group-d">决定这张图怎么出，价格不同</Text>
                 </View>
-              ))}
-            </Field>
-            <Field label="行动号召" err={errors.cta} count={<Counter value={cta} max={LIMITS.cta} />}>
-              <KbInput anchorId="ps-cta" className="ps-input" value={cta} placeholder="如：扫码来聊" onInput={(e) => setCta(e.detail.value)} />
-            </Field>
-
-            <Text className="ps-sec">画面长什么样</Text>
-            <Field label="视觉方向" hint="只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
-              <Textarea className="ps-area" value={visual} placeholder="如：干净留白、克制的墨色与暖金、正面柔光" onInput={(e) => setVisual(e.detail.value)} />
-            </Field>
-            {/* 版式清单来自 /creative/status（只含启用中的）。一套都没下发时整块不渲染：
-                硬编码三套恒可选会让用户选到已停用的版式，而服务端对此一律 422。 */}
-            {templates.length ? (
-              <Field label="版式">
-                <View className="ps-tpls">
-                  {templates.map((t) => {
-                    const on = t.key === templateKey;
-                    return (
-                      <View
-                        key={t.key}
-                        className={`ps-tpl${on ? ' on' : ''}`}
-                        style={on ? { borderColor: accent } : undefined}
-                        onClick={() => setTemplateKey(t.key)}
-                      >
-                        <View className="ps-tpl-h">
-                          <Text className="ps-tpl-n">{t.name}</Text>
-                          {on ? <Icon name="check" size={13} color={accent} /> : null}
-                        </View>
-                        <Text className="ps-tpl-d">{t.desc}</Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              </Field>
-            ) : null}
-
-            <Field label="这次怎么创作">
+              </View>
               <View className="ps-tpls">
                 {([
                   ['standard', '创意排版', `x${price} · 用图形、字体和你的素材现场创作`],
                   ...(premiumOn ? [['premium', '主视觉大片', `x${premiumPrice} · AI 先创作全幅主视觉，再由军师排中文`]] : []),
                 ] as [PosterTier, string, string][]).map(([k, name, desc]) => {
-                    const on = k === tier;
-                    return (
-                      <View
-                        key={k}
-                        className={`ps-tpl${on ? ' on' : ''}`}
-                        style={on ? { borderColor: accent } : undefined}
-                        onClick={() => chooseTier(k)}
-                      >
-                        <View className="ps-tpl-h">
-                          <Text className="ps-tpl-n">{name}</Text>
-                          {on ? <Icon name="check" size={13} color={accent} /> : null}
-                        </View>
-                        <View className="ps-tpl-cost">
-                          <Icon name="diamond" size={12} color={accent} />
-                          <Text className="ps-tpl-d">{desc}</Text>
-                        </View>
+                  const on = k === tier;
+                  return (
+                    <View
+                      key={k}
+                      className={`ps-tpl${on ? ' on' : ''}`}
+                      style={on ? { borderColor: accent } : undefined}
+                      onClick={() => chooseTier(k)}
+                    >
+                      <View className="ps-tpl-h">
+                        <Text className="ps-tpl-n">{name}</Text>
+                        {on ? <Icon name="check" size={13} color={accent} /> : null}
                       </View>
-                    );
+                      <View className="ps-tpl-cost">
+                        <Icon name="diamond" size={12} color={accent} />
+                        <Text className="ps-tpl-d">{desc}</Text>
+                      </View>
+                    </View>
+                  );
                 })}
               </View>
-              {tier === 'premium' ? (
-                <Text className="ps-fhint">主视觉大片不使用你上传的本人照片；人物方向是 AI 演绎，并非本人。标题等中文仍由军师排版。</Text>
-              ) : null}
-            </Field>
+            </View>
 
-            {directions.some((item) => item.tier === tier) ? (
-              <Field label="想往哪个方向做" err={errors.direction}>
+            {/* ③ 创作方向 */}
+            {tierDirections.length ? (
+              <View className="ps-group">
+                <View className="ps-group-h">
+                  <View className="ps-group-hl">
+                    <Text className="ps-group-t">创作方向</Text>
+                    <Text className="ps-group-d">决定画面里的主角是什么</Text>
+                  </View>
+                </View>
                 <ScrollView className="ps-dir-scroll" scrollX enhanced showScrollbar={false}>
                   <View className="ps-dir-grid">
-                    {directions.filter((item) => item.tier === tier).map((item) => {
+                    {tierDirections.map((item) => {
                       const on = item.key === directionKey;
                       return (
                         <View key={item.key} className={`ps-dir${on ? ' on' : ''}`} onClick={() => { setDirectionKey(item.key); setErrors((cur) => ({ ...cur, direction: '' })); }}>
@@ -555,41 +585,163 @@ export default function PosterConfirmPage() {
                     })}
                   </View>
                 </ScrollView>
-              </Field>
+                {errors.direction ? <Text className="ps-ferr">{errors.direction}</Text> : null}
+              </View>
             ) : null}
 
-            <Text className="ps-sec">素材（可留空）</Text>
-            {/* 肖像确认：人像上传的前置门（未勾选不给选图），文案取方案 §12.3 精简版 */}
-            <View className="ps-consent" onClick={() => { setConsent((v) => !v); setErrors((e) => ({ ...e, consent: '' })); }}>
-              <View className={`ps-check${consent ? ' on' : ''}`} style={consent ? { background: accent, borderColor: accent } : undefined}>
-                {consent ? <Icon name="check" size={11} color="#fff" /> : null}
-              </View>
-              <View className="ps-consent-b">
-                <Text className="ps-consent-t">上传人像前请确认</Text>
-                {PORTRAIT_CONSENT.map((line, i) => <Text key={`pc-${i}`} className="ps-consent-l">{`· ${line}`}</Text>)}
-              </View>
-            </View>
-            {errors.consent ? <Text className="ps-ferr">{errors.consent}</Text> : null}
-            <View className="ps-slots">
-              {(['portrait', 'logo', 'qr'] as CreativeUploadRole[]).map((role) => {
-                const slot = assets[role];
-                return (
-                  <View key={role} className="ps-slot">
-                    {slot ? (
-                      <View className="ps-thumb-wrap">
-                        <Image className="ps-thumb" src={slot.path} mode="aspectFill" />
-                        <Text className="ps-thumb-x" onClick={() => dropAsset(role)}>×</Text>
-                      </View>
-                    ) : (
-                      <View className="ps-slot-add" onClick={() => pickAsset(role)}>
-                        <Icon name="image" size={16} color="#7E848B" />
-                        <Text className="ps-slot-t">{uploading === role ? '上传中…' : `传${ROLE_LABEL[role]}`}</Text>
-                      </View>
-                    )}
-                    <Text className="ps-slot-k">{ROLE_LABEL[role]}</Text>
+            {/* ④ 版式：按密度分组，组与卡全由 status 下发的清单驱动（没下发 density 就退回单组平铺）。
+                版式清单来自 /creative/status（只含启用中的）。一套都没下发时整块不渲染：
+                硬编码恒可选会让用户选到已停用的版式，而服务端对此一律 422。 */}
+            {templateGroups.length ? (
+              <View className="ps-group">
+                <View className="ps-group-h">
+                  <View className="ps-group-hl">
+                    <Text className="ps-group-t">版式</Text>
+                    <Text className="ps-group-d">画面的信息密度与排布</Text>
                   </View>
-                );
-              })}
+                </View>
+                {templateGroups.map((group) => (
+                  <View key={group.key} className="ps-tpl-group">
+                    {group.label ? <Text className="ps-tpl-gk">{group.label}</Text> : null}
+                    <View className="ps-tpls">
+                      {group.items.map((t) => {
+                        const on = t.key === templateKey;
+                        return (
+                          <View
+                            key={t.key}
+                            className={`ps-tpl${on ? ' on' : ''}`}
+                            style={on ? { borderColor: accent } : undefined}
+                            onClick={() => setTemplateKey(t.key)}
+                          >
+                            <View className="ps-tpl-h">
+                              <Text className="ps-tpl-n">{t.name}</Text>
+                              {on ? <Icon name="check" size={13} color={accent} /> : null}
+                            </View>
+                            <Text className="ps-tpl-d">{t.desc}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {/* ⑤ 编辑内容：默认收起为摘要行 + 「编辑」入口（动词入口，不是「这些细节要改吗」这类问句）。 */}
+            <View className="ps-group">
+              <View className="ps-group-h">
+                <View className="ps-group-hl">
+                  <Text className="ps-group-t">编辑内容</Text>
+                  <Text className="ps-group-d">海报上会出现的字，军师已按对话填好</Text>
+                </View>
+                <View className="ps-group-act" onClick={() => setShowEdit((v) => !v)}>
+                  <Text className="ps-group-act-t">{showEdit ? '收起' : '编辑'}</Text>
+                  <Icon name={showEdit ? 'up' : 'down'} size={13} color={accent} />
+                </View>
+              </View>
+              {showEdit ? (
+                <View className="ps-edit">
+                  <Text className="ps-sub">这张图要干什么</Text>
+                  <Field label="宣传什么" err={errors.goal} count={<Counter value={goal} max={LIMITS.goal} />}>
+                    <KbInput anchorId="ps-goal" className="ps-input" value={goal} placeholder="这张海报要促成什么" onInput={(e) => setGoal(e.detail.value)} />
+                  </Field>
+                  <Field label="给谁看" err={errors.audience} count={<Counter value={audience} max={LIMITS.audience} />}>
+                    <KbInput anchorId="ps-aud" className="ps-input" value={audience} placeholder="目标客群是谁" onInput={(e) => setAudience(e.detail.value)} />
+                  </Field>
+
+                  <Text className="ps-sub">画面上的字</Text>
+                  <Field label="主标题" hint="一张海报只讲一件事" err={errors.headline} count={<Counter value={headline} max={LIMITS.headline} />}>
+                    <KbInput anchorId="ps-head" className="ps-input" value={headline} placeholder="最想让人记住的一句" onInput={(e) => setHeadline(e.detail.value)} />
+                  </Field>
+                  <Field label="副标题" err={errors.subheadline} count={<Counter value={subheadline} max={LIMITS.subheadline} />}>
+                    <KbInput anchorId="ps-sub" className="ps-input" value={subheadline} placeholder="可留空" onInput={(e) => setSubheadline(e.detail.value)} />
+                  </Field>
+                  <Field label="卖点" hint="最多 3 条，每条一句话">
+                    {proofs.map((p, i) => (
+                      <View key={`proof-${i}`} className="ps-proof">
+                        <View className="ps-flabel">
+                          <Text className="ps-fl sm">{`第 ${i + 1} 条`}</Text>
+                          <Counter value={p} max={LIMITS.proofPoint} />
+                        </View>
+                        <KbInput
+                          anchorId={`ps-proof-${i}`}
+                          className="ps-input"
+                          value={p}
+                          placeholder={i === 0 ? '可留空' : ''}
+                          onInput={(e) => setProof(i, e.detail.value)}
+                        />
+                        {errors[`proof${i}`] ? <Text className="ps-ferr">{errors[`proof${i}`]}</Text> : null}
+                      </View>
+                    ))}
+                  </Field>
+                  <Field label="行动号召" err={errors.cta} count={<Counter value={cta} max={LIMITS.cta} />}>
+                    <KbInput anchorId="ps-cta" className="ps-input" value={cta} placeholder="如：扫码来聊" onInput={(e) => setCta(e.detail.value)} />
+                  </Field>
+
+                  <Text className="ps-sub">画面长什么样</Text>
+                  <Field label="视觉方向" hint="只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
+                    <Textarea className="ps-area" value={visual} placeholder="如：干净留白、克制的墨色与暖金、正面柔光" onInput={(e) => setVisual(e.detail.value)} />
+                  </Field>
+                </View>
+              ) : (
+                <View className="ps-sum">
+                  {summaryRows.map((row) => (
+                    <View key={row.key} className="ps-sum-row">
+                      <Text className="ps-sum-k">{row.label}</Text>
+                      <Text className={`ps-sum-v${row.value ? '' : ' empty'}`}>{row.value || '未填'}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* ⑥ 上传素材：常驻显示，不再藏在折叠区里。每槽一句用途说明，说清传了会怎么被用。 */}
+            <View className="ps-group">
+              <View className="ps-group-h">
+                <View className="ps-group-hl">
+                  <Text className="ps-group-t">上传素材</Text>
+                  <Text className="ps-group-d">都可以留空，传了军师会排进画面</Text>
+                </View>
+              </View>
+              {tier === 'premium' ? (
+                <Text className="ps-fhint">Logo 与二维码会由军师排进成品；本人照片暂不进入主视觉（人物方向为 AI 演绎）</Text>
+              ) : null}
+              {/* 肖像确认：人像上传的前置门（未勾选不给选图），文案取方案 §12.3 精简版 */}
+              <View className="ps-consent" onClick={() => { setConsent((v) => !v); setErrors((e) => ({ ...e, consent: '' })); }}>
+                <View className={`ps-check${consent ? ' on' : ''}`} style={consent ? { background: accent, borderColor: accent } : undefined}>
+                  {consent ? <Icon name="check" size={11} color="#fff" /> : null}
+                </View>
+                <View className="ps-consent-b">
+                  <Text className="ps-consent-t">上传人像前请确认</Text>
+                  {PORTRAIT_CONSENT.map((line, i) => <Text key={`pc-${i}`} className="ps-consent-l">{`· ${line}`}</Text>)}
+                </View>
+              </View>
+              {errors.consent ? <Text className="ps-ferr">{errors.consent}</Text> : null}
+              <View className="ps-slots">
+                {UPLOAD_ROLES.map((role) => {
+                  const slot = assets[role];
+                  // 人像槽在主视觉大片下**置灰而不是消失**：消失了用户只会以为「这功能没了」。
+                  const off = role === 'portrait' && tier === 'premium';
+                  return (
+                    <View key={role} className="ps-slot">
+                      {slot ? (
+                        <View className="ps-thumb-wrap">
+                          <Image className="ps-thumb" src={slot.path} mode="aspectFill" />
+                          <Text className="ps-thumb-x" onClick={() => dropAsset(role)}>×</Text>
+                        </View>
+                      ) : (
+                        <View className={`ps-slot-add${off ? ' off' : ''}`} onClick={() => pickAsset(role)}>
+                          <Icon name="image" size={16} color="#7E848B" />
+                          <Text className="ps-slot-t">{uploading === role ? '上传中…' : off ? '本档不用' : `传${ROLE_LABEL[role]}`}</Text>
+                        </View>
+                      )}
+                      <Text className="ps-slot-k">{ROLE_LABEL[role]}</Text>
+                      <Text className="ps-slot-h">{ROLE_HINT[role]}</Text>
+                      {role === 'qr' && !slot ? <Text className="ps-slot-h reserve">不传也会预留贴码位</Text> : null}
+                    </View>
+                  );
+                })}
+              </View>
             </View>
 
             {submitErr ? (

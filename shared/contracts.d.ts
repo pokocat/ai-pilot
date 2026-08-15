@@ -686,12 +686,21 @@ export interface PosterDirectionOption {
   note?: string;
 }
 /** 模板白名单（服务端 TEMPLATE_KEYS 同口径；启用中的清单由 GET /creative/status 下发）。 */
-export type PosterTemplateKey = 'person_hero' | 'editorial' | 'business_launch';
+export type PosterTemplateKey =
+  | 'person_hero' | 'manifesto_min' | 'quote_card'
+  | 'editorial' | 'business_launch' | 'data_stat'
+  | 'info_list' | 'agenda_event';
+/**
+ * 版式的信息密度：`airy` 一句主张 + 大留白 · `balanced` 标题 + 少量支撑 · `dense` 清单/议程式一屏说完。
+ * 前端据它给选择器分组；老客户端读不到这个字段时按原样平铺即可（故为可选）。
+ */
+export type PosterTemplateDensity = 'airy' | 'balanced' | 'dense';
 /** 一套可选版式（status 只下发**启用中的**，前端照它渲染选择器，不要再硬编码本地目录）。 */
 export interface PosterTemplateOption {
   key: PosterTemplateKey;
   name: string;  // 中文名，如「人物主视觉」
   desc: string;  // 一句话说明，供确认页副标
+  density?: PosterTemplateDensity;
 }
 
 /** 海报需求单：用户在确认页最终敲定的入参（服务端仍会再校验长度/归属/白名单）。 */
@@ -776,6 +785,21 @@ export interface CreativeJobView {
    * 「「本人形象」需要先上传本人照片」，而详情页压根没有上传入口，用户在那儿无路可走。
    */
   hasPortrait: boolean;
+  /**
+   * 本单实际选中的影像风格中文名（如「编辑部黑金」）。**只有真的走了影像路线才有值**：
+   * 它读的是任务结果里的 styleKey（画面已经按这一档出过了），不是建单时的意图快照。
+   * standard 单、以及影像路线失败的单，一律不带这个字段。
+   *
+   * 用途：详情页要能说清「这张是什么风格出的」——在此之前用户只看得到一张图，
+   * 改稿时说不出哪里不对，客服也对不上账。
+   */
+  styleName?: string;
+  /**
+   * 成品里留了空白贴码位（用户没传二维码时，两条排版路径都会渲染浅色贴码区而不是不画）。
+   * 读的是 resultJson.qrReserved（worker 按「真读回了二维码字节」写入），只在成功单上出现；
+   * 前端据它在成品页提示「可保存后自行粘贴二维码」。绝不据此渲染假二维码。
+   */
+  qrReserved?: boolean;
   actions: Array<'revise' | 'regenerate' | 'cancel'>; // 当前状态下前端可展示的操作
 }
 /** 源素材上传返回（先传后建任务，故此时还没有 jobId）。 */

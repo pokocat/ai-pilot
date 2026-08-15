@@ -8,14 +8,51 @@ const {
 } = require('./creative');
 
 const ROLE_LABEL = { portrait: '人像', logo: 'Logo', qr: '二维码' };
+// 每个素材槽一句用途说明：说清「传了会被怎么用」，而不是只摆一个空框让人猜。
+const ROLE_HINT = {
+  portrait: '本人照片，用于「本人形象」方向',
+  logo: '排在画面角落，做品牌落款',
+  qr: '排在成品下方，扫码找到你',
+};
 const PORTRAIT_CONSENT = [
   '我拥有本人或被授权人的肖像使用权',
   '不冒用他人身份、不做误导性代言',
   '生成结果可能与本人存在差异',
 ];
+// 版式密度（TemplateOption.density）→ 中文档位标签。运营扩到 8 套之后，一列平铺的卡片读不出
+// 「这些是同一类」；按密度分组是唯一不需要用户先懂设计术语就能选的分法。
+const DENSITY_LABEL = { airy: '留白', balanced: '均衡', dense: '信息量' };
+const DENSITY_ORDER = ['airy', 'balanced', 'dense'];
+
+/**
+ * 版式分组：**完全数据驱动**——status 下发什么就渲染什么，本地不补目录、不猜密度。
+ * 一套都没带 density（老服务端）时退回单组平铺，不给用户凭空造出三个空档位标签。
+ */
+function groupTemplates(templates) {
+  const list = Array.isArray(templates) ? templates : [];
+  if (!list.length) return [];
+  if (!list.some((item) => item && DENSITY_LABEL[item.density])) return [{ key: 'all', label: '', items: list }];
+  const groups = [];
+  DENSITY_ORDER.forEach((density) => {
+    const items = list.filter((item) => item && item.density === density);
+    if (items.length) groups.push({ key: density, label: DENSITY_LABEL[density], items });
+  });
+  const rest = list.filter((item) => !item || !DENSITY_LABEL[item.density]);
+  if (rest.length) groups.push({ key: 'other', label: '其他', items: rest });
+  return groups;
+}
 
 function emptyProofs() {
   return [0, 1, 2].map((index) => ({ index, label: `第 ${index + 1} 条`, value: '', count: `0/${LIMITS.proofPoint}`, over: false, err: '' }));
+}
+
+/** 摘要行的初值：草稿回来之前也得有三行「未填」，不能先空一格再跳出来。 */
+function emptySummary() {
+  return [
+    { key: 'headline', label: '主标题', value: '未填', empty: true },
+    { key: 'proofs', label: '卖点', value: '未填', empty: true },
+    { key: 'cta', label: '行动号召', value: '未填', empty: true },
+  ];
 }
 
 function count(value, max) {
@@ -47,17 +84,19 @@ Page({
     headlineCount: `0/${LIMITS.headline}`, subheadlineCount: `0/${LIMITS.subheadline}`,
     ctaCount: `0/${LIMITS.cta}`, visualCount: `0/${LIMITS.visualDirection}`,
     goalOver: false, audienceOver: false, headlineOver: false, subheadlineOver: false, ctaOver: false, visualOver: false,
-    proofs: emptyProofs(), templates: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
+    proofs: emptyProofs(), templates: [], templateGroups: [], templateKey: '', brandKitVersion: null, negativePrompt: '',
     // 两条创作路线 + 路线内方向；真实缩略图由 status 下发，不进小程序代码包。
     tier: 'standard', premiumPrice: 0, premiumOn: false,
     directions: [], activeDirections: [], directionKey: '',
     // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
-    // 有它时表单默认收起（用户刚聊完，不该再对着表把话重打一遍）；没有就退回表单打头。
-    designNote: '', showForm: false,
+    designNote: '',
+    // 「编辑内容」分组默认收起成摘要行（2026-08-15 重排）：入口是动词「编辑」，
+    // 不是此前那句「这些细节要改吗」——问句会让人以为不点开就漏了什么。
+    showEdit: false, summaryRows: emptySummary(),
     assets: [
-      { role: 'portrait', label: ROLE_LABEL.portrait, assetId: '', path: '', uploading: false },
-      { role: 'logo', label: ROLE_LABEL.logo, assetId: '', path: '', uploading: false },
-      { role: 'qr', label: ROLE_LABEL.qr, assetId: '', path: '', uploading: false },
+      { role: 'portrait', label: ROLE_LABEL.portrait, hint: ROLE_HINT.portrait, assetId: '', path: '', uploading: false, disabled: false },
+      { role: 'logo', label: ROLE_LABEL.logo, hint: ROLE_HINT.logo, assetId: '', path: '', uploading: false, disabled: false },
+      { role: 'qr', label: ROLE_LABEL.qr, hint: ROLE_HINT.qr, assetId: '', path: '', uploading: false, disabled: false },
     ],
     consent: false, consentLines: PORTRAIT_CONSENT, errors: {}, submitErr: '', submitErrCredits: false, submitting: false,
   }),
@@ -121,14 +160,14 @@ Page({
     const updates = {
       loading: false, disabled: false,
       designNote: draftNote,
-      // 抽不出设计说明 = 没有可确认的东西，直接把表单摊开，否则页面上是一片空白。
-      showForm: !draftNote,
+      // 抽不出设计说明 = 没有可确认的东西，直接把「编辑内容」摊开，否则页面上少了主视图又没东西可看。
+      showEdit: !draftNote,
       // 从锦囊直接开工时**没有** messageId（不是从对话成果卡进来的），服务端本来就会 422
       // MESSAGE_ID_REQUIRED —— 那是「没有可预填的东西」，不是「预填失败」。这种情况下弹一条
       // 报错横幅会把一次正常的冷启动说成故障。只有带着 messageId 却没拿到草稿才是真出了事。
       loadErr: hasDraftBrief || !this.data.messageId ? '' : '需求单预填没取到，可以直接手填后生成。',
       reason: String(draft && draft.templateReason || ''), price: status ? status.pricePerPoster : null,
-      templates, templateKey,
+      templates, templateGroups: groupTemplates(templates), templateKey,
       premiumPrice: status ? status.premiumPricePerPoster : 0,
       premiumOn: !!(status && status.premiumAvailable),
       directions: status ? status.directions : [],
@@ -146,7 +185,32 @@ Page({
     updates.activeDirections = activeDirections;
     updates.directionKey = activeDirections.some((item) => item.key === requestedDirection)
       ? requestedDirection : String(activeDirections[0] && activeDirections[0].key || '');
+    updates.assets = this.assetsForTier(directionTier);
     this.setData(updates);
+    this.refreshSummary();
+  },
+
+  /**
+   * 「编辑内容」收起时的摘要行。只摘用户最在意的三项（主标题 / 卖点 / 行动号召）——
+   * 摘要要能一眼扫完，把七个字段全铺上去就又变回一张表了。
+   */
+  refreshSummary() {
+    const proofs = this.data.proofs.map((proof) => String(proof.value || '').trim()).filter(Boolean);
+    const row = (key, label, value) => ({ key, label, value: value || '未填', empty: !value });
+    this.setData({
+      summaryRows: [
+        row('headline', '主标题', String(this.data.headline || '').trim()),
+        row('proofs', '卖点', proofs.join(' · ')),
+        row('cta', '行动号召', String(this.data.cta || '').trim()),
+      ],
+    });
+  },
+
+  /** 人像槽在主视觉大片下**置灰而不是消失**：消失了用户只会以为「这功能没了」。 */
+  assetsForTier(tier) {
+    return this.data.assets.map((item) => (item.role === 'portrait'
+      ? Object.assign({}, item, { disabled: tier === 'premium' })
+      : item));
   },
 
   fieldInput(event) {
@@ -155,6 +219,7 @@ Page({
     const key = field === 'visual' ? 'visualDirection' : field;
     const state = count(value, LIMITS[key]);
     this.setData({ [field]: value, [`${field}Count`]: state.text, [`${field}Over`]: state.over, [`errors.${field}`]: '' });
+    this.refreshSummary();
   },
 
   proofInput(event) {
@@ -165,10 +230,11 @@ Page({
     const state = count(value, LIMITS.proofPoint);
     proofs[index] = Object.assign({}, proofs[index], { value, count: state.text, over: state.over, err: '' });
     this.setData({ proofs });
+    this.refreshSummary();
   },
 
   chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
-  toggleForm() { this.setData({ showForm: !this.data.showForm }); },
+  toggleEdit() { this.setData({ showEdit: !this.data.showEdit }); },
   chooseTier(event) {
     const tier = String(event.currentTarget.dataset.key || 'standard');
     const activeDirections = this.data.directions.filter((item) => item.tier === tier);
@@ -176,6 +242,7 @@ Page({
       tier,
       activeDirections,
       directionKey: String(activeDirections[0] && activeDirections[0].key || ''),
+      assets: this.assetsForTier(tier),
       'errors.direction': '',
     });
   },
@@ -208,6 +275,15 @@ Page({
   async pickAsset(event) {
     if (this.data.submitting || this.data.assets.some((item) => item.uploading)) return;
     const role = String(event.currentTarget.dataset.role || '');
+    // 置灰槽点得动，只是点了给解释：一个不响应的灰框跟坏掉的按钮长得一模一样。
+    if (this.data.assets.some((item) => item.role === role && item.disabled)) {
+      wx.showModal({
+        title: '主视觉大片不用本人照片',
+        content: '这一档由 AI 整幅创作主视觉，人物方向是 AI 演绎、并非本人。想让本人出镜，请切回「创意排版」。',
+        showCancel: false, confirmText: '知道了',
+      });
+      return;
+    }
     if (role === 'portrait' && !this.data.consent) {
       this.setData({ 'errors.consent': '请先确认肖像使用权' });
       wx.showToast({ title: '请先勾选肖像确认', icon: 'none' });
@@ -254,6 +330,11 @@ Page({
     if (this.data.tier === 'premium' && hasPortrait) errors.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     this.setData({ errors, proofs });
     if (Object.keys(errors).length || proofs.some((proof) => proof.err)) {
+      // 报错的字段大多躺在收起的「编辑内容」里：不摊开就等于让用户对着一句「还有几处要改」
+      // 找一个他根本看不见的输入框。
+      const inEdit = proofs.some((proof) => proof.err)
+        || ['goal', 'audience', 'headline', 'subheadline', 'cta', 'visual'].some((field) => errors[field]);
+      if (inEdit && !this.data.showEdit) this.setData({ showEdit: true });
       wx.showToast({ title: '还有几处需要改一下', icon: 'none' });
       return false;
     }
@@ -269,9 +350,10 @@ Page({
       const directionKey = activeDirections.some((item) => item.key === this.data.directionKey)
         ? this.data.directionKey : String(activeDirections[0] && activeDirections[0].key || '');
       this.setData({
-        templates: status.templates, templateKey, price: status.pricePerPoster,
+        templates: status.templates, templateGroups: groupTemplates(status.templates), templateKey, price: status.pricePerPoster,
         premiumPrice: status.premiumPricePerPoster, premiumOn: !!status.premiumAvailable,
         directions: status.directions, activeDirections, directionKey, tier,
+        assets: this.assetsForTier(tier),
       });
     } catch (_) { /* 服务端原错误已经在提交区展示 */ }
   },

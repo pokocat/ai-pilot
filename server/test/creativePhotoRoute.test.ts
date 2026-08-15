@@ -24,6 +24,8 @@ import {
 } from '../src/services/creative/styleLibrary.js';
 import {
   assembleImagePrompt, sanitizeSubject, shotSizesIn, expandSlots,
+  mergeArtDirection, composeImageBody, normalizeArtDirection, artDirectionNote, lexiconEn,
+  ART_DIRECTION_KEYS, MAX_AD_CHARS,
   BANNED_QUALITY_WORDS, BASE_NEGATIVES, NO_TEXT_CLAUSE, RATIO_SUFFIX, SUBJECT_SLOT,
 } from '../src/services/creative/imagePrompt.js';
 import { photoRouteAllowed, resolvePosterRoute } from '../src/services/creative/posterRoute.js';
@@ -63,13 +65,47 @@ describe('影像风格库 · 12 档完整性（档案是 prompt 的唯一真源�
     }
   });
 
-  test('每档必有 negativeSpaceClause 与 safeZone（这两个字段是海报与普通图的分界）', () => {
+  test('每档必有 structure.negativeSpace 与 safeZone（这两个字段是海报与普通图的分界）', () => {
     for (const s of POSTER_STYLE_LIST) {
-      assert.ok(s.negativeSpaceClause.trim().length > 40, `${s.key} 负空间子句太短，起不到禁入侵作用`);
+      assert.ok(s.structure.negativeSpace.trim().length > 40, `${s.key} 负空间子句太短，起不到禁入侵作用`);
       assert.ok(SAFE_ZONES.includes(s.safeZone), `${s.key} safeZone 不在白名单：${s.safeZone}`);
       assert.ok(SAFE_ZONE_HINTS[s.safeZone], `${s.safeZone} 缺少给排版层的 px 区间说明`);
       // 禁入侵子句必须真的写了「不许有什么」，否则只是一句「这里留白」——模型会把阴影塞进去
-      assert.match(s.negativeSpaceClause, /\bno\b/i, `${s.key} 负空间子句缺少显式排除项（no …）`);
+      assert.match(s.structure.negativeSpace, /\bno\b/i, `${s.key} 负空间子句缺少显式排除项（no …）`);
+    }
+  });
+
+  // 行动区是本次重构新增的结构位：叠层要在成品图上放二维码/CTA，而模型不知道那块地要留出来。
+  // 缺了它就回到「码压在主体上」——那是量测器量不出来、只能靠提示词说死的一类事故。
+  test('每档必有 structure.actionZone，且与安全区一样带显式禁入侵词', () => {
+    for (const s of POSTER_STYLE_LIST) {
+      assert.ok(s.structure.actionZone.trim().length > 40, `${s.key} 缺行动区结构位（二维码/CTA 没有落点）`);
+      assert.match(
+        s.structure.actionZone,
+        /action area/i,
+        `${s.key} 行动区没说清它是干什么用的（叠层据此避让）`,
+      );
+      const r = assembleImagePrompt({ style: s, subject: 'a founder', brief: BRIEF });
+      assert.ok(r.prompt.includes(s.structure.actionZone.slice(0, 40)), `${s.key} 行动区没进正文`);
+    }
+  });
+
+  // ★ 本次重构的核心不变量：负空间子句**不许自带颜色**。
+  //   它一旦写死 `pure unbroken black`，方案把 backdrop 改成「沉稳深灰」也白改 ——
+  //   合成出来的 prompt 会一边说深灰、一边说纯黑，模型按后一句画。
+  test('structure.negativeSpace 不含具体颜色词（颜色跟 backdrop 走，否则覆盖必然失效）', () => {
+    const COLOUR = /\b(black|white|grey|gray|navy|umber|crimson|gold|blue|green|red|teal|ivory|bone)\b/i;
+    for (const s of POSTER_STYLE_LIST) {
+      const hit = s.structure.negativeSpace.match(COLOUR);
+      assert.equal(
+        hit, null,
+        `${s.key} 负空间子句写死了颜色「${hit?.[0]}」：方案改了 backdrop 也会被这句话拽回去`,
+      );
+      assert.match(
+        s.structure.negativeSpace,
+        /backdrop tone|out of focus|evenly lit|unoccupied/i,
+        `${s.key} 负空间子句要么指向 backdrop 基调、要么只描述形状，不能凭空少一句`,
+      );
     }
   });
 
@@ -81,21 +117,38 @@ describe('影像风格库 · 12 档完整性（档案是 prompt 的唯一真源�
       ] as const) {
         assert.ok(String(v).trim().length > 0, `${s.key}.${field} 不能为空`);
       }
-      assert.ok(s.negatives.length > 0, `${s.key} 缺风格专属负向词`);
+      assert.ok(s.structure.negatives.length > 0, `${s.key} 缺风格专属负向词`);
     }
   });
 
-  test('骨架必须含 {SUBJECT} 槽、每个槽都带内容、且**不许自带 no-text 与画幅**（那两句由拼装器置尾）', () => {
+  test('structure.opening 含唯一 {SUBJECT} 槽；档案里**不许自带 no-text 与画幅**（那两句由拼装器置尾）', () => {
     for (const s of POSTER_STYLE_LIST) {
-      assert.ok(s.imagePromptSkeleton.includes(SUBJECT_SLOT), `${s.key} 缺 ${SUBJECT_SLOT} 槽`);
-      // 光秃秃的 {LABEL}（无内容）会被拼装器直接删掉 → 骨架少一段语义，属于档案写错
-      const bare = s.imagePromptSkeleton.match(/\{[A-Z_]+\}/g)?.filter((t) => t !== SUBJECT_SLOT) ?? [];
-      assert.deepEqual(bare, [], `${s.key} 有无内容的空槽：${bare.join(',')}`);
+      assert.ok(s.structure.opening.includes(SUBJECT_SLOT), `${s.key} 缺 ${SUBJECT_SLOT} 槽`);
+      // 字段化之后不该再有任何 {LABEL} 槽：可替换的东西已经是 defaults 字段了，
+      // 留着花括号说明这一档没拆干净，那段内容会被 expandSlots 直接删掉。
+      const all = [
+        s.structure.opening.split(SUBJECT_SLOT).join(''),
+        s.structure.camera, s.structure.negativeSpace, s.structure.actionZone,
+        ...Object.values(s.defaults),
+      ].join(' ');
+      const braces = all.match(/\{[^}]*\}/g) ?? [];
+      assert.deepEqual(braces, [], `${s.key} 残留槽位（应已拆成 defaults 字段）：${braces.join(',')}`);
       assert.ok(
-        !s.imagePromptSkeleton.toLowerCase().includes(NO_TEXT_CLAUSE),
-        `${s.key} 骨架自带了 no-text：它必须由拼装器放在正文最末，写在骨架里会被负空间子句挤到中段`,
+        !all.toLowerCase().includes(NO_TEXT_CLAUSE),
+        `${s.key} 档案自带了 no-text：它必须由拼装器放在正文最末，写在档案里会被负空间子句挤到中段`,
       );
-      assert.ok(!s.imagePromptSkeleton.includes(RATIO_SUFFIX), `${s.key} 骨架不该自带画幅后缀`);
+      assert.ok(!all.includes(RATIO_SUFFIX), `${s.key} 档案不该自带画幅后缀`);
+    }
+  });
+
+  test('defaults 七个字段全部在位（可为空串，但键不许缺——缺一个就是一处静默失效的覆盖点）', () => {
+    for (const s of POSTER_STYLE_LIST) {
+      for (const k of ART_DIRECTION_KEYS) {
+        assert.equal(typeof s.defaults[k], 'string', `${s.key}.defaults.${k} 缺失或类型不对`);
+      }
+      // 背景与光线是每一档都必须有主张的两项：合成时它们决定留白区长什么样。
+      assert.ok(s.defaults.backdrop.trim().length > 10, `${s.key} 缺 backdrop 缺省`);
+      assert.ok(s.defaults.lighting.trim().length > 10, `${s.key} 缺 lighting 缺省`);
     }
   });
 
@@ -136,7 +189,7 @@ describe('影像 prompt 拼装器 · 槽位与负向合并', () => {
     const brief = hotelOtaBrief({ negativePrompt: '霓虹灯, text, 手绘涂鸦' });
     const r = assembleImagePrompt({ style: STYLE, subject: 'a lawyer', brief });
     const list = r.negativePrompt.split(', ');
-    assert.equal(list[0], STYLE.negatives[0], '风格专属排在最前（更贴题）');
+    assert.equal(list[0], STYLE.structure.negatives[0], '风格专属排在最前（更贴题）');
     for (const w of BASE_NEGATIVES) assert.ok(list.includes(w), `通用基座缺 ${w}`);
     assert.ok(list.includes('霓虹灯') && list.includes('手绘涂鸦'), 'brief 的排除项必须带上（用户显式要求）');
     assert.equal(list.filter((x) => x === 'text').length, 1, '重复词只留一个');
@@ -149,10 +202,10 @@ describe('影像 prompt 拼装器 · 槽位与负向合并', () => {
 });
 
 describe('影像 prompt 拼装器 · 发现①：负空间禁入侵子句必须进正文', () => {
-  test('每一档的 negativeSpaceClause 都出现在 prompt 正文里（不是只塞负向框）', () => {
+  test('每一档的 structure.negativeSpace 都出现在 prompt 正文里（不是只塞负向框）', () => {
     for (const s of POSTER_STYLE_LIST) {
       const r = assembleImagePrompt({ style: s, subject: 'a founder', brief: BRIEF });
-      const head = s.negativeSpaceClause.slice(0, 40);
+      const head = s.structure.negativeSpace.slice(0, 40);
       assert.ok(r.prompt.includes(head), `${s.key} 的负空间子句没进正文`);
       assert.ok(
         !r.negativePrompt.includes(head),
@@ -164,7 +217,7 @@ describe('影像 prompt 拼装器 · 发现①：负空间禁入侵子句必须�
   test('负空间子句排在 no-text 之前（它描述画面内容，属于正文主体）', () => {
     const r = assembleImagePrompt({ style: STYLE, subject: 'a lawyer', brief: BRIEF });
     assert.ok(
-      r.prompt.indexOf(STYLE.negativeSpaceClause.slice(0, 30)) < r.prompt.indexOf(NO_TEXT_CLAUSE),
+      r.prompt.indexOf(STYLE.structure.negativeSpace.slice(0, 30)) < r.prompt.indexOf(NO_TEXT_CLAUSE),
       '顺序错了就等于把最该压轴的一句挤到中段',
     );
   });
@@ -211,7 +264,7 @@ describe('影像 prompt 拼装器 · 发现③：禁用词剥除与景别互斥'
 
   test('景别互斥：骨架已有景别 → subject 里的景别全剥（骨架的那个是我们调过的）', () => {
     // mono_authority_portrait 的骨架里是 tight head-and-shoulders
-    assert.ok(shotSizesIn(STYLE.imagePromptSkeleton).length >= 1, '这一档骨架本来就该有一个景别词');
+    assert.ok(shotSizesIn(STYLE.structure.camera).length >= 1, '这一档相机语法本来就该有一个景别词');
     const r = assembleImagePrompt({ style: STYLE, subject: 'extreme close-up of a lawyer, full body', brief: BRIEF });
     assert.ok(r.strippedShotSizes.includes('extreme close-up'), `实际剥了：${r.strippedShotSizes.join(',')}`);
     assert.ok(r.strippedShotSizes.includes('full body'));
@@ -258,10 +311,232 @@ describe('影像 prompt 拼装器 · 发现③：禁用词剥除与景别互斥'
 
   test('干净的 subject 不被动到（卫生只该剥噪声，不该改写主体）', () => {
     const clean = 'a composed Chinese woman in her forties, a tax advisor';
-    const r = sanitizeSubject(clean, shotSizesIn(STYLE.imagePromptSkeleton));
+    const r = sanitizeSubject(clean, shotSizesIn(STYLE.structure.camera));
     assert.equal(r.subject, clean);
     assert.deepEqual(r.strippedWords, []);
     assert.deepEqual(r.strippedShotSizes, []);
+  });
+});
+
+/* ───────────────── ②' 方案优先：字段合成器 ───────────────── */
+
+/**
+ * **等价还原守卫**：字段化之前，每档是一整段 `imagePromptSkeleton`。
+ * 下面这张表是那段文案在 2026-08-15 拆分**当天**的关键子句快照 —— 逐字摘自旧骨架，
+ * 不是重新想出来的描述。合成器在「方案什么都没说」时必须还原出语义等价的提示词，
+ * 也就是这些子句必须一条不少地出现在默认合成结果里。
+ *
+ * 它守的是拆分本身：拆错一个字段（把 `Lighting` 段落丢了、把服装拆没了）在别的用例里
+ * 看不出来 —— prompt 仍然通顺、仍然以 no-text 收尾，只是这一档不再是这一档了。
+ */
+const LEGACY_CLAUSES: Record<string, string[]> = {
+  quiet_luxury_grey: [
+    'undyed ivory or oatmeal cashmere', 'seated at a low stone table',
+    'vast near-empty gallery-like room', 'broad soft window light from camera right',
+    'two-stop falloff into the corners', 'high-key desaturated grade with warm undertone',
+    'subtle 400-speed grain', 'medium format 80mm', 'waist-up framing',
+  ],
+  baroque_icon_gold: [
+    'heavy crimson and deep-green velvet with gold thread embroidery', 'a white lamb',
+    'near-black umber void', 'single candlelit key high from camera left at 45 degrees',
+    'hard chiaroscuro', 'sfumato skin transitions', 'aged varnish', 'centred half-length figure',
+  ],
+  editorial_black_gold: [
+    'a sharply tailored black suit', 'hands in pockets', 'black seamless studio backdrop',
+    'rich true black point', 'hard focused key from top left through a small softbox',
+    'brushed-brass vertical element', 'crisp commercial retouch', '85mm at f/4', 'chest-up framing',
+  ],
+  neo_chinese_void: [
+    'loose raw-silk tea robe in bone white', 'rice-paper screen wall', 'one bare plum branch',
+    'pale diffused north light', 'low saturation celadon and mist grey', 'fine paper grain',
+    'xieyi-style asymmetric balance', 'small subject placed in the lower right',
+  ],
+  documentary_film_grain: [
+    'mid-gesture, unaware of the camera', 'their own workshop, kitchen', 'available light only',
+    'Kodak Portra 400 emulation', 'organic grain', 'unretouched pores and flyaway hair',
+    '35mm at f/2', 'medium shot',
+  ],
+  luxury_magazine_cover: [
+    'a monochrome sculptural coat', 'seamless paper backdrop in warm bone white',
+    'beauty dish key slightly above and on axis', 'saturated but controlled colour',
+    'tack-sharp fabric weave', 'medium format 110mm at f/8', 'three-quarter body',
+  ],
+  airy_japanese_light: [
+    'a white cotton shirt', 'bright pale room, one sheer white curtain', 'a single glass vase',
+    'backlit by a hazy window', 'soft veiling flare', 'Fujifilm Pro 400H emulation',
+    '50mm at f/1.8', 'medium close-up',
+  ],
+  cyber_tech_blue: [
+    'a dark technical jacket', 'dark data-hall corridor', 'faint volumetric haze',
+    'cyan practical rim from behind camera left', 'deep navy-to-black gradient',
+    'crisp micro-contrast', '50mm at f/2.2', 'chest-up framing',
+  ],
+  retro_hongkong: [
+    'a silk qipao or an open-collar shirt', 'green fluorescent tube overhead',
+    'magenta neon spill from the right', 'expired-film colour shift', 'crushed teal shadows',
+    'gate weave', 'anamorphic 40mm at f/2', 'medium shot',
+  ],
+  glossy_3d_trend: [
+    'single hero object floating slightly above a soft curved backdrop',
+    'glossy soft-touch plastic', 'one brushed chrome accent',
+    'large HDRI studio softbox from the front top', 'Octane-grade clean render',
+    'hero centred low in the frame', 'generous headroom',
+  ],
+  mono_authority_portrait: [
+    'a plain dark shirt or jacket', 'direct steady gaze', 'mid-grey painted wall',
+    'one large softbox at camera left 45 degrees', 'a catchlight in both eyes',
+    'silver-gelatin tonality', '85mm at f/2.8', 'head-and-shoulders',
+  ],
+  surreal_object_metaphor: [
+    'only subject, placed on a wide seamless surface', 'large empty studio field in warm bone grey',
+    'single hard sun-like source high from camera right', 'gallery still-life realism',
+    'matte surfaces', '100mm macro at f/8', 'the object small in the lower third',
+  ],
+};
+
+describe('字段合成器 · 等价还原（方案什么都没说时，必须还原出与旧骨架语义等价的提示词）', () => {
+  test('12 档的关键子句一条不少地出现在默认合成结果里', () => {
+    for (const s of POSTER_STYLE_LIST) {
+      const r = assembleImagePrompt({ style: s, subject: 'a composed founder', brief: BRIEF });
+      const missing = (LEGACY_CLAUSES[s.key] ?? []).filter((c) => !r.prompt.includes(c));
+      assert.deepEqual(missing, [], `${s.key} 拆分时丢了这些子句：${missing.join(' | ')}`);
+      assert.ok(LEGACY_CLAUSES[s.key]?.length, `${s.key} 没有等价还原快照，加档时必须补上`);
+    }
+  });
+
+  test('默认合成不产生空标签（某档没有 props/mood 时不许留下 "Props: ." 这种断句）', () => {
+    for (const s of POSTER_STYLE_LIST) {
+      const r = assembleImagePrompt({ style: s, subject: 'a founder', brief: BRIEF });
+      assert.ok(!/:\s*\./.test(r.prompt), `${s.key} 有空标签：${r.prompt}`);
+      assert.ok(!/\s{2,}|,,/.test(r.prompt), `${s.key} 有多余空白：${r.prompt}`);
+    }
+  });
+});
+
+describe('字段合成器 · 方案优先（ad 有值用 ad，空则回落缺省）', () => {
+  const AD = (v: Record<string, { zh: string; en: string }>) => normalizeArtDirection(v);
+
+  // ★ 这就是那条实证缺陷的回归用例：宣言承诺「沉稳深灰」，而旧实现把 black 写死在骨架
+  //   与负空间子句里，承诺永远到不了生图模型。
+  test('ad.backdrop=沉稳深灰 → 合成含 charcoal/deep grey，且缺省的 pure/true black 全部消失', () => {
+    const style = POSTER_STYLES.editorial_black_gold;
+    const r = assembleImagePrompt({
+      style, subject: 'a tax advisor', brief: BRIEF,
+      artDirection: AD({ backdrop: { zh: '沉稳深灰', en: '' } }),
+    });
+    assert.match(r.prompt, /charcoal|deep grey|deep gray/i, `深灰没进提示词：${r.prompt}`);
+    assert.ok(!/rich true black point/i.test(r.prompt), '缺省背景没被顶掉');
+    assert.ok(!/pure unbroken black/i.test(r.prompt), '负空间子句仍把留白区钉成纯黑——覆盖等于白做');
+    assert.deepEqual(r.overriddenFields, ['backdrop'], '只覆盖了 backdrop，其余字段不许被连坐');
+    // 只给中文时英文由词表补出来；zh 位原样留着给客户看。
+    assert.ok(r.note.includes('沉稳深灰'), `给客户看的那句话必须念的是原话：${r.note}`);
+  });
+
+  test('未覆盖的字段逐条回落该档缺省（覆盖是逐字段的，不是整块替换）', () => {
+    const style = POSTER_STYLES.editorial_black_gold;
+    const r = assembleImagePrompt({
+      style, subject: 'a tax advisor', brief: BRIEF,
+      artDirection: AD({ backdrop: { zh: '沉稳深灰', en: 'charcoal deep grey' } }),
+    });
+    for (const c of ['hard focused key from top left', 'crisp commercial retouch', 'a sharply tailored black suit']) {
+      assert.ok(r.prompt.includes(c), `没聊到的字段必须留着缺省：${c}`);
+    }
+  });
+
+  test('ad 全空 = 与不传 ad 逐字相同（"聊了但什么都没说" 不该改变任何一个字）', () => {
+    const style = POSTER_STYLES.quiet_luxury_grey;
+    const base = assembleImagePrompt({ style, subject: 'a founder', brief: BRIEF });
+    const empty = assembleImagePrompt({
+      style, subject: 'a founder', brief: BRIEF,
+      artDirection: AD({ backdrop: { zh: '', en: '' }, lighting: { zh: '', en: '' } }),
+    });
+    assert.equal(empty.prompt, base.prompt);
+    assert.deepEqual(empty.overriddenFields, []);
+    assert.equal(empty.note, '', '没聊到任何字段时不许对客户许诺画面');
+  });
+
+  test('structure 与技术合规位不可被覆盖（相机语法/负空间/no-text/画幅/负向框）', () => {
+    const style = POSTER_STYLES.mono_authority_portrait;
+    const r = assembleImagePrompt({
+      style, subject: 'a lawyer', brief: BRIEF,
+      artDirection: AD({
+        backdrop: { zh: '暖橙', en: 'warm orange wall' },
+        lighting: { zh: '硬光', en: 'hard flash' },
+        mood: { zh: '热闹', en: 'busy and loud' },
+      }),
+    });
+    assert.ok(r.prompt.includes(style.structure.camera), '相机语法被动了 → 安全区就对不上排版层');
+    assert.ok(r.prompt.includes(style.structure.negativeSpace.slice(0, 40)), '负空间子句被动了');
+    assert.ok(r.prompt.endsWith(`${NO_TEXT_CLAUSE}. ${RATIO_SUFFIX}`), 'no-text 与画幅必须仍在最末');
+    for (const w of BASE_NEGATIVES) assert.ok(r.negativePrompt.includes(w), `通用负向基座缺 ${w}`);
+    // 覆盖的字段真的进去了（否则上面几条都是空断言）
+    assert.ok(r.prompt.includes('warm orange wall') && r.prompt.includes('hard flash'));
+  });
+
+  test('graphic 路线（无风格档）只合成方案说过的字段，不凭空借用任何一档的缺省', () => {
+    const merged = mergeArtDirection(null, AD({ palette: { zh: '低饱和暖灰', en: 'low saturation warm grey' } }));
+    assert.deepEqual(merged.fields.map((f) => f.key), ['palette']);
+    assert.equal(merged.fields[0].source, 'ad');
+    assert.match(artDirectionNote(merged), /低饱和暖灰/);
+  });
+
+  test('中文摘要只念方案聊过的字段（缺省是骨架的事，念出来就是替方案许它没许过的诺）', () => {
+    const style = POSTER_STYLES.mono_authority_portrait;
+    const merged = mergeArtDirection(style, AD({ lighting: { zh: '柔暖侧光', en: 'soft warm side light' } }));
+    const note = artDirectionNote(merged, style.name);
+    assert.ok(note.includes('黑白权威肖像') && note.includes('柔暖侧光'));
+    assert.ok(!note.includes('softbox') && !note.includes('mid-grey'), `缺省不许出现在给客户看的话里：${note}`);
+  });
+});
+
+describe('字段合成器 · AD 值的卫生与归一（模型填的是不可信文本）', () => {
+  test('禁用质量词与景别词一律剥掉（景别归 structure.camera 所有）', () => {
+    const ad = normalizeArtDirection({
+      backdrop: { zh: '深灰墙面', en: 'a masterpiece 8k close-up of a deep grey wall' },
+    });
+    assert.ok(ad.backdrop, '整段不该被剥空');
+    assert.ok(!/masterpiece|8k|close-up/i.test(ad.backdrop!.en), `没剥干净：${ad.backdrop!.en}`);
+    assert.ok(ad.backdrop!.en.includes('deep grey wall'));
+  });
+
+  test('两边都空的字段整个缺席（不许用空对象冒充「聊过」）', () => {
+    const ad = normalizeArtDirection({ backdrop: { zh: '', en: '' }, mood: null, palette: '  ' });
+    assert.deepEqual(Object.keys(ad), []);
+  });
+
+  // 只认标量：嵌套对象 String() 出来是 "[object Object]"，那串东西会顶掉一个调好的缺省，
+  // 比丢掉这个字段糟得多（画面会照着一句无意义的话画）。
+  test('字段值是嵌套对象/数组时整条丢弃，绝不让 "[object Object]" 进 prompt', () => {
+    const ad = normalizeArtDirection({ backdrop: { zh: { deep: 'grey' }, en: ['a', 'b'] }, lighting: { nested: 1 } });
+    assert.deepEqual(Object.keys(ad), []);
+    const r = assembleImagePrompt({
+      style: POSTER_STYLES.editorial_black_gold, subject: 'a founder', brief: BRIEF, artDirection: ad,
+    });
+    assert.ok(!r.prompt.includes('object Object'), r.prompt);
+    assert.ok(r.prompt.includes('rich true black point'), '丢弃脏字段后必须回落缺省');
+  });
+
+  test('只给字符串也认（模型常把 {zh,en} 写成一句话），并按词表补出英文', () => {
+    const ad = normalizeArtDirection({ backdrop: '深灰', lighting: '柔暖光' });
+    assert.equal(ad.backdrop?.zh, '深灰');
+    assert.match(ad.backdrop!.en, /charcoal|grey/i);
+    assert.match(ad.lighting!.en, /soft warm light/i);
+  });
+
+  test('词表命中不了的中文原样透传（不做机器翻译，也不许丢字段）', () => {
+    assert.equal(lexiconEn('像一场晚宴散场'), '像一场晚宴散场');
+    const ad = normalizeArtDirection({ mood: '像一场晚宴散场' });
+    assert.equal(ad.mood?.en, '像一场晚宴散场');
+  });
+
+  test('超长字段被截断（一句短描述，不许写小作文稀释整条 prompt）', () => {
+    const ad = normalizeArtDirection({ backdrop: { zh: '深'.repeat(400), en: '' } });
+    assert.ok((ad.backdrop?.zh.length ?? 0) <= MAX_AD_CHARS, `没截断：${ad.backdrop?.zh.length}`);
+  });
+
+  test('composeImageBody 保留 {SUBJECT} 槽（填 subject 是拼装器最后一步的事）', () => {
+    const style = POSTER_STYLES.cyber_tech_blue;
+    assert.ok(composeImageBody(style, mergeArtDirection(style, {})).includes(SUBJECT_SLOT));
   });
 });
 
@@ -329,6 +604,7 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
     paragraphs: ['第一段：留白是结构。', '第二段：色彩承担信息。', '第三段：工艺感来自反复推敲。'],
     palette: ['#FFFFFF', '#7A7A7A', '#000000'],
     reference: '专家 IP 的可信感',
+    artDirection: {},
     route: { mode: 'photo', styleKey: 'mono_authority_portrait', subject: SUBJECT },
   };
 
@@ -407,6 +683,7 @@ const MANIFESTO_DOC: PosterManifesto = {
   paragraphs: ['第一段：留白是结构。', '第二段：色彩承担信息。', '第三段：工艺感来自反复推敲。'],
   palette: ['#FFFFFF', '#7A7A7A', '#000000'],
   reference: '专家 IP 的可信感',
+  artDirection: {},
   route: { mode: 'photo', styleKey: 'mono_authority_portrait', subject: SUBJECT },
 };
 

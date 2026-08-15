@@ -26,6 +26,7 @@ import {
 } from './config.js';
 import { normalizePosterBrief, briefModerationText, LIMITS, type NormalizedPosterBrief } from './schema.js';
 import { defaultDirectionKey, isPosterDirectionKey } from './directions.js';
+import { posterStyleName } from './styleLibrary.js';
 import { resolveBriefAssets, UploadRejectedError } from './uploads.js';
 import { creativeAssetUrl, getCreativeObject } from './storage.js';
 import type {
@@ -139,6 +140,17 @@ function userFacingError(code: string | null, fallback: string | null): string |
   return USER_FACING_ERROR[code] ?? '出图失败，已退回钻石';
 }
 
+/** 本单实际出图用的影像风格中文名。未走影像路线（或老任务无该字段）时为空串。 */
+function styleNameOfResult(job: JobRow): string {
+  const result = (job.resultJson ?? {}) as { styleKey?: unknown };
+  return posterStyleName(result.styleKey);
+}
+
+function qrReservedOfResult(job: JobRow): boolean {
+  const result = (job.resultJson ?? {}) as { qrReserved?: unknown };
+  return result.qrReserved === true;
+}
+
 function toView(job: JobRow, assets: Parameters<typeof assetView>[0][]): CreativeJobView {
   return {
     id: job.id,
@@ -161,6 +173,12 @@ function toView(job: JobRow, assets: Parameters<typeof assetView>[0][]): Creativ
     // 只是布尔事实，不带 assetId：详情页「换方向」据它过滤 requiresPortrait 的方向，
     // 否则无照片的单也会被摆出「本人形象」，选中即 422，而那页没有上传入口。
     hasPortrait: !!requestOf(job).brief?.portraitAssetId,
+    // 风格名读 **resultJson**（画面已经按这一档出过了），不读 brief：建单时没人知道模型会选哪一档，
+    // 而影像路线失败的单 resultJson 里压根没有 styleKey —— 那时也就不该对用户说风格。
+    ...(styleNameOfResult(job) ? { styleName: styleNameOfResult(job) } : {}),
+    // 贴码位事实：worker 按「真读回了二维码字节」写入 resultJson（两条排版路径同口径）。
+    // 只在成功单上有意义；缺省不带，老任务与失败单前端不渲染提示。
+    ...(qrReservedOfResult(job) ? { qrReserved: true } : {}),
     actions: actionsFor(job.status),
   };
 }

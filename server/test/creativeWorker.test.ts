@@ -140,6 +140,37 @@ describe('海报成品图 · worker 生命周期', () => {
     assert.equal(file.status, 200, '本人可下载');
   });
 
+  // ★ 贴码位的事实位：模板一律把码位画出来，没传二维码素材时那块是**空着等用户贴码**的。
+  // 成品页据 resultJson.qrReserved 给「可自行粘贴二维码」的提示 —— 前端不能靠「brief 里有没有
+  // qrAssetId」去猜：那是建单当时的快照，素材文件后来读不回来时它仍然是"有"，而画面上是空的。
+  test('resultJson.qrReserved：无二维码素材 → true；素材可用 → false', async () => {
+    const { token, tenantId } = await posterUser();
+
+    const noQr = await createJob(token, 'w-qr-none');
+    await tickCreativeWorker();
+    const a = await prisma.creativeJob.findUniqueOrThrow({ where: { id: noQr } });
+    assert.equal(a.status, 'succeeded', `${a.errorCode} ${a.errorMessage}`);
+    assert.equal(
+      (a.resultJson as { qrReserved?: boolean }).qrReserved, true,
+      '没传二维码 → 画面上是贴码位，必须如实下发',
+    );
+
+    // 传了二维码素材：worker 读回真实字节喂给模板，画的是真码，不该再提示贴码。
+    const qrKey = `test/creative/qr/${tenantId}.png`;
+    await putCreativeObject(qrKey, Buffer.from('qr-bytes'), 'image/png');
+    const qrAsset = await prisma.creativeAsset.create({
+      data: { tenantId, userId: token, kind: 'source', ossKey: qrKey, mimeType: 'image/png', bytes: 8 },
+    });
+    const withQr = await createJob(token, 'w-qr-with', { brief: brief({ qrAssetId: qrAsset.id }) });
+    await tickCreativeWorker();
+    const b = await prisma.creativeJob.findUniqueOrThrow({ where: { id: withQr } });
+    assert.equal(b.status, 'succeeded', `${b.errorCode} ${b.errorMessage}`);
+    assert.equal(
+      (b.resultJson as { qrReserved?: boolean }).qrReserved, false,
+      '有可用二维码素材 → 画的是真码，不该提示贴码',
+    );
+  });
+
   test('messageId 存在 → 成功后成果消息 contentJson 补写 assets + creativeJobId', async () => {
     const { token, tenantId } = await posterUser();
     const session = await prisma.session.create({ data: { tenantId, userId: token, agentKey: 'poster', title: '海报方案' } });
