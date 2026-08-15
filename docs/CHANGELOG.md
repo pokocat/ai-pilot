@@ -6,6 +6,11 @@
 
 ## 变更日志
 
+### 2026-08-15 · 修复真机声音增强上传被 multipart 字段上限截断 · 影响面：服务端上传基座、快出片声音/形象克隆、回归测试
+
+- **真机证据与根因**：预发真机两次 `POST /api/video/avatar/clone` 均在 3–9ms 内返回 422，未进入 AIStar。计费版克隆上传会发送 7 个 multipart 字段（微信连空的可选字段也会逐项发送），但 Fastify 全局上限仍为 5；排在最后的 `clientRequestId/expectedCredits` 触发 `ERR_STREAM_PREMATURE_CLOSE`，英文技术错误被端上安全降成“上传未能完成”。
+- **修复与守卫**：全局 multipart 字段上限提高到有界的 16，容纳当前完整契约及少量演进余量，不放开文件数和大小限制。新增与微信真实字段形状一致的七字段上传回归，修复前稳定复现 422，修复后必须进入克隆上游并按确认报价预扣。
+
 ### 2026-08-14 · TC-L 并发冒烟恢复自足并修正 Journey 首次并发竞态 · 影响面：服务端测试隔离、动态 Token 预留、UserJourney 状态迁移
 
 - **根因不是过载闸**：`structuredBilling.test.ts` 为计费回归写入的 AI v2 OpenAI 路由会跨进程留在 `junshi_test`；`cleanBusiness()` 刻意不清运营配置，导致随后单跑 integration 时 `generationQuotaReserveTokens` 把每次预留从 mock 的 2,000 提到 136,000，入门版 40 万额度只有 3 个并发请求成功，其余返回 402 `INSUFFICIENT_QUOTA`。复现确认不是 429/503，也与登录改动无关。

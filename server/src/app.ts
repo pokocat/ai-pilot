@@ -103,7 +103,11 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(cors, { origin: true });
   // 知识库文档上传：单文件、≤20MB（解析器在 docParse 按需动态加载）。
   // 快出片视频素材允许 100MB；其余上传路由继续在自身 handler 按 5/10/20MB 业务上限二次校验。
-  await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 5 } });
+  // 克隆上传当前有 7 个业务字段：kind/voiceSource/avatarId/voiceId/name/clientRequestId/expectedCredits。
+  // 微信会连空的可选字段也逐项发出；上限仍为 5 时，排在最后的幂等号与确认报价会触发
+  // ERR_STREAM_PREMATURE_CLOSE，最新版客户端反而被 BFF 拒成 422。保留 16 的有界上限，既容纳
+  // 当前契约和少量演进余量，也不把 multipart 字段数完全放开。
+  await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 16 } });
 
   // 全站限流（此前完全无 limit_req，SMS/AI 生成/下单等成本型接口零防刷，机器常态被扫描器扫——见售卖前体检 P1）。
   // 全局宽松兜底（正常用户远不会触及），成本/鉴权型路由用 route-level config.rateLimit 收紧（见 auth.ts 等）。

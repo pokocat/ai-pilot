@@ -415,6 +415,25 @@ test('训练声音真的扣钻石，而不是只在界面上写着要扣', async
   assert.equal(await getBalance(token), before - 200, '预扣必须落到余额上');
 });
 
+test('微信克隆上传的完整七字段不会被 multipart 全局上限截断', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  // wx.uploadFile 会把空的可选字段也逐项放进 multipart；计费版新增的幂等号和确认报价排在最后。
+  // 全局 fields 上限若还停在 5，最后两项会被静默截掉，最新版客户端会被误判成旧版并返回 422。
+  const res = await postClone(token, {
+    kind: 'voice',
+    voiceSource: '',
+    avatarId: '',
+    voiceId: '',
+    name: '',
+    clientRequestId: 'clone-req-full-fields',
+    expectedCredits: '200',
+  });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(cloneCalls, 1, '完整字段必须进入克隆上游，不能在 BFF 入口被截断');
+  assert.equal(await getBalance(token), before - 200);
+});
+
 test('缺幂等标识 / 报价对不上，一律挡在调用上游之前', async () => {
   const token = await cloneUser(1000);
   const before = await getBalance(token);
