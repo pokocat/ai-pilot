@@ -12,6 +12,22 @@
     <view class="av-body">
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
 
+      <!-- 读失败且手上没有可显示的数据：明说是我们没读到。绝不能落到下面那个空态去，
+           那句话会让有分身的人重新采集一次（要扣钻石）。
+           已经读到过数据时不走这里 —— 轮询抖一次不该把用户正在看的列表清空，改用列表上方的轻提示。 -->
+      <view wx:elif="{{loadFailed && !avatars.length}}" class="vd-empty">
+        <text class="t">没能读到你的数字分身</text>
+        <text class="s">这是加载失败，不是你没有创建过。已有的形象和训练进度都还在，不用重新采集，重试一下就好。</text>
+        <view class="vd-btn av-empty-btn" bindtap="retry">重新加载</view>
+        <text class="av-empty-link" bindtap="openVoices">看看我的声音 ›</text>
+      </view>
+
+      <view wx:elif="{{!loggedIn}}" class="vd-empty">
+        <text class="t">登录后查看你的数字分身</text>
+        <text class="s">创建之后每条片子都不用再出镜拍摄，形象和声音都会留在这里。</text>
+        <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
+      </view>
+
       <block wx:elif="{{!avatars.length}}">
         <view class="vd-empty">
           <text class="t">还没有数字分身</text>
@@ -23,6 +39,8 @@
       </block>
 
       <block wx:else>
+        <!-- 有数据但这次刷新没成功：列表照常显示，只解释一句「数字可能不是最新的」。 -->
+        <view wx:if="{{loadFailed}}" class="av-stale" bindtap="retry"><text class="av-stale-t">刚才没刷新成功，下面是上一次读到的状态</text><text class="av-stale-a">重试</text></view>
         <view class="av-list-head"><view><text class="av-list-kicker">你的数字人库</text><text class="av-list-title">{{avatars.length}} 个出镜形象</text></view><view class="av-add" bindtap="startClone">+ 新建</view></view>
         <view wx:for="{{avatars}}" wx:key="id" class="vd-card av-primary av-item">
           <view class="avp-head">

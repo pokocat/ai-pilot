@@ -5,6 +5,10 @@
 .vc-body { padding: 0 20px; }
 .vc-empty-btn { margin-top: 20px; }
 
+.vc-stale { margin-top: 12px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 12px; background: var(--vd-sunken); }
+.vc-stale-t { flex: 1; font-size: 12px; line-height: 1.5; color: var(--vd-muted); }
+.vc-stale-a { flex: none; font-size: 12px; font-weight: 700; color: var(--vd-avatar-deep); }
+
 .vc-list-head { min-height: 60px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .vc-list-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-avatar-deep); }
 .vc-list-title { display: block; margin-top: 4px; font-family: var(--vd-serif); font-size: 21px; font-weight: 600; }

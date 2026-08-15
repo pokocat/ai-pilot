@@ -78,7 +78,9 @@ Page({
       })
       .catch(() => {
         if (this._loadToken !== token) return;
+        // 保留上一次读到的 voices，并让轮询继续 —— 训练中撞上一次网络抖动不该把进度永久冻住。
         this.setData({ loading: false, loadFailed: true, loggedIn: true });
+        this.schedulePolling(this.data.voices);
       });
   },
 

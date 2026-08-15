@@ -12,8 +12,9 @@
     <view class="vc-body">
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
 
-      <!-- 读失败：明说是我们没读到，并给重试。不许伪装成「你还没有声音」。 -->
-      <view wx:elif="{{loadFailed}}" class="vd-empty">
+      <!-- 读失败且手上没有可显示的数据：明说是我们没读到，并给重试。不许伪装成「你还没有声音」。
+           已经读到过就不走这里，改用列表上方的轻提示，免得轮询抖一次列表就整个消失。 -->
+      <view wx:elif="{{loadFailed && !voices.length}}" class="vd-empty">
         <text class="t">没能读到你的声音</text>
         <text class="s">这是加载失败，不是你没有录过。已有的声音和训练进度都还在，重试一下就好。</text>
         <view class="vd-btn vc-empty-btn" bindtap="retry">重新加载</view>
@@ -32,6 +33,8 @@
       </view>
 
       <block wx:else>
+        <!-- 有数据但这次刷新没成功：列表照常显示，只解释一句「数字可能不是最新的」。 -->
+        <view wx:if="{{loadFailed}}" class="vc-stale" bindtap="retry"><text class="vc-stale-t">刚才没刷新成功，下面是上一次读到的状态</text><text class="vc-stale-a">重试</text></view>
         <view class="vc-list-head">
           <view>
             <text class="vc-list-kicker">你的音色库</text>
