@@ -158,7 +158,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'no furniture edge, no shadow line and no surface texture detail crossing into it, held clear as typography space.',
       actionZone:
         'Inside that reserved band, the lower left corner stays equally flat and unoccupied as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'visible patterns on the reserved wall', 'wide-angle facial distortion', 'glamour retouch',
         'HDR glow', 'oversaturated colour', 'busy background',
@@ -192,7 +192,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'no hands, no props, no visible canvas texture — one flat plane reserved for the title block.',
       actionZone:
         'The lower right corner of that plane stays the flattest part of it, kept free of brush detail as a small '
-        + 'action area for an overlaid QR code and call to action.',
+        + 'action area kept completely empty — nothing drawn inside it.',
       negatives: [
         'modern clothing', 'plastic 3D render look', 'cartoon face', 'neon colour',
         'flat even lighting', 'religious text on scrolls',
@@ -228,7 +228,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'no light spill and no gradient banding — a solid field for headline type.',
       actionZone:
         'The lower left corner stays in the same flat backdrop tone, free of rim light and props, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         // 原为 `muddy grey blacks`：背景被方案改成深灰时那条负向词会跟方案打架，改成只否定「浑浊」。
         'muddy backdrop tone', 'gradient banding', 'lens flare crossing the empty area', 'busy props',
@@ -262,8 +262,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         'The upper two thirds is left empty in the backdrop tone carrying at most a faint gradient — no branches, '
         + 'no seal marks, no wall texture and no shadow intruding — held clear for vertical calligraphic type.',
       actionZone:
-        'The lower left corner stays equally empty and shadow-free as a small action area for an overlaid QR code '
-        + 'and call to action.',
+        'The lower left corner stays equally empty and shadow-free, a small reserved action area — nothing drawn inside it.',
       negatives: [
         'calligraphy strokes', 'seal stamps', 'red lanterns', 'dragons', 'kitsch chinoiserie',
         'gold ornament', 'cluttered antiques', 'oversaturated red', 'cherry blossoms',
@@ -297,7 +296,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + '— no hanging tools, no signage, no window frame — tonally even enough for type to sit on.',
       actionZone:
         'The lower right corner keeps a small patch of plain unlit surface, no clutter and no highlight, as an action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'shop signage', 'studio backdrop', 'beauty retouch', 'posed smile at camera', 'HDR',
         'teal-and-orange grade', 'hanging objects in the reserved zone',
@@ -330,8 +329,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         'The top 30% of the seamless backdrop is left completely clean and evenly lit in the backdrop tone — no shadow '
         + 'gradient, no hair strays crossing it, no vignette — the masthead zone.',
       actionZone:
-        'The lower right corner of the paper stays clean and shadow-free as a small action area for an overlaid QR code '
-        + 'and call to action.',
+        'The lower right corner of the paper stays clean and shadow-free, a small reserved action area — nothing drawn inside it.',
       negatives: [
         'masthead', 'barcode', 'waxy skin', 'cluttered set', 'distracting jewellery glare',
         'wide-angle facial distortion', 'second cast shadow', 'backdrop seams',
@@ -365,7 +363,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'and no window mullions — soft and even enough to carry light-weight type.',
       actionZone:
         'The upper right corner of that washed field stays the most even part of it, free of flare, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'heavy shadow', 'dark moody grade', 'saturated colour', 'busy patterns', 'harsh flash',
         'strong vignette', 'curtain folds in the reserved zone',
@@ -399,7 +397,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'no cables, no HUD elements, no particles — a quiet field for the headline.',
       actionZone:
         'The lower left corner of that field stays the darkest and flattest part of it, glow-free, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'HUD text', 'floating code', 'numbers', 'circuit-board clutter', 'neon pink cyberpunk kitsch',
         'lens flare streaks over the empty zone', 'glowing wireframe overlays',
@@ -433,7 +431,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'in the backdrop tone, no signage and no neon spill reaching it — so vertical type can sit on it.',
       actionZone:
         'The lower left corner of that panel stays the flattest part of it, free of colour spill, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'Chinese signage', 'neon lettering', 'shop banners', 'modern smartphones', 'modern LED panels',
         'clean digital look', 'over-clean skin', 'cosplay costume feel', 'neon reflection in the reserved panel',
@@ -467,7 +465,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + '— no floating props, no cast shadows, no reflections and no orbiting elements enter it.',
       actionZone:
         'The upper right corner of that gradient stays the flattest part of it, kicker-free, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'human hands', 'human figures', 'cluttered props', 'chromatic noise', 'low-poly artifacts',
         'burnt sharp highlights', 'photoreal skin', 'muddy dark render', 'props drifting into the reserved zone',
@@ -501,7 +499,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'no second light edge, no shoulder intruding — the block reserved for name and title type.',
       actionZone:
         'The lower left corner of that block stays the most even part of it, free of falloff banding, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'colour tint', 'sepia', 'skin smoothing', 'glamour glow', 'hard on-camera flash',
         'dramatic fog', 'second catchlight',
@@ -535,7 +533,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
         + 'must not enter it, no secondary props, no dust concentration, no vignette at the edges.',
       actionZone:
         'The upper right corner of that empty field stays the most even part of it, gradient-free, as a small action area '
-        + 'for an overlaid QR code and call to action.',
+        + 'kept completely empty — nothing drawn inside it.',
       negatives: [
         'human figure', 'hands', 'cluttered arrangement', 'multiple unexplained floating objects',
         'glossy plastic CGI look', 'busy patterns', 'harsh vignette', 'second light source',

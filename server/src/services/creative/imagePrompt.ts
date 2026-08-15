@@ -30,7 +30,10 @@ import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterStyle, PosterStyleDefaults } from './styleLibrary.js';
 
 /** 正文最后一句（发现②）。改这里必须同步改 styleLibrary 的完整性单测。 */
-export const NO_TEXT_CLAUSE = 'no text anywhere in the image';
+// 「no QR codes / barcodes」是 2026-08-15 预发矩阵的实付学费：actionZone 措辞里点名过
+// "QR code"，Seedream 就真把码画进了主视觉（假码扫出来是空的，印在物料上就是欺骗）。
+// 骨架侧已改为只描述「空」，这里是第二道保险——本子句恒为正文最后一句、任何层不可覆盖。
+export const NO_TEXT_CLAUSE = 'no text, no qr codes, no barcodes anywhere in the image';
 /** 画幅后缀（固定 3:4；MJ 用 --ar 3:4，即梦/Seedream 用画幅选项，两边都吃这个字面量）。 */
 export const RATIO_SUFFIX = '3:4';
 
