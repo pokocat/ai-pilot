@@ -1033,18 +1033,20 @@ describe('TC-V 智能体权益', () => {
     assert.equal((await api('GET', '/api/sessions', { token: t })).body.length, 0, '被拦截不应留下会话');
   });
 
-  test('V3 用算力解锁 unlock 智能体 → 扣算力、owned=true、随后可产出', async () => {
+  // 2026-08 计费改造：启用改成「确认即启用」——对话走额度、产出物走独立钻石计费，
+  // 启用动作本身不再扣权益点。agent.price 仍非零（后台展示 / metered 用），正好作为对照。
+  test('V3 启用 unlock 智能体 → 不扣算力、owned=true、随后可产出', async () => {
     const t = await login(uniquePhone());
     const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
     const copy = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'copy');
-    assert.ok(before >= copy.price, '体验版赠送算力应足够解锁 copy');
+    assert.ok(copy.price > 0, '这条测的正是「单价非零但启用不收费」，价格塌成 0 就没有对照');
 
     const buy = await api('POST', '/api/agents/copy/purchase', { token: t, body: {} });
     assert.equal(buy.status, 200);
     assert.equal(buy.body.alreadyOwned, false);
-    assert.equal(buy.body.pricePaid, copy.price);
-    assert.equal(buy.body.creditBalance, before - copy.price, '解锁应扣减算力');
-    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - copy.price, '/me 同步');
+    assert.equal(buy.body.pricePaid, 0, '启用不收费');
+    assert.equal(buy.body.creditBalance, before, '启用不扣减算力');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before, '/me 同步');
 
     const owned = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'copy');
     assert.equal(owned.owned, true);
@@ -1054,7 +1056,7 @@ describe('TC-V 智能体权益', () => {
     assert.equal(gen.body.kind, 'report');
   });
 
-  test('V4 解锁幂等：重复购买不再扣费、alreadyOwned=true', async () => {
+  test('V4 启用幂等：重复启用 alreadyOwned=true、余额不变', async () => {
     const t = await login(uniquePhone());
     const first = await api('POST', '/api/agents/copy/purchase', { token: t, body: {} });
     const balAfter = first.body.creditBalance as number;
@@ -1065,16 +1067,19 @@ describe('TC-V 智能体权益', () => {
     assert.equal(again.body.creditBalance, balAfter, '重复购买余额不变');
   });
 
-  test('V5 算力不足解锁 → 402 INSUFFICIENT_CREDITS，不开通', async () => {
+  test('V5 余额置零也能启用：启用不再走扣费闸门（不再有 402）', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
     await prisma.creditLedger.create({ data: { tenantId, userId: t, delta: -999, reason: '测试置零', balance: 0 } });
-    // 用保留科室里的 unlock 智能体 ops（D-8 后 intel 已下架、purchase 走 404 不再走 402 口径）。
+    // 用保留科室里的 unlock 智能体 ops（D-8 后 intel 已下架、purchase 走 404）。
     const buy = await api('POST', '/api/agents/ops/purchase', { token: t, body: {} });
-    assert.equal(buy.status, 402);
-    assert.equal(buy.body.code, 'INSUFFICIENT_CREDITS');
+    assert.equal(buy.status, 200, JSON.stringify(buy.body));
+    assert.equal(buy.body.alreadyOwned, false);
+    assert.equal(buy.body.pricePaid, 0);
+    assert.equal(buy.body.creditBalance, 0, '零余额启用后仍是零，没有产生负数扣减');
     const ops = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'ops');
-    assert.equal(ops.owned, false, '未成功扣费则不开通');
+    assert.equal(ops.owned, true, '零余额也能启用');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, 0, '余额仍为 0');
   });
 
   test('V6 free 类无需购买 → 返回 400 AGENT_NOT_PURCHASABLE', async () => {

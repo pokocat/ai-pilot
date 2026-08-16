@@ -1524,21 +1524,14 @@ export const mock = {
     const agent = DEFAULT_AGENTS.find((a) => a.key === key);
     if (!agent) throw Object.assign(new Error('智能体不存在'), { code: 'AGENT_NOT_FOUND' });
     if (agent.billing !== 'unlock') throw Object.assign(new Error('该智能体无需额外启用'), { code: 'AGENT_NOT_PURCHASABLE' });
+    // 「确认即启用」：启用动作不扣权益点，mock 同口径（余额分毫不动，pricePaid 恒 0）。
     d.ownedAgents ??= [];
     if (d.ownedAgents.includes(key)) {
       return delay({ ok: true, agentKey: key, pricePaid: 0, creditBalance: d.creditBalance, alreadyOwned: true });
     }
-    const unlimited = d.creditBalance < 0;
-    if (!unlimited && d.creditBalance < agent.price) {
-      throw Object.assign(new Error('权益点不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
-    }
     d.ownedAgents.push(key);
-    if (!unlimited) {
-      d.creditBalance -= agent.price;
-      (d.creditLog ??= []).push({ at: now(), reason: `启用智能体 · ${agent.name}`, delta: -agent.price, balance: d.creditBalance });
-    }
     save(token, d);
-    return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
+    return delay({ ok: true, agentKey: key, pricePaid: 0, creditBalance: d.creditBalance, alreadyOwned: false });
   },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
 

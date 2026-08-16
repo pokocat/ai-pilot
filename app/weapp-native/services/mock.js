@@ -52,16 +52,12 @@ function purchaseAgent(key) {
   const agent = DEFAULT_AGENTS.find((item) => item.key === key);
   if (!agent) return Promise.reject(Object.assign(new Error('智能体不存在'), { code: 'AGENT_NOT_FOUND' }));
   if (agent.billing !== 'unlock') return Promise.reject(Object.assign(new Error('该智能体无需额外启用'), { code: 'AGENT_NOT_PURCHASABLE' }));
+  // 「确认即启用」：启用动作不扣权益点，mock 同口径（余额分毫不动，pricePaid 恒 0）。
   const owned = ownedAgentKeys();
   const balance = mockCreditBalance();
   if (owned.includes(key)) return Promise.resolve({ ok: true, agentKey: key, pricePaid: 0, creditBalance: balance, alreadyOwned: true });
-  if (balance >= 0 && balance < Number(agent.price || 0)) {
-    return Promise.reject(Object.assign(new Error('权益点不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } }));
-  }
   wx.setStorageSync(storageKey('ownedAgents'), owned.concat(key));
-  const nextBalance = balance < 0 ? balance : balance - Number(agent.price || 0);
-  wx.setStorageSync(storageKey('creditBalance'), nextBalance);
-  return Promise.resolve({ ok: true, agentKey: key, pricePaid: balance < 0 ? 0 : Number(agent.price || 0), creditBalance: nextBalance, alreadyOwned: false });
+  return Promise.resolve({ ok: true, agentKey: key, pricePaid: 0, creditBalance: balance, alreadyOwned: false });
 }
 function sessions() { return Promise.resolve(wx.getStorageSync(storageKey('sessions')) || []); }
 function session(id, before) {

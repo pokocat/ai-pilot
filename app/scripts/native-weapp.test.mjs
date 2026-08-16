@@ -1188,9 +1188,12 @@ test('原生会话恢复专项军师启用层，方案过期口径不回归', ()
   assert.match(sessions, /agentUnlocked\(event\)[\s\S]*?agentKey=\$\{agent\.key\}&continue=1/);
   assert.match(unlock, /api\.purchaseAgent\(agent\.key/);
   assert.match(unlock, /Promise\.all\(\[store\.loadAgents\(\), store\.loadMe\(\)\]\)/);
-  assert.match(unlock, /权益点不足，请先调整方案/);
+  // 2026-08「确认即启用」：启用动作本身不收费，启用层不得再出现价格卡、余额与余额不足分支。
+  assert.doesNotMatch(unlock, /权益点不足/, '启用不收费，不该再有余额不足分支');
+  assert.doesNotMatch(unlock, /priceText|balanceText|enough/, '启用层不再读价格/余额');
   assert.match(unlockWxml, /name="spark"/);
-  assert.match(unlockWxml, /name="diamond"/);
+  assert.doesNotMatch(unlockWxml, /name="diamond"|启用所需|我的余额/, '启用弹层不得展示启用价格与余额');
+  assert.match(unlockWxml, /'确认启用'/, '主按钮改为纯确认');
   assert.match(api, /purchaseAgent:[\s\S]{0,120}mock\.purchaseAgent\(key, attribution\)/);
   assert.match(mock, /storageKey\('ownedAgents'\)/);
   assert.match(mock, /storageKey\('creditBalance'\)/);
@@ -1368,9 +1371,11 @@ test('原生 mock 专项军师启用按账号隔离并持久化', async () => {
     assert.equal(creativeStatus.pricePerPoster, 10);
     assert.ok(Array.isArray(creativeStatus.templates) && creativeStatus.templates.some((item) => item.key === 'editorial'));
     await mock.purchasePlan('mock-month');
-    await mock.purchaseAgent('ops');
+    const bought = await mock.purchaseAgent('ops');
     assert.equal((await mock.agents()).find((agent) => agent.key === 'ops')?.owned, true);
-    assert.equal((await mock.me()).creditBalance, 90);
+    // 「确认即启用」：mock 与服务端同口径——启用不扣权益点，余额分毫不动。
+    assert.equal(bought.pricePaid, 0);
+    assert.equal((await mock.me()).creditBalance, 100);
 
     values.set('junshi.userId', 'mock-agent-b');
     assert.equal((await mock.agents()).find((agent) => agent.key === 'ops')?.owned, false);

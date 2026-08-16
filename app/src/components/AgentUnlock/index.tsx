@@ -6,7 +6,6 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent, type ActivationSource } from '../../services/api';
-import { diamondCost } from '../../services/format';
 import { paymentErrorMessage } from '../../services/paymentFeedback';
 import './index.scss';
 
@@ -18,23 +17,16 @@ interface Props {
   refId?: string;               // source=prescription 时的处方 id
 }
 
-// 专项智能体启用弹层：用产出额度启用。free/metered 不会进入这里。
+// 专项智能体启用弹层：确认即启用，不收费。free/metered 不会进入这里。
 export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'catalog', refId }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [busy, setBusy] = useState(false);
 
   if (!agent) return null;
-  const balance = s.me()?.creditBalance ?? 0;
-  const unlimited = balance < 0;
-  const enough = unlimited || balance >= agent.price;
 
   const confirm = async () => {
     if (busy) return;
-    if (!enough) {
-      Taro.showToast({ title: '权益点不足，请先调整方案', icon: 'none' });
-      return;
-    }
     setBusy(true);
     try {
       const r = await api.purchaseAgent(agent.key, { source, refId });
@@ -62,11 +54,11 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
         <View className="au-btns">
           <View className="btn btn-ghost au-btn ghost" onClick={onClose}><Text>暂不启用</Text></View>
           <View
-            className={`btn btn-primary au-btn primary ${busy ? 'disabled' : ''} ${!enough ? 'insufficient' : ''}`}
+            className={`btn btn-primary au-btn primary ${busy ? 'disabled' : ''}`}
             style={{ background: accent }}
             onClick={confirm}
           >
-            <Text>{busy ? '启用中…' : `${diamondCost(agent.price)} 启用`}</Text>
+            <Text>{busy ? '启用中…' : '确认启用'}</Text>
           </View>
         </View>
       }
@@ -78,29 +70,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
       <Text className="au-role">{agent.role}</Text>
       {agent.deliverableKey && <Text className="au-deliver" style={{ color: accent }}>擅长 · {agent.deliverableKey}</Text>}
 
-      <View className="au-price card">
-        <View className="au-pl">
-          <Text className="au-pk">启用所需</Text>
-          <View className="au-pv-row">
-            <Text className="au-pv" style={{ color: accent }}>{diamondCost(agent.price)}</Text>
-          </View>
-        </View>
-        <View className="au-divider" />
-        <View className="au-pl">
-          <Text className="au-pk">我的余额</Text>
-          <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : 'var(--danger)' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
-        </View>
-      </View>
-
-      <Text className="au-note">启用后会加入你的工作台，永久可用；后续深度产出按当前方案消耗权益点。</Text>
-
-      {!enough && (
-        <View className="au-low">
-          {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
-          <Icon name="alert" size={13} color="#9C4A38" />
-          <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
-        </View>
-      )}
+      <Text className="au-note">启用后会加入你的工作台，永久可用；对话与深度产出按你当前方案的额度另行计算。</Text>
     </Sheet>
   );
 }

@@ -44,7 +44,7 @@ Page({
     const rx = this._rx; if (!rx || this.data.busy) return;
     const agent = (store.snapshot().agents || []).find((item) => item.key === rx.toolKey);
     if (!agent || agent.billing !== 'unlock' || agent.owned) { this.finishPrescription(); return; }
-    wx.showModal({ title: `启用${agent.name || '专项军师'}`, content: `将按当前权益规则扣除算力${agent.price ? `（${agent.price}）` : ''}，确认继续？`, confirmText: '确认启用', success: async (result) => {
+    wx.showModal({ title: `启用${agent.name || '专项军师'}`, content: '启用后会加入你的工作台，确认继续？', confirmText: '确认启用', success: async (result) => {
       if (!result.confirm) return; this.setData({ busy: true });
       try { await api.purchaseAgent(agent.key, { source: 'prescription', refId: rx.id }); await store.loadAgents(); await this.finishPrescription(); }
       catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '启用失败' }); }

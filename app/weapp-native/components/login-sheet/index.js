@@ -88,9 +88,26 @@ Component({
           stage: 'complete', nickname: '', avatarLocal: '', avatarShown: user.avatarUrl || '',
           nameFocus: false, pendingOnboarded: Boolean(result && result.onboarded),
         });
+        this.ensureProfilePrivacy();
         return;
       }
       this.finishAuth(result && result.onboarded);
+    },
+    ensureProfilePrivacy() {
+      // 头像昵称填写能力受《用户隐私保护指引》管控：指引未申报或本机未授权时，
+      // chooseAvatar 面板不出现「用微信头像」、昵称键盘不给微信昵称联想，开发版上点了甚至毫无反应。
+      // 与 packages/video/clone 的录音同一姿势：进补档页就主动拉起隐私授权弹窗，
+      // 拉不起来（指引未在管理后台申报/用户拒绝）只能手动填，给一句能听懂的解释而不是装死。
+      if (typeof wx.getPrivacySetting !== 'function') return;
+      wx.getPrivacySetting({
+        success: (res) => {
+          if (!res || !res.needAuthorization) return;
+          if (typeof wx.requirePrivacyAuthorize !== 'function') return;
+          wx.requirePrivacyAuthorize({
+            fail: () => wx.showToast({ title: '隐私授权未完成，头像与昵称联想暂不可用，可先手动填写称呼', icon: 'none', duration: 2600 }),
+          });
+        },
+      });
     },
     presentPhoneBindingNotice(result) {
       const binding = result && result.phoneBinding;

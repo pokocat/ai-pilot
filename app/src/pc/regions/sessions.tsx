@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { api, type Agent, type SessionItem } from '../../services/api';
 import { platform } from '../../services/platform';
-import { diamondCost } from '../../services/format';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, dialogueDirectoryAgents } from '../../data/council';
 import { portraitOf } from '../portraits';
 import type { CtxItem, PcState } from '../state';
@@ -63,7 +62,6 @@ interface Row {
   unread: number;
   hasUnread: boolean;
   locked: boolean;
-  price: number;
   online: boolean;
 }
 
@@ -157,7 +155,6 @@ export default function ListBody({ st }: { st: PcState }) {
           unread: it.unreadCount ?? 0,
           hasUnread: !!it.hasUnread,
           locked: false,
-          price: 0,
           online: false,
         }))
         .filter(hit);
@@ -177,13 +174,13 @@ export default function ListBody({ st }: { st: PcState }) {
         menuLabel: name,
         name,
         alias: ADVISOR_ALIAS[a.key] || '',
-        time: locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : online ? '在线' : '',
+        // 2026-08「确认即启用」：启用不收费，锁态只说「需启用」，不给启用动作标价。
+        time: locked ? '需启用' : last ? relTime(last.updatedAt) : online ? '在线' : '',
         timeAccent: locked,
         preview: last?.snippet || duty,
         unread: last?.unreadCount ?? 0,
         hasUnread: !!last?.hasUnread,
         locked,
-        price: a.price,
         online,
       };
     };
@@ -206,7 +203,7 @@ export default function ListBody({ st }: { st: PcState }) {
 
   const openRow = (r: Row) => {
     st.setChatKey(r.chatKey);
-    if (r.locked) st.say(`「${r.name}」尚未开通，需 ${diamondCost(r.price)}`);
+    if (r.locked) st.say(`「${r.name}」还没启用，去锦囊里启用即可`);
   };
 
   const markRead = async (id: string) => {

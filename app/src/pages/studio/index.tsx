@@ -760,8 +760,9 @@ export default function Studio() {
                 <View className="ai" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={18} color={accent} /></View>
                 <Text className="ah">{a.name}</Text>
                 <Text className="ap">{a.role}</Text>
+                {/* 2026-08「确认即启用」：启用不收费，锁态只邀请启用、不标价；下面 metered 的按次单价照旧。 */}
                 {locked
-                  ? <Text className="ameta lock" style={{ color: accent }}>{diamondCost(a.price)} ›</Text>
+                  ? <Text className="ameta lock" style={{ color: accent }}>启用后可用 ›</Text>
                   : a.billing === 'metered'
                     ? <Text className="ameta" style={{ color: accent }}>{diamondCost(a.price, true)} · {a.deliverableKey}</Text>
                     : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>擅长 · {a.deliverableKey}</Text>}

@@ -67,25 +67,30 @@ async function createUnlockAgent(key: string, price: number) {
   });
 }
 
-test('并发购买不同 unlock 智能体：同一余额账户串行扣减，不能双花', async () => {
+// 2026-08 计费改造：启用改成「确认即启用」，unlock 路径不再碰余额——
+// 这条原本守「同一余额账户不能双花」，现改守「并发启用幂等 + 余额分毫不动」；
+// 扣费并发的串行化仍由下面「并发套餐发放」那条守着。
+test('并发启用 unlock 智能体：同一位军师只开通一次，余额分毫不动', async () => {
   const { userId } = await createUserWithCredits(10);
   await createUnlockAgent('race_unlock_a', 8);
   await createUnlockAgent('race_unlock_b', 8);
 
   const results = await Promise.all([
     api('POST', '/api/agents/race_unlock_a/purchase', { token: userId, body: {} }),
+    api('POST', '/api/agents/race_unlock_a/purchase', { token: userId, body: {} }),
     api('POST', '/api/agents/race_unlock_b/purchase', { token: userId, body: {} }),
   ]);
 
-  assert.equal(results.filter((r) => r.status === 200).length, 1, '只有一次购买能成功');
-  assert.equal(results.filter((r) => r.status === 402).length, 1, '余额被首个请求占用后，另一个应余额不足');
-  assert.equal(await prisma.userAgent.count({ where: { userId } }), 1, '只开通一个智能体');
+  assert.equal(results.filter((r) => r.status === 200).length, 3, '启用不再有余额闸门，三个请求都该成功');
+  assert.ok(results.every((r) => r.body.pricePaid === 0), '启用不收费');
+  assert.equal(await prisma.userAgent.count({ where: { userId, agentKey: 'race_unlock_a' } }), 1, '同一位军师并发只开通一次');
+  assert.equal(await prisma.userAgent.count({ where: { userId } }), 2, '两位军师各一行');
 
   const last = await prisma.creditLedger.findFirst({
     where: { userId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   });
-  assert.equal(last?.balance, 2, '余额只扣一次');
+  assert.equal(last?.balance, 10, '余额没被启用动作动过');
 });
 
 test('并发套餐发放：同一余额账户串行叠加，不丢充值', async () => {
