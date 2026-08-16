@@ -115,8 +115,9 @@ test('快出片所有页面只占一层原生导航高度', () => {
   const pages = fs.readdirSync(videoRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(videoRoot, entry.name, 'index.wxml')))
     .map((entry) => path.join(videoRoot, entry.name, 'index.wxml'));
-  // 13 = 原 11 页 + templates（模板专区，从首页拆出来）+ cover（成片封面，确认页的可选支线）
-  assert.equal(pages.length, 13);
+  // 14 = 原 11 页 + templates（模板专区，从首页拆出来）+ cover（成片封面，确认页的可选支线）
+  //      + voices（我的声音列表页，声音可脱离形象单独存在）
+  assert.equal(pages.length, 14);
   pages.forEach((file) => {
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /--native-nav-inset:\{\{navInset\}\}px/);
