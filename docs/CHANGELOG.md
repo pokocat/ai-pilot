@@ -9,6 +9,7 @@
 ### 2026-08-16 · 修复 P0 告警失真与抖动 · 影响面：AI 端点定时探活、Prometheus 指标与规则、飞书告警卡片、注册静默告警
 
 - **端点探活按线上事实执行**：调度器不再扫描所有带 Key 的历史端点，只取启用用途路由的实际承载成员；`single` 只探 primary、`pool` 探全部启用成员。文本用途仍走 chat 组装链，embedding/rerank 改走各自真实协议，避免用错误协议把健康端点测红，也避免闲置端点持续计费。
+- **模型清单不是健康硬门**：生产首轮验收确认 qnaigc 的聊天与 Thinking 均成功，但可选 `GET /models` 返回 404；现将 404/405/501 记为 skipped，不再反推端点不可用，鉴权/限流/5xx 仍失败。修复前已持久化的此类假失败不会恢复进 latest gauge，而会在下一轮立即按新语义重测覆盖。
 - **告警定位到具体对象**：新增 `junshi_ai_endpoint_probe_{ok,last_run_timestamp_seconds,interval_seconds}`，并为 counter/histogram 补 `endpoint/label/purpose/kind/source` 标签；手动检测不进入线上规则，route 下线会清掉进程内旧失败态。端点表中的探活历史改为按 kind 合并，修复 10 分钟 connectivity 覆盖 1 小时/24 小时结果、导致低频探针调度失真的问题；进程重启后从持久结果恢复 latest gauge，避免低频探针到期前出现监控盲窗。
 - **抑制告警风暴**：`JunshiAiEndpointProbeFailing` 改为 endpoint×purpose×kind 最新状态持续 25 分钟才触发，并 `keep_firing_for: 15m` 吸收单轮恢复/失败；飞书卡片直接展示端点、用途和检测项。
 - **注册告警改读数据库事实**：新增 60 秒缓存的 `junshi_user_registrations_72h` 与最后注册时间 gauge；`JunshiNoRegistrations72h` 不再依赖进程内 counter 的 `increase()`，避免首个 channel 样本没有 0→1 基线而误报零注册。无数据库连接时不伪造 0，由既有 API/PG 告警承接。

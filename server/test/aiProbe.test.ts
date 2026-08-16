@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import {
   runProbes, probeEndpointById, modelsUrl, probeSchedulerEnabled, scheduledProbeSweep,
-  scheduledProbesForPurposes, ALL_PROBES, SCHEDULED_PROBES, type ProbeKind,
+  scheduledProbesForPurposes, modelListUnsupportedStatus, ALL_PROBES, SCHEDULED_PROBES, type ProbeKind,
 } from '../src/services/aiProbe.js';
 import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
 import { createEndpoint, __wipeAiV2 } from '../src/services/aiV2Admin.js';
@@ -43,6 +43,11 @@ describe('GET /models 的地址拼装', () => {
 
   test('baseUrl 为空（官方直连未配网关）→ 空串，调用方据此跳过', () => {
     assert.equal(modelsUrl('anthropic', ''), '');
+  });
+
+  test('模型清单是可选能力：404/405/501 跳过，鉴权/限流/服务异常仍失败', () => {
+    for (const status of [404, 405, 501]) assert.equal(modelListUnsupportedStatus(status), true);
+    for (const status of [400, 401, 403, 429, 500, 503]) assert.equal(modelListUnsupportedStatus(status), false);
   });
 });
 

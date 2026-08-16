@@ -156,6 +156,17 @@ async function probeConnectivity(cfg: ResolvedAiConfig): Promise<{ ok: boolean; 
   return { ok: r.ok, error: r.error, detail: { sample: r.sample, model: r.model } };
 }
 
+/** GET /models 是网关可选能力；明确“不存在/不实现”不能反推实际聊天模型不可用。 */
+export function modelListUnsupportedStatus(status: number): boolean {
+  return status === 404 || status === 405 || status === 501;
+}
+
+function persistedModelListUnsupported(result: ProbeResult): boolean {
+  if (result.kind !== 'model_scope' || result.ok) return false;
+  const match = /^HTTP\s+(\d+)$/.exec(result.error?.trim() ?? '');
+  return !!match && modelListUnsupportedStatus(Number(match[1]));
+}
+
 /**
  * key 的模型范围。七牛的 Key 带 model groups，范围外会报
  * `model not available in your assigned model groups`——这类错误在真实调用时才暴露，
@@ -176,7 +187,12 @@ async function probeModelScope(cfg: ResolvedAiConfig): Promise<{ ok: boolean; er
         : { Authorization: `Bearer ${cfg.apiKey}` },
       signal: ctrl.signal,
     });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    if (!res.ok) {
+      if (modelListUnsupportedStatus(res.status)) {
+        return { ok: true, detail: { skipped: `上游不提供 GET /models（HTTP ${res.status}）` } };
+      }
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
     const body = (await res.json().catch(() => ({}))) as { data?: { id?: string }[] };
     const models = (body.data ?? []).map((m) => String(m.id ?? '')).filter(Boolean);
     if (!models.length) return { ok: true, detail: { models: [], note: '上游未返回模型清单' } };
@@ -529,6 +545,9 @@ export async function scheduledProbeSweep(at: Date): Promise<void> {
     for (const result of previous) {
       const kind = result?.kind as ProbeKind;
       const time = Date.parse(result?.at ?? '');
+      // 兼容刚修复前已落库的假失败：不要恢复成 latest gauge，也不要等满 24h，
+      // 下一轮立刻用新语义重测并覆盖该结果。
+      if (persistedModelListUnsupported(result)) continue;
       if (ALL_PROBES.includes(kind) && Number.isFinite(time)) {
         lastByKind.set(kind, time);
         resultByKind.set(kind, result);
