@@ -209,17 +209,48 @@ export function noteTokenUsage(args: {
 
 // 「报告假完成」「降级模板」这类缺陷线上最难被用户报出来——用户只觉得内容差，不会截图报错。
 // path 标签指认降级发生在哪条产出路径（gateway 各 fallback 分支）。
-// 端点探活（services/aiProbe）。定时项失败＝这个上游的某项能力现在不可用，
-// 与「用户请求失败」是两码事：探活先红，说明我们**在用户撞上之前**就发现了。
-const probeRuns = new LabeledCounter('junshi_ai_endpoint_probe_total', '端点探活次数（kind=检测项，status=ok|fail）');
+// 端点探活（services/aiProbe）。必须带 endpoint/purpose/source：旧指标只按 kind 汇总，
+// 两个非聊天端点的 400 会把健康聊天端点一起报红；运营手动检测也不应污染定时告警。
+export interface ProbeMetricLabels extends Record<string, string> {
+  endpoint: string;
+  label: string;
+  purpose: string;
+  kind: string;
+  source: 'manual' | 'scheduled';
+}
+const probeRuns = new LabeledCounter(
+  'junshi_ai_endpoint_probe_total',
+  '端点探活次数（按 endpoint/purpose/kind/source，status=ok|fail）',
+);
 const probeLatency = new LabeledHistogram(
   'junshi_ai_endpoint_probe_duration_seconds',
-  '端点探活耗时（按检测项）',
+  '端点探活耗时（按 endpoint/purpose/kind/source）',
   [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
 );
-export function noteProbe(kind: string, ok: boolean, seconds: number): void {
-  probeRuns.inc({ kind, status: ok ? 'ok' : 'fail' });
-  probeLatency.observe({ kind }, seconds);
+const probeLatest = new Map<string, { labels: ProbeMetricLabels; ok: boolean; atSeconds: number; intervalSeconds: number }>();
+export function noteProbe(labels: ProbeMetricLabels, ok: boolean, seconds: number, intervalSeconds = 0): void {
+  probeRuns.inc({ ...labels, status: ok ? 'ok' : 'fail' });
+  probeLatency.observe(labels, seconds);
+  probeLatest.set(seriesKey(labels), { labels, ok, atSeconds: Date.now() / 1000, intervalSeconds });
+}
+
+/** route 下线后移除进程内旧失败态，避免一个已经不承载流量的端点继续告警。 */
+export function syncScheduledProbeTargets(targets: ProbeMetricLabels[]): void {
+  const keep = new Set(targets.map(seriesKey));
+  for (const [key, latest] of probeLatest) {
+    if (latest.labels.source === 'scheduled' && !keep.has(key)) probeLatest.delete(key);
+  }
+}
+
+/** 进程重启后从端点表恢复各检测项的最新状态，避免低频探针在下一次到期前监控失明。 */
+export function restoreScheduledProbeState(
+  labels: ProbeMetricLabels,
+  ok: boolean,
+  atSeconds: number,
+  intervalSeconds: number,
+): void {
+  if (!Number.isFinite(atSeconds) || atSeconds <= 0 || intervalSeconds <= 0) return;
+  probeLatest.set(seriesKey(labels), { labels, ok, atSeconds, intervalSeconds });
 }
 
 const genDegraded = new LabeledCounter('junshi_gen_degraded_total', '产出降级次数（mock 兜底 / 工程语境泄漏替换）');
@@ -380,6 +411,25 @@ seedClosedMetricSeries();
 
 const registrations = new LabeledCounter('junshi_user_registrations_total', '新注册用户数（channel=注册入口）');
 export function noteRegistration(channel: string): void { registrations.inc({ channel }); }
+
+// 注册静默告警必须读数据库事实，不能用进程内 counter 的 increase()：一个 channel 的首个
+// 样本会直接从 1 出现，Prometheus 没有 0→1 基线，实际首个注册会被算成“增量 0”。
+let registrationFactCache = { at: 0, count72h: 0, lastAtSeconds: 0, ready: false };
+async function registrationFacts(): Promise<{ count72h: number; lastAtSeconds: number }> {
+  const now = Date.now();
+  if (registrationFactCache.ready && now - registrationFactCache.at < 60_000) return registrationFactCache;
+  const [count72h, latest] = await Promise.all([
+    prisma.user.count({ where: { createdAt: { gte: new Date(now - 72 * 60 * 60_000) } } }),
+    prisma.user.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+  ]);
+  registrationFactCache = {
+    at: now,
+    count72h,
+    lastAtSeconds: latest ? latest.createdAt.getTime() / 1000 : 0,
+    ready: true,
+  };
+  return registrationFactCache;
+}
 
 const moderationChecks = new LabeledCounter('junshi_moderation_checks_total', '内容审核判定数（ref=input|output，verdict=pass|block）');
 export function noteModeration(ref: string, pass: boolean): void {
@@ -639,6 +689,26 @@ export async function renderMetrics(): Promise<string> {
   /* —— 路由级时延 / 状态 —— */
   httpDuration.renderInto(ms);
   probeRuns.renderInto(ms); probeLatency.renderInto(ms);
+  const probeOk = push(metric(
+    'junshi_ai_endpoint_probe_ok',
+    '端点最近一次探活是否成功（1=成功，0=失败；告警仅看 source=scheduled）',
+    'gauge',
+  ));
+  const probeAt = push(metric(
+    'junshi_ai_endpoint_probe_last_run_timestamp_seconds',
+    '端点最近一次探活时间（Unix 秒）',
+    'gauge',
+  ));
+  const probeInterval = push(metric(
+    'junshi_ai_endpoint_probe_interval_seconds',
+    '端点定时探活预期间隔（秒；手动检测为 0）',
+    'gauge',
+  ));
+  for (const latest of probeLatest.values()) {
+    probeOk.samples.push(fmt('junshi_ai_endpoint_probe_ok', latest.ok ? 1 : 0, latest.labels));
+    probeAt.samples.push(fmt('junshi_ai_endpoint_probe_last_run_timestamp_seconds', latest.atSeconds, latest.labels));
+    probeInterval.samples.push(fmt('junshi_ai_endpoint_probe_interval_seconds', latest.intervalSeconds, latest.labels));
+  }
   httpRouteResponses.renderInto(ms);
 
   /* —— LLM 调用 / Token / 成本 / 产出质量 —— */
@@ -666,6 +736,13 @@ export async function renderMetrics(): Promise<string> {
 
   /* —— 业务事件 —— */
   registrations.renderInto(ms);
+  try {
+    const facts = await registrationFacts();
+    push(metric('junshi_user_registrations_72h', '数据库事实：最近 72 小时创建的用户数', 'gauge'))
+      .samples.push(fmt('junshi_user_registrations_72h', facts.count72h));
+    push(metric('junshi_user_last_registration_timestamp_seconds', '数据库事实：最近一次用户注册时间（Unix 秒；无用户为 0）', 'gauge'))
+      .samples.push(fmt('junshi_user_last_registration_timestamp_seconds', facts.lastAtSeconds));
+  } catch { /* 数据库暂不可用时不伪造 0；PgDown/JunshiApiDown 负责告警 */ }
   moderationChecks.renderInto(ms);
   creditsFlow.renderInto(ms);
   planGateBlocked.renderInto(ms);
@@ -797,7 +874,7 @@ export function __resetMetrics(): void {
   responsesByClass.clear();
   overloadRejected = 0; rateLimited = 0;
   httpDuration.reset(); httpRouteResponses.reset();
-  probeRuns.reset(); probeLatency.reset();
+  probeRuns.reset(); probeLatency.reset(); probeLatest.clear();
   llmCalls.reset(); llmCallDuration.reset(); llmErrors.reset(); llmTokens.reset(); llmCost.reset();
   genDegraded.reset(); outputTruncated.reset(); asksRecovered.reset();
   chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatProviderFirstToken.reset(); chatPartialKept.reset();
@@ -809,5 +886,6 @@ export function __resetMetrics(): void {
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };
   stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };
+  registrationFactCache = { at: 0, count72h: 0, lastAtSeconds: 0, ready: false };
   seedClosedMetricSeries();
 }

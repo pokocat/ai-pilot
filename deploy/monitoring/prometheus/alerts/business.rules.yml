@@ -43,14 +43,15 @@ groups:
           summary: "内容审核拦截次数明显升高，可能存在异常请求或策略误伤。"
           current: "审核来源 {{ $labels.ref }} · 1 小时 {{ $value | printf \"%.0f\" }} 次拦截"
 
-      # 注册通道静默:三天零注册对一个在推广的产品是异常信号（阈值按增长阶段自行调整或删除）。
+      # 注册通道静默：直接读数据库 72h 用户数。不能用进程内 counter 的 increase()——
+      # 新 channel 首个样本直接从 1 出现，没有 0→1 基线，会把真实首个注册误算成 0。
       - alert: JunshiNoRegistrations72h
-        expr: sum(increase(junshi_user_registrations_total[3d])) == 0
+        expr: junshi_user_registrations_72h == 0
         for: 1h
         labels: { severity: warning, category: growth }
         annotations:
           summary: "连续 72 小时没有新注册；如非业务预期，注册链路可能存在静默故障。"
-          current: "全部渠道 72 小时注册增量为 0"
+          current: "数据库最近 72 小时新用户数为 {{ $value | printf \"%.0f\" }}"
 
       - alert: JunshiCreativeFailureRateHigh
         expr: >

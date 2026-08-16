@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import {
   runProbes, probeEndpointById, modelsUrl, probeSchedulerEnabled, scheduledProbeSweep,
-  ALL_PROBES, SCHEDULED_PROBES, type ProbeKind,
+  scheduledProbesForPurposes, ALL_PROBES, SCHEDULED_PROBES, type ProbeKind,
 } from '../src/services/aiProbe.js';
 import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
 import { createEndpoint, __wipeAiV2 } from '../src/services/aiV2Admin.js';
@@ -124,6 +124,28 @@ describe('落库与回填', () => {
     assert.equal(probe?.results?.[0]?.kind, 'connectivity');
   });
 
+  test('不同周期的探活结果按 kind 合并保存，高频项不覆盖低频项', async () => {
+    const id = await createEndpoint({ label: 'TEST-probe-merge', provider: 'mock', baseUrl: '', model: 'template', apiKey: '' });
+    await probeEndpointById(id, ['thinking'], AT);
+    await probeEndpointById(id, ['connectivity'], new Date(AT.getTime() + 10 * 60_000));
+    const after = await prisma.aiEndpoint.findUnique({ where: { id } });
+    const probe = after?.probeJson as { results?: { kind: string; at: string }[] } | null;
+    assert.deepEqual(probe?.results?.map((r) => r.kind), ['connectivity', 'thinking']);
+    assert.equal(probe?.results?.find((r) => r.kind === 'thinking')?.at, AT.toISOString());
+  });
+
+  test('embedding/rerank 端点会投影到各自协议配置，不误读全局 chat 开关', async () => {
+    const id = await createEndpoint({
+      label: 'TEST-probe-purpose-config', provider: 'mock', baseUrl: 'http://127.0.0.1:1/v1',
+      model: 'purpose-model', apiKey: 'sk-real-key-for-local-test',
+    });
+    const out = await probeEndpointById(id, ['embedding', 'rerank'], AT);
+    assert.ok(out);
+    for (const result of out!.results) {
+      assert.doesNotMatch(result.error ?? '', /未开启|缺少模型/, `${result.kind} 不应退回全局 chat 配置`);
+    }
+  });
+
   test('模型不存在 → null，不抛', async () => {
     assert.equal(await probeEndpointById('不存在的id', ['connectivity'], AT), null);
   });
@@ -149,6 +171,26 @@ describe('定时探活', () => {
     assert.ok(by.thinking < by.model_scope, 'thinking 应比模型范围跑得密');
     // 定时项必须是 ALL_PROBES 的子集，否则调度会跑一个不存在的检测。
     for (const p of SCHEDULED_PROBES) assert.ok(ALL_PROBES.includes(p.kind), `${p.kind} 不在 ALL_PROBES 里`);
+  });
+
+  test('定时探活按在线用途选协议：嵌入/重排绝不走聊天 connectivity', () => {
+    assert.deepEqual(
+      scheduledProbesForPurposes(['embedding']).map((p) => p.kind),
+      ['embedding'],
+    );
+    assert.deepEqual(
+      scheduledProbesForPurposes(['rerank']).map((p) => p.kind),
+      ['rerank'],
+    );
+    assert.deepEqual(
+      scheduledProbesForPurposes(['chat']).map((p) => p.kind),
+      ['connectivity', 'thinking', 'model_scope'],
+    );
+    assert.deepEqual(
+      scheduledProbesForPurposes(['chat', 'embedding']).map((p) => p.kind),
+      ['connectivity', 'embedding', 'thinking', 'model_scope'],
+    );
+    assert.deepEqual(scheduledProbesForPurposes([]), [], '未挂在线 route 的端点不能定时探活');
   });
 
   test('未配 key 的端点被定时探活跳过（不浪费也不刷错误）', async () => {

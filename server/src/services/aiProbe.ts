@@ -29,9 +29,12 @@ import { readAiCredential } from './aiCredentialStorage.js';
 import { getAiConfig, type ResolvedAiConfig } from './aiConfig.js';
 import { __resetAiRoutes } from './aiRoutes.js';
 import { recordTokenUsage } from './usage.js';
-import { noteProbe } from './metrics.js';
+import {
+  noteProbe, restoreScheduledProbeState, syncScheduledProbeTargets, type ProbeMetricLabels,
+} from './metrics.js';
 import { testEmbedding } from './embedding.js';
 import { testRerank } from './rerank.js';
+import type { AiPurpose } from './aiRoutes.js';
 import { dialectOf, normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 import { readCaps, type Cap, type EndpointCaps, type ProbeResult } from '../llm/configSchemas.js';
 import type { AiProvider, GenContext } from '../llm/schema.js';
@@ -45,12 +48,58 @@ export const ALL_PROBES: ProbeKind[] = [
   'connectivity', 'model_scope', 'thinking', 'tools', 'streaming', 'long_output', 'embedding', 'rerank',
 ];
 
-/** 定时探活的默认项与周期。connectivity 便宜且最能反映「还活着吗」，其余功能项低频即可。 */
+/**
+ * 定时探活的默认项与周期。
+ *
+ * 注意：这里是“检测项自己的频率”，不是说每个端点都跑全部检测。实际调度必须再按在线
+ * route purpose 裁剪：embedding/rerank 只能跑各自协议，绝不能拿 chat completion 冒充连通性。
+ */
 export const SCHEDULED_PROBES: { kind: ProbeKind; everyMs: number }[] = [
   { kind: 'connectivity', everyMs: 10 * 60_000 },
+  { kind: 'embedding', everyMs: 10 * 60_000 },
+  { kind: 'rerank', everyMs: 10 * 60_000 },
   { kind: 'thinking', everyMs: 60 * 60_000 },
   { kind: 'model_scope', everyMs: 24 * 60 * 60_000 },
 ];
+
+const TEXT_PURPOSES = new Set<AiPurpose>(['chat', 'deliverable', 'aux', 'moderation']);
+
+export interface ProbeRunContext {
+  endpointId?: string;
+  endpointLabel?: string;
+  purposes?: AiPurpose[];
+  source?: 'manual' | 'scheduled';
+}
+
+function purposeForProbe(kind: ProbeKind, purposes: AiPurpose[]): string {
+  return kind === 'embedding' || kind === 'rerank'
+    ? kind
+    : purposes.filter((p) => TEXT_PURPOSES.has(p)).sort().join('+') || 'manual';
+}
+
+function probeMetricLabels(
+  kind: ProbeKind,
+  cfg: Pick<ResolvedAiConfig, 'endpointId' | 'label'>,
+  context: ProbeRunContext,
+): ProbeMetricLabels {
+  return {
+    endpoint: context.endpointId ?? cfg.endpointId ?? 'manual',
+    label: context.endpointLabel ?? cfg.label ?? '手动检测',
+    purpose: purposeForProbe(kind, context.purposes ?? []),
+    kind,
+    source: context.source ?? 'manual',
+  };
+}
+
+/** 在线用途决定允许跑哪些定时检测；同一端点多用途时去重，保留各检测项自己的周期。 */
+export function scheduledProbesForPurposes(purposes: AiPurpose[]): { kind: ProbeKind; everyMs: number }[] {
+  const text = purposes.some((p) => TEXT_PURPOSES.has(p));
+  return SCHEDULED_PROBES.filter(({ kind }) => {
+    if (kind === 'embedding') return purposes.includes('embedding');
+    if (kind === 'rerank') return purposes.includes('rerank');
+    return text;
+  });
+}
 
 export interface ProbeOutcome {
   endpointId: string | null;
@@ -274,6 +323,7 @@ export async function runProbes(
   cfg: ResolvedAiConfig,
   kinds: ProbeKind[],
   at: Date,
+  context: ProbeRunContext = {},
 ): Promise<ProbeOutcome> {
   const probeCfg = toProbeConfig(cfg);
   const results: ProbeResult[] = [];
@@ -282,7 +332,10 @@ export async function runProbes(
 
   const push = (kind: ProbeKind, ok: boolean, ms: number, error?: string, detail?: Record<string, unknown>) => {
     results.push({ kind, ok, at: nowIso(at), latencyMs: ms, ...(error ? { error } : {}), ...(detail ? { detail } : {}) });
-    noteProbe(kind, ok, ms / 1000);
+    const interval = context.source === 'scheduled'
+      ? (SCHEDULED_PROBES.find((p) => p.kind === kind)?.everyMs ?? 0) / 1000
+      : 0;
+    noteProbe(probeMetricLabels(kind, cfg, context), ok, ms / 1000, interval);
   };
   // 运营手动锁定的能力项不被探活覆盖——探活是证据，运营的显式判断优先。
   const setCap = (key: 'thinking' | 'tools' | 'streaming', cap?: Cap) => {
@@ -343,17 +396,23 @@ export async function runProbes(
 }
 
 /** 按 AiEndpoint.id 探活并把结果 + 能力回填落库。 */
-export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date): Promise<ProbeOutcome | null> {
+export async function probeEndpointById(
+  id: string,
+  kinds: ProbeKind[],
+  at: Date,
+  context: ProbeRunContext = {},
+): Promise<ProbeOutcome | null> {
   const row = await prisma.aiEndpoint.findUnique({ where: { id }, include: { credential: true } });
   if (!row) return null;
   const base = await getAiConfig(true);
+  const apiKey = readAiCredential(row.credential.apiKey);
   const cfg: ResolvedAiConfig = {
     ...base,
     provider: (row.provider as AiProvider) ?? 'mock',
     label: row.label,
     baseUrl: row.baseUrl,
     model: row.model,
-    apiKey: readAiCredential(row.credential.apiKey),
+    apiKey,
     temperature: row.temperature,
     thinkingMode: normalizeThinkingMode(row.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(row.thinkingBudget),
@@ -362,6 +421,20 @@ export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date
     endpointId: row.id,
     traceEndpointId: row.id,
     traceEndpointLabel: row.label,
+    // AiEndpoint 是六用途共用的归一化行；embedding/rerank 的调用器仍消费兼容字段。
+    // 探单个端点时必须把这行投影到对应用途，否则会误用全局 chat 配置并报“未开启”。
+    ...(kinds.includes('embedding') ? {
+      embeddingEnabled: true,
+      embeddingBaseUrl: row.baseUrl,
+      embeddingApiKey: apiKey,
+      embeddingModel: row.model,
+    } : {}),
+    ...(kinds.includes('rerank') ? {
+      rerankEnabled: true,
+      rerankBaseUrl: row.baseUrl,
+      rerankApiKey: apiKey,
+      rerankModel: row.model,
+    } : {}),
   };
   if (cfg.provider !== 'mock' && !isRealKey(cfg.apiKey)) {
     return {
@@ -370,8 +443,20 @@ export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date
     };
   }
 
-  const outcome = await runProbes(cfg, kinds, at);
+  const outcome = await runProbes(cfg, kinds, at, {
+    ...context,
+    endpointId: row.id,
+    endpointLabel: row.label,
+  });
   try {
+    const previous = ((row.probeJson as { results?: ProbeResult[] } | null)?.results ?? [])
+      .filter((r): r is ProbeResult => !!r && ALL_PROBES.includes(r.kind as ProbeKind));
+    const latestByKind = new Map(previous.map((r) => [r.kind, r]));
+    for (const result of outcome.results) latestByKind.set(result.kind, result);
+    const mergedResults = ALL_PROBES.flatMap((kind) => {
+      const result = latestByKind.get(kind);
+      return result ? [result] : [];
+    });
     // 直接写端点表——运行时读的就是这里，能力回填（「这个模型不支持思考」）当场对校验器生效。
     // 三期收尾前这里写的是 ai_model，还要靠投影才能到运行时，闭环恰好断在最要紧的一环。
     await prisma.aiEndpoint.update({
@@ -379,7 +464,9 @@ export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date
       data: {
         lastProbeAt: at,
         lastProbeOk: outcome.ok,
-        probeJson: { results: outcome.results } as object,
+        // 保留每个 kind 的最新结果。旧实现每 10 分钟 connectivity 覆盖整块 JSON，导致
+        // thinking/model_scope 的上次时间永久丢失，调度只能拿一个全局 lastProbeAt 猜。
+        probeJson: { results: mergedResults } as object,
         capsJson: outcome.caps as object,
       },
     });
@@ -390,18 +477,81 @@ export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date
   return outcome;
 }
 
-/** 定时探活：对所有配了 key 的端点跑到期的检测项。 */
+/** 定时探活：只对在线用途路由的实际承载端点跑到期且协议匹配的检测项。 */
 export async function scheduledProbeSweep(at: Date): Promise<void> {
   if (!probeSchedulerEnabled()) return;
-  const rows = await prisma.aiEndpoint.findMany({
-    where: { provider: { not: 'mock' } },
-    include: { credential: true },
+  const routes = await prisma.aiRoute.findMany({
+    where: { enabled: true },
+    include: {
+      members: {
+        where: { enabled: true },
+        include: { endpoint: { include: { credential: true } } },
+      },
+    },
   });
-  for (const row of rows) {
-    if (!isRealKey(readAiCredential(row.credential.apiKey))) continue;
-    const last = row.lastProbeAt ? row.lastProbeAt.getTime() : 0;
-    const due = SCHEDULED_PROBES.filter((p) => at.getTime() - last >= p.everyMs).map((p) => p.kind);
+
+  // 与运行时路由语义一致：single 只取 primary（缺失时回退首个），pool 才探全部启用成员。
+  // 没挂到任何在线 route 的历史/备用端点不再定时烧钱，也不会污染线上告警。
+  const active = new Map<string, { row: (typeof routes)[number]['members'][number]['endpoint']; purposes: Set<AiPurpose> }>();
+  for (const route of routes) {
+    const candidates = route.members.filter((m) => {
+      const endpoint = m.endpoint;
+      return endpoint.provider !== 'mock' && isRealKey(readAiCredential(endpoint.credential.apiKey));
+    });
+    const selected = route.mode === 'pool'
+      ? candidates
+      : [candidates.find((m) => m.primary) ?? candidates[0]].filter((m): m is (typeof candidates)[number] => !!m);
+    for (const member of selected) {
+      const found = active.get(member.endpoint.id) ?? { row: member.endpoint, purposes: new Set<AiPurpose>() };
+      found.purposes.add(route.purpose as AiPurpose);
+      active.set(member.endpoint.id, found);
+    }
+  }
+
+  syncScheduledProbeTargets([...active.values()].flatMap(({ row, purposes: purposeSet }) => {
+    const purposes = [...purposeSet].sort();
+    return scheduledProbesForPurposes(purposes).map(({ kind }) => probeMetricLabels(kind, {
+      endpointId: row.id,
+      label: row.label,
+    }, {
+      endpointId: row.id,
+      endpointLabel: row.label,
+      purposes,
+      source: 'scheduled',
+    }));
+  }));
+
+  for (const { row, purposes: purposeSet } of active.values()) {
+    const purposes = [...purposeSet].sort();
+    const previous = ((row.probeJson as { results?: ProbeResult[] } | null)?.results ?? []);
+    const lastByKind = new Map<ProbeKind, number>();
+    const resultByKind = new Map<ProbeKind, ProbeResult>();
+    for (const result of previous) {
+      const kind = result?.kind as ProbeKind;
+      const time = Date.parse(result?.at ?? '');
+      if (ALL_PROBES.includes(kind) && Number.isFinite(time)) {
+        lastByKind.set(kind, time);
+        resultByKind.set(kind, result);
+      }
+    }
+    const scheduled = scheduledProbesForPurposes(purposes);
+    for (const probe of scheduled) {
+      const previousResult = resultByKind.get(probe.kind);
+      if (!previousResult) continue;
+      restoreScheduledProbeState(probeMetricLabels(probe.kind, {
+        endpointId: row.id,
+        label: row.label,
+      }, {
+        endpointId: row.id,
+        endpointLabel: row.label,
+        purposes,
+        source: 'scheduled',
+      }), previousResult.ok, lastByKind.get(probe.kind)! / 1000, probe.everyMs / 1000);
+    }
+    const due = scheduled
+      .filter((p) => at.getTime() - (lastByKind.get(p.kind) ?? 0) >= p.everyMs)
+      .map((p) => p.kind);
     if (!due.length) continue;
-    await probeEndpointById(row.id, due, at);
+    await probeEndpointById(row.id, due, at, { purposes, source: 'scheduled' });
   }
 }

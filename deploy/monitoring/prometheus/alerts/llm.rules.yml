@@ -32,18 +32,23 @@ groups:
           summary: "模型服务限流严重，生成等待和失败风险快速上升。"
           current: "10 分钟限流率 {{ $value | humanizePercentage }}"
 
-      # 端点探活（services/aiProbe）：定时对每个上游端点跑连通性 / thinking 写法 / 模型范围三项。
+      # 端点探活（services/aiProbe）：只探在线 route；文本/嵌入/重排按各自协议检测。
       # 与「模型调用失败率」是两码事——探活先红意味着我们**在用户撞上之前**就发现了这个端点坏了。
-      # 只在连续失败时告警：单次失败可能只是一次抖动，探活本身也走网络。
+      # latest gauge 精确到 endpoint+purpose+kind，手动检测不进告警。25m 对 10m 快探针等价于
+      # 至少连续三轮失败；keep_firing_for 吞掉单轮恢复/失败造成的飞书 firing↔resolved 风暴。
       - alert: JunshiAiEndpointProbeFailing
         expr: >
-          sum by (kind) (increase(junshi_ai_endpoint_probe_total{status="fail"}[30m])) >= 3
-          and on(kind) sum by (kind) (increase(junshi_ai_endpoint_probe_total[30m])) >= 3
-        for: 10m
+          (junshi_ai_endpoint_probe_ok{source="scheduled"} == 0)
+          and on(endpoint, label, purpose, kind, source) (
+            time() - junshi_ai_endpoint_probe_last_run_timestamp_seconds{source="scheduled"}
+              < 2.5 * junshi_ai_endpoint_probe_interval_seconds{source="scheduled"}
+          )
+        for: 25m
+        keep_firing_for: 15m
         labels: { severity: warning, category: llm_gateway }
         annotations:
-          summary: "上游端点检测连续失败，该能力当前不可用。"
-          current: "30 分钟内 {{ $labels.kind }} 检测失败 {{ $value | printf \"%.0f\" }} 次"
+          summary: "上游端点的在线能力检测持续失败。"
+          current: "端点 {{ $labels.label }} · 用途 {{ $labels.purpose }} · 检测项 {{ $labels.kind }}"
 
       - alert: JunshiLlmErrorRateHigh
         expr: >

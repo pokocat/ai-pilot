@@ -193,6 +193,24 @@ describe('告警规则 × 应用指标对账', () => {
     }
   });
 
+  test('端点探活按具体在线端点告警，手动检测不污染且带抖动保护', () => {
+    const source = readFileSync(join(ALERTS_DIR, 'llm.rules.yml'), 'utf8');
+    const rule = allRules().find((r) => r.name === 'JunshiAiEndpointProbeFailing');
+    assert.ok(rule);
+    assert.match(rule.expr, /junshi_ai_endpoint_probe_ok\{source="scheduled"\}/);
+    assert.match(rule.expr, /on\(endpoint, label, purpose, kind, source\)/);
+    assert.match(rule.expr, /junshi_ai_endpoint_probe_interval_seconds/);
+    assert.doesNotMatch(rule.expr, /sum by \(kind\)/, '不同端点不得再按 kind 混成一个告警');
+    assert.match(source, /keep_firing_for:\s*15m/);
+  });
+
+  test('零注册告警读取数据库 72h 事实，不再依赖首样本会漏计的进程 counter', () => {
+    const rule = allRules().find((r) => r.name === 'JunshiNoRegistrations72h');
+    assert.ok(rule);
+    assert.match(rule.expr, /junshi_user_registrations_72h\s*==\s*0/);
+    assert.doesNotMatch(rule.expr, /junshi_user_registrations_total/);
+  });
+
   test('API P95/错误率只看用户交互接口，并以 15 分钟最小样本量防低流量误报', () => {
     const names = ['JunshiApiP95High', 'JunshiApiP95Critical', 'JunshiApi5xxRateHigh'];
     const rules = allRules().filter((r) => names.includes(r.name));

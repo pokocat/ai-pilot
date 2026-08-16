@@ -20,7 +20,7 @@ import {
   notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep,
   noteChatFirstToken, noteChatGenerationFinalized,
   noteSessionDigestState, noteSessionDigestCompaction,
-  noteCreativeCritique,
+  noteCreativeCritique, noteProbe,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -238,6 +238,8 @@ describe('指标内容', () => {
     notePaySweep({ scanned: 5, applied: 1, failed: 0, closed: 2 });
     const body = await get();
     assert.match(body, /junshi_user_registrations_total\{channel="wechat_register"\} 1/);
+    assert.match(body, /^junshi_user_registrations_72h \d+$/m, '注册静默告警必须导出数据库事实 gauge');
+    assert.match(body, /^junshi_user_last_registration_timestamp_seconds \d+(?:\.\d+)?$/m);
     assert.match(body, /junshi_credits_flow_total\{direction="spent",reason="深度报告"\} 30/);
     assert.match(body, /junshi_credits_flow_total\{direction="granted",reason="决策版"\} 500/);
     assert.match(body, /^junshi_pay_orders_created_total 1$/m);
@@ -247,6 +249,17 @@ describe('指标内容', () => {
     assert.match(body, /junshi_pay_sweep_last\{result="scanned"\} 5/);
     assert.match(body, /junshi_pay_sweep_last\{result="closed"\} 2/);
     assert.match(body, /^junshi_pay_sweep_runs_total 1$/m);
+  });
+
+  test('端点探活指标精确到端点/用途/检测项，手动与定时来源分开', async () => {
+    noteProbe({
+      endpoint: 'ep-embedding', label: '向量嵌入', purpose: 'embedding', kind: 'embedding', source: 'scheduled',
+    }, false, 0.12, 600);
+    const body = await get();
+    const labels = 'endpoint="ep-embedding",label="向量嵌入",purpose="embedding",kind="embedding",source="scheduled"';
+    assert.match(body, new RegExp(`junshi_ai_endpoint_probe_ok\\{${labels}\\} 0`));
+    assert.match(body, new RegExp(`junshi_ai_endpoint_probe_interval_seconds\\{${labels}\\} 600`));
+    assert.match(body, /junshi_ai_endpoint_probe_total\{endpoint="ep-embedding",label="向量嵌入",purpose="embedding",kind="embedding",source="scheduled",status="fail"\} 1/);
   });
 
   test('标签基数保护：reason 超 100 种折叠进 other，direction 维度保留、总量守恒', async () => {

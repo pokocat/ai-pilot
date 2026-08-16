@@ -344,7 +344,9 @@ cd /srv/junshi/server && npm run ai:check-drop
 
 ### E3. 定时探活（默认开启）
 
-端点探活会周期性外呼（连通性 10 分钟 / Thinking 写法 1 小时 / 模型范围 24 小时），**是真实计费请求**，用量按 `kind='probe'` 单独记账、成本看板可与用户流量分开看。要停：`AI_PROBE_SCHEDULED=false`。探活连续失败会走 Alertmanager → 飞书卡片（`JunshiAiEndpointProbeFailing`），它是**先行指标**——探活先红意味着在用户撞上之前就发现了。
+端点探活只对**启用用途路由当前实际承载流量的端点**周期性外呼：文本用途跑连通性 10 分钟 / Thinking 写法 1 小时 / 模型范围 24 小时；embedding 与 rerank 各用自己的真实协议每 10 分钟检测。`single` 路由只探 primary（缺失时首个有效成员），`pool` 路由探全部启用成员；未入在线 route 的历史/备用端点不定时探，避免无效计费和假告警。探活是**真实计费请求**，用量按 `kind='probe'` 单独记账、成本看板可与用户流量分开看。要停：`AI_PROBE_SCHEDULED=false`。
+
+定时结果按 `endpoint + purpose + kind` 导出最新状态；手动检测标为 `source=manual`，不参与线上告警。`JunshiAiEndpointProbeFailing` 连续 25 分钟失败才触发，并用 `keep_firing_for: 15m` 吸收单轮恢复/失败抖动；飞书卡片会直接写出端点、用途和检测项。它是**先行指标**——探活先红意味着在用户撞上之前就发现了。
 
 ### E4. 待向七牛确认的两个事实（影响生产配置与成本记账）
 
