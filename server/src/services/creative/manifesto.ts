@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { structured } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
 import { styleCatalogDigest } from './styleLibrary.js';
+import { normalizeArtDirection, ART_DIRECTION_KEYS, MAX_AD_CHARS, type ArtDirection } from './imagePrompt.js';
 import { directionFor } from './directions.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { TemplateKey } from './config.js';
@@ -104,6 +105,20 @@ const MANIFESTO_SYS_BASE = [
   '- palette：3–5 个十六进制色值（含一个可作强调色的暖色或金属色）。',
   '- reference：一句话说明「这门生意的灵魂」将如何被藏进画面（见下方【隐性主题】）。它是给设计师的私语，',
   '  **不会**被印在海报上。',
+  '- artDirection：把宣言里**关于画面本身的承诺**收成结构化字段（见下方【艺术指导必须结构化】）。',
+  '',
+  // ★ 2026-08-15：宣言此前只是一篇长文，它承诺的「沉稳深灰 + 柔暖光」从来进不了生图提示词
+  //   （风格骨架把颜色写死在整段英文里）。现在宣言产出的 artDirection 会**逐字段顶掉**骨架缺省，
+  //   也会被原样渲染成给客户看的画面描述——所以这里的每一条留空规则都是真会兑现的承诺边界。
+  '【艺术指导必须结构化】artDirection 是一个对象，七个字段名固定：',
+  '  figure（人物气质：服装/动作/神态）、props（道具与陪体）、backdrop（背景基调）、',
+  '  lighting（光质与方向）、palette（色彩关系）、material（材质质感）、mood（情绪）。',
+  '每个字段写成 {"zh":"中文短语","en":"english phrase"} —— zh 会**原样念给客户听**，en 会**原样进生图提示词**，',
+  `两边必须说的是同一件事。每段不超过 ${MAX_AD_CHARS} 字，只写画面属性，不写景别（近景/远景/半身这类由结构位决定）。`,
+  '**没聊到的字段必须留空**（写 {"zh":"","en":""} 或整个字段不给）。这一条是硬规则：',
+  '空着的字段会自动回落到该风格档调好的缺省值，而你硬编一个字段就等于替客户许下他从没提过的承诺——',
+  '客户会在确认页读到这句话，然后在成品图上找不到它。**宁可全空，也不要编。**',
+  '判据只有一个：客户或方向说明里**真的提到过**这个维度吗？没提到就留空。',
   '',
   '【避免冗余】同一件事不要在多段里反复重申。色彩讲过就不要再讲一遍色彩理论，除非能补上新的深度。',
   '',
@@ -139,19 +154,25 @@ function manifestoSystem(
   fixedPhotoRoute?: { styleKey: string; subject: string } | null,
   allowedStyleKeys?: readonly import('./styleLibrary.js').PosterStyleKey[],
 ): string {
+  // artDirection 的 JSON 壳两条路线都要（graphic 路线由排版层消费同一份字段）。
+  // 只列两个字段作样例：七个全展开会把壳撑得比正文还长，模型反而照抄样例把没聊到的也填满。
+  const adShell = '"artDirection":{"backdrop":{"zh":"","en":""},"lighting":{"zh":"","en":""}}';
   const tail = allowPhoto
     ? [
       '',
       '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":"",',
+      ` ${adShell},`,
       forcePhoto
         ? ' "mode":"photo","styleKey":"","subject":""}'
         : ' "mode":"graphic 或 photo","styleKey":"","subject":""}',
       'movement / manifesto / reference 全部用中文；subject 用英文。克制、具体、不说空话。',
+      'artDirection 只放**真的聊到过**的维度，其余字段直接不出现（别为了填满而编）。',
     ].join('\n')
     : [
       '',
-      '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":""}',
-      '全部用中文，克制、具体、不说空话。',
+      `只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":"",${adShell}}`,
+      '全部用中文（artDirection 的 en 位用英文），克制、具体、不说空话。',
+      'artDirection 只放**真的聊到过**的维度，其余字段直接不出现（别为了填满而编）。',
     ].join('\n');
   return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective(forcePhoto, fixedPhotoRoute, allowedStyleKeys) : ''}${tail}`;
 }
@@ -161,6 +182,11 @@ const TEMPLATE_TENDENCY: Record<TemplateKey, string> = {
   person_hero: '用户偏好「人物主视觉」：画面重心在人，光与材质要服务可信度。',
   editorial: '用户偏好「编辑杂志」：大留白、强排印、克制的音量。',
   business_launch: '用户偏好「商业发布」：信息读取要快，同时不牺牲质感与工艺。',
+  manifesto_min: '用户偏好「一句主张」：只说一句话，留白就是音量。',
+  quote_card: '用户偏好「金句卡」：引号排印，观点要有出处与署名。',
+  data_stat: '用户偏好「数据主视觉」：一个关键数字压住画面，其余退让。',
+  info_list: '用户偏好「要点清单」：密集信息要有节奏，编号与间距代替装饰。',
+  agenda_event: '用户偏好「活动信息」：时间地点议程层级清楚，行动区显著。',
 };
 
 const ManifestoSchema = z.object({
@@ -176,6 +202,9 @@ const ManifestoSchema = z.object({
   mode: z.string().catch('').default(''),
   styleKey: z.string().catch('').default(''),
   subject: z.string().catch('').default(''),
+  // 结构化艺术指导。**不在这里判形态**：模型可能给 {"zh","en"}、也可能只给一个字符串，
+  // 还可能给 null —— 全部交给 normalizeArtDirection 逐字段收，这里只保证不因为它整份失败。
+  artDirection: z.unknown().catch(undefined).default(undefined),
 });
 
 export interface PosterManifesto {
@@ -185,6 +214,11 @@ export interface PosterManifesto {
   palette: string[];
   /** 隐性主题私语（进提示词，不进画面）。 */
   reference: string;
+  /**
+   * 结构化艺术指导：**方案对画面的承诺**，逐字段顶掉风格档缺省（见 imagePrompt.mergeArtDirection）。
+   * 只含模型真的聊到的字段——缺席即「这一维度听骨架的」，不是「模型忘了写」。
+   */
+  artDirection: ArtDirection;
   /**
    * 模型返回的历史路线字段与 photo 风格/主体（原始值，未归一）。mode 不再决定商品路线；
    * 归一与门禁一律走 posterRoute.resolvePosterRoute。
@@ -199,6 +233,11 @@ export function manifestoText(m: PosterManifesto): string {
     ...m.paragraphs,
     `色板：${m.palette.join(' ')}`,
     m.reference ? `隐性主题：${m.reference}` : '',
+    // AD 的 zh 位会被原样念给客户、en 位会原样进生图提示词 —— 两者都属于「间接决定对外成品」，
+    // 必须和宣言正文一起过输出侧审核，也必须进 promptSnapshot 供排障。
+    ...ART_DIRECTION_KEYS
+      .filter((k) => m.artDirection[k])
+      .map((k) => `艺术指导·${k}：${m.artDirection[k]!.zh} / ${m.artDirection[k]!.en}`),
     // 路线三件套也进快照与送审文本：subject 是模型自创的英文文本，它会决定画面主体，
     // 属于「间接决定对外成品」的内容，必须和宣言正文一起过输出侧审核。
     m.route.mode ? `路线：${m.route.mode}${m.route.styleKey ? ` · ${m.route.styleKey}` : ''}` : '',
@@ -304,6 +343,8 @@ export async function generateManifesto(opts: {
     paragraphs,
     palette: hex.length >= 3 ? hex.slice(0, 5) : opts.fallbackPalette,
     reference: ai.reference.trim().slice(0, 200),
+    // 归一里已含卫生（剥禁用质量词与景别词、去花括号、截断），口径与 subject 同一套。
+    artDirection: normalizeArtDirection(ai.artDirection),
     // standard 即使模型硬塞 photo 也清空；tier 路线不能被模型改写。
     route: opts.fixedPhotoRoute
       ? {

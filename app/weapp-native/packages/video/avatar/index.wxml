@@ -12,15 +12,35 @@
     <view class="av-body">
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
 
+      <!-- 读失败且手上没有可显示的数据：明说是我们没读到。绝不能落到下面那个空态去，
+           那句话会让有分身的人重新采集一次（要扣钻石）。
+           已经读到过数据时不走这里 —— 轮询抖一次不该把用户正在看的列表清空，改用列表上方的轻提示。 -->
+      <view wx:elif="{{loadFailed && !avatars.length}}" class="vd-empty">
+        <text class="t">没能读到你的数字分身</text>
+        <text class="s">这是加载失败，不是你没有创建过。已有的形象和训练进度都还在，不用重新采集，重试一下就好。</text>
+        <view class="vd-btn av-empty-btn" bindtap="retry">重新加载</view>
+        <text class="av-empty-link" bindtap="openVoices">看看我的声音 ›</text>
+      </view>
+
+      <view wx:elif="{{!loggedIn}}" class="vd-empty">
+        <text class="t">登录后查看你的数字分身</text>
+        <text class="s">创建之后每条片子都不用再出镜拍摄，形象和声音都会留在这里。</text>
+        <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
+      </view>
+
       <block wx:elif="{{!avatars.length}}">
         <view class="vd-empty">
           <text class="t">还没有数字分身</text>
           <text class="s">上传一段正脸视频就能创建，之后每条片子都不用再出镜拍摄。</text>
           <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
+          <!-- 这一屏只管形象。声音是能脱离形象独立存在的，别让「只训了声音」的人以为自己什么都没有。 -->
+          <text class="av-empty-link" bindtap="openVoices">已经录过声音？看看我的声音 ›</text>
         </view>
       </block>
 
       <block wx:else>
+        <!-- 有数据但这次刷新没成功：列表照常显示，只解释一句「数字可能不是最新的」。 -->
+        <view wx:if="{{loadFailed}}" class="av-stale" bindtap="retry"><text class="av-stale-t">刚才没刷新成功，下面是上一次读到的状态</text><text class="av-stale-a">重试</text></view>
         <view class="av-list-head"><view><text class="av-list-kicker">你的数字人库</text><text class="av-list-title">{{avatars.length}} 个出镜形象</text></view><view class="av-add" bindtap="startClone">+ 新建</view></view>
         <view wx:for="{{avatars}}" wx:key="id" class="vd-card av-primary av-item">
           <view class="avp-head">
@@ -57,6 +77,7 @@
         <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除分身，删除后所有新的生成能力立即停用。</text>
 
         <view class="av-rows">
+          <view class="av-row" bindtap="openVoices"><text class="ar-t">我的声音</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openConsentLog"><text class="ar-t">历史素材声明</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openUsageLog"><text class="ar-t">使用记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openCredits"><text class="ar-t">我的积分与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>

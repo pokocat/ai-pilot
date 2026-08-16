@@ -302,8 +302,28 @@ module.exports = {
     consentHistory.unshift(record);
     return delay(clone(record), 600);
   },
+  voiceById: (id) => {
+    const found = voices.find((item) => item.id === id);
+    return found ? delay(clone(found)) : Promise.reject(Object.assign(new Error('声音不存在或无权使用'), { code: 'CLIP_VOICE_NOT_FOUND' }));
+  },
   startClone: (kind, payload) => {
     if (!payload || !payload.filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
+    // 训声音必须同时在 voices 里落一条并把 voiceId 回给端上 —— 真服务端就是这么回的
+    // （routes/video.ts 的 { avatarId?, voiceId? }）。mock 少回一个字段，端上「按 voiceId 轮询」
+    // 这条路径在 mock 下就永远走不到，等于把 2026-08-15 那个 bug 又留了一份在 mock 里。
+    const voiceRow = kind === 'voice'
+      ? { id: `vo_mock_${Date.now()}`, name: payload.name || `专属声音 ${voices.length + 1}`, status: 'training', source: 'dedicated', trainedText: '', progress: 12 }
+      : null;
+    if (voiceRow) {
+      const reuseIndex = payload.voiceId ? voices.findIndex((item) => item.id === payload.voiceId) : -1;
+      // 带了 voiceId = 重训那一条，id 不变（新建一条会把「免费重训」悄悄变成「又开一条」）。
+      if (reuseIndex >= 0) { voiceRow.id = payload.voiceId; voiceRow.name = voices[reuseIndex].name; voices[reuseIndex] = voiceRow; }
+      else voices.unshift(voiceRow);
+      setTimeout(() => {
+        const index = voices.findIndex((item) => item.id === voiceRow.id);
+        if (index >= 0) voices[index] = Object.assign({}, voices[index], { status: 'ready', progress: 100, trainedText: new Date().toISOString() });
+      }, 2500);
+    }
     const targetIndex = payload.avatarId ? avatars.findIndex((item) => item.id === payload.avatarId) : -1;
     const target = avatars[targetIndex] || Object.assign({}, clone(AVATAR), { id: `av_mock_${Date.now()}`, name: payload.name || `数字分身 ${avatars.length + 1}` });
     const avatar = Object.assign({}, target, kind === 'voice'
@@ -318,7 +338,11 @@ module.exports = {
     }, 2500);
     const currentIndex = avatars.findIndex((item) => item.id === avatar.id);
     if (currentIndex >= 0) avatars[currentIndex] = avatar; else avatars.unshift(avatar);
-    return delay({ ok: true, kind, status: 'training' }, 500);
+    return delay({
+      ok: true, kind, status: 'training',
+      avatarId: kind === 'voice' ? undefined : avatar.id,
+      voiceId: voiceRow ? voiceRow.id : undefined,
+    }, 500);
   },
   consentLogs: () => delay(clone(consentHistory)),
   usageLogs: () => delay(clone(usageHistory)),

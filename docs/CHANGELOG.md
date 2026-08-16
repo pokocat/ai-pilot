@@ -11,6 +11,23 @@
 - **新身份口径**：账号身份识别只认手机号；openid/unionid 降级为附着在账号上的第三方绑定。`/auth/wechat-phone` 一律按本次授权手机号定位账号，第三方身份自动跟随迁绑；`LoginPhoneBinding.status` 改为 `matched / placeholder_upgraded / wechat_relinked`，`mismatch` 及其「登录进原账号但不改号」的解释链路删除。该接口不再返回 `PHONE_TAKEN` / `WECHAT_ACCOUNT_CONFLICT`，显式换绑 `/auth/bind-phone` 的 409 `PHONE_TAKEN` 不变。
 - **端上改动**：原生登录层 `login-sheet` 与 Taro `Login` 把 `mismatch` 弹窗换成 `wechat_relinked` 的非阻断说明（「已按授权手机号登录」，并指路用原手机号验证码找回原账号）；登录层可见文案继续零平台名，审核红线断言保持并通过。Taro 纯 code 登录遇到 404 `PHONE_LOGIN_REQUIRED` 不再弹错误，直接切到手机号验证码阶段，登录成功后第三方身份自动附着；两套错误码表补 `PHONE_LOGIN_REQUIRED` 兜底文案。
 - **占位号**：`wx_<openid>` 占位手机号停止新增，存量仅允许首次补真实号时升级。
+### 2026-08-15 · 海报版式池扩到 8 套并按信息密度分档，每套版式增设贴码行动区 · 影响面：模板渲染器、模板白名单/目录、/creative/status 契约、运营后台版式启停、渲染量测回归
+
+- **实证缺陷**：三套 540×720 版式（`person_hero` / `editorial` / `business_launch`）密度高度雷同——都是「标题 + 副标 + 三条卖点 + CTA」，只有配色与图带位置不同。用户想要「只说一句话」或「把议程说清楚」时，没有任何一套版式能承接，反馈集中在"看起来都一样"。
+- **新增 5 套，按密度补齐三档**：`manifesto_min`（airy，一句宣言大字 + 落款）、`quote_card`（airy，引号排印 + 署名 + 头像位）、`data_stat`（balanced，从卖点抽一个主数据撑画面）、`info_list`（dense，编号卖点清单 + 行动条）、`agenda_event`（dense，时间/地点/议程结构位 + 显著行动区）。老三套 key 与结构不动，只补标 density（airy / balanced / balanced）。`TEMPLATE_CATALOG` 仍是名称/描述/密度的唯一真源，白名单校验、显式请求停用模板 422、scene 回退等既有规矩一律不变。
+- **贴码行动区（模板路径这半）**：每套版式都定义了码位，且**二维码在与不在占同一块面积**——有 `qrUrl` 渲染真码（带 `data-role="qr"` 供量测验可扫性），无 `qrUrl` 渲染浅色贴码位 + 「贴码位」角标，用户可自行把码贴在那块已留好静区的白底上。「没传码就不画」会让有码/无码变成两套版面预算，而长文案下只有一套被验证过。绝不画假二维码的铁律保持。事实位落 `resultJson.qrReserved`，成品页据它提示「可自行粘贴二维码」。
+- **二维码外框 76→80px**：原尺寸减去两侧 6px 静区后码本体恰好 64px，正卡在量测下限上；亚像素取整会让"恰好合格"在不同渲染环境里随机变成不合格，留 4px 余量。
+- **契约**：`PosterTemplateOption` 新增可选 `density`（`airy|balanced|dense`），由 `/creative/status` 随启用清单一起下发；老客户端读不到该字段时行为不变。运营后台版式启停列表同步展示密度（后台仍保留本地目录：`/creative/status` 只发启用中的，而后台要能把停用的重新打开）。
+- **量测守卫**：新增「版式池 · 真实渲染量测」用例组（无头 Chromium + `canvasMeasure`），8 套 × 长短文案 × 有码/无码共 32 种组合零违规（不越界 / 不压字 / 字号 ≥10px / 二维码静区达标），并按三档密度断言留白率与信息行数；贴码位单独量了尺寸、静区与白底。头一轮量测即抓出 3 类真实缺陷：满宽 + 左右 padding 的文字块包围盒仍贴画布边（`margin` 违规，改用 margin 内缩）、小号码位内框只有 56px、以及密集版式富余高度堆在清单中段。常规回归另有一组不起浏览器的结构断言（自包含 / AI 标识 / 码位分支 / 文案缺失降级）。
+- **文案缺失降级**：`info_list` / `agenda_event` 的条目数严格跟随实际卖点数，一条不足也不留空编号行；富余高度按「有主视觉给图带、无主视觉给清单居中」分配，两种情形都不会在中段留死白。`data_stat` 抽不到数字时整块数据区去掉、主标题接管画面，**绝不编造数字**。
+
+### 2026-08-15 · 海报「方案优先」重构：影像风格档字段化，聊定的画面承诺真正进入生图提示词 · 影响面：影像风格库、宣言、prompt 拼装器、画布引擎、brief 草稿 designNote、任务视图契约、回归测试
+
+- **实证缺陷**：预发真单 `cmsucfvax0se` 的宣言承诺「沉稳深灰 + 柔暖光」，模型自选 `styleKey=editorial_black_gold`，而该档的 `imagePromptSkeleton` 是一整段写死的英文——`black seamless backdrop / rich true black point / pure unbroken black`。宣言的色彩承诺从头到尾没有任何一处能进入生图提示词，用户看到的方案与产出**结构性脱节**；两边各自都「正常」，没有日志会报错、没有测试会红。
+- **风格骨架降级为「结构 + 可覆盖缺省」**：12 档各拆成 `structure`（`opening`/`camera`/`negativeSpace`/`actionZone`/`negatives`，不可覆盖）与 `defaults`（`backdrop`/`lighting`/`palette`/`material`/`props`/`mood`/`figure`，可覆盖），缺省值逐条从原骨架文案里忠实拆出。`negativeSpace` 一并去掉全部颜色词、改为指代 `backdrop tone`——否则覆盖了背景也会被留白子句拽回原色。新增 `actionZone` 结构位，让二维码/CTA 在生图阶段就有一块与主体错开的落点。
+- **合成器一套机制两条路线**：`mergeArtDirection` 逐字段取「方案有值用方案、空用缺省」，`composeImageBody` 拼正文；no-text 恒为正文最后一句、负向框与 `3:4` 与 structure 一样不可被方案改写。graphic 路线共用同一个合成器，输出中文摘要注入画布提示词。宣言不新增 LLM 阶段，只在既有产物里多要一个结构化 `artDirection`（每字段 `{zh,en}`，只给中文时按词表补英文，命中不了原样透传）。
+- **承诺同源**：`zh` 原样念给客户、`en` 原样进 prompt，出自同一个对象。宣言与 brief 抽取的提示词都写死「没聊到的字段必须留空」，中文摘要只念方案真的聊过的字段（缺省是骨架的事，念出来就是替方案许它没许过的诺）。`briefDraft` 把 AD 确定性序列化进 `visualDirection` 往下游走，designNote 的画面句改由服务端从终值拼、不再让模型自由发挥配色。`CreativeJobView` 新增 `styleName`（读 `resultJson.styleKey`，只有真走了影像路线才有值）。
+- **守卫**：新增 `LEGACY_CLAUSES` 等价还原快照（旧骨架关键子句逐字摘录，钉住「方案什么都没说时必须还原出语义等价的提示词」）、覆盖优先级（`backdrop=沉稳深灰` → 含 charcoal 且 `pure/true black` 全部消失）、留空回落逐字相同、structure 与合规位不可覆盖、行动区存在性、负空间无颜色词、AD 值卫生与词表透传。`creativePhotoRoute.test.ts` 60 项全绿。
 
 ### 2026-08-15 · 修复真机声音增强上传被 multipart 字段上限截断 · 影响面：服务端上传基座、快出片声音/形象克隆、回归测试
 

@@ -767,11 +767,17 @@ function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { platform.stor
 const MOCK_POSTER_PRICE = 10;
 const MOCK_POSTER_PREMIUM_PRICE = 25;
 // 版式清单与服务端 TEMPLATE_CATALOG（config.ts）逐字对齐 —— mock 是前端唯一的离线口径，
-// 描述文案漂一个字，自测出来的界面就跟真机不是同一个产品。真实接口只下发启用中的，mock 恒三套全开。
+// 描述文案漂一个字，自测出来的界面就跟真机不是同一个产品。真实接口只下发启用中的，mock 恒八套全开。
+// density（留白 / 均衡 / 信息量）确认页据它把八套分档：一列平铺八张卡读不出「这些是同一类」。
 const MOCK_POSTER_TEMPLATES: PosterTemplateOption[] = [
-  { key: 'person_hero', name: '人物主视觉', desc: '真人照片打底，人物占据主视觉' },
-  { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
-  { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质' },
+  { key: 'person_hero', name: '人物主视觉', desc: '真人照片打底，人物占据主视觉', density: 'airy' },
+  { key: 'manifesto_min', name: '一句主张', desc: '一句宣言占满画面，留白说话', density: 'airy' },
+  { key: 'quote_card', name: '金句卡', desc: '引号排印 + 署名，适合观点转发', density: 'airy' },
+  { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重', density: 'balanced' },
+  { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质', density: 'balanced' },
+  { key: 'data_stat', name: '数据主视觉', desc: '一个关键数字撑起整张画面', density: 'balanced' },
+  { key: 'info_list', name: '要点清单', desc: '标题 + 编号卖点清单 + 行动条', density: 'dense' },
+  { key: 'agenda_event', name: '活动信息', desc: '时间地点议程齐全，行动区显著', density: 'dense' },
 ];
 const MOCK_POSTER_DIRECTIONS: PosterDirectionOption[] = [
   { key: 'graphic_bold_type', tier: 'standard', name: '强标题视觉', desc: '让一句主张成为画面主角，靠字号、字形和留白制造冲击。' },
@@ -826,6 +832,16 @@ function creativeActionsM(status: CreativeJobView['status']): CreativeJobView['a
   if (status === 'succeeded') return ['revise', 'regenerate'];
   return ['regenerate'];
 }
+/**
+ * 主视觉大片的风格名（A/B 组约定的 CreativeJobView.styleName）。真实链路由服务端在选风格时定格，
+ * mock 按 jobId 取一个稳定值 —— 每次查询随机换一个名字，详情页会像在自己乱跳。
+ */
+const MOCK_POSTER_STYLES = ['静默锋芒', '暖光叙事', '冷峻工业', '东方留白'];
+function mockStyleName(id: string): string {
+  let sum = 0;
+  for (let i = 0; i < id.length; i += 1) sum += id.charCodeAt(i);
+  return MOCK_POSTER_STYLES[sum % MOCK_POSTER_STYLES.length]!;
+}
 function creativeViewM(rec: CreativeJobRec): CreativeJobView {
   const { status, progress } = creativePhaseM(rec);
   const assets: CreativeAssetView[] = status === 'succeeded'
@@ -850,6 +866,12 @@ function creativeViewM(rec: CreativeJobRec): CreativeJobView {
     ...(rec.parentJobId ? { parentJobId: rec.parentJobId } : {}),
     // 与服务端同口径：只回布尔事实，不回 assetId。详情页「换方向」据它过滤 requiresPortrait 的方向。
     hasPortrait: !!rec.brief.portraitAssetId,
+    // 没传二维码时服务端仍在成品里留贴码位（resultJson.qrReserved → 任务详情顶层）。
+    // 传了码就是直接排进画面，没有「预留」这回事。
+    qrReserved: !rec.brief.qrAssetId,
+    // 风格名只有主视觉大片才有（标准档是现场排版，没有"选中了哪个风格"）。
+    // tier 一起回：详情页据它定「换方向」的价格，也据它决定要不要显示「本次风格」。
+    ...(rec.brief.tier === 'premium' ? { tier: 'premium' as const, styleName: mockStyleName(rec.id) } : {}),
     actions: creativeActionsM(status),
   };
 }
@@ -911,6 +933,8 @@ function posterDraftM(d: UserData, sessionId?: string, messageId?: string): Post
       ratio: '3:4',
     },
     templateReason: '你的成果里人物信任感是主要抓手，人物主视觉能让第一眼先记住人，再记住主张。',
+    // 设计说明是确认页的主视图；mock 不给它，本地走查就永远看不到那一屏该长什么样。
+    designNote: '竖版三分构图：上半幅放你的人物照，下半幅压一句主张，底部留一条窄带放二维码。整体走克制的墨色打底、暖金点缀，正面柔光，不做花哨特效。',
   };
 }
 

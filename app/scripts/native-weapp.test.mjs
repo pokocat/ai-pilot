@@ -1459,6 +1459,24 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     assert.match(finished.assets[0]?.previewUrl || '', /^data:image\/png;base64,/);
     assert.match(finished.outputs[0] || '', /^data:image\/png;base64,/);
     assert.deepEqual([...Buffer.from(finished.outputs[0].split(',')[1], 'base64').subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    // 贴码位与风格名（2026-08-15）：没传二维码 → 服务端仍在成品里留位置，详情页据此告诉用户
+    // 「不用为了加个码再出一版」。标准档没有「本次风格」这回事，styleName 不许凭空冒出来。
+    assert.equal(finished.qrReserved, true, '没传二维码时任务详情要回 qrReserved');
+    assert.equal(finished.styleName, undefined, '标准档不许有风格名');
+    assert.equal(finished.tier, undefined, '标准档不下发 tier（老口径：缺省即 standard）');
+    // 高级档单独换个账号建，免得多出来的这条把下面作品库分页的断言搅了。
+    values.set('junshi.userId', 'mock-truth-premium');
+    const premium = await mock.createPosterJob({
+      idempotencyKey: 'poster-truth-premium',
+      brief: { headline: '主视觉大片这一版', cta: '扫码来聊', tier: 'premium', qrAssetId: 'asset-qr-1', visualDirection: '冷峻光影' },
+    });
+    clock += 3300;
+    const premiumJob = await mock.creativeJob(premium.jobId);
+    assert.equal(premiumJob.tier, 'premium');
+    assert.ok(premiumJob.styleName, '主视觉大片要回风格名');
+    assert.equal(premiumJob.styleName, (await mock.creativeJob(premium.jobId)).styleName, '风格名必须稳定，不能每次查询乱跳');
+    assert.equal(premiumJob.qrReserved, false, '传了二维码就是直接排进画面，没有「预留」这回事');
+    values.set('junshi.userId', 'mock-truth-a');
 
     const revised = await mock.reviseJob(created.jobId, { idempotencyKey: 'poster-revise-1', headline: '增长只抓一条主线' });
     assert.equal(revised.creditCost, 0);
@@ -1923,6 +1941,41 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   // 而这一屏此前只有一行灰字「正在取需求单」，看着像卡死。转圈 + 说明 + 表单骨架，一样不能少。
   assert.match(posterWxml, /wx:if="\{\{loading\}\}" class="ps-loading">[\s\S]{0,400}ps-spin/, '取需求单要有转圈');
   assert.match(posterWxml, /ps-sk-card/, '取需求单要有表单骨架');
+
+  // ── 2026-08-15 确认页信息架构重排（C 组）──
+  // 旧结构把「上传素材」和整张表一起塞进一个叫「这些细节要改吗」的折叠区：
+  // 问句入口让人以为不点开就漏了东西，而三个素材槽（人像 / Logo / 二维码）根本不是「细节」，
+  // 是这张图长什么样的一部分。新结构按互联网 App 常规姿势分组，入口一律用动词。
+  assert.doesNotMatch(posterWxml, /这些细节要改吗|ps-more/, '「这些细节要改吗」折叠区必须已经废除');
+  assert.doesNotMatch(poster, /showForm|toggleForm/, 'showForm/toggleForm 随折叠区一起拆干净');
+  assert.match(posterWxml, /class="ps-group-t">编辑内容<[\s\S]{0,400}bindtap="toggleEdit"[\s\S]{0,120}\{\{showEdit\?'收起':'编辑'\}\}/,
+    '「编辑内容」入口用动词（编辑 / 收起），不用疑问句');
+  assert.match(posterWxml, /wx:if="\{\{!showEdit\}\}" class="ps-sum"[\s\S]{0,300}summaryRows/, '收起态给摘要行而不是一片空白');
+  assert.match(poster, /refreshSummary\(\)\s*\{[\s\S]{0,600}'主标题'[\s\S]{0,200}'卖点'[\s\S]{0,200}'行动号召'/,
+    '摘要行 = 主标题 / 卖点 / 行动号召');
+  // ★ 上传素材从折叠区提出来常驻显示：三槽都要在，且每槽带一句用途说明。
+  const uploadBlock = posterWxml.match(/<text class="ps-group-t">上传素材<[\s\S]*?<\/view>\s*<view wx:if="\{\{submitErr\}\}"/);
+  assert.ok(uploadBlock, '「上传素材」必须是一个常驻分组');
+  assert.doesNotMatch(uploadBlock[0], /wx:if="\{\{showEdit\}\}"/, '上传素材不许再被折叠开关罩住');
+  assert.match(uploadBlock[0], /wx:for="\{\{assets\}\}"/, '三个素材槽照 assets 渲染');
+  assert.match(uploadBlock[0], /class="ps-slot-h">\{\{item\.hint\}\}/, '每槽一句用途说明');
+  for (const hint of ['本人照片，用于「本人形象」方向', '排在画面角落，做品牌落款', '排在成品下方，扫码找到你']) {
+    assert.ok(poster.includes(hint), `素材槽用途说明缺一条：${hint}`);
+  }
+  // 二维码空槽的贴码位提示：不传也会预留，说清了用户才不会为了加个码再扣一次钻石。
+  assert.match(uploadBlock[0], /item\.role==='qr'&&!item\.path[\s\S]{0,80}不传也会预留贴码位/, '二维码空槽要说明会预留贴码位');
+  // premium 素材提示：人像槽**置灰不消失**，点击给解释（消失了用户只会以为功能没了）。
+  assert.match(uploadBlock[0], /tier==='premium'[\s\S]{0,160}Logo 与二维码会由军师排进成品；本人照片暂不进入主视觉（人物方向为 AI 演绎）/,
+    'premium 下素材区提示要说清 Logo/二维码进成品、本人照片不进主视觉');
+  assert.match(uploadBlock[0], /ps-slot-add \{\{item\.disabled\?'off':''\}\}/, 'premium 下人像槽置灰而不是消失');
+  assert.match(poster, /assetsForTier\(tier\)\s*\{[\s\S]{0,300}disabled: tier === 'premium'/, '置灰只针对人像槽且只在 premium');
+  assert.match(poster, /item\.role === role && item\.disabled[\s\S]{0,400}wx\.showModal/, '点置灰槽要给解释，不能沉默');
+  // 版式：按 density 分组渲染，且分组完全由 status 下发的清单驱动（本地不补目录、不猜密度）。
+  assert.match(posterWxml, /wx:for="\{\{templateGroups\}\}" wx:for-item="group"[\s\S]{0,300}group\.label[\s\S]{0,300}group\.items/,
+    '版式按密度分组渲染');
+  assert.match(poster, /const DENSITY_LABEL = \{ airy: '留白', balanced: '均衡', dense: '信息量' \}/, '三档中文标签');
+  assert.match(poster, /function groupTemplates\(templates\)[\s\S]{0,700}return \[\{ key: 'all', label: '', items: list \}\]/,
+    '一套都没带 density 时退回单组平铺，不许凭空造出空档位');
   // 档位插画引的 /assets/tier/*.jpg 从来没进过 src/assets，也就从没打进产物：实测每次进页面
   // 两张都触发 binderror、tierArt 立刻全 false。与其留一段永远走 catch 的死代码，不如拆掉。
   assert.doesNotMatch(posterWxml, /src="[^"]*assets\/tier\//, '不许引用没打进产物的档位插画');
@@ -1999,7 +2052,32 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
     }
     assert.match(src, /key: 'graphic_portrait'[^\n]*requiresPortrait: true/, `${side} mock 要标出「本人形象」需要照片`);
     assert.match(src, /hasPortrait: [^\n]*portraitAssetId/, `${side} mock 的任务视图要按 brief 回 hasPortrait`);
+    // ★ 2026-08-15：版式扩到 8 套且每套带 density；确认页的密度分档、成品页的贴码位与风格名
+    //   全靠这几个字段。两端各写一份，删掉任何一边都必须红——少一个字段本地走查只会以为
+    //   「功能没做」，查不到是 mock 吃了字段。
+    const keys = [...src.matchAll(/\{ key: '([a-z_]+)', name: '[^']+', desc: '[^']+', density: '(airy|balanced|dense)'/g)];
+    assert.equal(keys.length, 8, `${side} mock 的版式清单要有 8 套且每套带 density`);
+    assert.deepEqual(
+      keys.map((m) => m[1]),
+      ['person_hero', 'manifesto_min', 'quote_card', 'editorial', 'business_launch', 'data_stat', 'info_list', 'agenda_event'],
+      `${side} mock 的版式 key 必须与服务端 TEMPLATE_CATALOG 逐字同源`,
+    );
+    assert.deepEqual(
+      keys.map((m) => m[2]),
+      ['airy', 'airy', 'airy', 'balanced', 'balanced', 'balanced', 'dense', 'dense'],
+      `${side} mock 的版式密度分布要覆盖三档`,
+    );
+    assert.match(src, /qrReserved: !\(?(?:rec|row)\.brief/, `${side} mock 的任务视图要回 qrReserved`);
+    assert.match(src, /styleName: [\s\S]{0,120}mockStyleName\(/, `${side} mock 的任务视图要回 styleName`);
+    assert.match(src, /brief\.tier === 'premium' \? \{ tier: 'premium' as const, styleName|brief\.tier === 'premium' \? 'premium' : undefined/,
+      `${side} mock 的 styleName 只给主视觉大片`);
+    assert.match(src, /designNote: '竖版三分构图/, `${side} mock 的需求单草稿要带设计说明（确认页主视图）`);
   }
+  // 详情页：贴码位与风格名是成品图下面的两行事实，缺省不渲染整行。
+  assert.match(posterJobWxml, /wx:if="\{\{styleName\}\}" class="pj-meta-l">本次风格：\{\{styleName\}\}/, '风格名要能透出且缺省不渲染');
+  assert.match(posterJobWxml, /wx:if="\{\{qrReserved\}\}" class="pj-meta-l">已预留贴码位，可保存后自行粘贴二维码/, '预留贴码位要在成品图下方说明');
+  assert.match(posterJob, /styleName: job\.tier === 'premium' \? String\(job\.styleName \|\| ''\) : ''/, '风格名只在主视觉大片下有意义');
+  assert.match(posterJob, /qrReserved: job\.qrReserved === true/, '贴码位缺省 false：服务端没说预留就不许说预留');
   // 详情页「换方向」的清单 = 路线 ∩ 照片事实，两个条件缺一不可。
   assert.match(posterJob, /item\.tier === tier && \(!item\.requiresPortrait \|\| hasPortrait\)/,
     '换方向清单必须同时按路线和 hasPortrait 过滤');

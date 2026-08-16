@@ -32,19 +32,42 @@ export const CREATIVE_FLAG_ID = 'creative-poster';
  */
 export const POSTER_SKILL_KEY = 'canvas_design';
 
-/** 模板白名单（MVP 三套 3:4）。服务端只认这三个 key，未指定时按 scene 回退默认。 */
-export const TEMPLATE_KEYS = ['person_hero', 'editorial', 'business_launch'] as const;
+/**
+ * 模板白名单（3:4 版式池）。服务端只认这些 key，未指定时按 scene 回退默认。
+ * **数组顺序即前端选择器顺序**：按密度分组（airy → balanced → dense），
+ * 让用户在选择器上看到的是一条从「一句话」到「一整版信息」的连续谱，而不是随机排列。
+ */
+export const TEMPLATE_KEYS = [
+  'person_hero', 'manifesto_min', 'quote_card',
+  'editorial', 'business_launch', 'data_stat',
+  'info_list', 'agenda_event',
+] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 /**
- * 模板中文名与说明的**唯一真源**：由 GET /creative/status 下发给小程序（只发启用中的）。
+ * 信息密度。**用户挑版式时真正在挑的是这个**（"我这张要说一句话还是说满一版"），
+ * 名字与描述反而是二级线索 —— 所以它跟 name/desc 同源下发，由前端做分组/排序。
+ * · airy     一句主张 + 落款，大留白；
+ * · balanced 标题 + 少量支撑信息 + 主视觉；
+ * · dense    清单/议程式，一屏交代完整信息。
+ */
+export const TEMPLATE_DENSITIES = ['airy', 'balanced', 'dense'] as const;
+export type TemplateDensity = (typeof TEMPLATE_DENSITIES)[number];
+
+/**
+ * 模板中文名、说明与密度的**唯一真源**：由 GET /creative/status 下发给小程序（只发启用中的）。
  * 曾有三份各自维护（app / admin / 这里），到 P4 上线时 app 与 admin 的描述已经对不上 ——
  * 同一套版式在两端叫不同的东西，运营和用户没法对话。前端不要再建本地目录。
  */
-export const TEMPLATE_CATALOG: Record<TemplateKey, { name: string; desc: string }> = {
-  person_hero: { name: '人物主视觉', desc: '真人照片打底，人物占据主视觉' },
-  editorial: { name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
-  business_launch: { name: '商业发布', desc: '发布会 / 新品公告气质' },
+export const TEMPLATE_CATALOG: Record<TemplateKey, { name: string; desc: string; density: TemplateDensity }> = {
+  person_hero: { name: '人物主视觉', desc: '真人照片打底，人物占据主视觉', density: 'airy' },
+  manifesto_min: { name: '一句主张', desc: '一句宣言占满画面，留白说话', density: 'airy' },
+  quote_card: { name: '金句卡', desc: '引号排印 + 署名，适合观点转发', density: 'airy' },
+  editorial: { name: '编辑杂志', desc: '杂志内页式排版，图文并重', density: 'balanced' },
+  business_launch: { name: '商业发布', desc: '发布会 / 新品公告气质', density: 'balanced' },
+  data_stat: { name: '数据主视觉', desc: '一个关键数字撑起整张画面', density: 'balanced' },
+  info_list: { name: '要点清单', desc: '标题 + 编号卖点清单 + 行动条', density: 'dense' },
+  agenda_event: { name: '活动信息', desc: '时间地点议程齐全，行动区显著', density: 'dense' },
 };
 
 /**
@@ -193,7 +216,7 @@ function plainObject(v: unknown): Record<string, unknown> {
 function templatesOf(v: unknown): Record<TemplateKey, boolean> {
   const raw = plainObject(v);
   const out = {} as Record<TemplateKey, boolean>;
-  // 缺省一律视为「启用」：运营只需显式停用问题模板，不必先把三个都打开。
+  // 缺省一律视为「启用」：运营只需显式停用问题模板，不必先把整池都打开。
   for (const k of TEMPLATE_KEYS) out[k] = raw[k] === undefined ? true : !!raw[k];
   return out;
 }

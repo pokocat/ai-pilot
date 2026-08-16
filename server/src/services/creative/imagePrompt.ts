@@ -21,11 +21,19 @@
 //      · **景别互斥**：一条 prompt 只能有一个景别词。混用两个（骨架已写 `waist-up framing`，
 //        subject 里又来一个 `close-up`）是社区公认的首要失败原因。骨架的景别是我们调过的，
 //        所以冲突时**剥 subject 的**，不动骨架。
+//
+//   ④ **方案优先（2026-08-15）**：本文件不再整段拼骨架，而是**逐字段合成**。
+//      风格档只提供「结构 + 可覆盖缺省」，军师跟客户聊定的 Art Direction（宣言的 artDirection）
+//      有值就用它、没值才用缺省。structure 与技术合规位（no-text 恒为正文最后一句、负向框、比例）
+//      不可被覆盖 —— 那是叠层能落字与合规交付的前提，不属于「方案可以改的画面」。
 import type { NormalizedPosterBrief } from './schema.js';
-import type { PosterStyle } from './styleLibrary.js';
+import type { PosterStyle, PosterStyleDefaults } from './styleLibrary.js';
 
 /** 正文最后一句（发现②）。改这里必须同步改 styleLibrary 的完整性单测。 */
-export const NO_TEXT_CLAUSE = 'no text anywhere in the image';
+// 「no QR codes / barcodes」是 2026-08-15 预发矩阵的实付学费：actionZone 措辞里点名过
+// "QR code"，Seedream 就真把码画进了主视觉（假码扫出来是空的，印在物料上就是欺骗）。
+// 骨架侧已改为只描述「空」，这里是第二道保险——本子句恒为正文最后一句、任何层不可覆盖。
+export const NO_TEXT_CLAUSE = 'no text, no qr codes, no barcodes anywhere in the image';
 /** 画幅后缀（固定 3:4；MJ 用 --ar 3:4，即梦/Seedream 用画幅选项，两边都吃这个字面量）。 */
 export const RATIO_SUFFIX = '3:4';
 
@@ -194,6 +202,202 @@ export function expandSlots(skeleton: string, subject: string): string {
     .replace(/\{[A-Z_]+\}/g, '');
 }
 
+/* ───────────────── Art Direction 合成（方案优先） ───────────────── */
+
+/**
+ * 可被方案覆盖的七个表现字段。字段名与 styleLibrary.PosterStyleDefaults **必须逐字相同**：
+ * 名字对不上就等于覆盖静默失效（正是本次要修的那类缺陷）。
+ */
+export const ART_DIRECTION_KEYS = [
+  'figure', 'props', 'backdrop', 'lighting', 'palette', 'material', 'mood',
+] as const;
+export type ArtDirectionKey = (typeof ART_DIRECTION_KEYS)[number];
+
+/**
+ * 一个 AD 字段的两面：`zh` 给人看（designNote / 中文摘要），`en` 进生图提示词。
+ * 两面同源同一个对象，才可能保证「用户看到的色彩」与「模型收到的色彩」是一件事。
+ */
+export interface ArtDirectionField { zh: string; en: string }
+export type ArtDirection = Partial<Record<ArtDirectionKey, ArtDirectionField>>;
+
+/** AD 字段的长度上界：一句短描述。超过就是模型在写小作文，会稀释整条 prompt。 */
+export const MAX_AD_CHARS = 90;
+
+/**
+ * 中文视觉词 → 英文提示词短语。**只用于补 `en` 缺失时**（模型只给了中文）。
+ *
+ * 为什么需要它：宣言是中文产物，而缺省骨架是英文；「沉稳深灰」直接顶掉
+ * `black seamless backdrop` 会让整句英文里插一个中文词——主流模型读得懂，但与相邻英文子句的
+ * 权重耦合会掉。命中不了的中文**原样透传**（Seedream / 即梦理解中文），不做机器翻译。
+ * 顺序即匹配优先级，**必须先长后短**（`深灰` 要在 `灰` 之前，否则会被拆成两处命中）。
+ */
+export const AD_LEXICON: ReadonlyArray<readonly [string, string]> = [
+  // 色彩
+  ['沉稳深灰', 'composed deep charcoal grey'], ['深灰', 'deep charcoal grey'], ['炭灰', 'charcoal grey'],
+  ['浅灰', 'light grey'], ['暖灰', 'warm grey'], ['冷灰', 'cool grey'], ['灰', 'grey'],
+  ['米白', 'bone white'], ['象牙白', 'ivory white'], ['纯白', 'pure white'], ['白', 'white'],
+  ['纯黑', 'true black'], ['黑', 'black'], ['墨绿', 'deep green'], ['深蓝', 'deep navy'],
+  ['藏青', 'navy'], ['青绿', 'celadon'], ['朱红', 'vermilion'], ['正红', 'crimson'],
+  ['香槟金', 'champagne gold'], ['金', 'gold'], ['银', 'silver'], ['铜', 'bronze'],
+  ['低饱和', 'low saturation'], ['高饱和', 'high saturation'], ['莫兰迪', 'muted dusty tones'],
+  ['单色', 'monochrome'], ['黑白', 'black and white'],
+  // 光线
+  ['柔暖光', 'soft warm light'], ['柔光', 'soft diffused light'], ['硬光', 'hard directional light'],
+  ['暖光', 'warm light'], ['冷光', 'cool light'], ['侧光', 'side light'], ['逆光', 'backlight'],
+  ['顶光', 'top light'], ['自然光', 'available natural light'], ['窗光', 'window light'],
+  ['高调', 'high key'], ['低调', 'low key'], ['明暗对比', 'chiaroscuro contrast'],
+  // 材质与情绪
+  ['磨砂', 'matte'], ['哑光', 'matte'], ['丝绒', 'velvet'], ['亚麻', 'linen'], ['宣纸', 'rice paper'],
+  ['胶片颗粒', 'film grain'], ['金属质感', 'brushed metal'], ['木质', 'wood'], ['石材', 'stone'],
+  ['克制', 'restrained'], ['温柔', 'gentle'], ['庄重', 'solemn'], ['安静', 'quiet'],
+  ['通透', 'airy and clean'], ['怀旧', 'nostalgic'], ['锐利', 'crisp'],
+];
+
+/** 中文 → 英文：逐位置取最长命中，命中不了整段原样透传。 */
+export function lexiconEn(zh: string): string {
+  const s = String(zh ?? '');
+  const hits: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    for (const [k, v] of AD_LEXICON) {
+      if (!s.startsWith(k, i)) continue;
+      if (!hits.includes(v)) hits.push(v);
+      i += k.length - 1;
+      break;
+    }
+  }
+  return hits.length ? hits.join(', ') : s.trim();
+}
+
+/**
+ * AD 字段值的卫生。与 subject 同一套口径（发现③）：模型填的是不可信文本。
+ *   · 剥禁用质量词（BANNED_QUALITY_WORDS）；
+ *   · 剥**所有**景别词 —— 景别属于 structure.camera，一条 prompt 只能有一个；
+ *   · 去花括号、截断、收拾标点残骸。
+ */
+export function sanitizeArtDirectionText(raw: unknown, max = MAX_AD_CHARS): string {
+  // 只认标量：模型偶尔会把字段写成嵌套对象/数组，String() 出来是 "[object Object]" ——
+  // 那串东西会原样进 prompt 并顶掉一个调好的缺省，比丢掉这个字段糟得多。
+  if (raw !== undefined && raw !== null && typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const s = String(raw ?? '').replace(/[{}]/g, ' ').slice(0, max);
+  // skeletonShots 传非空 = 「景别归 structure 所有」→ 本段里的景别词全剥。
+  return sanitizeSubject(s, [...SHOT_SIZE_TERMS]).subject;
+}
+
+/** 归一一个 AD 字段：接受 `'深灰'` 或 `{zh,en}` 两种形态；两边都空视为「方案没聊到」。 */
+export function normalizeArtDirectionField(raw: unknown): ArtDirectionField | null {
+  const src = typeof raw === 'string' || typeof raw === 'number'
+    ? { zh: String(raw), en: '' }
+    : (raw && typeof raw === 'object' ? raw as Record<string, unknown> : null);
+  if (!src) return null;
+  const zh = sanitizeArtDirectionText(src.zh);
+  const en = sanitizeArtDirectionText(src.en);
+  if (!zh && !en) return null;
+  // 只给中文时用词表补英文；只给英文时中文位留英文原文（摘要里显示原文好过显示空白）。
+  return { zh: zh || en, en: en || lexiconEn(zh) };
+}
+
+/** 归一整个 artDirection 对象。**没聊到的字段一律缺席**，不许补空对象冒充「聊过」。 */
+export function normalizeArtDirection(raw: unknown): ArtDirection {
+  const src = (raw && typeof raw === 'object' ? raw as Record<string, unknown> : {});
+  const out: ArtDirection = {};
+  for (const k of ART_DIRECTION_KEYS) {
+    const f = normalizeArtDirectionField(src[k]);
+    if (f) out[k] = f;
+  }
+  return out;
+}
+
+export interface MergedArtDirectionField {
+  key: ArtDirectionKey;
+  /** 进 prompt 的英文（或原样中文）终值。 */
+  en: string;
+  /** 给人看的中文终值。来自缺省时为空串（缺省是骨架的事，不是对用户的承诺）。 */
+  zh: string;
+  source: 'ad' | 'default';
+}
+export interface MergedArtDirection {
+  fields: MergedArtDirectionField[];
+  /** 被方案覆盖掉的字段（留痕进资产 metadata：方案到底改了什么，不必现场猜）。 */
+  overridden: ArtDirectionKey[];
+}
+
+/**
+ * 逐字段合成：**ad 有值用 ad，空则用该档缺省**。
+ *
+ * @param style graphic 路线传 null —— 那条路没有影像骨架，只有方案本身说过的话。
+ */
+export function mergeArtDirection(style: PosterStyle | null, ad?: ArtDirection | null): MergedArtDirection {
+  const defaults = (style?.defaults ?? {}) as Partial<PosterStyleDefaults>;
+  const fields: MergedArtDirectionField[] = [];
+  const overridden: ArtDirectionKey[] = [];
+  for (const key of ART_DIRECTION_KEYS) {
+    const chosen = ad?.[key];
+    if (chosen?.en) {
+      fields.push({ key, en: chosen.en, zh: chosen.zh, source: 'ad' });
+      overridden.push(key);
+      continue;
+    }
+    const fallback = (defaults[key] ?? '').trim();
+    if (fallback) fields.push({ key, en: fallback, zh: '', source: 'default' });
+  }
+  return { fields, overridden };
+}
+
+/** 合成时每个字段在正文里的英文标签（顺序即正文顺序）。 */
+const AD_SECTION_LABEL: Record<ArtDirectionKey, string> = {
+  figure: '',            // 直接续在 opening 后面（`… of {SUBJECT}, in a plain dark shirt`）
+  props: 'Props',
+  backdrop: 'Environment',
+  lighting: 'Lighting',
+  palette: 'Palette',
+  material: 'Finish',
+  mood: 'Mood',
+};
+
+/** 中文摘要用的字段名（designNote / 画布提示词共用一套说法）。 */
+const AD_LABEL_ZH: Record<ArtDirectionKey, string> = {
+  figure: '人物', props: '道具', backdrop: '背景', lighting: '光线',
+  palette: '色彩', material: '材质', mood: '情绪',
+};
+
+function fieldOf(merged: MergedArtDirection, key: ArtDirectionKey): MergedArtDirectionField | undefined {
+  return merged.fields.find((f) => f.key === key);
+}
+
+/**
+ * 把 structure + 合成后的 AD 拼成 prompt 正文（`{SUBJECT}` 槽仍在，由 expandSlots 后填）。
+ *
+ * 顺序是刻意的：主体 → 道具 → 环境 → 光线 → 色彩 → 材质 → 情绪 → 相机。
+ * 相机放最后且属于 structure：它决定景别与主体位置，是安全区能成立的前提。
+ */
+export function composeImageBody(style: PosterStyle, merged: MergedArtDirection): string {
+  const figure = fieldOf(merged, 'figure');
+  const head = figure?.en ? `${style.structure.opening}, ${figure.en}` : style.structure.opening;
+  const parts = [`${head}.`];
+  for (const key of ART_DIRECTION_KEYS) {
+    if (key === 'figure') continue;
+    const f = fieldOf(merged, key);
+    if (!f?.en) continue;
+    parts.push(`${AD_SECTION_LABEL[key]}: ${f.en}.`);
+  }
+  parts.push(style.structure.camera);
+  return parts.join(' ');
+}
+
+/**
+ * 合成结果的**中文摘要**：一套机制两条路线 —— photo 用它写 designNote 的画面描述段，
+ * graphic 用它给排版层交代 Art Direction。
+ *
+ * **只渲染方案真的聊到的字段**（source === 'ad'）。缺省值是骨架的事，不是对用户的承诺；
+ * 把缺省也念一遍等于替方案许下它从没说过的诺。
+ */
+export function artDirectionNote(merged: MergedArtDirection, styleName?: string): string {
+  const said = merged.fields.filter((f) => f.source === 'ad' && f.zh);
+  if (!said.length) return '';
+  const body = said.map((f) => `${AD_LABEL_ZH[f.key]}${f.zh}`).join('，');
+  return styleName ? `画面基调：${styleName}，${body}。` : `画面基调：${body}。`;
+}
+
 export interface AssembledImagePrompt {
   /** 送给生图模型的正文（负空间子句在中段、no-text 在最末、画幅收尾）。 */
   prompt: string;
@@ -204,37 +408,58 @@ export interface AssembledImagePrompt {
   subject: string;
   strippedWords: string[];
   strippedShotSizes: string[];
+  /** 本条 prompt 里被方案覆盖掉的表现字段（留痕：方案到底改了什么）。 */
+  overriddenFields: ArtDirectionKey[];
+  /** 与本条 prompt 同源的中文画面描述（给用户看的承诺；方案没聊到时为空串）。 */
+  note: string;
 }
 
 /**
  * 拼一条影像主导 prompt。
  *
  * 正文顺序是刻意的：
- *   [骨架（已填 subject）] → [负空间禁入侵子句] → [no text anywhere in the image] → [3:4]
- * 负空间子句必须在 no-text **之前**（它描述画面内容，属于正文主体）；
+ *   [structure + 合成后的 AD（已填 subject）] → [负空间禁入侵子句] → [行动区] →
+ *   [no text anywhere in the image] → [3:4]
+ * 负空间与行动区必须在 no-text **之前**（它们描述画面内容，属于正文主体）；
  * no-text 必须是**最后一句人话**（发现②），画幅只是个参数尾巴。
+ *
+ * 覆盖边界（方案优先，但不是方案说了算一切）：
+ *   · 可覆盖：figure / props / backdrop / lighting / palette / material / mood；
+ *   · 不可覆盖：structure（opening / camera / negativeSpace / actionZone / negatives）
+ *     与技术合规位（no-text、负向框、画幅）。
  */
 export function assembleImagePrompt(input: {
   style: PosterStyle;
   /** 模型给的英文主体描述（不可信文本，本函数负责卫生）。 */
   subject: unknown;
   brief: NormalizedPosterBrief;
+  /** 军师聊定的 Art Direction（宣言产物）。缺省即全部回落到风格档缺省。 */
+  artDirection?: ArtDirection | null;
 }): AssembledImagePrompt {
   const { style, brief } = input;
-  const skeletonShots = shotSizesIn(style.imagePromptSkeleton);
+  // 景别归 structure.camera 所有：subject 里的景别词一律剥掉（骨架的那个是我们调过的）。
+  const skeletonShots = shotSizesIn(style.structure.camera);
   const hygiene = sanitizeSubject(input.subject, skeletonShots);
 
+  const merged = mergeArtDirection(style, input.artDirection);
   // 兜底：槽位接缝处的重复介词/冠词（`of of` / `of a a`）。subject 侧已经收拾过一轮，
-  // 但接缝是「骨架 + 模型文本」两边共同决定的，这里再压一次比在两边各猜一次可靠。
-  const body = tidy(expandSlots(style.imagePromptSkeleton, hygiene.subject))
+  // 但接缝是「结构位 + 模型文本」两边共同决定的，这里再压一次比在两边各猜一次可靠。
+  const body = tidy(expandSlots(composeImageBody(style, merged), hygiene.subject))
     .replace(/\b(of|in|at|with|and|a|an|the) \1\b/gi, '$1');
-  const clause = tidy(style.negativeSpaceClause);
+  const clause = tidy(style.structure.negativeSpace);
+  const action = tidy(style.structure.actionZone);
   const sentence = (s: string): string => (/[.!?]$/.test(s) ? s : `${s}.`);
-  const prompt = [sentence(body), sentence(clause), `${NO_TEXT_CLAUSE}.`, RATIO_SUFFIX].join(' ');
+  const prompt = [
+    sentence(body),
+    sentence(clause),
+    ...(action ? [sentence(action)] : []),
+    `${NO_TEXT_CLAUSE}.`,
+    RATIO_SUFFIX,
+  ].join(' ');
 
   // 负向：风格专属在前（更贴题），通用基座在后，brief 排除项最后（用户显式要求，不能被去重吃掉语义）。
   const parts = [
-    ...style.negatives,
+    ...style.structure.negatives,
     ...BASE_NEGATIVES,
     ...String(brief.negativePrompt ?? '').split(/[,，、;；\n]/),
   ];
@@ -256,5 +481,8 @@ export function assembleImagePrompt(input: {
     subject: hygiene.subject,
     strippedWords: hygiene.strippedWords,
     strippedShotSizes: hygiene.strippedShotSizes,
+    overriddenFields: merged.overridden,
+    // 与 prompt 同源：这句话就是从上面那份 merged 渲染出来的，不是另写一段描述。
+    note: artDirectionNote(merged, style.name),
   };
 }

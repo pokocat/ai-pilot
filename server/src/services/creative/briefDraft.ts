@@ -15,6 +15,10 @@ import { getBrandKit } from '../brandKit.js';
 import { TEMPLATE_KEYS, type TemplateKey } from './config.js';
 import { SCENE_DEFAULT_TEMPLATE, LIMITS } from './schema.js';
 import { CreativeError } from './jobs.js';
+import {
+  artDirectionNote, mergeArtDirection, normalizeArtDirection,
+  type ArtDirection, type ArtDirectionKey,
+} from './imagePrompt.js';
 import type { Deliverable, PosterBrief, PosterBriefDraft, PosterScene, BrandKitView } from '../../../../shared/contracts';
 
 /** agentKey → 默认场景（成果来自哪个顾问，海报大概是干什么用的）。 */
@@ -38,6 +42,9 @@ const DraftSchema = z.object({
   templateKey: z.string().catch('').default(''),
   templateReason: z.string().catch('').default(''),
   designNote: z.string().catch('').default(''),
+  // 结构化艺术指导：形态与宣言那份完全一致（同一套字段名、同一个归一函数）。
+  // 这里抽的是**客户在对话里真的说过**的画面承诺，下游宣言与生图提示词都以它为准。
+  artDirection: z.unknown().catch(undefined).default(undefined),
 });
 
 const DRAFT_SYS = [
@@ -59,10 +66,22 @@ const DRAFT_SYS = [
   '  （不出现参数、模型、渲染、模板 key 之类技术说法）；',
   '- 抽不出的字段留空字符串，不要编造。',
   '',
+  // ★ 2026-08-15：artDirection 与 designNote 的分工是**承诺同源**的关键。
+  //   在此之前 designNote 由模型自由发挥「什么气质与配色」，而那句话下游一个字都读不到 ——
+  //   于是确认页承诺「沉稳深灰 + 柔暖光」，生图提示词照旧发 pure black。现在色彩/光线这类
+  //   画面承诺**只走 artDirection**，由服务端确定性地渲染成一句话贴在 designNote 后面，
+  //   同一份字段再往下走进宣言与生图提示词——用户读到的和模型收到的是同一个对象。
+  '【artDirection：客户对画面本身的要求，结构化抽出来】',
+  '七个字段名固定：figure（人物气质）、props（道具）、backdrop（背景基调）、lighting（光质与方向）、',
+  'palette（色彩关系）、material（材质质感）、mood（情绪）。',
+  '每个字段写成 {"zh":"中文短语","en":"english phrase"}，两边说同一件事；zh 会原样念给客户听，',
+  'en 会原样进出图环节。**对话里没提到的字段一律留空或不给**——这里不是让你替客户设计，',
+  '是把他说过的话归位。他没提配色就别编一个配色：编了他会在确认页读到，然后在成品图上找不到。',
+  '',
   '【designNote：写给客户看的设计说明，2–3 句，确认页会把它放在最上面】',
   '用人话讲清这张海报会长什么样，让客户**不用看下面的表格**就知道对不对。要说到：',
   '① 这张讲的是什么（主题）；② 画面上会放哪些内容（主标题、几条卖点、行动号召、有没有二维码）；',
-  '③ 什么气质与配色；④ 为什么用这个版式（一句话）。',
+  '③ 为什么用这个版式（一句话）。',
   '按海报的通用设计原则来描述，别写成参数清单：',
   '- 对齐：元素咬住同一条轴，不是各摆各的；',
   '- 分组：相关的信息贴在一起、不相关的拉开，间距本身在表达从属关系；',
@@ -70,9 +89,12 @@ const DRAFT_SYS = [
   '- 颜色搭配：一主色一辅色一强调色，强调色只用在最该被看见的那一处；',
   '- 风格统一：整张图只有一套形状语言（圆角、线宽、字体族保持一致）。',
   '不要出现「渲染」「模板」「参数」「模型」这类技术说法，也不要复述客户原话。',
+  '**不要在 designNote 里写具体配色与光线**（「深灰底」「暖光」这类）——那句话由服务端从 artDirection',
+  '统一拼在后面，你再写一遍只会和它打架，也可能承诺一个出图环节收不到的颜色。',
   '对话太短、信息不足以描述画面时，designNote 留空字符串——**宁可不写，也不要编一个看起来很像的**。',
   '',
-  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","templateKey":"","templateReason":"","designNote":""}',
+  // designNote 恒在壳的最后一位（既有单测钉住这个位置：它是最容易被后加字段挤走的一项）。
+  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","artDirection":{"backdrop":{"zh":"","en":""},"lighting":{"zh":"","en":""}},"templateKey":"","templateReason":"","designNote":""}',
 ].join('\n');
 
 function isTemplateKey(v: unknown): v is TemplateKey {
@@ -163,6 +185,32 @@ function clip(s: string, max: number): string {
   return t.length > max ? t.slice(0, max) : t;
 }
 
+/**
+ * AD → visualDirection 的确定性序列化。
+ *
+ * 顺序即重要性：`visualDirection` 只有 100 字，装不下就**整条丢弃末尾字段**，
+ * 而不是让 clip 从中间截断 —— 半句「背景沉稳深」比少一个字段更糟，它是个说不完的承诺。
+ * 背景/光线/色彩排在最前：那三项正是本次修复里「说了却进不了画面」的字段。
+ */
+const AD_SERIALIZE_ORDER: readonly ArtDirectionKey[] = [
+  'backdrop', 'lighting', 'palette', 'material', 'mood', 'figure', 'props',
+];
+const AD_SERIALIZE_LABEL: Record<ArtDirectionKey, string> = {
+  backdrop: '背景', lighting: '光线', palette: '色彩',
+  material: '材质', mood: '情绪', figure: '人物', props: '道具',
+};
+function serializeArtDirection(ad: ArtDirection, max: number): string {
+  let out = '';
+  for (const k of AD_SERIALIZE_ORDER) {
+    const zh = ad[k]?.zh;
+    if (!zh) continue;
+    const next = out ? `${out}；${AD_SERIALIZE_LABEL[k]}${zh}` : `${AD_SERIALIZE_LABEL[k]}${zh}`;
+    if (next.length > max) break;
+    out = next;
+  }
+  return out;
+}
+
 /** BrandKit 合并（只在 approved 时调用）：tagline→副标候选、theme→视觉方向、taboos→排除项。 */
 function mergeBrandKit(brief: Partial<PosterBrief>, kit: BrandKitView): Partial<PosterBrief> {
   const out = { ...brief };
@@ -209,6 +257,10 @@ export async function buildPosterBriefDraft(opts: {
     console.warn('[creative] brief 草稿抽取失败，回退确定性预填：', (e as Error).message);
   }
 
+  // 结构化艺术指导：归一（含卫生）后既拼给客户看的那句话，也序列化进 visualDirection 往下游走。
+  const artDirection = normalizeArtDirection(ai?.artDirection);
+  const adNote = clip(artDirectionNote(mergeArtDirection(null, artDirection)), 200);
+
   const scene: PosterScene = ai?.scene ?? fallbackScene;
   const aiKey = isTemplateKey(ai?.templateKey) ? (ai!.templateKey as TemplateKey) : null;
   const templateKey: TemplateKey = aiKey ?? rec.templateKey ?? SCENE_DEFAULT_TEMPLATE[scene];
@@ -228,7 +280,13 @@ export async function buildPosterBriefDraft(opts: {
       .filter(Boolean)
       .slice(0, LIMITS.proofPoints),
     cta: clip(ai?.cta ?? '', LIMITS.cta),
-    visualDirection: clip(ai?.visualDirection ?? '', LIMITS.visualDirection),
+    // ★ 承诺同源：抽到结构化 AD 时，visualDirection 用它的确定性序列化 —— 客户在确认页读到的
+    //   那句画面描述，和下游宣言/生图提示词读到的，必须是同一串字。抽不到才退回自由文本。
+    //   （装不下时整条丢弃末尾字段，不做中途截断——序列化按重要性排序就是为了这一步。）
+    visualDirection: clip(
+      serializeArtDirection(artDirection, LIMITS.visualDirection) || (ai?.visualDirection ?? ''),
+      LIMITS.visualDirection,
+    ),
     templateKey,
     ratio: '3:4',
   };
@@ -242,7 +300,11 @@ export async function buildPosterBriefDraft(opts: {
 
   // designNote 只有真抽出来才下发：抽不出时确认页退回表单打头，
   // 而不是显示一句模型编的、看起来很像但跟这张海报无关的话。
-  const designNote = clip(ai?.designNote ?? '', 240);
+  //
+  // AD 那句话**优先保留**：它是唯一一句「确认页说的」与「出图收到的」逐字相同的承诺，
+  // 被 240 上限砍掉的应该是模型写的自由段落，不是它。
+  const noteBody = clip(ai?.designNote ?? '', adNote ? Math.max(0, 240 - adNote.length - 1) : 240);
+  const designNote = clip([noteBody, adNote].filter(Boolean).join(' '), 240);
   return {
     brief,
     ...(templateReason ? { templateReason } : {}),

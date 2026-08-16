@@ -59,7 +59,14 @@ function decorateAvatar(avatar) {
 Page({
   data: host.hostBaseData({
     loading: true,
+    /**
+     * 读失败 ≠ 没有分身。合成一个空态，会把「这次没读到」说成「你还没有数字分身」，
+     * 并引导用户重新采集 —— 而重新采集是要扣钻石的。首页 refreshAccountState 早就把
+     * 四态分开了（ready / training / missing / failed），这一屏必须同口径。
+     */
+    loadFailed: false,
     avatars: [],
+    loggedIn: false,
     me: null,
     showLogin: false,
   }),
@@ -71,15 +78,32 @@ Page({
 
   load() {
     this.stopPolling();
-    if (!host.isLoggedIn()) { this.setData({ loading: false }); return; }
+    // 游客可以浏览这一屏（不前置登录门），但「没登录」不是「没有分身」，各说各的。
+    if (!host.isLoggedIn()) {
+      this.setData({ loading: false, loadFailed: false, loggedIn: false, avatars: [] });
+      return;
+    }
+    // 并发闸：onShow 与轮询可能同时触发，晚回来的那次不许覆盖新结果。
+    const token = (this._loadToken || 0) + 1;
+    this._loadToken = token;
     api.avatars()
       .then((avatars) => {
+        if (this._loadToken !== token) return;
         const decorated = (Array.isArray(avatars) ? avatars : []).map(decorateAvatar);
-        this.setData({ loading: false, avatars: decorated, me: host.currentUser() });
+        this.setData({ loading: false, loadFailed: false, loggedIn: true, avatars: decorated, me: host.currentUser() });
         this.schedulePolling(decorated);
       })
-      .catch(() => this.setData({ loading: false }));
+      .catch(() => {
+        if (this._loadToken !== token) return;
+        // 保留上一次读到的 avatars：读失败时把已经显示出来的分身抹掉毫无必要。
+        this.setData({ loading: false, loadFailed: true, loggedIn: true });
+        // 轮询必须接着跑。否则训练中撞上一次网络抖动，进度就永远停在失败前的那一帧，
+        // 而用户看到的是「卡住了」——又一个「其实早就好了，只是端上不知道」。
+        this.schedulePolling(this.data.avatars);
+      });
   },
+
+  retry() { this.setData({ loading: true, loadFailed: false }); this.load(); },
 
   schedulePolling(avatars) {
     if (!(avatars || []).some((avatar) => avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')) return;
@@ -113,6 +137,8 @@ Page({
     if (!host.requireLogin(this, 'execute')) return;
     host.go('clone/index');
   },
+
+  openVoices() { host.go('voices/index'); },
 
   openCredits() { host.goHost('/packages/work/credits/index'); },
 

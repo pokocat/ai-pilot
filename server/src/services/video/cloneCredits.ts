@@ -228,21 +228,58 @@ export async function refundStaleUnsubmittedCloneHolds(maxAgeMs = 10 * 60_000): 
 }
 
 /**
- * 训练卡死兜底：超过 maxAgeMs 仍停在 submitted 的 hold 一律退回。
+ * 问上游「这个目标现在到底什么状态」。返回 null 表示**问不出来**（超时 / 报错 / 没这条），
+ * 与「上游明确说还在训」是两件事，调用方必须分开处理。
+ */
+export type CloneStatusProbe = (
+  hold: Pick<VideoCloneHold, 'tenantId' | 'userId' | 'targetKind' | 'targetId'>,
+) => Promise<string | null>;
+
+/**
+ * 训练卡死兜底。
  *
  * 上游任务可能永远不给终态（供应商侧丢单）。没有这道闸，用户的钻石会被一笔永不结算的 hold
- * 无限期占住 —— 对用户而言这和「扣了钱没给东西」没区别。宁可错退，不可长占。
+ * 无限期占住 —— 对用户而言这和「扣了钱没给东西」没区别。
+ *
+ * ★ 2026-08-15：这里原本是「超过 6 小时一律退回」。那条规则在**独立声音**上翻了车 —— 上游
+ *   早已 ready，只是状态没刷回来（AIStar 侧独立声音不走刷新路径），兜底照退，造成
+ *   「货已经出了、钱却退了」这种最难对账的不一致。宁可错退不可长占的前提，是我们**真的
+ *   不知道**结果；能问出来就不该猜。
+ *
+ * 所以 maxAgeMs 的语义从「到点就退」改成「到点开始逐轮核实」，退与不退按上游口径走：
+ * - ready   → 结算，不退（货确实出了）
+ * - failed  → 退回（确实没出货）
+ * - training / 问不出来 → **这一轮不动**，留给 5 分钟后的下一次 sweep 再问
+ * - 一直问不出结果 → 熬到 hardMaxAgeMs 硬止损退回，钻石不会被无限期占住
+ *
+ * 不传 probe 时退回旧的「到点就退」行为，保证这个函数裸调也是安全的。
  */
-export async function refundStalledCloneHolds(maxAgeMs = 6 * 3600_000): Promise<number> {
+export async function refundStalledCloneHolds(
+  maxAgeMs = 6 * 3600_000,
+  probe?: CloneStatusProbe,
+  hardMaxAgeMs = 24 * 3600_000,
+): Promise<{ settled: number; refunded: number }> {
+  const now = Date.now();
   const rows = await prisma.videoCloneHold.findMany({
-    where: { status: 'submitted', updatedAt: { lt: new Date(Date.now() - maxAgeMs) } },
-    select: { id: true },
+    where: { status: 'submitted', updatedAt: { lt: new Date(now - maxAgeMs) } },
+    select: { id: true, tenantId: true, userId: true, targetKind: true, targetId: true, updatedAt: true },
     take: 100,
   });
+  let settled = 0;
   let refunded = 0;
   for (const row of rows) {
-    const result = await refundCloneHold(row.id, 'train_timeout').catch(() => null);
-    if (result?.status === 'refunded') refunded += 1;
+    const expired = row.updatedAt.getTime() < now - Math.max(maxAgeMs, hardMaxAgeMs);
+    const status = probe ? await probe(row).catch(() => null) : null;
+    if (status === 'ready') {
+      const result = await settleCloneHold(row.id, 'ready').catch(() => null);
+      if (result?.status === 'settled') settled += 1;
+      continue;
+    }
+    // probe 缺席时 status 恒为 null，走的就是旧的到点即退；有 probe 时只有明确 failed 或熬到硬止损才退。
+    if (status === 'failed' || !probe || expired) {
+      const result = await refundCloneHold(row.id, status === 'failed' ? 'failed' : 'train_timeout').catch(() => null);
+      if (result?.status === 'refunded') refunded += 1;
+    }
   }
-  return refunded;
+  return { settled, refunded };
 }

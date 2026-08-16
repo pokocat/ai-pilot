@@ -32,6 +32,8 @@ const POLL_MAX_MS = 10 * 60_000;
 
 const PROOF_SLOTS = 3;
 
+type JobView = CreativeJobView;
+
 function isInFlight(status?: string): boolean {
   return status === 'pending' || status === 'running';
 }
@@ -68,7 +70,7 @@ export default function PosterJobPage() {
   const accent = s.color().vars['--accent'];
   const jobId = String(router.params.jobId ?? '');
 
-  const [job, setJob] = useState<CreativeJobView | null>(null);
+  const [job, setJob] = useState<JobView | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
   const [timedOut, setTimedOut] = useState(false);
@@ -102,7 +104,7 @@ export default function PosterJobPage() {
   /** 停掉当前这一代轮询（代号自增即可，在飞的 poll 醒来会自行退场）。 */
   const stopPolling = () => { pollSeqRef.current += 1; clearTimer(); };
 
-  const applyJob = (v: CreativeJobView) => {
+  const applyJob = (v: JobView) => {
     setJob(v);
     urlRetriedRef.current = false;
     // 进终态即清掉本地在途标记，别让下一次「生成成品图」被劫持回这条旧任务。
@@ -197,6 +199,9 @@ export default function PosterJobPage() {
 
   const asset = posterAsset(job);
   const imgUrl = absoluteCreativeUrl(asset?.previewUrl);
+  // 风格名只在主视觉大片下有意义（标准档没有「本次风格」这回事）；服务端没给就整行不渲染。
+  const styleName = job?.tier === 'premium' ? String(job.styleName ?? '').trim() : '';
+  const qrReserved = job?.qrReserved === true;
 
   /** 签名 URL 短时效（600 秒）：图片加载失败先当过期处理，重拉一次任务详情换新链接。 */
   const onImgError = () => {
@@ -442,6 +447,16 @@ export default function PosterJobPage() {
                     ? <Image className="pj-img" src={imgUrl} mode="aspectFit" onError={onImgError} />
                     : <Text className="pj-note">成品图链接已过期，正在重新获取…</Text>}
                 </View>
+                {/* 成品图下面的两行事实（缺省不渲染整行）：
+                    · 本次风格 —— 只有主视觉大片才有「选中了哪个风格」这回事；
+                    · 已预留贴码位 —— 没传二维码时服务端仍会在画面里留位置，这句是让用户知道
+                      「不用重出一版」，否则他会为了加个码再扣一次钻石。 */}
+                {styleName || qrReserved ? (
+                  <View className="pj-meta">
+                    {styleName ? <Text className="pj-meta-l">{`本次风格：${styleName}`}</Text> : null}
+                    {qrReserved ? <Text className="pj-meta-l">已预留贴码位，可保存后自行粘贴二维码</Text> : null}
+                  </View>
+                ) : null}
                 <View className="pj-acts">
                   <View className="pj-act" style={{ background: accent }} onClick={saveAlbum}>
                     <Icon name="down" size={14} color="#fff" />

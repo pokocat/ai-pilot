@@ -35,10 +35,15 @@ import { fmtTime } from '../format';
  * 为什么后台不像小程序那样吃服务端下发的列表：`/creative/status` 只下发**启用中**的版式，
  * 而后台恰恰要把被停用的那几套也列出来才能重新打开。所以这份本地目录必须留着。
  */
-const TEMPLATES: [string, string, string][] = [
-  ['person_hero', '人物主视觉', '真人照片打底，人物占据主视觉'],
-  ['editorial', '编辑杂志', '杂志内页式排版，图文并重'],
-  ['business_launch', '商业发布', '发布会 / 新品公告气质'],
+const TEMPLATES: [string, string, string, string][] = [
+  ['person_hero', '人物主视觉', '真人照片打底，人物占据主视觉', '留白'],
+  ['manifesto_min', '一句主张', '一句宣言占满画面，留白说话', '留白'],
+  ['quote_card', '金句卡', '引号排印 + 署名，适合观点转发', '留白'],
+  ['editorial', '编辑杂志', '杂志内页式排版，图文并重', '均衡'],
+  ['business_launch', '商业发布', '发布会 / 新品公告气质', '均衡'],
+  ['data_stat', '数据主视觉', '一个关键数字撑起整张画面', '均衡'],
+  ['info_list', '要点清单', '标题 + 编号卖点清单 + 行动条', '密集'],
+  ['agenda_event', '活动信息', '时间地点议程齐全，行动区显著', '密集'],
 ];
 
 /**
@@ -619,13 +624,13 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
               <div className="ai-field">
                 <div className="ai-fl">
-                  模板启停（MVP 三套 3:4 · 全部停用则无法建单，建单返回 422
-                  {draft.layoutEngine === 'ai' ? '；AI 排版下这三套仍是回落时的兜底池，别全关' : ''}）
+                  模板启停（3:4 版式池 · 按信息密度分档 · 全部停用则无法建单，建单返回 422
+                  {draft.layoutEngine === 'ai' ? '；AI 排版下这一池仍是回落时的兜底，别全关' : ''}）
                 </div>
                 <div className="cfg">
-                  {TEMPLATES.map(([k, label, desc]) => (
+                  {TEMPLATES.map(([k, label, desc, density]) => (
                     <div key={k} className="cfg-row">
-                      <div className="cb"><div className="ct">{label}</div><div className="cs">{desc} · <span className="tag off">{k}</span></div></div>
+                      <div className="cb"><div className="ct">{label}</div><div className="cs">{desc} · {density} · <span className="tag off">{k}</span></div></div>
                       <div className={`sw ${draft.templates[k] ? 'on' : ''}`} onClick={() => isSuper && setTpl(k, !draft.templates[k])}><i /></div>
                     </div>
                   ))}

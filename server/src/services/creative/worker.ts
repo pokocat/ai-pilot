@@ -24,7 +24,7 @@ import {
   isPremiumTier,
   type ResolvedPosterRoute,
 } from './posterRoute.js';
-import { assembleImagePrompt } from './imagePrompt.js';
+import { assembleImagePrompt, type ArtDirection } from './imagePrompt.js';
 import { renderPoster, PosterRenderError } from './renderer.js';
 import { resolveVisualProvider } from './visualProvider.js';
 import { moderate } from '../moderation.js';
@@ -263,6 +263,8 @@ export interface CreativeWorkerDeps {
   /** photo 子路的主视觉产出（注入以跳过真图片供应商与真审核）。 */
   photoVisual?: (
     input: JobExecutionInput, cfg: CreativeRuntimeConfig, route: ResolvedPosterRoute,
+    /** 方案聊定的艺术指导；逐字段顶掉风格档缺省（宣言不可用时为 null）。 */
+    artDirection?: ArtDirection | null,
   ) => Promise<PhotoVisualResult>;
   /** 排版（注入以按「有没有 photoStyle」分别返回成功/失败，从而钉住回落链）。 */
   compose?: typeof generateCanvasPoster;
@@ -474,6 +476,8 @@ async function runAiEngine(
     providerLabel: string;
     visualAssetId: string | null;
     photoError: string | null;
+    /** 与模板路径同语义：按「真读回了二维码字节」判，不看建单快照。 */
+    qrReserved: boolean;
   }): Promise<RunOutcome> => {
     await checkpoint(job.id);
     return settlePoster(input, {
@@ -510,6 +514,7 @@ async function runAiEngine(
         movement,
         philosophySource: philosophy.source,
         visualAssetId: o.visualAssetId,
+        qrReserved: o.qrReserved,
         degraded: false,
         // 历史兼容字段；新 tier 契约不会把 photo 失败交成 graphic。
         ...(o.photoError ? { photoError: o.photoError.slice(0, 300) } : {}),
@@ -532,7 +537,7 @@ async function runAiEngine(
         }
         : { error: '原主视觉文件已不可用，无法免费改文字' };
     } else {
-      visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route);
+      visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route, manifesto?.artDirection ?? null);
     }
     if (visual.assetId && visual.dataUri) {
       // 主视觉走**手上的字节**直接拼 data URI，不再从 OSS 读回：字节已经在内存里，读回只是多一次
@@ -548,6 +553,7 @@ async function runAiEngine(
             providerLabel: visual.providerLabel ?? 'none',
             visualAssetId: visual.assetId,
             photoError: null,
+            qrReserved: !assets.qrUrl,
           }),
         };
       }
@@ -585,6 +591,7 @@ async function runAiEngine(
       providerLabel: 'none',   // graphic 子路不调图片供应商
       visualAssetId: null,
       photoError,
+      qrReserved: !assets.qrUrl,
     }),
   };
 }
@@ -598,6 +605,7 @@ async function runPhotoVisual(
   input: JobExecutionInput,
   cfg: CreativeRuntimeConfig,
   route: ResolvedPosterRoute,
+  artDirection?: ArtDirection | null,
 ): Promise<PhotoVisualResult> {
   const { job, brief } = input;
   // 免费单闸门的第二道（runPipeline 已挡过一次）：这两处是全链仅有的供应商入口，
@@ -608,7 +616,14 @@ async function runPhotoVisual(
   const provider = await resolveVisualProvider(cfg);
   if (!provider) return { error: '图片供应商不可用' };
 
-  const assembled = assembleImagePrompt({ style: route.style, subject: route.subject, brief });
+  // ★ 方案优先：宣言聊定的 artDirection 逐字段顶掉风格档缺省（没聊到的字段才用缺省）。
+  //   宣言不可用时传 null —— 那时整条 AI 路径本来就已回落，这里只是不让它再多一处 undefined 分支。
+  const assembled = assembleImagePrompt({
+    style: route.style,
+    subject: route.subject,
+    brief,
+    artDirection: artDirection ?? null,
+  });
   try {
     const submitted = await provider.submit({ prompt: assembled.prompt, negativePrompt: assembled.negativePrompt });
     if (submitted.status !== 'succeeded' || !submitted.image) {
@@ -630,6 +645,10 @@ async function runPhotoVisual(
         // 剥了什么词也留痕：模型反复塞禁用词/景别词是提示词该改的信号，不是每次现场猜。
         ...(assembled.strippedWords.length ? { strippedWords: assembled.strippedWords } : {}),
         ...(assembled.strippedShotSizes.length ? { strippedShotSizes: assembled.strippedShotSizes } : {}),
+        // 方案覆盖了哪几个字段 + 与本条 prompt 同源的中文承诺：线上出现「说的和画的不一样」时，
+        // 这两项直接给出答案，不必再拿宣言长文与英文 prompt 逐句对读。
+        ...(assembled.overriddenFields.length ? { artDirectionOverrides: assembled.overriddenFields } : {}),
+        ...(assembled.note ? { artDirectionNote: assembled.note } : {}),
         provider: provider.name,
         moderation: { provider: verdict.provider, skipped: !!verdict.skipped },
       },
@@ -745,6 +764,10 @@ async function runTemplatePipeline(
       movement: philosophy.movement,
       philosophySource: philosophy.source,
       visualAssetId: visualAssetId ?? null,
+      // 本单成品图上是一块**空着的贴码位**（用户没传二维码素材）。模板一律把码位画出来
+      // 而不是省略，成品页据这个事实位提示「可自行粘贴二维码」——没有它，前端只能靠
+      // 「brief 里有没有 qrAssetId」去猜，而那是建单快照，与真正画出来的东西不是同一件事。
+      qrReserved: !assets.qrUrl,
       degraded,
       ...(visualError ? { visualError } : {}),
       // 回落原因落库：否则「AI 引擎在生产静默失效」这件事只存在于日志里，任务台全是绿的模板图。

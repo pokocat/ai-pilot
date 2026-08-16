@@ -14,9 +14,13 @@ import { grantCredits, getBalance } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
 import {
   CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER, DEFAULT_PREMIUM_PRICE_PER_POSTER, MAX_TIMEOUT_MS,
-  getCreativeConfig, TEMPLATE_CATALOG, assertVisualSize, premiumTierAvailable,
-  type CreativeRuntimeConfig, type VisualDialect,
+  getCreativeConfig, TEMPLATE_CATALOG, TEMPLATE_KEYS, TEMPLATE_DENSITIES, assertVisualSize, premiumTierAvailable,
+  type CreativeRuntimeConfig, type VisualDialect, type TemplateKey,
 } from '../src/services/creative/config.js';
+import {
+  renderPosterHtml, auditPosterHtml, extractStat, metaRow, QR_HOLD_TEXT,
+} from '../src/services/creative/templates.js';
+import { fallbackPhilosophy } from '../src/services/creative/philosophy.js';
 import { STALE_RUNNING_MS } from '../src/services/creative/worker.js';
 import { parseTemplateRecommendation } from '../src/services/creative/briefDraft.js';
 import { normalizePosterBrief, normalizeTier } from '../src/services/creative/schema.js';
@@ -37,7 +41,7 @@ function visualCfg(dialect: VisualDialect, extraParams: Record<string, unknown> 
   return {
     enabled: true, pricePerPoster: PRICE, premiumPricePerPoster: PREMIUM_PRICE, dailyLimit: 0,
     timeoutMs: 180_000, layoutEngine: 'ai',
-    templates: { person_hero: true, editorial: true, business_launch: true },
+    templates: Object.fromEntries(TEMPLATE_KEYS.map((k) => [k, true])) as Record<TemplateKey, boolean>,
     visual: {
       enabled: true, dialect, baseUrl: 'https://example.com/v1', model: 'm', apiKey: 'k',
       size: '1440x1920', timeoutMs: 60_000, extraParams,
@@ -550,14 +554,14 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(create.body.code, 'CANVAS_DISABLED');
   });
 
-  // D6：版式清单由服务端下发（只含启用中的），前端不再硬编码三套恒可选。
+  // D6：版式清单由服务端下发（只含启用中的），前端不再硬编码一份本地目录。
   test('GET /creative/status 下发启用中的版式清单（停用的不出现）', async () => {
     const { token } = await posterUser();
     const all = await api('GET', '/api/creative/status', { token });
     assert.deepEqual(
       all.body.templates.map((t: { key: string }) => t.key),
-      ['person_hero', 'editorial', 'business_launch'],
-      '缺省三套全启用，且保持白名单顺序',
+      [...TEMPLATE_KEYS],
+      '缺省整池全启用，且保持白名单顺序',
     );
     const first = all.body.templates[0];
     assert.equal(first.name, TEMPLATE_CATALOG.person_hero.name, '中文名来自服务端唯一真源');
@@ -565,11 +569,29 @@ describe('海报成品图 · status 与 brief 草稿', () => {
 
     await setPayload({ templates: { editorial: false } });
     const partial = await api('GET', '/api/creative/status', { token });
-    assert.deepEqual(
-      partial.body.templates.map((t: { key: string }) => t.key),
-      ['person_hero', 'business_launch'],
+    assert.ok(
+      !partial.body.templates.some((t: { key: string }) => t.key === 'editorial'),
       '被停用的 editorial 不下发',
     );
+    assert.equal(partial.body.templates.length, TEMPLATE_KEYS.length - 1, '只少这一套');
+  });
+
+  // 密度是用户挑版式时真正在挑的东西（"说一句话还是说满一版"），必须跟着清单一起下发，
+  // 否则前端只能靠 key 名去猜分组 —— 那就是当年 app / admin 各维护一份目录的老路。
+  test('GET /creative/status 每套版式带 density，且取值在三档之内', async () => {
+    const { token } = await posterUser();
+    const r = await api('GET', '/api/creative/status', { token });
+    for (const t of r.body.templates as { key: TemplateKey; density?: string }[]) {
+      assert.ok(t.density, `${t.key} 缺 density`);
+      assert.ok(
+        (TEMPLATE_DENSITIES as readonly string[]).includes(t.density!),
+        `${t.key} 的 density=${t.density} 不在 ${TEMPLATE_DENSITIES.join('/')} 之内`,
+      );
+      assert.equal(t.density, TEMPLATE_CATALOG[t.key].density, '下发值必须来自唯一真源');
+    }
+    // 三档都真的有版式：只有一档的"分档"等于没分。
+    const got = new Set(r.body.templates.map((t: { density: string }) => t.density));
+    assert.deepEqual([...got].sort(), [...TEMPLATE_DENSITIES].sort(), '三档密度都要有版式');
   });
 
   test('brief-draft：无 provider 也不抛错，返回可用预填 + templateKey/templateReason', async () => {
@@ -978,6 +1000,26 @@ describe('海报成品图 · 纯函数单测', () => {
     );
   });
 
+  // 版式池扩容（B 组）：新增 5 套必须与老三套走**同一条**白名单/停用/回退路径，
+  // 不许有「新版式走了另一套判断」的分叉——那正是模板清单当年在两端对不上的成因。
+  test('normalizePosterBrief：新增 5 套版式同样进白名单、同样受停用闸门管', () => {
+    const added: TemplateKey[] = ['manifesto_min', 'quote_card', 'data_stat', 'info_list', 'agenda_event'];
+    for (const key of added) {
+      assert.equal(normalizePosterBrief(brief({ templateKey: key })).templateKey, key, `${key} 应被白名单接受`);
+      // 显式请求被停用的新版式 → 422（与 editorial 同一口径，不静默换版）
+      assert.throws(
+        () => normalizePosterBrief(brief({ templateKey: key }), { [key]: false }),
+        /版式暂时不可用/,
+        `${key} 被停用时必须 422`,
+      );
+      // 停用新版式不影响「没指定 templateKey」的 scene 回退
+      assert.equal(
+        normalizePosterBrief(brief({ templateKey: undefined }), { [key]: false }).templateKey,
+        'person_hero',
+      );
+    }
+  });
+
   test('normalizeTier：只认 premium，缺省 / 脏值 / 老客户端不带 → standard', () => {
     assert.equal(normalizeTier('premium'), 'premium');
     assert.equal(normalizeTier('standard'), 'standard');
@@ -1165,5 +1207,124 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
     // 意味着模型首轮输出没通过 zod 校验——即便这里是打桩、必过 schema，也该恒为 1。
     assert.equal(callCount, 1, '首轮即应通过 schema 校验；为 2 则说明抽取分支已经不稳定（触发了修复轮）');
     assert.equal(r.body.brief.headline, '标题', '确认拿到的是真结构化结果，不是解析失败后的兜底空值');
+  });
+});
+
+/* ───────────────── 版式池：确定性排版（不起浏览器，只查产物结构） ───────────────── */
+//
+// 这一组和 creativeCanvas.test.ts 里那组「真实渲染量测」是**两件事，缺一不可**：
+//   · 这里查的是**结构契约**——每套版式都必须自包含、带 AI 标识、带码位、文案缺失能降级。
+//     它跑在常规 npm test 里，是回归的第一道网。
+//   · 那边查的是**真实布局**——不越界、不压字、字号下限、二维码静区。它要 Chromium，默认跳过。
+// 只有前者会漏掉压字，只有后者跑不进日常回归。
+describe('海报成品图 · 版式池（确定性排版）', () => {
+  /** 1×1 透明 PNG：素材本体不重要，重要的是「有没有这个素材」这条分支。 */
+  const PX = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
+
+  function html(key: TemplateKey, over: Record<string, unknown> = {}, assets: Record<string, string> = {}) {
+    const nb = normalizePosterBrief(brief({ templateKey: key, ...over }));
+    return renderPosterHtml({ brief: nb, philosophy: fallbackPhilosophy(nb), assets });
+  }
+
+  test('每套版式都产出自包含 HTML：AI 标识在位、无外链、无脚本', () => {
+    for (const key of TEMPLATE_KEYS) {
+      const out = html(key);
+      const audit = auditPosterHtml(out);
+      assert.equal(audit.ok, true, `${key} 自检未过：${audit.issues.join('；')}`);
+      assert.ok(out.includes('class="poster"'), `${key} 缺画布根元素`);
+      assert.ok(out.includes('增长顾问'), `${key} 没把主标题排上画面`);
+      assert.ok(out.includes('扫码预约'), `${key} 没把 CTA 排上画面`);
+    }
+  });
+
+  // ★ 贴码行动区：二维码在与不在，占的是**同一块面积**。
+  // 「没传码就不画」会让「有码」与「无码」变成两套版面预算，而长文案下只有一套被验证过。
+  test('每套版式都有码位：有 qrUrl 出真码，无 qrUrl 出贴码位（绝不画假二维码）', () => {
+    for (const key of TEMPLATE_KEYS) {
+      // 注意断言的是**角标标签**而不是「贴码位」三个字：公共 CSS 的注释里也写着这三个字，
+      // 拿裸文本判会恒真（第一版就是这么写的，person_hero 立刻把它抓了出来）。
+      const holdTag = `<span class="holdtag">${QR_HOLD_TEXT}</span>`;
+
+      const withQr = html(key, {}, { qrUrl: PX });
+      assert.ok(withQr.includes('data-role="qr"'), `${key} 有码时必须带 data-role="qr" 供量测可扫性`);
+      assert.ok(!withQr.includes(holdTag), `${key} 有真码就不该再出贴码位角标`);
+
+      const noQr = html(key);
+      assert.ok(noQr.includes(holdTag), `${key} 无码时必须渲染贴码位（不是省略）`);
+      assert.ok(!noQr.includes('data-role="qr"'), `${key} 无码时不许出现二维码元素`);
+      assert.ok(noQr.includes('class="qr hold"'), `${key} 贴码位要用统一的浅色块样式`);
+      // 绝不画假二维码：无码分支里不许出现任何图片元素冒充码
+      assert.ok(!/<img[^>]*class="qr/.test(noQr), `${key} 贴码位里不许放图片冒充二维码`);
+    }
+  });
+
+  // 密度高的版式必须处理文案缺失：不足 3 条时收缩，不留编号空行/空议程行。
+  test('info_list / agenda_event 文案缺失降级：条目数跟着实际卖点走，不留空洞', () => {
+    for (const [key, marker] of [['info_list', 'class="li"'], ['agenda_event', 'class="mrow"']] as const) {
+      for (const n of [0, 1, 2, 3]) {
+        const points = Array.from({ length: n }, (_, i) => `卖点第 ${i + 1} 条`);
+        const out = html(key, { proofPoints: points });
+        const rows = out.split(marker).length - 1;
+        assert.equal(rows, n, `${key} 在 ${n} 条卖点时应渲染 ${n} 行，实际 ${rows} 行`);
+        assert.equal(auditPosterHtml(out).ok, true, `${key} ${n} 条卖点时自检应通过`);
+      }
+    }
+  });
+
+  test('data_stat：卖点里有数字就抽成主数据，一个数字都没有就退成纯排印（不编数字）', () => {
+    const withNum = html('data_stat', { proofPoints: ['平均降佣 9 个点'] });
+    assert.ok(withNum.includes('class="statNum"'), '有数字时应有主数据大字');
+    assert.ok(withNum.includes('>9<'), '大字取的是卖点里的那个数字');
+
+    const noNum = html('data_stat', { proofPoints: ['降佣效果稳定可复用'] });
+    assert.ok(!noNum.includes('class="statNum"'), '抽不到数字时整块数据区去掉，不留空数字位');
+    assert.ok(noNum.includes('降佣效果稳定可复用'), '卖点本身仍照常排进画面');
+    assert.equal(auditPosterHtml(noNum).ok, true);
+  });
+
+  test('extractStat：取第一条含数字的卖点，注释是整条原文（不把数字从句子中间抠掉）', () => {
+    assert.deepEqual(
+      extractStat(['服务过很多家', '平均降佣 9 个点', '45% 直客']),
+      { value: '9', note: '平均降佣 9 个点' },
+      '取第一条含数字的；注释保留整句，抠数字会得到「平均降佣点」',
+    );
+    assert.equal(extractStat(['45%的直客占比'])?.value, '45%', '百分号跟着数字一起进大字');
+    assert.equal(extractStat(['服务 60 家单体酒店'])?.value, '60');
+    assert.equal(extractStat(['降佣 3.5 倍'])?.value, '3.5倍', '小数与倍数单位都跟走');
+    assert.equal(extractStat(['纯文字没有数字', '也没有']), null, '一个数字都没有 → null，不编造');
+    assert.equal(extractStat([]), null);
+  });
+
+  test('metaRow：带分隔符拆成标签 + 内容两列，不带分隔符的整条进内容列（不替用户造标签）', () => {
+    assert.deepEqual(metaRow('时间：8月20日 20:00'), { label: '时间', value: '8月20日 20:00' });
+    assert.deepEqual(metaRow('地点: 杭州文三路'), { label: '地点', value: '杭州文三路' }, '半角冒号也认');
+    assert.deepEqual(metaRow('地点|杭州文三路'), { label: '地点', value: '杭州文三路' }, '竖线也认');
+    assert.deepEqual(
+      metaRow('平均降佣九个点见效快'),
+      { label: '', value: '平均降佣九个点见效快' },
+      '没有分隔符时标签留空 —— 猜一个标签比没有标签更误导',
+    );
+    assert.deepEqual(
+      metaRow('这是一段很长的没有分隔符的说明：内容'),
+      { label: '', value: '这是一段很长的没有分隔符的说明：内容' },
+      '冒号前超过 6 字不像标签，整条进内容列',
+    );
+    assert.deepEqual(metaRow('时间：'), { label: '', value: '时间：' }, '内容为空不算结构位');
+  });
+
+  // 高级档的溢价就是那张生成主视觉。任何一套版式把它排丢了，都是收了钱没交付。
+  test('每套版式都会把 visualUrl 排进画面（高级档买的就是这张图）', () => {
+    for (const key of TEMPLATE_KEYS) {
+      const out = html(key, {}, { visualUrl: PX });
+      assert.ok(out.includes(PX), `${key} 没有渲染 visualUrl`);
+    }
+  });
+
+  test('未知 templateKey（模板下线后老任务被重试）→ 抛可读错误，不是裸 TypeError', () => {
+    const nb = { ...normalizePosterBrief(brief()), templateKey: 'gone_template' as TemplateKey };
+    assert.throws(
+      () => renderPosterHtml({ brief: nb, philosophy: fallbackPhilosophy(nb), assets: {} }),
+      /未知版式 gone_template/,
+    );
   });
 });

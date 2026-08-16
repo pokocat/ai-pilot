@@ -70,6 +70,11 @@ Page({
      * 空 = 新建一条声音，走 voiceCreate。
      */
     retrainVoiceId: '',
+    /**
+     * 本次提交产出的那条声音（上游回的 voiceId）。训练那一屏靠它按 voiceId 轮询自己，
+     * 不必绕道形象接口 —— 独立声音在形象接口里根本不存在。
+     */
+    voiceId: '',
     /** 克隆各档单价；null = 还没读到，界面据此不显示价格而不是显示 0。 */
     pricing: null,
     /** 本次提交的合计报价；null = 价格还没读到，此时不许提交（提交要带确认报价）。 */
@@ -513,7 +518,12 @@ Page({
       clientRequestId: this.ensureCloneRequestId(this.data.voiceFile.path),
       expectedCredits: this.data.expectedCredits,
     })
-      .then(() => this.enterTraining())
+      // 必须接住 voiceId：这一屏接下来要靠它轮询这条声音。丢了它就只能去轮形象，
+      // 而「只训了声音、没建形象」的用户压根没有形象可轮 —— 进度会永远停在训练中。
+      .then((result) => {
+        if (result && result.voiceId) this.setData({ voiceId: result.voiceId });
+        this.enterTraining();
+      })
       .catch((error) => this.handleCloneError(error, '声音提交失败'));
   },
 
@@ -635,7 +645,33 @@ Page({
     this.startTrainingPolling();
   },
 
+  /**
+   * 纯训声音时直接轮这条声音本身。
+   *
+   * 形象接口只在「有形象」时才带得出声音状态；独立声音走那条路要么查无此物、要么读到不刷新的
+   * 陈旧值，用户看到的永远是「训练中」（2026-08-15：上游 16:16 就 ready 了，端上还在转）。
+   * 声音的进度，就该问声音自己。
+   */
+  pollVoiceTraining() {
+    return api.voiceById(this.data.voiceId).then((voice) => {
+      const done = Boolean(voice && voice.status === 'ready');
+      const failed = Boolean(voice && voice.status === 'failed');
+      const percent = done ? 100 : Math.max(0, Math.min(100, Number(voice && voice.progress) || 0));
+      this.setData({
+        training: Object.assign({}, this.data.training, {
+          voiceDone: done,
+          percent,
+          voiceStateText: done ? '完成' : (failed ? '需要重新录制' : `${percent}%`),
+          voiceFailed: failed,
+          hasFailure: failed,
+        }),
+      });
+      if (done || failed) this.stopTrainingPolling();
+    });
+  },
+
   pollTraining() {
+    if (this.data.mode === 'voice' && this.data.voiceId) { this.pollVoiceTraining().catch(() => {}); return; }
     (this.data.avatarId ? api.avatarById(this.data.avatarId) : api.avatar())
       .then((avatar) => {
         const imageDone = avatar && avatar.imageStatus === 'ready';
@@ -679,7 +715,8 @@ Page({
     if (this.data.notificationRequesting) return;
     if (this.data.mode === 'voice') {
       host.toast('声音会在后台继续训练');
-      setTimeout(() => host.go('avatar/index'), 500);
+      // 回「我的声音」而不是「我的数字分身」：只训了声音的用户在分身页什么都看不到。
+      setTimeout(() => host.go('voices/index'), 500);
       return;
     }
     if (api.isMock()) {
@@ -715,7 +752,7 @@ Page({
     });
   },
   retryImage() { this.setData({ mode: 'avatar', step: 1, recaptureKind: 'avatar', faceFile: null, agreed: false, training: null }); },
-  retryVoice() { this.setData({ mode: 'voice', step: 1, recaptureKind: 'voice', voiceFile: null, voiceSubmitted: false, recordSeconds: 0, training: null }); },
+  retryVoice() { this.setData({ mode: 'voice', step: 1, recaptureKind: 'voice', voiceFile: null, voiceSubmitted: false, recordSeconds: 0, training: null, voiceId: '' }); },
 
   back() {
     host.back();

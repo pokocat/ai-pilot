@@ -41,6 +41,10 @@ Page({
   data: baseData({
     jobId: '', loading: true, loadErr: '', showLogin: false, job: null,
     inFlight: false, succeeded: false, failed: false, cancelled: false, timedOut: false,
+    // 成品图下面的两行事实（都来自任务详情，缺省不渲染整行）：
+    //   · styleName —— 主视觉大片本次实际选中的风格中文名；
+    //   · qrReserved —— 服务端在成品里留了贴码位，用户可以保存后自己贴二维码。
+    styleName: '', qrReserved: false,
     stageItems: [], progressLabel: '', assetUrl: '', assetMissingText: '', canCancel: false, canRevise: false, canRegenerate: false,
     price: null, templates: [], directions: [], activeDirections: [], directionKey: '', panel: '',
     // 出图是异步的（约一分钟），用户本来就该走开。这里放订阅模板，让他一键「好了通知我」。
@@ -143,6 +147,9 @@ Page({
     if (!inFlight) clearPosterPendingByJob(job.id);
     this.setData({
       job, inFlight,
+      // 风格名只在主视觉大片下有意义（标准档没有「本次风格」这回事）；服务端没给就整行不渲染。
+      styleName: job.tier === 'premium' ? String(job.styleName || '') : '',
+      qrReserved: job.qrReserved === true,
       succeeded: job.status === 'succeeded', failed: job.status === 'failed', cancelled: job.status === 'cancelled',
       progressLabel: progressText(job.progress),
       stageItems: STAGES.map((stage, index) => ({ stage, label: progressText(stage), active: index <= Math.max(0, STAGES.indexOf(job.progress)) })),
