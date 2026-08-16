@@ -77,6 +77,30 @@ function normalizeStatus(raw) {
   };
 }
 
+/**
+ * 军师推荐组合（PosterBriefDraft.recommendation）归一。**两端同一套判据**
+ * （H5 在 app/src/services/creative.ts 的 normalizeRecommendation，逐条对照着写）。
+ *
+ * 只认「当前 status 清单里真存在」的组合：服务端保证下发那一刻合法，但用户可能停在本页，
+ * 期间后台停用了某套版式 / 关掉了高级路线 —— 拿一个已停用的 key 当默认值，用户点「生成」必 422，
+ * 而他压根没做过这个选择。任一项对不上就整条作废，页面回退现行为（按现逻辑预选 + 把选择器展开），
+ * 不半信半疑地用一半。老服务端不下发这个字段时同样返回 null。
+ */
+function normalizeRecommendation(raw, context) {
+  if (!raw || typeof raw !== 'object') return null;
+  const ctx = context || {};
+  const directions = Array.isArray(ctx.directions) ? ctx.directions : [];
+  const templates = Array.isArray(ctx.templates) ? ctx.templates : [];
+  // 高级路线不可用却推了高级：整条作废，不悄悄降标准 —— 降了之后方案卡上的价格与那句
+  // 「军师为什么这么定」就对不上，用户看到的是一句解释配着另一档的价。
+  if (raw.tier === 'premium' && ctx.premiumAvailable !== true) return null;
+  const tier = raw.tier === 'premium' ? 'premium' : 'standard';
+  const direction = directions.find((item) => item && item.key === raw.directionKey && item.tier === tier);
+  const template = templates.find((item) => item && item.key === raw.templateKey);
+  if (!direction || !template) return null;
+  return { tier, directionKey: direction.key, templateKey: template.key, reason: String(raw.reason || '').trim() };
+}
+
 function newIdempotencyKey(prefix) {
   return `${prefix || 'poster'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -169,6 +193,6 @@ function formatTime(iso) {
 
 module.exports = {
   LIMITS, STAGES, progressText, absoluteCreativeUrl, posterAsset, isInFlight,
-  normalizeJob, normalizeStatus, newIdempotencyKey, posterScope, readPosterPending,
+  normalizeJob, normalizeStatus, normalizeRecommendation, newIdempotencyKey, posterScope, readPosterPending,
   markPosterPending, attachPosterJob, clearPosterPendingByJob, fetchPosterFile, formatTime,
 };

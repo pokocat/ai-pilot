@@ -902,7 +902,16 @@ function creativePosterItemM(rec: CreativeJobRec): CreativePosterListItem | null
     ...(rec.parentJobId ? { parentJobId: rec.parentJobId } : {}),
   };
 }
-/** mock 需求单预填：优先读该成果消息的标题/分段，读不到再用确定性兜底（不编造客户业务结论）。 */
+/**
+ * mock 需求单预填：优先读该成果消息的标题/分段，读不到再用确定性兜底（不编造客户业务结论）。
+ *
+ * **两条路径都要留**（与原生 mock 同契约）：
+ *  · 默认带 recommendation —— 确认页据它渲染军师方案卡（方式 / 方向 / 版式一次定好 + 一句为什么）；
+ *  · messageId 带 `no-reco` 时不带 —— 老服务端 / 抽取失败的样子。确认页必须回退成
+ *    「按现逻辑预选 + 三个选择器常驻展开」，本地走查得能验到那一屏，所以留一个可达入口。
+ * 推荐的三个 key 必须落在 MOCK_POSTER_DIRECTIONS / MOCK_POSTER_TEMPLATES 里，否则前端按
+ * 「清单里不存在」整条作废，走查看到的就永远是回退态。
+ */
 function posterDraftM(d: UserData, sessionId?: string, messageId?: string): PosterBriefDraft {
   let title = '';
   let firstList: string[] = [];
@@ -919,7 +928,11 @@ function posterDraftM(d: UserData, sessionId?: string, messageId?: string): Post
     if (title) break;
   }
   const scene: PosterScene = 'personal_brand';
-  return {
+  // recommendation 的 SSOT 在 shared/contracts.d.ts（服务端组维护）；本文件先行落 mock，
+  // 故这里显式加宽一层类型，而不是等契约文件合过来才敢写。
+  const draft: PosterBriefDraft & {
+    recommendation?: { tier: string; directionKey: string; templateKey: string; reason: string };
+  } = {
     brief: {
       scene,
       goal: '让潜在客户看懂你在做什么',
@@ -936,6 +949,15 @@ function posterDraftM(d: UserData, sessionId?: string, messageId?: string): Post
     // 设计说明是确认页的主视图；mock 不给它，本地走查就永远看不到那一屏该长什么样。
     designNote: '竖版三分构图：上半幅放你的人物照，下半幅压一句主张，底部留一条窄带放二维码。整体走克制的墨色打底、暖金点缀，正面柔光，不做花哨特效。',
   };
+  // 老响应路径（messageId 带 no-reco）：不下发推荐，确认页回退成「按现逻辑预选 + 选择器展开」。
+  if (/no-reco/.test(String(messageId ?? ''))) return draft;
+  draft.recommendation = {
+    tier: 'standard',
+    directionKey: 'graphic_bold_type',
+    templateKey: 'person_hero',
+    reason: '你要的是先让人记住这句主张，版式给人物留了主位，传了照片就能直接用。',
+  };
+  return draft;
 }
 
 // ── mock api（与后端同口径） ──

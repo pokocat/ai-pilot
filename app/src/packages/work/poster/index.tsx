@@ -19,7 +19,10 @@ import {
   api, type Agent, type PosterBrief, type PosterScene, type CreativeUploadRole, type PosterTemplateOption,
   type PosterTier, type PosterDirectionKey, type PosterDirectionOption,
 } from '../../../services/api';
-import { absoluteCreativeUrl, getCreativeStatus, POSTER_LIMITS as LIMITS } from '../../../services/creative';
+import {
+  absoluteCreativeUrl, getCreativeStatus, normalizeRecommendation, POSTER_LIMITS as LIMITS,
+  type PosterRecommendation,
+} from '../../../services/creative';
 import { attachPosterJob, markPosterPending, posterScope, readPosterPending } from '../../../services/posterPending';
 import { checkImageUpload } from '../../../services/uploadGuard';
 import { navTo, redirectToGuarded } from '../../../services/nav';
@@ -49,23 +52,37 @@ const UPLOAD_ROLES: CreativeUploadRole[] = ['portrait', 'logo', 'qr'];
  * 密度值本身来自 `PosterTemplateOption.density`（服务端下发），本地只负责翻译成中文。
  */
 type PosterDensity = 'airy' | 'balanced' | 'dense';
-type TemplateOption = PosterTemplateOption & { density?: PosterDensity };
+type TemplateOption = PosterTemplateOption & { density?: PosterDensity; previewUrl?: string };
 const DENSITY_LABEL: Record<PosterDensity, string> = { airy: '留白', balanced: '均衡', dense: '信息量' };
+// 「调整版式」一级分档的入口文案：说人话。「留白 / 均衡 / 信息量」是给方案卡摘要行用的短标签，
+// 而让人现场做选择的那三个按钮得直接说清选完会怎样。
+const DENSITY_TAB: Record<PosterDensity, string> = { airy: '只说一句话', balanced: '均衡', dense: '信息全放上' };
 const DENSITY_ORDER: PosterDensity[] = ['airy', 'balanced', 'dense'];
+// 两条路线各一句「差价买的是什么」。价格差由 status 实价算出来（premiumPrice - price），不写死。
+const WAY_NAME: Record<PosterTier, string> = { standard: '创意排版', premium: '主视觉大片' };
+const WAY_BUY: Record<PosterTier, string> = {
+  standard: '军师用图形与排印现场作画',
+  premium: 'AI 先出实拍质感主视觉，再排中文',
+};
+
+type TemplateGroup = { key: string; label: string; tab: string; items: TemplateOption[] };
 
 /**
  * 版式分组：**完全数据驱动**——status 下发什么就渲染什么，本地不补目录、不猜密度。
  * 一套都没带 density（老服务端）时退回单组平铺，不给用户凭空造出三个空档位标签。
  */
-function groupTemplates(list: TemplateOption[]): Array<{ key: string; label: string; items: TemplateOption[] }> {
+function groupTemplates(list: TemplateOption[]): TemplateGroup[] {
   if (!list.length) return [];
   const known = (t: TemplateOption) => !!t.density && !!DENSITY_LABEL[t.density];
-  if (!list.some(known)) return [{ key: 'all', label: '', items: list }];
-  const groups: Array<{ key: string; label: string; items: TemplateOption[] }> = DENSITY_ORDER
-    .map((density) => ({ key: String(density), label: DENSITY_LABEL[density], items: list.filter((t) => t.density === density) }))
+  if (!list.some(known)) return [{ key: 'all', label: '', tab: '全部版式', items: list }];
+  const groups: TemplateGroup[] = DENSITY_ORDER
+    .map((density) => ({
+      key: String(density), label: DENSITY_LABEL[density], tab: DENSITY_TAB[density],
+      items: list.filter((t) => t.density === density),
+    }))
     .filter((g) => g.items.length);
   const rest = list.filter((t) => !known(t));
-  if (rest.length) groups.push({ key: 'other', label: '其他', items: rest });
+  if (rest.length) groups.push({ key: 'other', label: '其他', tab: '其他', items: rest });
   return groups;
 }
 
@@ -137,6 +154,14 @@ export default function PosterConfirmPage() {
   const [premiumOn, setPremiumOn] = useState(false);
   const [directions, setDirections] = useState<PosterDirectionOption[]>([]);
   const [directionKey, setDirectionKey] = useState<PosterDirectionKey | ''>('');
+  // ── 军师方案卡（2026-08-16 重排）──
+  // 服务端下发 recommendation（方式 / 方向 / 版式 + 一句理由）时，这三项已经替用户定好了：
+  // 主视图是一张方案卡（说明 + 理由 + 组合摘要 + 价格），三处修改收进低调入口，点开才出现。
+  // 没有 recommendation（老服务端 / 抽取失败）时 reco=null，三个选择器回退成常驻展开。
+  const [reco, setReco] = useState<PosterRecommendation | null>(null);
+  const [panel, setPanel] = useState<'' | 'way' | 'direction' | 'template'>('');
+  // 用户点过的信息量档；空串表示「跟着当前版式走」。
+  const [densityKey, setDensityKey] = useState('');
   // 以下两项**用户不填也看不到**，只从服务端草稿透传回 submit（方案 §5.3 的 BrandKit 集成靠它落地）：
   //   · brandKitVersion —— 服务端据它取已确认（approved）的品牌资产包，合并品牌语气与主题色板进提示词；
   //   · negativePrompt  —— 服务端从 BrandKit 的品牌禁忌生成的排除项。
@@ -220,6 +245,23 @@ export default function PosterConfirmPage() {
         const rec = String(b.templateKey ?? '');
         setTemplateKey(tpls.length ? (tpls.some((t) => t.key === rec) ? rec : (tpls[0]?.key ?? '')) : rec);
         if (b.directionKey) setDirectionKey(b.directionKey);
+        // ── 军师方案：三项一次定死，用户默认只需要点头 ──
+        // 推荐组合优先于 brief 里的零散字段（brief.templateKey / tier / directionKey 是草稿的旧口径，
+        // recommendation 才是军师对「这三项怎么配」的完整答复）。任一项在当前清单里对不上就整条作废，
+        // 页面退回现行为：按现逻辑预选 + 把选择器摊开（判据见 services/creative.ts）。
+        // 这一层 as 是故意的：recommendation 的 SSOT 在 shared/contracts.d.ts（服务端组维护），
+        // 端上先行落地并按约定字段消费，契约文件到没到都不影响本页编译。
+        const plan = normalizeRecommendation((draft as { recommendation?: unknown }).recommendation, {
+          directions: st?.directions ?? [],
+          templates: tpls,
+          premiumAvailable: !!st?.premiumAvailable,
+        });
+        if (plan) {
+          setTier(plan.tier);
+          setDirectionKey(plan.directionKey);
+          setTemplateKey(plan.templateKey);
+        }
+        setReco(plan);
         setReason(draft.templateReason ?? '');
         const note = String(draft.designNote ?? '').trim();
         setDesignNote(note);
@@ -288,6 +330,9 @@ export default function PosterConfirmPage() {
     if (directionKey === 'graphic_portrait' && !assets.portrait) next.direction = '「本人形象」需要先上传本人照片';
     if (tier === 'premium' && assets.portrait) next.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     setErrors(next);
+    // 方向/路线的错误躺在收起的面板里：不点开就等于让用户对着一句「还有几处要改」
+    // 找一个他根本看不见的选项。互斥（传了照片却选了主视觉大片）要开「换方式」，其余开「换方向」。
+    if (next.direction) setPanel(tier === 'premium' && assets.portrait ? 'way' : 'direction');
     if (Object.keys(next).length) {
       // 报错的字段大多躺在收起的「编辑内容」里：不摊开就等于让用户对着一句「还有几处要改」
       // 找一个他根本看不见的输入框。
@@ -468,6 +513,64 @@ export default function PosterConfirmPage() {
   ];
   const templateGroups = groupTemplates(templates);
   const tierDirections = directions.filter((item) => item.tier === tier);
+  // ── 方案卡与三个展开区的派生数据 ──
+  // ⚠️ 全部只读**当前选择**，永不回头读 recommendation：推荐只在首屏落一次，
+  // 用户改过之后再被推荐值盖回去，等于告诉他「你的选择不算数」。
+  const hasReco = !!reco;
+  const recoReason = reco?.reason ?? '';
+  const currentDirection = directions.find((item) => item.key === directionKey);
+  const currentTemplate = templates.find((item) => item.key === templateKey);
+  const currentDensity = currentTemplate?.density ? DENSITY_LABEL[currentTemplate.density] : '';
+  const planPrice = premiumOn && tier === 'premium' ? premiumPrice : price;
+  const premiumDelta = Math.max(0, premiumPrice - (price ?? 0));
+  // 用户点过信息量档就留住他那一档；没点过（或那一档没了）才跟着当前版式走。
+  const activeGroup = templateGroups.find((g) => g.key === densityKey)
+    ?? templateGroups.find((g) => g.items.some((t) => t.key === templateKey))
+    ?? templateGroups[0];
+  const densityItems = activeGroup?.items ?? templates;
+  /**
+   * 「换方式」两档各配一张**真实**样例：优先当前选中的方向那张，其次该档第一张有图的。
+   * 刻意不拿 requiresPortrait 的方向当门面 —— 那张图是用户自己的脸排出来的效果，
+   * 拿它代表整条路线会让人以为不传照片就出不了图。
+   */
+  const waySample = (t: PosterTier) => {
+    const list = directions.filter((item) => item.tier === t);
+    const current = list.find((item) => item.key === directionKey);
+    return (current?.previewUrl ? current : null)
+      ?? list.find((item) => item.previewUrl && !item.requiresPortrait)
+      ?? list.find((item) => item.previewUrl)
+      ?? list[0]
+      ?? null;
+  };
+  const openPanel = (key: 'way' | 'direction' | 'template') => setPanel((cur) => (cur === key ? '' : key));
+  /**
+   * 一档方式卡（两端同口径；原生端的对应物是 wxml 里的 ps-way 两张卡 + waySample）。
+   * 刻意写成「返回 JSX 的函数」而不是组件：在 render 里定义组件，每次渲染都是一个新组件类型，
+   * React 会把整棵子树卸载重挂（本页的 Input 焦点丢失事故就是这么来的，见文件顶部注释）。
+   */
+  const wayCard = (k: PosterTier) => {
+    const on = k === tier;
+    const sample = waySample(k);
+    return (
+      <View key={k} className={`ps-way${on ? ' on' : ''}`} onClick={() => chooseTier(k)}>
+        <View className="ps-way-h">
+          <Text className="ps-way-n">{WAY_NAME[k]}</Text>
+          {on ? <Icon name="check" size={13} color={accent} /> : null}
+        </View>
+        {sample?.previewUrl
+          ? <Image className="ps-way-img" src={sample.previewUrl} mode="aspectFill" />
+          : <View className="ps-way-ph"><Icon name="image" size={16} color="#7E848B" /><Text>样例待发布</Text></View>}
+        <View className="ps-way-b">
+          <Text className="ps-way-d">{WAY_BUY[k]}</Text>
+          <View className="ps-way-cost">
+            <Icon name="diamond" size={12} color={accent} />
+            <Text className="ps-way-p">{`x${k === 'premium' ? premiumPrice : price ?? 0}`}</Text>
+            {k === 'premium' && premiumDelta > 0 ? <Text className="ps-way-delta">{`比创意排版多 ${premiumDelta}`}</Text> : null}
+          </View>
+        </View>
+      </View>
+    );
+  };
 
   if (disabled) {
     return (
@@ -500,16 +603,46 @@ export default function PosterConfirmPage() {
           </View>
         ) : (
           <>
-            {/* ① 设计说明卡：本页主视图。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
-                而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染。 */}
-            {designNote ? (
-              <View className="ps-note-card">
-                <Text className="ps-note-k">这张海报会这么设计</Text>
-                <Text className="ps-note-b">{designNote}</Text>
+            {/* ① 军师方案卡：本页主视图。用户刚跟设计师聊完，这里只需要他点头 ——
+                方式 / 方向 / 版式军师已经配好了一套，改的人才点开下面三个入口。
+                此前这三项是三道必答题（两卡 + 三卡 + 八卡分组常驻），等于把军师的活退回给用户自己做。 */}
+            <View className="ps-plan">
+              <Text className="ps-plan-k">这张海报会这么设计</Text>
+              {designNote ? <Text className="ps-plan-b">{designNote}</Text> : null}
+              {recoReason ? <Text className="ps-plan-why">{recoReason}</Text> : null}
+              <View className="ps-plan-sum">
+                <Text className="ps-plan-s">{WAY_NAME[tier]}</Text>
+                {currentDirection ? <Text className="ps-plan-s">{` · ${currentDirection.name}`}</Text> : null}
+                {currentTemplate ? <Text className="ps-plan-s">{` · ${currentTemplate.name}${currentDensity ? `（${currentDensity}）` : ''}`}</Text> : null}
+                {typeof planPrice === 'number' ? (
+                  <View className="ps-plan-price">
+                    <Icon name="diamond" size={12} color={accent} />
+                    <Text className="ps-plan-s">{`x${planPrice}`}</Text>
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-            {/* 版式推荐理由 = 设计师的「为什么这样设计」，原样展示（惊喜感文案位） */}
-            {reason ? (
+              {/* 三个低调入口，一律用动词。有推荐才渲染：没推荐时下面三块本来就摊开着，
+                  再摆三个开关只会让人以为还有别的东西藏着。 */}
+              {hasReco ? (
+                <View className="ps-plan-acts">
+                  {premiumOn ? (
+                    <View className={`ps-plan-act${panel === 'way' ? ' on' : ''}`} onClick={() => openPanel('way')}>
+                      <Text>换方式</Text>
+                    </View>
+                  ) : null}
+                  <View className={`ps-plan-act${panel === 'direction' ? ' on' : ''}`} onClick={() => openPanel('direction')}>
+                    <Text>换方向</Text>
+                  </View>
+                  <View className={`ps-plan-act${panel === 'template' ? ' on' : ''}`} onClick={() => openPanel('template')}>
+                    <Text>调整版式</Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+            {/* 方向/路线的报错常驻在方案卡下面：面板收起时它照样看得见（收起来的错误等于没报）。 */}
+            {errors.direction ? <Text className="ps-ferr">{errors.direction}</Text> : null}
+            {/* 老服务端只给「为什么这样设计」、给不出推荐理由时，那句话仍旧原样展示，不白丢。 */}
+            {reason && !recoReason ? (
               <View className="ps-reason" style={{ borderColor: accent }}>
                 <View className="ps-reason-h">
                   <Icon name="spark" size={13} color={accent} />
@@ -520,49 +653,29 @@ export default function PosterConfirmPage() {
             ) : null}
             {loadErr ? <Text className="ps-note">{loadErr}</Text> : null}
 
-            {/* ② 创作方式 */}
-            <View className="ps-group">
-              <View className="ps-group-h">
-                <View className="ps-group-hl">
-                  <Text className="ps-group-t">创作方式</Text>
-                  <Text className="ps-group-d">决定这张图怎么出，价格不同</Text>
+            {/* ② 换方式：两档对比。各配一张该档下的真实样例 + 一句「差价买的是什么」，
+                差价数字按 status 实价算（premiumPrice - price），不写死。
+                高级路线不可用（premiumAvailable=false）时整块连同入口都不渲染 —— 只有一档可选还摆个
+                「换方式」，点开只有一张卡，是让人白跑一趟。 */}
+            {premiumOn && (!hasReco || panel === 'way') ? (
+              <View className="ps-panel">
+                <View className="ps-panel-h">
+                  <Text className="ps-panel-t">{hasReco ? '换个方式出图' : '选一种出图方式'}</Text>
+                  <Text className="ps-panel-d">差价买的是画面从哪来</Text>
+                </View>
+                <View className="ps-ways">
+                  {wayCard('standard')}
+                  {wayCard('premium')}
                 </View>
               </View>
-              <View className="ps-tpls">
-                {([
-                  ['standard', '创意排版', `x${price} · 用图形、字体和你的素材现场创作`],
-                  ...(premiumOn ? [['premium', '主视觉大片', `x${premiumPrice} · AI 先创作全幅主视觉，再由军师排中文`]] : []),
-                ] as [PosterTier, string, string][]).map(([k, name, desc]) => {
-                  const on = k === tier;
-                  return (
-                    <View
-                      key={k}
-                      className={`ps-tpl${on ? ' on' : ''}`}
-                      style={on ? { borderColor: accent } : undefined}
-                      onClick={() => chooseTier(k)}
-                    >
-                      <View className="ps-tpl-h">
-                        <Text className="ps-tpl-n">{name}</Text>
-                        {on ? <Icon name="check" size={13} color={accent} /> : null}
-                      </View>
-                      <View className="ps-tpl-cost">
-                        <Icon name="diamond" size={12} color={accent} />
-                        <Text className="ps-tpl-d">{desc}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
+            ) : null}
 
-            {/* ③ 创作方向 */}
-            {tierDirections.length ? (
-              <View className="ps-group">
-                <View className="ps-group-h">
-                  <View className="ps-group-hl">
-                    <Text className="ps-group-t">创作方向</Text>
-                    <Text className="ps-group-d">决定画面里的主角是什么</Text>
-                  </View>
+            {/* ③ 换方向：原来的三张大图卡原样搬进展开区，预选军师推荐的那一个。 */}
+            {tierDirections.length && (!hasReco || panel === 'direction') ? (
+              <View className="ps-panel">
+                <View className="ps-panel-h">
+                  <Text className="ps-panel-t">{hasReco ? '换个方向' : '选一个创作方向'}</Text>
+                  <Text className="ps-panel-d">决定画面里的主角是什么</Text>
                 </View>
                 <ScrollView className="ps-dir-scroll" scrollX enhanced showScrollbar={false}>
                   <View className="ps-dir-grid">
@@ -585,45 +698,49 @@ export default function PosterConfirmPage() {
                     })}
                   </View>
                 </ScrollView>
-                {errors.direction ? <Text className="ps-ferr">{errors.direction}</Text> : null}
               </View>
             ) : null}
 
-            {/* ④ 版式：按密度分组，组与卡全由 status 下发的清单驱动（没下发 density 就退回单组平铺）。
-                版式清单来自 /creative/status（只含启用中的）。一套都没下发时整块不渲染：
-                硬编码恒可选会让用户选到已停用的版式，而服务端对此一律 422。 */}
-            {templateGroups.length ? (
-              <View className="ps-group">
-                <View className="ps-group-h">
-                  <View className="ps-group-hl">
-                    <Text className="ps-group-t">版式</Text>
-                    <Text className="ps-group-d">画面的信息密度与排布</Text>
-                  </View>
+            {/* ④ 调整版式：一级挑信息量（三档说人话），二级横滑挑这一档下的版式。
+                档与卡全由 status 下发的清单驱动（只含启用中的）；一套都没带 density（老服务端）时
+                只有一档，连档位条都不渲染 —— 不给用户凭空造出一排空标签。
+                一套都没下发时整块不渲染：硬编码恒可选会让用户选到已停用的版式，而服务端对此一律 422。 */}
+            {templateGroups.length && (!hasReco || panel === 'template') ? (
+              <View className="ps-panel">
+                <View className="ps-panel-h">
+                  <Text className="ps-panel-t">{hasReco ? '调整版式' : '选一套版式'}</Text>
+                  <Text className="ps-panel-d">先定这张图说多少话，再挑排布</Text>
                 </View>
-                {templateGroups.map((group) => (
-                  <View key={group.key} className="ps-tpl-group">
-                    {group.label ? <Text className="ps-tpl-gk">{group.label}</Text> : null}
-                    <View className="ps-tpls">
-                      {group.items.map((t) => {
-                        const on = t.key === templateKey;
-                        return (
-                          <View
-                            key={t.key}
-                            className={`ps-tpl${on ? ' on' : ''}`}
-                            style={on ? { borderColor: accent } : undefined}
-                            onClick={() => setTemplateKey(t.key)}
-                          >
-                            <View className="ps-tpl-h">
-                              <Text className="ps-tpl-n">{t.name}</Text>
-                              {on ? <Icon name="check" size={13} color={accent} /> : null}
-                            </View>
-                            <Text className="ps-tpl-d">{t.desc}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
+                {templateGroups.length > 1 ? (
+                  <View className="ps-dens">
+                    {templateGroups.map((group) => (
+                      <View
+                        key={group.key}
+                        className={`ps-den${group.key === activeGroup?.key ? ' on' : ''}`}
+                        onClick={() => setDensityKey(group.key)}
+                      >
+                        <Text>{group.tab}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
+                ) : null}
+                <ScrollView className="ps-tpl-scroll" scrollX enhanced showScrollbar={false}>
+                  <View className="ps-tpl-row">
+                    {densityItems.map((t) => {
+                      const on = t.key === templateKey;
+                      return (
+                        <View key={t.key} className={`ps-tpl-card${on ? ' on' : ''}`} onClick={() => setTemplateKey(t.key)}>
+                          {t.previewUrl ? <Image className="ps-tpl-img" src={t.previewUrl} mode="aspectFill" /> : null}
+                          <View className="ps-tpl-ch">
+                            <Text className="ps-tpl-cn">{t.name}</Text>
+                            {on ? <Icon name="check" size={13} color={accent} /> : null}
+                          </View>
+                          <Text className="ps-tpl-cd">{t.desc}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
               </View>
             ) : null}
 

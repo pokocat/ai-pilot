@@ -22,7 +22,10 @@ import {
 } from '../src/services/creative/templates.js';
 import { fallbackPhilosophy } from '../src/services/creative/philosophy.js';
 import { STALE_RUNNING_MS } from '../src/services/creative/worker.js';
-import { parseTemplateRecommendation } from '../src/services/creative/briefDraft.js';
+import {
+  parseTemplateRecommendation, resolveRecommendation, isRecommendationConsistent, RECOMMEND_REASON_LIMIT,
+} from '../src/services/creative/briefDraft.js';
+import { POSTER_DIRECTIONS, directionFor } from '../src/services/creative/directions.js';
 import { normalizePosterBrief, normalizeTier } from '../src/services/creative/schema.js';
 import { buildVisualBody } from '../src/services/creative/visualProvider.js';
 // designNote 抽取分支守卫（见文末新增 describe）：默认测试环境无 live provider，
@@ -740,6 +743,28 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.ok(!('designNote' in r.body), '无 provider 时即便会话很长也不该带 designNote 键');
   });
 
+  // 2026-08-16 军师推荐组合：确认页据它预选，用户零次必答即可下单。
+  // 因此它**恒在**——无 provider 是线上最常见的一条路径，那条路上给不出组合，
+  // 用户就又被推回「方式 / 方向 / 版式」三次选择，正是这次要消灭的东西。
+  test('brief-draft：无 provider 也带 recommendation，且是一套可直接下单的组合', async () => {
+    const { token, tenantId } = await posterUser(100, '推荐兜底用户');
+    const messageId = await reportMessage(token, tenantId);
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?messageId=${messageId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const rec = r.body.recommendation;
+    assert.ok(rec, 'AI 不可用也必须给出推荐组合（服务端确定性合成）');
+    assert.equal(rec.tier, 'standard', '兜底恒 standard —— 默认不推贵档');
+    assert.equal(directionFor(rec.directionKey).tier, 'standard', '方向必须与档位同档，否则建单直接 422');
+    assert.ok((TEMPLATE_KEYS as readonly string[]).includes(rec.templateKey), '版式必须在白名单内');
+    assert.ok(rec.reason && rec.reason.length <= RECOMMEND_REASON_LIMIT, `理由非空且不超 ${RECOMMEND_REASON_LIMIT} 字`);
+    assert.equal(
+      isRecommendationConsistent(rec, { hasPortrait: false, premiumAvailable: false }),
+      true,
+      '下发前后走同一套一致性校验：确认页拿到的组合必须原样下得了单',
+    );
+  });
+
   test('建单挂越权 messageId → 404 MESSAGE_NOT_FOUND，不扣费', async () => {
     const { token } = await posterUser(100, '本人2');
     const { token: other, tenantId: otherTenant } = await posterUser(100, '别人2');
@@ -751,6 +776,151 @@ describe('海报成品图 · status 与 brief 草稿', () => {
     assert.equal(r.body.code, 'MESSAGE_NOT_FOUND');
     assert.equal(await getBalance(token), before, '归属校验失败不扣费');
     assert.equal(await prisma.creativeJob.count({ where: { userId: token } }), 0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 军师推荐组合（纯函数，不起 app、不碰库）
+//
+// 这套函数是「零次必答」的全部安全绳：确认页把它预选上，用户可以一次都不改就下单。
+// 所以这里验的不是「推得准不准」（那是模型的事），而是**推出来的组合必须下得了单**——
+// 档位与方向同档、requiresPortrait 有照片、premium 真的能下单、理由不超长。
+describe('海报成品图 · 军师推荐组合（纯函数：白名单校验与确定性兜底）', () => {
+  /** 最保守的上下文：无照片、高级档不可用、无卖点。 */
+  const BARE = { scene: 'personal_brand' as const, proofPointCount: 0, hasPortrait: false, premiumAvailable: false };
+
+  test('LLM 正常路径：合法组合原样保留，理由用模型写的那句', () => {
+    const std = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_symbol', templateKey: 'quote_card', reason: '你的主张一句话就能立住，图形做记忆点' },
+      { ...BARE, scene: 'service' },
+    );
+    assert.deepEqual(std, {
+      tier: 'standard', directionKey: 'graphic_symbol', templateKey: 'quote_card',
+      reason: '你的主张一句话就能立住，图形做记忆点',
+    }, '合法组合不许被服务端改写——改写等于把模型读过的对话丢掉');
+
+    const pre = resolveRecommendation(
+      { tier: 'premium', directionKey: 'photo_character', templateKey: 'editorial', reason: '这张要靠人物气场立住，用实拍质感出主视觉' },
+      { ...BARE, premiumAvailable: true },
+    );
+    assert.equal(pre.tier, 'premium', '高级档可下单时保留模型的判断');
+    assert.equal(pre.directionKey, 'photo_character');
+    assert.equal(pre.reason, '这张要靠人物气场立住，用实拍质感出主视觉');
+  });
+
+  test('非法值逐项回退：档位/方向/版式各自兜底，不因一项非法丢掉整组判断', () => {
+    const out = resolveRecommendation(
+      { tier: 'deluxe', directionKey: 'photo_hero_x', templateKey: 'gone_template', reason: '' },
+      { ...BARE, scene: 'service', proofPointCount: 2 },
+    );
+    assert.equal(out.tier, 'standard', '档位非法 → standard（不是随手给个 premium）');
+    assert.equal(out.directionKey, 'graphic_symbol', 'service + 无照片的确定性默认方向');
+    assert.equal(out.templateKey, 'editorial', '有卖点 → balanced 档，service 的默认版式恰在该档');
+    assert.ok(out.reason.length > 0, '模型没给理由时用确定性模板句，不下发空理由');
+
+    // 只有版式非法时，方向仍走模型给的那个（逐项回退，不是整组作废）。
+    const partial = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_bold_type', templateKey: 123, reason: '一句主张撑满画面' },
+      BARE,
+    );
+    assert.equal(partial.directionKey, 'graphic_bold_type', '版式非法不该连累方向');
+    assert.equal(partial.reason, '一句主张撑满画面', '也不该连累理由');
+  });
+
+  test('版式兜底按内容密度：一句观点 airy、有卖点 balanced、活动议程 dense', () => {
+    const at = (scene: 'personal_brand' | 'event' | 'service' | 'product', proofPointCount: number) =>
+      resolveRecommendation({}, { ...BARE, scene, proofPointCount }).templateKey;
+    assert.equal(TEMPLATE_CATALOG[at('personal_brand', 0)].density, 'airy', '一条卖点都没有＝一句观点');
+    assert.equal(at('personal_brand', 0), 'person_hero', 'scene 默认版式恰在 airy 档时优先用它，不另起一套');
+    assert.equal(TEMPLATE_CATALOG[at('personal_brand', 3)].density, 'balanced', '有卖点要摆就不能再留白');
+    assert.equal(TEMPLATE_CATALOG[at('service', 0)].density, 'airy');
+    assert.equal(TEMPLATE_CATALOG[at('event', 0)].density, 'dense', '活动/议程要一屏交代完，与卖点条数无关');
+    assert.equal(at('event', 3), 'agenda_event');
+  });
+
+  test('premium 不可用 → 降级 standard 并换理由（原理由已经不成立）', () => {
+    const aiReason = '这张要靠人物实拍质感立住，用高级出图';
+    const out = resolveRecommendation(
+      { tier: 'premium', directionKey: 'photo_character', templateKey: 'editorial', reason: aiReason },
+      BARE, // premiumAvailable: false
+    );
+    assert.equal(out.tier, 'standard', '高级档下不了单就不能推给用户（推了必 422）');
+    assert.equal(directionFor(out.directionKey).tier, 'standard', '方向跟着降档，不能留一个 premium 方向');
+    assert.notEqual(out.reason, aiReason, '组合被改写了，理由必须跟着改——留着原句就是在承诺一个没买的东西');
+    assert.ok(out.reason.includes('高级'), '降级理由要说清是"暂时用不了"，不是悄悄换了个便宜的');
+    assert.equal(out.templateKey, 'editorial', '版式合法就不受降级影响');
+  });
+
+  test('requiresPortrait 方向只有真有本人照才可推', () => {
+    const without = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_portrait', templateKey: 'person_hero', reason: '本人出镜最有信任感' },
+      BARE,
+    );
+    assert.notEqual(without.directionKey, 'graphic_portrait', '没上传本人照就推"本人形象"＝确认页点下去必 422');
+    assert.equal(without.directionKey, 'graphic_bold_type', 'personal_brand + 无照片的确定性默认');
+
+    const withPortrait = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_portrait', templateKey: 'person_hero', reason: '本人出镜最有信任感' },
+      { ...BARE, hasPortrait: true },
+    );
+    assert.equal(withPortrait.directionKey, 'graphic_portrait', '有照片时这条约束不该反过来拦住合法推荐');
+  });
+
+  test(`理由超 ${RECOMMEND_REASON_LIMIT} 字被截断，不是原样透传也不是清空`, () => {
+    const long = '甲'.repeat(200);
+    const out = resolveRecommendation({ tier: 'standard', directionKey: 'graphic_symbol', templateKey: 'quote_card', reason: long }, BARE);
+    assert.equal(out.reason.length, RECOMMEND_REASON_LIMIT);
+    assert.equal(out.reason, long.slice(0, RECOMMEND_REASON_LIMIT), '截前 N 字，不做省略号处理');
+    // 确定性模板句自己也不许超限（含最长的中文方向名/版式名时）。
+    for (const scene of ['personal_brand', 'event', 'service', 'product'] as const) {
+      const fb = resolveRecommendation({ tier: 'premium' }, { ...BARE, scene });
+      assert.ok(fb.reason.length <= RECOMMEND_REASON_LIMIT, `${scene} 的降级模板句超限：${fb.reason}`);
+    }
+  });
+
+  test('isRecommendationConsistent：四条硬约束逐条拦得住', () => {
+    const ok = { tier: 'standard' as const, directionKey: 'graphic_bold_type' as const, templateKey: 'manifesto_min' as const, reason: '一句主张撑满画面' };
+    assert.equal(isRecommendationConsistent(ok, { hasPortrait: false, premiumAvailable: false }), true);
+    assert.equal(
+      isRecommendationConsistent({ ...ok, directionKey: 'photo_character' }, { hasPortrait: false, premiumAvailable: true }),
+      false, '方向档位与 tier 不匹配 → 不一致（schema 会 422）',
+    );
+    assert.equal(
+      isRecommendationConsistent({ ...ok, directionKey: 'graphic_portrait' }, { hasPortrait: false, premiumAvailable: false }),
+      false, 'requiresPortrait 方向没有本人照 → 不一致',
+    );
+    assert.equal(
+      isRecommendationConsistent({ tier: 'premium', directionKey: 'photo_scene', templateKey: 'editorial', reason: '场景叙事' }, { hasPortrait: false, premiumAvailable: false }),
+      false, 'premium 组合本身合法，但此刻高级档下不了单 → 不一致',
+    );
+    assert.equal(isRecommendationConsistent({ ...ok, reason: '' }, { hasPortrait: false, premiumAvailable: false }), false, '空理由不算一套可展示的推荐');
+    assert.equal(isRecommendationConsistent({ ...ok, reason: '甲'.repeat(RECOMMEND_REASON_LIMIT + 1) }, { hasPortrait: false, premiumAvailable: false }), false, '超长理由不一致');
+  });
+
+  // 兜底的意义是「无论模型吐什么」都下得了单，所以这里穷举脏输入 × 场景 × 上下文，
+  // 用同一个一致性函数复核 resolveRecommendation 的每一个产出。
+  test('穷举脏输入：任何组合的产出都过一致性校验', () => {
+    const dirty: Record<string, unknown>[] = [
+      {}, { tier: null, directionKey: null, templateKey: null, reason: null },
+      { tier: 'premium', directionKey: 'graphic_portrait', templateKey: 'person_hero', reason: 42 },
+      { tier: 'PREMIUM', directionKey: 'photo_product', templateKey: 'editorial', reason: '  ' },
+      { tier: 'standard', directionKey: 'photo_scene', templateKey: 'agenda_event', reason: '场景叙事' },
+      { tier: 'premium', directionKey: { key: 'photo_character' }, templateKey: ['editorial'], reason: '甲'.repeat(300) },
+    ];
+    for (const scene of ['personal_brand', 'event', 'service', 'product'] as const) {
+      for (const hasPortrait of [false, true]) {
+        for (const premiumAvailable of [false, true]) {
+          for (const raw of dirty) {
+            const out = resolveRecommendation(raw, { scene, proofPointCount: 2, hasPortrait, premiumAvailable });
+            assert.equal(
+              isRecommendationConsistent(out, { hasPortrait, premiumAvailable }), true,
+              `脏输入 ${JSON.stringify(raw)} 在 ${scene}/portrait=${hasPortrait}/premium=${premiumAvailable} 下产出了下不了单的组合：${JSON.stringify(out)}`,
+            );
+            assert.ok(POSTER_DIRECTIONS[out.directionKey], '方向必须是白名单里真实存在的一项');
+          }
+        }
+      }
+    }
   });
 });
 
@@ -1207,6 +1377,66 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
     // 意味着模型首轮输出没通过 zod 校验——即便这里是打桩、必过 schema，也该恒为 1。
     assert.equal(callCount, 1, '首轮即应通过 schema 校验；为 2 则说明抽取分支已经不稳定（触发了修复轮）');
     assert.equal(r.body.brief.headline, '标题', '确认拿到的是真结构化结果，不是解析失败后的兜底空值');
+  });
+
+  // 2026-08-16 军师推荐组合的**真实抽取分支**：上面纯函数用例验的是归一与兜底，
+  // 这里验的是"抽取那一次调用真的把 tier/directionKey/recommendReason 带回来了"——
+  // 两者缺一：只测纯函数，字段没接上链路也全绿；只测链路，脏输入的兜底又验不到。
+  test('推荐组合：模型给的合法 premium 组合，在高级档可用时原样下发', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩推荐用户');
+    const sessionId = await conversationSession(token, tenantId);
+    // 高级档可下单的唯一条件就是图片供应商配齐并启用（premiumTierAvailable）。
+    await setPayload({ visual: { enabled: true, baseUrl: 'https://example.invalid/v1/images', model: 'demo-model' } });
+    assert.equal(premiumTierAvailable(await getCreativeConfig({ fresh: true })), true, '前提：这条用例里高级档确实可下单');
+
+    stubDraftJson({
+      scene: 'personal_brand', headline: '标题', proofPoints: ['卖点一'],
+      templateKey: 'editorial',
+      tier: 'premium', directionKey: 'photo_character', recommendReason: '这张要靠人物气场立住，用实拍质感出主视觉',
+    });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.recommendation, {
+      tier: 'premium', directionKey: 'photo_character', templateKey: 'editorial',
+      reason: '这张要靠人物气场立住，用实拍质感出主视觉',
+    }, '合法组合原样下发：模型读过整段对话，服务端没有理由改写它');
+  });
+
+  test('推荐组合：模型推 premium 但高级档不可用 → 降级 standard 并换理由', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩降级用户');
+    const sessionId = await conversationSession(token, tenantId);
+    // 本 describe 的 beforeEach 未配图片供应商 → premiumTierAvailable 为 false。
+    assert.equal(premiumTierAvailable(await getCreativeConfig({ fresh: true })), false, '前提：这条用例里高级档下不了单');
+
+    const aiReason = '这张要靠人物实拍质感立住';
+    stubDraftJson({
+      scene: 'personal_brand', headline: '标题',
+      tier: 'premium', directionKey: 'photo_character', templateKey: 'editorial', recommendReason: aiReason,
+    });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.recommendation.tier, 'standard', '高级档不可用时不许把 premium 推给用户');
+    assert.equal(directionFor(r.body.recommendation.directionKey).tier, 'standard', '方向跟着降档');
+    assert.notEqual(r.body.recommendation.reason, aiReason, '组合被改写，理由必须跟着改');
+  });
+
+  test('推荐组合：模型给非法值 → 服务端确定性合成，键仍恒在', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩非法值用户');
+    const sessionId = await conversationSession(token, tenantId);
+    stubDraftJson({
+      scene: 'event', headline: '开业活动', proofPoints: ['卖点一', '卖点二'],
+      tier: '豪华档', directionKey: 'photo_hero_x', templateKey: 'gone_template', recommendReason: '',
+    });
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${sessionId}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const rec = r.body.recommendation;
+    assert.equal(rec.tier, 'standard');
+    assert.equal(rec.templateKey, 'agenda_event', '活动场景 → dense 档');
+    assert.ok(rec.reason.length > 0 && rec.reason.length <= RECOMMEND_REASON_LIMIT, '理由由服务端合成，非空且不超限');
+    assert.equal(isRecommendationConsistent(rec, { hasPortrait: false, premiumAvailable: false }), true);
   });
 });
 

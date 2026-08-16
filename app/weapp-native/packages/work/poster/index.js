@@ -3,7 +3,7 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const {
-  LIMITS, normalizeStatus, newIdempotencyKey, posterScope, readPosterPending,
+  LIMITS, normalizeStatus, normalizeRecommendation, newIdempotencyKey, posterScope, readPosterPending,
   markPosterPending, attachPosterJob,
 } = require('./creative');
 
@@ -22,7 +22,16 @@ const PORTRAIT_CONSENT = [
 // 版式密度（TemplateOption.density）→ 中文档位标签。运营扩到 8 套之后，一列平铺的卡片读不出
 // 「这些是同一类」；按密度分组是唯一不需要用户先懂设计术语就能选的分法。
 const DENSITY_LABEL = { airy: '留白', balanced: '均衡', dense: '信息量' };
+// 「调整版式」一级分档的入口文案：说人话。「留白 / 均衡 / 信息量」是给方案卡摘要行用的短标签，
+// 而让人现场做选择的那三个按钮得直接说清选完会怎样。
+const DENSITY_TAB = { airy: '只说一句话', balanced: '均衡', dense: '信息全放上' };
 const DENSITY_ORDER = ['airy', 'balanced', 'dense'];
+// 两条路线各一句「差价买的是什么」。价格差由 status 实价算出来（premiumPrice - price），不写死。
+const WAY_NAME = { standard: '创意排版', premium: '主视觉大片' };
+const WAY_BUY = {
+  standard: '军师用图形与排印现场作画',
+  premium: 'AI 先出实拍质感主视觉，再排中文',
+};
 
 /**
  * 版式分组：**完全数据驱动**——status 下发什么就渲染什么，本地不补目录、不猜密度。
@@ -31,14 +40,14 @@ const DENSITY_ORDER = ['airy', 'balanced', 'dense'];
 function groupTemplates(templates) {
   const list = Array.isArray(templates) ? templates : [];
   if (!list.length) return [];
-  if (!list.some((item) => item && DENSITY_LABEL[item.density])) return [{ key: 'all', label: '', items: list }];
+  if (!list.some((item) => item && DENSITY_LABEL[item.density])) return [{ key: 'all', label: '', tab: '全部版式', items: list }];
   const groups = [];
   DENSITY_ORDER.forEach((density) => {
     const items = list.filter((item) => item && item.density === density);
-    if (items.length) groups.push({ key: density, label: DENSITY_LABEL[density], items });
+    if (items.length) groups.push({ key: density, label: DENSITY_LABEL[density], tab: DENSITY_TAB[density], items });
   });
   const rest = list.filter((item) => !item || !DENSITY_LABEL[item.density]);
-  if (rest.length) groups.push({ key: 'other', label: '其他', items: rest });
+  if (rest.length) groups.push({ key: 'other', label: '其他', tab: '其他', items: rest });
   return groups;
 }
 
@@ -90,6 +99,17 @@ Page({
     directions: [], activeDirections: [], directionKey: '',
     // 设计说明：服务端从整段对话抽出来的「这张海报会长什么样」，是本页主视图。
     designNote: '',
+    // ── 军师方案卡（2026-08-16 重排）──
+    // 服务端下发 recommendation（方式 / 方向 / 版式 + 一句理由）时，这三项已经替用户定好了：
+    // 页面主视图是一张方案卡（说明 + 理由 + 组合摘要 + 价格），三处修改收进低调入口，点开才出现。
+    // 没有 recommendation（老服务端 / 抽取失败）时 hasReco=false，三个选择器回退成常驻展开。
+    hasReco: false, recoReason: '', panel: '',
+    plan: { way: '', direction: '', template: '', density: '', price: null },
+    // 「换方式」两档各配一张该档下的真实样例缩略图（取自 status.directions，不进代码包）。
+    wayStd: { previewUrl: '', name: '' }, wayPro: { previewUrl: '', name: '' },
+    wayBuyStd: WAY_BUY.standard, wayBuyPro: WAY_BUY.premium, premiumDelta: 0,
+    // 「调整版式」：一级密度分档 + 二级该档下的版式横滑。
+    densityKey: '', densityItems: [],
     // 「编辑内容」分组默认收起成摘要行（2026-08-15 重排）：入口是动词「编辑」，
     // 不是此前那句「这些细节要改吗」——问句会让人以为不点开就漏了什么。
     showEdit: false, summaryRows: emptySummary(),
@@ -186,8 +206,89 @@ Page({
     updates.directionKey = activeDirections.some((item) => item.key === requestedDirection)
       ? requestedDirection : String(activeDirections[0] && activeDirections[0].key || '');
     updates.assets = this.assetsForTier(directionTier);
+    // ── 军师方案：三项一次定死，用户默认只需要点头 ──
+    // 推荐组合优先于 brief 里的零散字段（brief.templateKey / tier / directionKey 是草稿的旧口径，
+    // recommendation 才是军师对「这三项怎么配」的完整答复）。任一项在当前清单里对不上就整条作废，
+    // 页面退回现行为：按现逻辑预选 + 把选择器摊开（判据见 creative.js 的 normalizeRecommendation）。
+    const reco = normalizeRecommendation(draft && draft.recommendation, {
+      directions: updates.directions, templates, premiumAvailable: updates.premiumOn,
+    });
+    if (reco) {
+      updates.tier = reco.tier;
+      updates.activeDirections = updates.directions.filter((item) => item.tier === reco.tier);
+      updates.directionKey = reco.directionKey;
+      updates.templateKey = reco.templateKey;
+      updates.assets = this.assetsForTier(reco.tier);
+    }
+    updates.hasReco = !!reco;
+    updates.recoReason = reco ? reco.reason : '';
+    updates.panel = '';
+    // 版式一级分档跟着推荐版式落在它所属的那一档上（用户点开「调整版式」就看到自己那档是高亮的）。
+    updates.densityKey = String((updates.templateGroups.find((group) => group.items
+      .some((item) => item && item.key === updates.templateKey)) || updates.templateGroups[0] || {}).key || '');
     this.setData(updates);
     this.refreshSummary();
+    this.refreshPlan();
+  },
+
+  /**
+   * 方案卡的组合摘要 + 三个面板的派生数据。改方式 / 改方向 / 改版式之后都要重算 ——
+   * 摘要行与价格是用户点「生成」前唯一还会再看一眼的东西，慢一拍就等于在扣费那一刻说假话。
+   *
+   * ⚠️ 这里**只读当前选择**，永不回头读 recommendation：推荐只在首屏落一次，
+   * 用户改过之后再被推荐值盖回去，等于告诉他「你的选择不算数」。
+   */
+  refreshPlan() {
+    const tier = this.data.tier;
+    const price = tier === 'premium' && this.data.premiumOn ? this.data.premiumPrice : this.data.price;
+    const direction = (this.data.directions || []).find((item) => item && item.key === this.data.directionKey);
+    const template = (this.data.templates || []).find((item) => item && item.key === this.data.templateKey);
+    const groups = this.data.templateGroups || [];
+    // 用户点过密度档就留住他那一档；没点过（或那一档没了）才跟着当前版式走。
+    const densityKey = groups.some((group) => group.key === this.data.densityKey)
+      ? this.data.densityKey
+      : String((groups.find((group) => group.items.some((item) => item && item.key === this.data.templateKey)) || groups[0] || {}).key || '');
+    const active = groups.find((group) => group.key === densityKey);
+    this.setData({
+      densityKey,
+      densityItems: active ? active.items : (this.data.templates || []),
+      premiumDelta: Math.max(0, Number(this.data.premiumPrice || 0) - Number(this.data.price || 0)),
+      wayStd: this.waySample('standard'),
+      wayPro: this.waySample('premium'),
+      plan: {
+        way: WAY_NAME[tier] || WAY_NAME.standard,
+        direction: String(direction && direction.name || ''),
+        template: String(template && template.name || ''),
+        density: template && DENSITY_LABEL[template.density] ? DENSITY_LABEL[template.density] : '',
+        price: Number.isFinite(Number(price)) ? Number(price) : null,
+      },
+    });
+  },
+
+  /**
+   * 「换方式」两档各配一张**真实**样例：优先当前选中的方向那张，其次该档第一张有图的。
+   * 刻意不拿 requiresPortrait 的方向当门面 —— 那张图是用户自己的脸排出来的效果，
+   * 拿它代表整条路线会让人以为不传照片就出不了图。
+   */
+  waySample(tier) {
+    const list = (this.data.directions || []).filter((item) => item && item.tier === tier);
+    const current = list.find((item) => item.key === this.data.directionKey);
+    const pick = (current && current.previewUrl ? current : null)
+      || list.find((item) => item.previewUrl && !item.requiresPortrait)
+      || list.find((item) => item.previewUrl)
+      || list[0] || null;
+    return { previewUrl: String(pick && pick.previewUrl || ''), name: String(pick && pick.name || '') };
+  },
+
+  /** 三个低调入口：点开一个、再点收起。没有推荐时三块本来就常驻展开，这个开关也就不渲染。 */
+  openPanel(event) {
+    const key = String(event.currentTarget.dataset.panel || '');
+    this.setData({ panel: this.data.panel === key ? '' : key });
+  },
+
+  chooseDensity(event) {
+    this.setData({ densityKey: String(event.currentTarget.dataset.key || '') });
+    this.refreshPlan();
   },
 
   /**
@@ -233,7 +334,10 @@ Page({
     this.refreshSummary();
   },
 
-  chooseTemplate(event) { this.setData({ templateKey: String(event.currentTarget.dataset.key || '') }); },
+  chooseTemplate(event) {
+    this.setData({ templateKey: String(event.currentTarget.dataset.key || '') });
+    this.refreshPlan();
+  },
   toggleEdit() { this.setData({ showEdit: !this.data.showEdit }); },
   chooseTier(event) {
     const tier = String(event.currentTarget.dataset.key || 'standard');
@@ -245,8 +349,12 @@ Page({
       assets: this.assetsForTier(tier),
       'errors.direction': '',
     });
+    this.refreshPlan();
   },
-  chooseDirection(event) { this.setData({ directionKey: String(event.currentTarget.dataset.key || ''), 'errors.direction': '' }); },
+  chooseDirection(event) {
+    this.setData({ directionKey: String(event.currentTarget.dataset.key || ''), 'errors.direction': '' });
+    this.refreshPlan();
+  },
   toggleConsent() { this.setData({ consent: !this.data.consent, 'errors.consent': '' }); },
 
   /**
@@ -265,11 +373,13 @@ Page({
       const portraitOne = list.find((item) => item.requiresPortrait);
       if (!portraitOne) return;
       this.setData({ directionKey: portraitOne.key, 'errors.direction': '' });
+      this.refreshPlan();
       wx.showToast({ title: `已切换到「${portraitOne.name || '本人形象'}」方向`, icon: 'none' });
       return;
     }
     if (!current || !current.requiresPortrait) return;
     this.setData({ directionKey: String(list[0] && list[0].key || ''), 'errors.direction': '' });
+    this.refreshPlan();
   },
 
   async pickAsset(event) {
@@ -329,6 +439,11 @@ Page({
     if (this.data.directionKey === 'graphic_portrait' && !hasPortrait) errors.direction = '「本人形象」需要先上传本人照片';
     if (this.data.tier === 'premium' && hasPortrait) errors.direction = '「主视觉大片」不使用本人照片，请移除照片或选择「创意排版」';
     this.setData({ errors, proofs });
+    // 方向/路线的错误躺在收起的面板里：不点开就等于让用户对着一句「还有几处要改」
+    // 找一个他根本看不见的选项。互斥（传了照片却选了主视觉大片）要开「换方式」，其余开「换方向」。
+    if (errors.direction) {
+      this.setData({ panel: this.data.tier === 'premium' && hasPortrait ? 'way' : 'direction' });
+    }
     if (Object.keys(errors).length || proofs.some((proof) => proof.err)) {
       // 报错的字段大多躺在收起的「编辑内容」里：不摊开就等于让用户对着一句「还有几处要改」
       // 找一个他根本看不见的输入框。
@@ -341,6 +456,11 @@ Page({
     return true;
   },
 
+  /**
+   * 重取启用中的清单（后台停用某套版式 / 关掉高级路线后，本页缓存会过期）。
+   * ⚠️ 这里**不碰 recommendation**：推荐只在首屏落一次。用户此刻的选择是他自己做的决定，
+   * 借一次刷新把推荐值盖回去，就是当着他的面把选择改掉。
+   */
   async refreshTemplates() {
     try {
       const status = normalizeStatus(await api.creativeStatus());
@@ -355,6 +475,7 @@ Page({
         directions: status.directions, activeDirections, directionKey, tier,
         assets: this.assetsForTier(tier),
       });
+      this.refreshPlan();
     } catch (_) { /* 服务端原错误已经在提交区展示 */ }
   },
 

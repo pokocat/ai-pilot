@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-08-16 · 海报确认页改为「军师推荐组合默认、零次必答」（server 侧） · 影响面：PosterBriefDraft 契约、brief-draft 抽取提示词与兜底、回归测试
+
+- **契约**：`PosterBriefDraft` 增加 `recommendation { tier, directionKey, templateKey, reason }`，确认页据此预选整套组合，用户可改。此前确认页逼用户做「方式 / 方向 / 版式」三次选择，而这三项的差别用户感知不到。
+- **不新增环节**：推荐由 brief-draft **既有的那次**抽取调用顺带产出（提示词新增 tier / directionKey / recommendReason 三个字段），不多一次模型调用、不多一个页面。
+- **规则写死在提示词里**：只有画面必须靠人物 / 产品 / 场景的实拍质感才立得住时才推 premium，「更好看」不构成理由，默认 standard；版式按内容密度推（一句观点 → airy、有卖点 → balanced、活动议程 → dense）；方向按语义推。
+- **服务端永远兜底**：模型输出过白名单（方向 / 版式 / 档位枚举）与一致性校验——方向必须与档位同档、`requiresPortrait` 方向必须真有本人照、premium 必须过 `premiumTierAvailable`，不可用时降级 standard 并换掉已不成立的理由；缺失或非法值按确定性规则逐项合成，理由截到 60 字。因此 `recommendation` 键恒在，无 provider 也给得出可直接下单的组合。
+- **回归**：新增纯函数用例（正常路径 / 逐项回退 / 密度映射 / premium 降级 / 肖像约束 / 理由截断 / 脏输入穷举）与打桩 provider 的真实抽取分支用例；`test/creative.test.ts` 78 项全绿。
+
 ### 2026-08-15 · 清除宿主机内存泄漏源并把预发改为原子、限额发布 · 影响面：Dify、deploy-preprod.sh、AIStar Clip 部署脚本、运维文档
 
 - **根因实证**：部署 8925cc2 到预发时宿主 `8.136.36.175` 的 `/tmp` tmpfs 已被 AIStar Clip 历次不清理的时间戳 JAR 推到约 2.97GiB Shmem，`MemAvailable` 只剩约 670MiB且无 Swap；预发 `npm ci` 随后把 CPU 推到约 84%，Prometheus、SSH、HTTP 在 22:42–22:46 陆续失联。重启后预发因在线 `server/` 已被覆盖、`dist/index.js` 缺失陷入 3 秒崩溃循环，补建后恢复。AIStar `deploy-clip-preprod.sh` 现用远端 `trap` 成功/失败都删除当前 `/tmp/aistareco-clip-*.jar`，预检再清超过 60 分钟的同 owner 残留。

@@ -1012,8 +1012,16 @@ function creativeStatus() {
     templates: MOCK_POSTER_TEMPLATES,
   });
 }
-function posterBriefDraft() {
-  return Promise.resolve({
+/**
+ * 需求单草稿。**两条路径都要留**（与 H5 mock 同契约）：
+ *  · 默认带 recommendation —— 确认页据它渲染军师方案卡（方式 / 方向 / 版式一次定好 + 一句为什么）；
+ *  · messageId 带 `no-reco` 时不带 —— 老服务端 / 抽取失败的样子。确认页必须回退成
+ *    「按现逻辑预选 + 三个选择器常驻展开」，本地走查得能验到那一屏，所以留一个可达入口。
+ * 推荐的三个 key 必须落在 MOCK_POSTER_DIRECTIONS / MOCK_POSTER_TEMPLATES 里，否则前端按
+ * 「清单里不存在」整条作废，走查看到的就永远是回退态。
+ */
+function posterBriefDraft(sessionId, messageId) {
+  const draft = {
     brief: {
       scene: 'personal_brand', goal: '让潜在客户看懂你在做什么', audience: '有相同问题、还没找到解法的人',
       headline: '一件事，做到别人做不到', subheadline: '', proofPoints: ['先看主要矛盾', '再定一条行动主线'],
@@ -1023,7 +1031,16 @@ function posterBriefDraft() {
     templateReason: '人物信任感是主要抓手，人物主视觉能让第一眼先记住人，再记住主张。',
     // 设计说明是确认页的主视图；mock 不给它，本地走查就永远看不到那一屏该长什么样。
     designNote: '竖版三分构图：上半幅放你的人物照，下半幅压一句主张，底部留一条窄带放二维码。整体走克制的墨色打底、暖金点缀，正面柔光，不做花哨特效。',
-  });
+  };
+  if (/no-reco/.test(String(messageId || ''))) return Promise.resolve(draft);
+  return Promise.resolve(Object.assign({}, draft, {
+    recommendation: {
+      tier: 'standard',
+      directionKey: 'graphic_bold_type',
+      templateKey: 'person_hero',
+      reason: '你要的是先让人记住这句主张，版式给人物留了主位，传了照片就能直接用。',
+    },
+  }));
 }
 const MOCK_POSTER_PRICE = 10;
 const MOCK_POSTER_PAGE_SIZE = 20;

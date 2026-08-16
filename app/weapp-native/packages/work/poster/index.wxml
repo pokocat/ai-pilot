@@ -13,33 +13,64 @@
     </view>
     <view wx:elif="{{disabled}}" class="ps-empty"><text class="ps-empty-t serif">成品图暂未开放</text><text class="ps-empty-d">海报设计师的文字方案不受影响，可继续在对话里推进。</text></view>
     <block wx:else>
-      <!-- ① 设计说明卡：本页主视图。用户刚跟设计师聊完，这里只需要他确认「是这样吗」，
-           而不是对着一张表把刚说过的话重打一遍。抽不出说明时本块不渲染。 -->
-      <view wx:if="{{designNote}}" class="ps-note-card">
-        <text class="ps-note-k">这张海报会这么设计</text>
-        <text class="ps-note-b">{{designNote}}</text>
+      <!-- ① 军师方案卡：本页主视图。用户刚跟设计师聊完，这里只需要他点头 ——
+           方式 / 方向 / 版式军师已经配好了一套，改的人才点开下面三个入口。
+           此前这三项是三道必答题（两卡 + 三卡 + 八卡分组常驻），等于把军师的活退回给用户自己做。 -->
+      <view class="ps-plan">
+        <text class="ps-plan-k">这张海报会这么设计</text>
+        <text wx:if="{{designNote}}" class="ps-plan-b">{{designNote}}</text>
+        <text wx:if="{{recoReason}}" class="ps-plan-why">{{recoReason}}</text>
+        <view class="ps-plan-sum">
+          <text class="ps-plan-s">{{plan.way}}</text>
+          <text wx:if="{{plan.direction}}" class="ps-plan-s"> · {{plan.direction}}</text>
+          <text wx:if="{{plan.template}}" class="ps-plan-s"> · {{plan.template}}{{plan.density?'（'+plan.density+'）':''}}</text>
+          <view wx:if="{{plan.price!==null}}" class="ps-plan-price"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-plan-s">x{{plan.price}}</text></view>
+        </view>
+        <!-- 三个低调入口，一律用动词。有推荐才渲染：没推荐时下面三块本来就摊开着，
+             再摆三个开关只会让人以为还有别的东西藏着。 -->
+        <view wx:if="{{hasReco}}" class="ps-plan-acts">
+          <view wx:if="{{premiumOn}}" class="ps-plan-act {{panel==='way'?'on':''}}" data-panel="way" bindtap="openPanel"><text>换方式</text></view>
+          <view class="ps-plan-act {{panel==='direction'?'on':''}}" data-panel="direction" bindtap="openPanel"><text>换方向</text></view>
+          <view class="ps-plan-act {{panel==='template'?'on':''}}" data-panel="template" bindtap="openPanel"><text>调整版式</text></view>
+        </view>
       </view>
-      <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
+      <!-- 老服务端只给「为什么这样设计」、给不出推荐理由时，那句话仍旧原样展示，不白丢。 -->
+      <view wx:if="{{reason&&!recoReason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
+      <!-- 方向/路线的报错常驻在方案卡下面：面板收起时它照样看得见（收起来的错误等于没报）。 -->
+      <text wx:if="{{errors.direction}}" class="ps-ferr">{{errors.direction}}</text>
       <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
 
-      <!-- ② 创作方式 -->
-      <view class="ps-group">
-        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">创作方式</text><text class="ps-group-d">决定这张图怎么出，价格不同</text></view></view>
-        <view class="ps-tpls">
-          <view class="ps-tpl {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier">
-            <view class="ps-tpl-h"><text class="ps-tpl-n">创意排版</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="14"></native-icon></view>
-            <view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{price}} · 用图形、字体和你的素材现场创作</text></view>
+      <!-- ② 换方式：两档对比。各配一张该档下的真实样例 + 一句「差价买的是什么」，
+           差价数字按 status 实价算（premiumPrice - price），不写死。
+           高级路线不可用（premiumAvailable=false）时整块连同入口都不渲染 —— 只有一档可选还摆个
+           「换方式」，点开只有一张卡，是让人白跑一趟。 -->
+      <view wx:if="{{premiumOn&&(!hasReco||panel==='way')}}" class="ps-panel">
+        <view class="ps-panel-h"><text class="ps-panel-t">{{hasReco?'换个方式出图':'选一种出图方式'}}</text><text class="ps-panel-d">差价买的是画面从哪来</text></view>
+        <view class="ps-ways">
+          <view class="ps-way {{tier==='standard'?'on':''}}" data-key="standard" bindtap="chooseTier">
+            <view class="ps-way-h"><text class="ps-way-n">创意排版</text><native-icon wx:if="{{tier==='standard'}}" name="check" tone="green" size="13"></native-icon></view>
+            <image wx:if="{{wayStd.previewUrl}}" class="ps-way-img" src="{{wayStd.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
+            <view wx:else class="ps-way-ph"><native-icon name="image" tone="neutral" size="18"></native-icon><text>样例待发布</text></view>
+            <view class="ps-way-b">
+              <text class="ps-way-d">{{wayBuyStd}}</text>
+              <view class="ps-way-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-way-p">x{{price}}</text></view>
+            </view>
           </view>
-          <view wx:if="{{premiumOn}}" class="ps-tpl {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier">
-            <view class="ps-tpl-h"><text class="ps-tpl-n">主视觉大片</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="14"></native-icon></view>
-            <view class="ps-tpl-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-tpl-d">x{{premiumPrice}} · AI 先创作全幅主视觉，再由军师排中文</text></view>
+          <view wx:if="{{premiumOn}}" class="ps-way {{tier==='premium'?'on':''}}" data-key="premium" bindtap="chooseTier">
+            <view class="ps-way-h"><text class="ps-way-n">主视觉大片</text><native-icon wx:if="{{tier==='premium'}}" name="check" tone="green" size="13"></native-icon></view>
+            <image wx:if="{{wayPro.previewUrl}}" class="ps-way-img" src="{{wayPro.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
+            <view wx:else class="ps-way-ph"><native-icon name="image" tone="neutral" size="18"></native-icon><text>样例待发布</text></view>
+            <view class="ps-way-b">
+              <text class="ps-way-d">{{wayBuyPro}}</text>
+              <view class="ps-way-cost"><native-icon name="diamond" tone="accent" size="12"></native-icon><text class="ps-way-p">x{{premiumPrice}}</text><text wx:if="{{premiumDelta}}" class="ps-way-delta">比创意排版多 {{premiumDelta}}</text></view>
+            </view>
           </view>
         </view>
       </view>
 
-      <!-- ③ 创作方向 -->
-      <view wx:if="{{activeDirections.length}}" class="ps-group">
-        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">创作方向</text><text class="ps-group-d">决定画面里的主角是什么</text></view></view>
+      <!-- ③ 换方向：原来的三张大图卡原样搬进展开区，预选军师推荐的那一个。 -->
+      <view wx:if="{{activeDirections.length&&(!hasReco||panel==='direction')}}" class="ps-panel">
+        <view class="ps-panel-h"><text class="ps-panel-t">{{hasReco?'换个方向':'选一个创作方向'}}</text><text class="ps-panel-d">决定画面里的主角是什么</text></view>
         <scroll-view class="ps-dir-scroll" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
           <view class="ps-dir-grid">
             <view wx:for="{{activeDirections}}" wx:key="key" class="ps-dir {{directionKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseDirection">
@@ -49,21 +80,25 @@
             </view>
           </view>
         </scroll-view>
-        <text wx:if="{{errors.direction}}" class="ps-ferr">{{errors.direction}}</text>
       </view>
 
-      <!-- ④ 版式：按密度分组，组与卡全由 status 下发的清单驱动（没下发 density 就退回单组平铺）。 -->
-      <view wx:if="{{templateGroups.length}}" class="ps-group">
-        <view class="ps-group-h"><view class="ps-group-hl"><text class="ps-group-t">版式</text><text class="ps-group-d">画面的信息密度与排布</text></view></view>
-        <view wx:for="{{templateGroups}}" wx:for-item="group" wx:key="key" class="ps-tpl-group">
-          <text wx:if="{{group.label}}" class="ps-tpl-gk">{{group.label}}</text>
-          <view class="ps-tpls">
-            <view wx:for="{{group.items}}" wx:key="key" class="ps-tpl {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate">
-              <view class="ps-tpl-h"><text class="ps-tpl-n">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="14"></native-icon></view>
-              <text class="ps-tpl-d">{{item.desc}}</text>
+      <!-- ④ 调整版式：一级挑信息量（三档说人话），二级横滑挑这一档下的版式。
+           档与卡全由 status 下发的清单驱动；一套都没带 density（老服务端）时只有一档，
+           连档位条都不渲染 —— 不给用户凭空造出一排空标签。 -->
+      <view wx:if="{{templateGroups.length&&(!hasReco||panel==='template')}}" class="ps-panel">
+        <view class="ps-panel-h"><text class="ps-panel-t">{{hasReco?'调整版式':'选一套版式'}}</text><text class="ps-panel-d">先定这张图说多少话，再挑排布</text></view>
+        <view wx:if="{{templateGroups.length>1}}" class="ps-dens">
+          <view wx:for="{{templateGroups}}" wx:for-item="group" wx:key="key" class="ps-den {{densityKey===group.key?'on':''}}" data-key="{{group.key}}" bindtap="chooseDensity"><text>{{group.tab}}</text></view>
+        </view>
+        <scroll-view class="ps-tpl-scroll" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+          <view class="ps-tpl-row">
+            <view wx:for="{{densityItems}}" wx:key="key" class="ps-tpl-card {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate">
+              <image wx:if="{{item.previewUrl}}" class="ps-tpl-img" src="{{item.previewUrl}}" mode="aspectFill" lazy-load="{{true}}"></image>
+              <view class="ps-tpl-ch"><text class="ps-tpl-cn">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="13"></native-icon></view>
+              <text class="ps-tpl-cd">{{item.desc}}</text>
             </view>
           </view>
-        </view>
+        </scroll-view>
       </view>
 
       <!-- ⑤ 编辑内容：默认收起为摘要行 + 「编辑」入口。入口用动词，不用疑问句 ——

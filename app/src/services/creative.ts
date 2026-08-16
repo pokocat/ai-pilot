@@ -6,7 +6,10 @@
 // 早已漂移（同一套版式在小程序和后台叫不同的东西），二是后台停用某套版式后用户照旧能选中它，
 // 而服务端对「显式请求了被停用的版式」一律 422。前端不要再建本地目录。
 import Taro from '@tarojs/taro';
-import { api, type CreativeStatusResult } from './api';
+import {
+  api,
+  type CreativeStatusResult, type PosterTier, type PosterDirectionOption, type PosterTemplateOption,
+} from './api';
 import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 
@@ -39,6 +42,44 @@ export function peekCreativeStatus(): CreativeStatusResult | null {
   const token = getToken();
   if (!token || !cache || cache.token !== token) return null;
   return cache.value;
+}
+
+/* ───────────────── 军师推荐组合（确认页主视图的数据来源） ───────────────── */
+
+/**
+ * 军师给的方案：这张海报按哪条路线、哪个方向、哪套版式出，外加一句为什么。
+ * 服务端放在 `PosterBriefDraft.recommendation` 下发（SSOT 在 shared/contracts.d.ts，由服务端组维护）。
+ * 确认页据它渲染「方案卡」——用户默认只需要点头，改的人才点开三个入口。
+ */
+export interface PosterRecommendation {
+  tier: PosterTier;
+  directionKey: PosterDirectionOption['key'];
+  templateKey: string;
+  reason: string;
+}
+
+/**
+ * 推荐组合归一。**两端同一套判据**（原生端在 packages/work/poster/creative.js，逐条对照着写）。
+ *
+ * 只认「当前 status 清单里真存在」的组合：服务端保证下发那一刻合法，但用户可能停在本页，
+ * 期间后台停用了某套版式 / 关掉了高级路线 —— 拿一个已停用的 key 当默认值，用户点「生成」必 422，
+ * 而他压根没做过这个选择。任一项对不上就整条作废，页面回退现行为（按现逻辑预选 + 把选择器展开），
+ * 不半信半疑地用一半。老服务端不下发这个字段时同样返回 null。
+ */
+export function normalizeRecommendation(
+  raw: unknown,
+  ctx: { directions: PosterDirectionOption[]; templates: PosterTemplateOption[]; premiumAvailable: boolean },
+): PosterRecommendation | null {
+  const r = raw as { tier?: unknown; directionKey?: unknown; templateKey?: unknown; reason?: unknown } | null;
+  if (!r || typeof r !== 'object') return null;
+  // 高级路线不可用却推了高级：整条作废，不悄悄降标准 —— 降了之后方案卡上的价格与那句
+  // 「军师为什么这么定」就对不上，用户看到的是一句解释配着另一档的价。
+  if (r.tier === 'premium' && ctx.premiumAvailable !== true) return null;
+  const tier: PosterTier = r.tier === 'premium' ? 'premium' : 'standard';
+  const direction = ctx.directions.find((item) => item.key === r.directionKey && item.tier === tier);
+  const template = ctx.templates.find((item) => item.key === r.templateKey);
+  if (!direction || !template) return null;
+  return { tier, directionKey: direction.key, templateKey: template.key, reason: String(r.reason ?? '').trim() };
 }
 
 /* ───────────────── 文案字数上限（确认页与详情页共用一份） ───────────────── */

@@ -1934,7 +1934,9 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   //   判据与 submit 里带 tier 的判据必须逐字同源，两处各写各的迟早对不上。
   assert.match(posterWxml, /x\{\{premiumOn&&tier==='premium'\?premiumPrice:price\}\}/, '按钮价格要跟随路线');
   assert.match(poster, /brief\.tier = this\.data\.premiumOn \? this\.data\.tier : 'standard';/, '提交带的路线判据同源');
-  assert.match(posterWxml, /wx:if="\{\{premiumOn\}\}"[\s\S]{0,400}主视觉大片/, '主视觉大片不可用时整条路线不渲染');
+  // 2026-08-16：这块从常驻的「创作方式」两卡挪进了「换方式」展开区，守卫仍旧是 premiumOn ——
+  // 判据没变（高级档不可用就一个字都不许露），只是它现在挂在展开区里的那张卡上。
+  assert.match(posterWxml, /wx:if="\{\{premiumOn[^"]*"[\s\S]{0,600}主视觉大片/, '主视觉大片不可用时整条路线不渲染');
   // 冷启动（没有对话上下文）不是故障：服务端现在回空草稿（2026-08-13 前是 422 MESSAGE_ID_REQUIRED），
   // 弹报错横幅会把一次正常的空白表单说成出了事。
   assert.match(poster, /hasDraftBrief \|\| !this\.data\.messageId \? '' :/, '冷启动不报"预填没取到"');
@@ -1971,12 +1973,66 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
   assert.match(uploadBlock[0], /ps-slot-add \{\{item\.disabled\?'off':''\}\}/, 'premium 下人像槽置灰而不是消失');
   assert.match(poster, /assetsForTier\(tier\)\s*\{[\s\S]{0,300}disabled: tier === 'premium'/, '置灰只针对人像槽且只在 premium');
   assert.match(poster, /item\.role === role && item\.disabled[\s\S]{0,400}wx\.showModal/, '点置灰槽要给解释，不能沉默');
-  // 版式：按 density 分组渲染，且分组完全由 status 下发的清单驱动（本地不补目录、不猜密度）。
-  assert.match(posterWxml, /wx:for="\{\{templateGroups\}\}" wx:for-item="group"[\s\S]{0,300}group\.label[\s\S]{0,300}group\.items/,
-    '版式按密度分组渲染');
-  assert.match(poster, /const DENSITY_LABEL = \{ airy: '留白', balanced: '均衡', dense: '信息量' \}/, '三档中文标签');
-  assert.match(poster, /function groupTemplates\(templates\)[\s\S]{0,700}return \[\{ key: 'all', label: '', items: list \}\]/,
+  // 版式：一级密度分档 + 二级横滑，档与卡完全由 status 下发的清单驱动（本地不补目录、不猜密度）。
+  assert.match(posterWxml, /wx:for="\{\{templateGroups\}\}" wx:for-item="group"[\s\S]{0,200}group\.tab[\s\S]{0,60}chooseDensity|chooseDensity[\s\S]{0,60}group\.tab/,
+    '版式一级 = 密度三档（点得动）');
+  assert.match(posterWxml, /class="ps-tpl-scroll"[^>]*scroll-x="\{\{true\}\}"[\s\S]{0,300}wx:for="\{\{densityItems\}\}"/,
+    '版式二级 = 该档下的版式横滑');
+  assert.match(posterWxml, /wx:if="\{\{templateGroups\.length>1\}\}"/,
+    '只有一档时不渲染档位条：老服务端没下发 density，摆一排空标签是凭空造分类');
+  assert.match(poster, /const DENSITY_LABEL = \{ airy: '留白', balanced: '均衡', dense: '信息量' \}/, '三档中文短标签（方案卡摘要用）');
+  assert.match(poster, /const DENSITY_TAB = \{ airy: '只说一句话', balanced: '均衡', dense: '信息全放上' \}/,
+    '一级分档的入口文案说人话，不出现「密度」这类内部词');
+  assert.match(poster, /function groupTemplates\(templates\)[\s\S]{0,700}return \[\{ key: 'all', label: '', tab: '全部版式', items: list \}\]/,
     '一套都没带 density 时退回单组平铺，不许凭空造出空档位');
+  // ── 2026-08-16 确认页再重排：军师方案卡默认 + 三处可改 ──
+  // 旧结构把「创作方式」「创作方向」「版式」三块常驻摊开，等于让每个刚跟军师聊完的人
+  // 先做三道选择题——那正是他花钱请军师替他定的三件事。现在服务端下发 recommendation
+  // （方式 / 方向 / 版式 + 一句为什么），主视图收成一张方案卡，改的人才点开入口。
+  assert.match(posterWxml, /class="ps-plan">[\s\S]{0,400}designNote[\s\S]{0,200}recoReason/,
+    '方案卡 = 设计说明原文 + 推荐理由');
+  assert.match(posterWxml, /class="ps-plan-sum">[\s\S]{0,600}plan\.way[\s\S]{0,400}plan\.direction[\s\S]{0,400}plan\.template[\s\S]{0,400}plan\.price/,
+    '组合摘要行 = 方式 · 方向 · 版式（含密度标签）· 价格');
+  assert.match(poster, /plan: \{[\s\S]{0,400}price: Number\.isFinite\(Number\(price\)\) \? Number\(price\) : null/,
+    '摘要行的价格按当前路线实价算');
+  assert.match(poster, /refreshPlan\(\)/, '改方式/方向/版式之后要重算摘要');
+  for (const method of ['chooseTier', 'chooseDirection', 'chooseTemplate', 'chooseDensity']) {
+    assert.match(poster, new RegExp(`${method}\\(event\\)[\\s\\S]{0,420}this\\.refreshPlan\\(\\)`),
+      `${method} 之后摘要行与价格必须当场更新`);
+  }
+  // 三个入口一律动词（此前踩过的坑：疑问句入口让人以为不点开就漏了东西）。
+  for (const verb of ['换方式', '换方向', '调整版式']) {
+    assert.match(posterWxml, new RegExp(`data-panel="[a-z]+" bindtap="openPanel"><text>${verb}<`), `入口文案要用动词：${verb}`);
+  }
+  assert.doesNotMatch(posterWxml, /<text[^>]*>[^<{]*(tier|directionKey|templateKey|密度)/,
+    '面向用户的文案里不许出现 tier / directionKey / 密度 这类内部词');
+  // ★ 没有 recommendation（老服务端 / 抽取失败）时回退现行为：三个选择器常驻展开，入口不渲染。
+  assert.match(poster, /const reco = normalizeRecommendation\(draft && draft\.recommendation/, '推荐组合走共享归一');
+  assert.match(poster, /updates\.hasReco = !!reco;/, 'hasReco 由归一结果决定，不是猜的');
+  for (const panel of ['way', 'direction', 'template']) {
+    assert.match(posterWxml, new RegExp(`!hasReco\\|\\|panel==='${panel}'`), `没有推荐时「${panel}」这块必须常驻展开`);
+  }
+  assert.match(posterWxml, /wx:if="\{\{hasReco\}\}" class="ps-plan-acts"/, '没有推荐时不摆三个开关（那三块本来就摊开着）');
+  // ★ 推荐只在首屏落一次：用户改过之后不许被回写覆盖。刷新清单是最容易偷偷回写的那条路。
+  const refreshBlock = poster.match(/async refreshTemplates\(\)[\s\S]*?\n  \},/);
+  assert.ok(refreshBlock, '缺少 refreshTemplates');
+  assert.doesNotMatch(refreshBlock[0], /reco|recommendation/i, '刷新清单不许把推荐值盖回用户的选择');
+  const planBlock = poster.match(/refreshPlan\(\)\s*\{[\s\S]*?\n  \},/);
+  assert.ok(planBlock, '缺少 refreshPlan');
+  assert.doesNotMatch(planBlock[0], /reco|recommendation/i, '摘要只读当前选择，不回头读推荐');
+  // ★ 换方式：两档对比，各配一张该档下的真实样例 + 一句「差价买什么」+ 实际差价数字。
+  assert.match(poster, /waySample\(tier\)\s*\{[\s\S]{0,500}item\.previewUrl && !item\.requiresPortrait/,
+    '样例取 status.directions 的真实缩略图，且不拿「要本人照片」那张当门面');
+  assert.match(poster, /standard: '军师用图形与排印现场作画'/, '标准档一句差价买什么');
+  assert.match(poster, /premium: 'AI 先出实拍质感主视觉，再排中文'/, '高级档一句差价买什么');
+  assert.match(poster, /premiumDelta: Math\.max\(0, Number\(this\.data\.premiumPrice \|\| 0\) - Number\(this\.data\.price \|\| 0\)\)/,
+    '差价按 status 实价算，不写死');
+  assert.match(posterWxml, /wx:if="\{\{premiumDelta\}\}"[^>]*>比创意排版多 \{\{premiumDelta\}\}/, '差价数字要露给用户');
+  // 方向/路线的报错在面板收起时也要看得见，并把该开的那块打开（收起来的错误等于没报）。
+  assert.match(posterWxml, /class="ps-plan-acts"[\s\S]{0,900}wx:if="\{\{errors\.direction\}\}" class="ps-ferr"/,
+    '方向报错常驻在方案卡下面');
+  assert.match(poster, /if \(errors\.direction\) \{[\s\S]{0,200}panel: this\.data\.tier === 'premium' && hasPortrait \? 'way' : 'direction'/,
+    '报错要把对应的面板打开');
   // 档位插画引的 /assets/tier/*.jpg 从来没进过 src/assets，也就从没打进产物：实测每次进页面
   // 两张都触发 binderror、tierArt 立刻全 false。与其留一段永远走 catch 的死代码，不如拆掉。
   assert.doesNotMatch(posterWxml, /src="[^"]*assets\/tier\//, '不许引用没打进产物的档位插画');
@@ -2073,6 +2129,14 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
     assert.match(src, /brief\.tier === 'premium' \? \{ tier: 'premium' as const, styleName|brief\.tier === 'premium' \? 'premium' : undefined/,
       `${side} mock 的 styleName 只给主视觉大片`);
     assert.match(src, /designNote: '竖版三分构图/, `${side} mock 的需求单草稿要带设计说明（确认页主视图）`);
+    // ★ 2026-08-16：确认页主视图改成军师方案卡，数据源是 brief-draft 的 recommendation。
+    //   两端 mock 各写一份，且**两条路径都要留**：带推荐（方案卡）与不带推荐（老服务端 → 回退成
+    //   选择器展开）。少了后者，回退那一屏本地永远走查不到，线上遇到老响应才发现是空白。
+    assert.match(src, /recommendation = \{|recommendation: \{/, `${side} mock 的需求单草稿要带军师推荐组合`);
+    assert.match(src, /tier: 'standard'[\s\S]{0,80}directionKey: 'graphic_bold_type'[\s\S]{0,80}templateKey: 'person_hero'/,
+      `${side} mock 的推荐组合必须落在自家方向/版式清单里，否则前端整条作废、只看得到回退态`);
+    assert.match(src, /reason: '你要的是先让人记住这句主张/, `${side} mock 的推荐要带一句为什么（确认页原样展示）`);
+    assert.match(src, /no-reco/, `${side} mock 要留一个「没有 recommendation」的老响应用例`);
   }
   // 详情页：贴码位与风格名是成品图下面的两行事实，缺省不渲染整行。
   assert.match(posterJobWxml, /wx:if="\{\{styleName\}\}" class="pj-meta-l">本次风格：\{\{styleName\}\}/, '风格名要能透出且缺省不渲染');

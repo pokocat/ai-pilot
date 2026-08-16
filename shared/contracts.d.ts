@@ -752,6 +752,21 @@ export interface PosterBriefDraft {
    * 抽取不出来（无 provider / 对话太短）时不下发，确认页退回表单打头。
    */
   designNote?: string;
+  /**
+   * 军师推荐的完整组合：确认页据此预选，用户可改。规则不默认推贵档。
+   *
+   * 为什么整组一起给（2026-08-16）：此前确认页逼用户做三次选择（方式 / 方向 / 版式），
+   * 而这三项的差别用户根本感知不到——他刚说完需求，我们却让他替我们做技术选型。
+   * 现在由 brief-draft 那**同一次**抽取顺带产出一套可直接下单的组合，零次必答。
+   * 服务端永远兜底：LLM 不可用或给了非法值时按确定性规则合成，这个键因此恒在。
+   */
+  recommendation?: {
+    tier: PosterTier;
+    directionKey: PosterDirectionKey;
+    templateKey: PosterTemplateKey;
+    /** 一句话推荐理由（确认页原样展示，说清为什么这个方式/这张图靠什么立住）。≤60 字。 */
+    reason: string;
+  };
 }
 
 /** 创作任务产出的资产视图（url 为短时效签名链接，每次下发重签）。 */

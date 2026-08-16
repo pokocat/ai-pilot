@@ -8,7 +8,29 @@
 .form-title { font-size: 16px; font-weight: 600; }
 .ps-pad { padding-top: 10px; }
 .ps-reason { border-color: var(--accent); }
-/* 设计说明卡的样式在 src 同名文件里（两端共用一份，`@use` 引进来）。 */
+/* 军师方案卡与三个展开区的样式在 src 同名文件里（两端共用一份，`@use` 引进来）；
+   这里只补原生端的 flex/图标对齐与选中描边（原生 text 默认 inline，量必须重申一遍）。 */
+.ps-plan { border-left-color: var(--accent); }
+.ps-plan-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ps-plan-price { display: flex; align-items: center; gap: 3px; margin-left: auto; }
+.ps-plan-price .ps-plan-s { color: var(--accent); font-weight: 600; }
+.ps-plan-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-plan-act.on { border-color: var(--accent); color: var(--accent); }
+
+.ps-ways { display: flex; gap: 10px; }
+.ps-way.on { border-color: var(--accent); border-width: 2px; margin: -1px; }
+.ps-way.on .ps-way-n { color: var(--accent); }
+.ps-way-h { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.ps-way-ph { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+.ps-way-cost { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.ps-dens { display: flex; gap: 8px; }
+.ps-den.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.ps-tpl-scroll { width: 100%; }
+.ps-tpl-row { display: flex; width: max-content; gap: 9px; padding: 1px; }
+.ps-tpl-card.on { border-color: var(--accent); border-width: 2px; margin: -1px; }
+.ps-tpl-card.on .ps-tpl-cn { color: var(--accent); }
+.ps-tpl-ch { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 
 /* 分组头 + 「编辑」入口（原生端补 flex 与图标对齐；其余样式在 src 同名文件里）。 */
 .ps-group-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -19,8 +41,6 @@
 /* 取需求单骨架（.ps-loading / .ps-spin / .ps-sk-*）的样式在 src 同名文件里，两端共用一份。 */
 
 /* 选中态不靠背景色（理由见 app/src 同名文件的注释）：重点色只落在描边与标题上。 */
-.ps-tpl.on { border-color: var(--accent); border-width: 2px; margin: -1px; }
-.ps-tpl.on .ps-tpl-n { color: var(--accent); }
 .ps-dir-scroll { width: 100%; }
 .ps-dir-grid { display: flex; width: max-content; gap: 10px; padding: 1px; }
 .ps-dir {
