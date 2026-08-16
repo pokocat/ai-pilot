@@ -42,6 +42,22 @@ SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
 RELEASE_ID="${SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
 
+# 与 deploy-prod.sh 同口径：谁发的要能追溯，制表符/换行会破坏 TSV 结构先洗掉。
+DEPLOY_OPERATOR="${DEPLOY_OPERATOR:-$( (cd "$ROOT" && git config user.name) 2>/dev/null || id -un)@$(hostname -s)}"
+DEPLOY_OPERATOR="$(printf '%s' "$DEPLOY_OPERATOR" | tr -d '\t\n' | tr -s ' ')"
+
+# 见 deploy-prod.sh 同段注释：exec > >(tee ...) 会丢末尾行，改用自重入 + 管道。
+LOG_DIR="$ROOT/.deploy-logs"
+mkdir -p "$LOG_DIR"
+if [ -z "${DEPLOY_LOG_FILE:-}" ]; then
+  export DEPLOY_LOG_FILE="$LOG_DIR/preprod-${SHA}-$(date -u +%Y%m%dT%H%M%SZ).log"
+  set -o pipefail
+  bash "$0" "$@" 2>&1 | tee -a "$DEPLOY_LOG_FILE"
+  DEPLOY_STATUS="${PIPESTATUS[0]}"
+  printf '\033[1;36m[deploy]\033[0m 全量日志：%s\n' "$DEPLOY_LOG_FILE"
+  exit "$DEPLOY_STATUS"
+fi
+
 log(){ printf "\033[1;36m[preprod]\033[0m %s\n" "$*"; }
 die(){ printf "\033[1;31m[preprod] %s\033[0m\n" "$*" >&2; exit 1; }
 [ -f "$SSH_KEY" ] || die "SSH key 不存在：$SSH_KEY"
@@ -54,7 +70,7 @@ scp -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking
 
 log "远端建立/更新 preprod"
 ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$DEPLOY_HOST" \
-  "SHA='${SHA}' RELEASE_ID='${RELEASE_ID}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' RESEED='$RESEED' bash -se" <<'REMOTE'
+  "SHA='${SHA}' RELEASE_ID='${RELEASE_ID}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' RESEED='$RESEED' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
 set -euo pipefail
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
 DEPLOY_USER="$(id -un)"; DEPLOY_GROUP="$(id -gn)"
@@ -316,6 +332,14 @@ fi
 echo "  AI 凭证存储校验：历史密文 0 行"
 
 echo "== 原子切换候选 release =="
+# 必须在覆盖 .deploy-version 之前捞出旧值，否则「上一版是谁」永久丢失。
+PREV_VERSION="$(cat "$PREPROD_ROOT/.deploy-version" 2>/dev/null || true)"
+# 列口径与 deploy-prod.sh 一致：UTC / 旧版本 / 新版本 / 明细 / 结果 / 操作者。
+record_history() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PREV_VERSION:--}" "${SHA}" "release=${RELEASE_ID}" "$1" "${DEPLOY_OPERATOR:-unknown}" \
+    | sudo tee -a "$PREPROD_ROOT/.deploy-history" >/dev/null || true
+}
 PREVIOUS_TARGET=""
 if [ -L "$LIVE_SERVER" ]; then
   PREVIOUS_TARGET="$(readlink -f "$LIVE_SERVER")"
@@ -330,6 +354,8 @@ sudo mv -Tf "$NEXT_LINK" "$LIVE_SERVER"
 
 rollback_release() {
   echo "!! 候选 release 启动失败，回滚到 ${PREVIOUS_TARGET:-无}" >&2
+  # 回滚也是一次真实发生过的发布尝试，必须留痕；只记成功的历史会掩盖反复失败的版本。
+  record_history rollback
   if [ -n "$PREVIOUS_TARGET" ] && [ -d "$PREVIOUS_TARGET" ]; then
     local rollback_link="$PREPROD_ROOT/.server-rollback-${RELEASE_ID}"
     sudo rm -f "$rollback_link"
@@ -360,6 +386,10 @@ fi
 echo "== 本机健康检查 :$PORT =="
 cat /tmp/junshi-preprod-health; echo
 printf '%s\n' "${SHA}" | sudo tee "$PREPROD_ROOT/.deploy-version" >/dev/null
+# 预发已在上面做过启动 + 健康双重把关（失败会走 rollback_release 并记 rollback），
+# 走到这里就是确定成功，不需要生产那种 switched/ok 两段式。
+record_history ok
+echo "== 版本记录 ${PREV_VERSION:--} -> ${SHA}（ok）=="
 echo "PREPROD_DEPLOYED ${SHA} release=${RELEASE_ID} previous=${PREVIOUS_TARGET:-none}"
 REMOTE
 

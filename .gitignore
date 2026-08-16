@@ -74,3 +74,6 @@ ui-review/
 
 # 快出片分包的 e2e 截图（本地验收产物，不入库）
 app/dist-native-e2e-shots/
+
+# 部署全量日志（本地留痕，远端只记 .deploy-history 一行结论）
+.deploy-logs/

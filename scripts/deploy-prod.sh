@@ -28,6 +28,25 @@ ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data
 SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
 ARCHIVE="/tmp/junshi-${SHA}.tar.gz"
 
+# 谁发的、发的什么，都要能事后追溯。制表符/换行会破坏历史行的 TSV 结构，先洗掉。
+DEPLOY_OPERATOR="${DEPLOY_OPERATOR:-$( (cd "$ROOT" && git config user.name) 2>/dev/null || id -un)@$(hostname -s)}"
+DEPLOY_OPERATOR="$(printf '%s' "$DEPLOY_OPERATOR" | tr -d '\t\n' | tr -s ' ')"
+
+# 本地全量日志：远端 .deploy-history 只记一行结论，出问题要看过程还得靠这个。
+# 走「自重入 + 管道」而不是 exec > >(tee ...)：后者父进程会先于 tee 退出，
+# 实测末尾几行来不及落盘——而部署失败时最该看的恰恰是末尾。
+# 这里父进程等整条管道结束，再用 PIPESTATUS[0] 把子进程真实退出码透出去。
+LOG_DIR="$ROOT/.deploy-logs"
+mkdir -p "$LOG_DIR"
+if [ -z "${DEPLOY_LOG_FILE:-}" ]; then
+  export DEPLOY_LOG_FILE="$LOG_DIR/prod-${SHA}-$(date -u +%Y%m%dT%H%M%SZ).log"
+  set -o pipefail
+  bash "$0" "$@" 2>&1 | tee -a "$DEPLOY_LOG_FILE"
+  DEPLOY_STATUS="${PIPESTATUS[0]}"
+  printf '\033[1;36m[deploy]\033[0m 全量日志：%s\n' "$DEPLOY_LOG_FILE"
+  exit "$DEPLOY_STATUS"
+fi
+
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -i "$SSH_KEY")
 
 log(){ printf "\033[1;36m[deploy]\033[0m %s\n" "$*"; }
@@ -47,7 +66,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"
@@ -210,7 +229,26 @@ if [ "$DEPLOY_PC" = "1" ]; then
   sudo cp -R dist-pc/. /var/www/junshi/pc/
 fi
 
+# 版本切换点：先把被覆盖的旧版本捞出来，否则 .deploy-version 一写就再也查不到「上一版是谁」。
+# 生产是 rsync 原地更新、没有 release 目录史，这份 append-only 的 .deploy-history 是唯一可追溯来源。
+PREV_VERSION="$(cat "$APP_ROOT/.deploy-version" 2>/dev/null || true)"
 printf '%s\n' "${SHA}" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null
+
+DEPLOY_COMPONENTS="server,admin"
+[ "${DEPLOY_H5:-0}" = "1" ] && DEPLOY_COMPONENTS="$DEPLOY_COMPONENTS,h5"
+[ "${DEPLOY_PC:-0}" = "1" ] && DEPLOY_COMPONENTS="$DEPLOY_COMPONENTS,pc"
+
+# 列：UTC 时间 / 旧版本 / 新版本 / 组件 / 结果 / 操作者。记账失败绝不能连累发布，整段 || true。
+record_history() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PREV_VERSION:--}" "${SHA}" "$DEPLOY_COMPONENTS" "$1" "${DEPLOY_OPERATOR:-unknown}" \
+    | sudo tee -a "$APP_ROOT/.deploy-history" >/dev/null || true
+}
+# 两段式记账：这里先记 switched（线上版本此刻已经变了），冒烟全过之后再补 ok。
+# 只在最后记一行的话，中途失败会既改了线上版本又不留任何痕迹——那正是这次要解决的问题。
+# 所以一条孤立的 switched 就代表「发布没走完」，比历史里一片 ok 诚实。
+record_history switched
+echo "== 版本记录 ${PREV_VERSION:--} -> ${SHA}（switched）=="
 
 echo "== nginx reload =="
 sudo nginx -t
@@ -321,6 +359,9 @@ fi
 if [ "$DEPLOY_PC" = "1" ]; then
   curl -fsSI http://127.0.0.1/pc/ >/dev/null
 fi
+
+# 冒烟全过，补记结果行。有 switched 无 ok = 这次发布中途挂了，事后一眼可辨。
+record_history ok
 
 echo "DEPLOYED ${SHA}"
 REMOTE

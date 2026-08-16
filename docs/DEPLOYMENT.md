@@ -551,3 +551,9 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - 现有固定 ECS（`ecs-user@8.136.36.175`，`/opt/junshi` 上传包式部署）升级：从本机仓库根目录执行 `bash scripts/deploy-prod.sh`，默认发布 `server + admin`；如需同步 H5，加 `DEPLOY_H5=1`。不要在远端 `git pull`，脚本会上传当前 git `HEAD` 归档、保留 `server/.env`、构建重启 API、覆盖 `/var/www/junshi/admin/`，并在 H5 模式下把 `app/dist-h5/` 覆盖到 `/var/www/junshi/h5/` 后做公网 smoke；原生微信迁移后 `app/dist/` 已不是 H5 产物。裸 IP 只验 `/api/health`；`/admin/` 只验域名入口，裸 IP `/admin` 预期为 404。
 - 首次部署或换新机器：仍按 §4 裸机步骤准备数据库、systemd、Nginx 与 HTTPS，再把 `scripts/deploy-prod.sh` 的 `DEPLOY_HOST`/`REMOTE_ROOT`/`PUBLIC_BASE`/`PUBLIC_DOMAIN` 指向新环境。
 - 回滚：保留上一个 `dist/` 与前端产物；DB 变更前先 `pg_dump` 备份。
+- **发布追溯（2026-08-16 补）**：两个环境各有一份 append-only 的 `.deploy-history`（生产 `/opt/junshi/.deploy-history`，预发 `/opt/junshi-preprod/.deploy-history`），TSV 六列：`UTC / 旧版本 / 新版本 / 组件或 release / 结果 / 操作者`。此前生产是 rsync 原地更新、`.deploy-version` 一写就覆盖，事后查不到上一版是谁——现在切版本前会先把旧值捞进历史。
+  - 生产两段式记账：切换时记 `switched`，本机冒烟全过后补 `ok`。**孤立的 `switched`（没有配对的 `ok`）= 那次发布中途挂了但线上版本已经变了**，是排查时最该先看的信号。
+  - 预发有启动 + 健康双重把关，成功记 `ok`；触发自动回滚会记 `rollback`。只记成功的历史会掩盖反复失败的版本，所以失败路径也留痕。
+  - 记账整段 `|| true`，绝不会因为写历史失败而连累发布。
+  - 本机全量日志落在仓库 `.deploy-logs/`（已 gitignore），命名 `<env>-<sha>-<utc>.log`，失败的部署同样留。脚本用「自重入 + 管道 + `PIPESTATUS`」而非 `exec > >(tee …)`——后者父进程会先于 tee 退出，实测末尾几行来不及落盘，而部署失败时最该看的恰恰是末尾。
+  - 查最近发布：`ssh … "tail -5 /opt/junshi/.deploy-history"`。
