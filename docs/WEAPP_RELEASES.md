@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-08-16 | `0.2.35` | `手机号唯一身份登录与隐私预授权` | `d5fd8d7` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（先 dry-run 校验） | 2.2 MB / 2306455 B | 上传成功：开发版已进入微信后台，仅供预发验收，尚未提交审核或发布。配套预发 server `970e12a+`（手机号唯一身份 `/auth/wechat-phone` 迁绑语义）已部署；上传同时触发平台隐私接口重扫，指引中「微信昵称、头像」条目确认用途并发布后，补档页头像昵称组件方可生效 |
 | 2026-08-15 | `0.2.34` | `独立声音状态回流与我的声音页` | `64eaa92` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（先 dry-run 校验） | 2.2 MB / 2299246 B | 上传成功：开发版已进入微信后台，仅供预发验收，尚未提交审核或发布。配套依赖 AIStar clip 预发 `bc0253be`（新增 `GET /api/me/clip/voices/{id}` 与独立声音状态刷新），需先于本包生效 |
 | 2026-08-14 | `0.2.33` | `海报双路线与真实方向样例` | `795a9c1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp` | 2.2 MB / 2278938 B | 上传成功：开发版已进入微信后台，仅供明日真机验收，尚未提交审核或发布 |
 | 2026-08-12 | `0.2.32` | `快出片全流程与iOS资料修复` | `cb786ea` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 2.0 MB / 2049556 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
