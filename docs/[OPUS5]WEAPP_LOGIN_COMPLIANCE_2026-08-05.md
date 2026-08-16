@@ -222,7 +222,8 @@ setAuthLostHandler(() => {
 |---|---|---|---|
 | 微信手机号 | 原生 `components/login-sheet` 的 `open-type="getPhoneNumber"` | 用户先勾选协议，再主动点「微信手机号一键登录」；服务端用一次性 code 换取微信绑定手机号并注册/登录 | 声明手机号用于账号注册、登录、找回与必要服务联系；不得写成静默获取 |
 | 微信账号标识 | 原生登录的 `wx.login` | 与用户本次手机号授权同时取 code，服务端换 openid/unionid 并关联同一账号 | 声明用于账号登录与身份识别；与手机号一键登录的关联用途保持一致 |
-| 微信头像 | `packages/main/settings` 的 `openType="chooseAvatar"` | 用户主动在设置页点「更换头像」后上传 | 声明头像，仅用于账号资料展示 |
+| 微信头像 | 注册补档 `components/login-sheet` 与 `packages/main/settings` 的 `open-type="chooseAvatar"` | 用户主动在补档页/设置页点头像后选「用微信头像」或相册图并上传 | 声明头像，仅用于账号资料展示。**未申报时该按钮在端上点击无反应且不弹任何提示** |
+| 微信昵称 | 注册补档 `components/login-sheet` 与 `packages/main/settings` 的 `input type="nickname"` | 用户主动点称呼输入框，键盘上方一键填入微信昵称 | 声明昵称，仅用于账号资料展示。**2026-08-16 复盘：此项此前漏出本表，指引照表配置会漏申报，昵称联想静默失效** |
 | 相册 / 相机图片 | `packages/main/chat`、`packages/work/poster` 的 `Taro.chooseImage` | 用户主动上传对话图片或海报肖像/素材 | 声明选取照片/拍摄，仅用于本次上传与生成 |
 | 微信聊天文件 | `pages/thinktank`、`packages/work/knowledge`、`packages/main/chat` 的 `Taro.chooseMessageFile` | 用户在明确说明后主动选择资料 | 声明选取聊天文件，用于资料解析、检索和本次对话引用 |
 | 保存到相册 | `reportShareCard`、`canvasCard`、老板页社群二维码、`posterJob` 的 `Taro.saveImageToPhotosAlbum` | 用户主动点保存分享图/二维码/海报 | 声明写入相册，不描述为读取相册 |
