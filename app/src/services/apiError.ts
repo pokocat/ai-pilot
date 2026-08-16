@@ -37,6 +37,7 @@ const USER_MESSAGES: Record<string, string> = {
   NOT_ANALYZABLE: '这份资料暂时无法分析，请检查内容或更换文件。',
   CONSENT_REQUIRED: '请先完成必要的确认后再继续。',
   PHONE_TAKEN: '这个手机号已绑定其他账号，请更换或联系客服。',
+  PHONE_LOGIN_REQUIRED: '请先用手机号验证码登录，之后这台设备可继续快捷登录。',
   WECHAT_ACCOUNT_CONFLICT: '当前登录身份已关联其他账号，请改用原账号登录或联系客服。',
   SMS_CODE_REQUIRED: '请输入短信验证码。',
   SMS_CODE_INVALID: '验证码不正确或已失效，请重新获取。',

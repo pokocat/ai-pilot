@@ -71,12 +71,21 @@ describe('TC-A 鉴权与账号隔离基线', () => {
     assert.equal(r.status, 401);
   });
 
-  test('A4 微信登录用 openid 建号，复登命中同一账号', async () => {
+  test('A4 微信快捷登录不建号：未关联 → 404；经手机号关联后可复登同一账号', async () => {
     const oldFetch = globalThis.fetch;
     process.env.WECHAT_MINI_APPID = 'wx-test-appid';
     process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
+    _resetTokenCache();
+    const phone = uniquePhone();
     globalThis.fetch = (async (input) => {
-      const url = new URL(String(input));
+      const raw = String(input);
+      if (raw.includes('stable_token')) {
+        return new Response(JSON.stringify({ access_token: 'tok-a4', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (raw.includes('getuserphonenumber')) {
+        return new Response(JSON.stringify({ errcode: 0, phone_info: { purePhoneNumber: phone, countryCode: '86' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      const url = new URL(raw);
       assert.equal(url.searchParams.get('appid'), 'wx-test-appid');
       assert.equal(url.searchParams.get('secret'), 'wx-test-secret');
       assert.equal(url.searchParams.get('grant_type'), 'authorization_code');
@@ -88,25 +97,35 @@ describe('TC-A 鉴权与账号隔离基线', () => {
     }) as typeof fetch;
 
     try {
-      const first = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-a' } });
-      assert.equal(first.status, 200);
-      assert.equal(first.body.isNew, true);
-      assert.equal(first.body.user.wechatLinked, true);
-      assert.equal(first.body.user.phone, '');
-      assert.equal(first.body.session_key, undefined, '不应把微信 session_key 下发给前端');
+      // 1) 手机号是唯一身份键：没关联过手机号账号的 openid 不再建号。
+      const unlinked = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-a' } });
+      assert.equal(unlinked.status, 404);
+      assert.equal(unlinked.body.code, 'PHONE_LOGIN_REQUIRED');
+      assert.equal(await prisma.user.count({ where: { wechatOpenId: 'openid-test-a' } }), 0, '纯 openid 登录不得建号');
 
+      // 2) 走手机号一键登录建号并把 openid 绑上来。
+      const onetap = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-a4', loginCode: 'wx-code-a' } });
+      assert.equal(onetap.status, 200);
+      assert.equal(onetap.body.isNew, true);
+      assert.equal(onetap.body.user.phone, phone);
+      assert.equal(onetap.body.user.wechatLinked, true);
+      assert.equal(onetap.body.phoneBinding.status, 'matched', '首次关联不算迁绑');
+
+      // 3) 关联之后微信快捷登录才放行，且复登命中同一账号。
       const second = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-b' } });
       assert.equal(second.status, 200);
       assert.equal(second.body.isNew, false);
-      assert.equal(second.body.token, first.body.token, '同一 openid 应复用同一账号');
+      assert.equal(second.body.token, onetap.body.token, '同一 openid 应复用同一账号');
+      assert.equal(second.body.session_key, undefined, '不应把微信 session_key 下发给前端');
 
-      const user = await prisma.user.findUnique({ where: { id: first.body.token } });
+      const user = await prisma.user.findUnique({ where: { id: onetap.body.token } });
       assert.equal(user?.wechatOpenId, 'openid-test-a');
       assert.equal(user?.wechatUnionId, 'unionid-test-a');
     } finally {
       globalThis.fetch = oldFetch;
       delete process.env.WECHAT_MINI_APPID;
       delete process.env.WECHAT_MINI_SECRET;
+      _resetTokenCache();
     }
   });
 
@@ -241,95 +260,194 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
     assert.equal(aliyunSignature('GET', p, 'sk'), aliyunSignature('GET', p, 'sk'));
   });
 
-  test('F11 先「微信一键登录」建号、后「本机号一键登录」不应另建新号（身份分裂回归）', async () => {
+  // ── F11~F15：手机号为唯一身份键的分支矩阵 ──
+  // 口径：登录身份只按手机号解析；微信 openid/unionid 只是补充绑定，每次手机号快捷登录都
+  // 强制迁绑到当前手机号账号（留审计）。不再有 PHONE_TAKEN / WECHAT_ACCOUNT_CONFLICT。
+  const masked = (phone: string) => `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+
+  /** 在微信 mock（loginCode→openid、phoneCode→手机号，两张表可在用例里就地补充）下跑一段用例。 */
+  async function withWechatMock(
+    openidByLoginCode: Record<string, string>,
+    phoneByCode: Record<string, string>,
+    fn: () => Promise<void>,
+  ) {
     const oldFetch = globalThis.fetch;
     process.env.WECHAT_MINI_APPID = 'wx-test-appid';
     process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
     _resetTokenCache();
-    const fragOpenid = 'openid-frag-' + Math.random().toString(36).slice(2);
-    const otherOpenid = 'openid-other-' + Math.random().toString(36).slice(2);
-    const conflictPhone = uniquePhone();
-    const realPhone = uniquePhone();
-    const nextPhone = uniquePhone();
-    const phoneByCode: Record<string, string> = {};
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
       if (url.includes('stable_token')) {
-        return new Response(JSON.stringify({ access_token: 'tok-frag', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ access_token: 'tok-identity', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.includes('jscode2session')) {
-        return new Response(JSON.stringify({ openid: url.includes('wx-code-other') ? otherOpenid : fragOpenid }), { status: 200, headers: { 'content-type': 'application/json' } });
+        const code = new URL(url).searchParams.get('js_code') ?? '';
+        const openid = openidByLoginCode[code];
+        assert.ok(openid, `用例未登记 loginCode=${code} 的 openid`);
+        return new Response(JSON.stringify({ openid }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.includes('getuserphonenumber')) {
         const body = init?.body ? JSON.parse(String(init.body)) : {};
         const phone = phoneByCode[body.code as string];
+        assert.ok(phone, `用例未登记 phoneCode=${body.code} 的手机号`);
         return new Response(JSON.stringify({ errcode: 0, phone_info: { purePhoneNumber: phone, countryCode: '86' } }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       throw new Error('unexpected fetch ' + url);
     }) as typeof fetch;
     try {
-      // 1) 先用「微信一键登录」建号 A（占位手机号 wx_<openid>）。
-      const wxLogin = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-frag' } });
-      assert.equal(wxLogin.status, 200);
-      assert.equal(wxLogin.body.isNew, true);
-      const tokenA = wxLogin.body.token as string;
-
-      // 2) 另一个真实用户 C 已占用 conflictPhone。
-      const tokenC = await login(conflictPhone);
-
-      // 3) 本机号一键登录：同一 openid，但取回的手机号已被 C 占用 → 409 PHONE_TAKEN，不应静默建号/顶号。
-      phoneByCode['pc-conflict'] = conflictPhone;
-      const conflict = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-conflict', loginCode: 'wx-code-frag-again' } });
-      assert.equal(conflict.status, 409);
-      assert.equal(conflict.body.code, 'PHONE_TAKEN');
-      const aAfterConflict = await prisma.user.findUnique({ where: { id: tokenA } });
-      assert.equal(aAfterConflict?.wechatOpenId, fragOpenid, 'A 的 openid 关联不应被冲突尝试破坏');
-      assert.ok(aAfterConflict?.phone.startsWith('wx_'), 'A 的占位手机号不应被冲突尝试改写');
-      const cAfterConflict = await prisma.user.findUnique({ where: { id: tokenC } });
-      assert.equal(cAfterConflict?.phone, conflictPhone, 'C 的账号不应受影响');
-
-      // 4) 本机号一键登录：同一 openid，取回未占用的真实手机号 → 应命中账号 A（同 token），而非另建新号。
-      phoneByCode['pc-real'] = realPhone;
-      const onetap = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-real', loginCode: 'wx-code-frag-again' } });
-      assert.equal(onetap.status, 200);
-      assert.equal(onetap.body.isNew, false);
-      assert.equal(onetap.body.token, tokenA, '同一微信身份的本机号一键登录应复用微信一键登录建的账号，而非另建新号');
-      assert.equal(onetap.body.user.phone, realPhone);
-      assert.deepEqual(onetap.body.phoneBinding, {
-        status: 'placeholder_upgraded',
-        accountPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
-        observedPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
-      });
-
-      // 5) 同一 openid 已有真实号后，本次授权另一个未占用号码：仍登录 A，但不得静默换绑。
-      phoneByCode['pc-mismatch'] = nextPhone;
-      const mismatch = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-mismatch', loginCode: 'wx-code-frag-again' } });
-      assert.equal(mismatch.status, 200);
-      assert.equal(mismatch.body.token, tokenA);
-      assert.equal(mismatch.body.user.phone, realPhone, '响应必须展示账号既有绑定号，不得冒充本次授权号');
-      assert.deepEqual(mismatch.body.phoneBinding, {
-        status: 'mismatch',
-        accountPhoneMasked: `${realPhone.slice(0, 3)}****${realPhone.slice(-4)}`,
-        observedPhoneMasked: `${nextPhone.slice(0, 3)}****${nextPhone.slice(-4)}`,
-      });
-      assert.equal((await prisma.user.findUnique({ where: { id: tokenA } }))?.phone, realPhone, '登录动作不得改写真实绑定号');
-
-      // 6) 另一微信身份拿同一个手机号来登录：手机号能定位 A，但微信凭证不能静默忽略，明确报身份冲突。
-      phoneByCode['pc-other-wechat'] = realPhone;
-      const identityConflict = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-other-wechat', loginCode: 'wx-code-other' } });
-      assert.equal(identityConflict.status, 409);
-      assert.equal(identityConflict.body.code, 'WECHAT_ACCOUNT_CONFLICT');
-
-      // 7) 之后再用「微信一键登录」复登，应仍是同一账号且能看到真实手机号（已从占位号更新）。
-      const wxAgain = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-frag-2' } });
-      assert.equal(wxAgain.body.token, tokenA);
-      assert.equal(wxAgain.body.user.phone, realPhone);
+      await fn();
     } finally {
       globalThis.fetch = oldFetch;
       delete process.env.WECHAT_MINI_APPID;
       delete process.env.WECHAT_MINI_SECRET;
       _resetTokenCache();
     }
+  }
+
+  /** 造一个历史「纯微信」占位账号（phone=wx_<openid>）：新链路不再产生，但存量还在。 */
+  async function seedLegacyWechatAccount(openid: string) {
+    const tenant = await prisma.tenant.create({ data: { name: '' } });
+    return prisma.user.create({
+      data: { tenantId: tenant.id, phone: `wx_${openid}`, name: '', role: 'owner', benmingColor: 'green', wechatOpenId: openid, wechatLinkedAt: new Date() },
+    });
+  }
+
+  test('F11 同手机号 + 同 openid → matched，复登同一账号', async () => {
+    const openid = 'openid-same-' + Math.random().toString(36).slice(2);
+    const phone = uniquePhone();
+    await withWechatMock({ 'lc-same': openid }, { 'pc-1': phone, 'pc-2': phone }, async () => {
+      const first = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-1', loginCode: 'lc-same' } });
+      assert.equal(first.status, 200);
+      assert.equal(first.body.isNew, true);
+      assert.equal(first.body.phoneBinding.status, 'matched');
+
+      const again = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-2', loginCode: 'lc-same' } });
+      assert.equal(again.status, 200);
+      assert.equal(again.body.isNew, false);
+      assert.equal(again.body.token, first.body.token, '同手机号同 openid 必须复用同一账号');
+      assert.deepEqual(again.body.phoneBinding, {
+        status: 'matched',
+        accountPhoneMasked: masked(phone),
+        observedPhoneMasked: masked(phone),
+      });
+    });
+  });
+
+  test('F12 同手机号 + 换了微信（新 openid）→ 登录原账号，openid 被覆盖，binding=wechat_relinked', async () => {
+    const oldOpenid = 'openid-old-' + Math.random().toString(36).slice(2);
+    const newOpenid = 'openid-new-' + Math.random().toString(36).slice(2);
+    const phone = uniquePhone();
+    await withWechatMock({ 'lc-old': oldOpenid, 'lc-new': newOpenid }, { 'pc-1': phone, 'pc-2': phone }, async () => {
+      const first = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-1', loginCode: 'lc-old' } });
+      const token = first.body.token as string;
+
+      const relinked = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-2', loginCode: 'lc-new' } });
+      assert.equal(relinked.status, 200);
+      assert.equal(relinked.body.token, token, '手机号才是身份键：换微信仍进原账号');
+      assert.deepEqual(relinked.body.phoneBinding, {
+        status: 'wechat_relinked',
+        accountPhoneMasked: masked(phone),
+        observedPhoneMasked: masked(phone),
+      });
+      const user = await prisma.user.findUnique({ where: { id: token } });
+      assert.equal(user?.wechatOpenId, newOpenid, '账号上的 openid 应被本次微信身份覆盖');
+      assert.equal(await prisma.user.count({ where: { wechatOpenId: oldOpenid } }), 0, '旧 openid 不得残留在任何账号上');
+    });
+  });
+
+  test('F13 openid 原挂真实号账号 C、本次授权手机号无账号 → 新建账号并把微信身份迁过来', async () => {
+    const openid = 'openid-move-' + Math.random().toString(36).slice(2);
+    const phoneC = uniquePhone();
+    const phoneNew = uniquePhone();
+    await withWechatMock({ 'lc-move': openid }, { 'pc-c': phoneC, 'pc-new': phoneNew }, async () => {
+      const c = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-c', loginCode: 'lc-move' } });
+      const tokenC = c.body.token as string;
+
+      const fresh = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-new', loginCode: 'lc-move' } });
+      assert.equal(fresh.status, 200);
+      assert.equal(fresh.body.isNew, true, '手机号没账号就必须新建，不得顶到 openid 的老账号上');
+      assert.notEqual(fresh.body.token, tokenC);
+      assert.equal(fresh.body.user.phone, phoneNew);
+      assert.deepEqual(fresh.body.phoneBinding, {
+        status: 'wechat_relinked',
+        accountPhoneMasked: masked(phoneNew),
+        observedPhoneMasked: masked(phoneNew),
+      });
+      const moved = await prisma.user.findUnique({ where: { id: fresh.body.token } });
+      assert.equal(moved?.wechatOpenId, openid);
+      const after = await prisma.user.findUnique({ where: { id: tokenC } });
+      assert.equal(after?.wechatOpenId, null, 'C 的微信绑定应被解绑');
+      assert.equal(after?.wechatLinkedAt, null);
+      assert.equal(after?.phone, phoneC, 'C 的手机号（身份键）不得被登录动作改写');
+
+      // 审计：解绑方与改绑方各一条，且只落掩码，不落手机号明文。
+      const detached = await prisma.auditLog.findFirst({ where: { action: 'auth.wechat_identity_detached', userId: tokenC }, orderBy: { createdAt: 'desc' } });
+      assert.ok(detached, '被迁走的账号必须留解绑审计');
+      const detachedPayload = detached!.payloadJson as any;
+      assert.equal(detachedPayload.toUserId, fresh.body.token);
+      assert.equal(detachedPayload.phoneMasked, masked(phoneC));
+      assert.ok(!JSON.stringify(detachedPayload).includes(phoneC), '审计不得落手机号明文');
+
+      const relinkedLog = await prisma.auditLog.findFirst({ where: { action: 'auth.wechat_relinked', userId: fresh.body.token }, orderBy: { createdAt: 'desc' } });
+      assert.ok(relinkedLog, '改绑方必须留 relink 审计');
+      const relinkedPayload = relinkedLog!.payloadJson as any;
+      assert.equal(relinkedPayload.fromUserId, tokenC);
+      assert.ok(!JSON.stringify(relinkedPayload).includes(phoneNew), '审计不得落手机号明文');
+
+      // 迁走之后，微信快捷登录进的是新账号。
+      const wxLogin = await api('POST', '/api/auth/wechat-login', { body: { code: 'lc-move' } });
+      assert.equal(wxLogin.status, 200);
+      assert.equal(wxLogin.body.token, fresh.body.token);
+    });
+  });
+
+  test('F14 历史占位账号（wx_ 前缀）首次补真实号 → placeholder_upgraded，账号 id 不变', async () => {
+    const openid = 'openid-legacy-' + Math.random().toString(36).slice(2);
+    const legacy = await seedLegacyWechatAccount(openid);
+    const phone = uniquePhone();
+    await withWechatMock({ 'lc-legacy': openid }, { 'pc-legacy': phone }, async () => {
+      const r = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-legacy', loginCode: 'lc-legacy' } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.isNew, false);
+      assert.equal(r.body.token, legacy.id, '占位账号原地升级，不新建账号');
+      assert.equal(r.body.user.phone, phone);
+      assert.deepEqual(r.body.phoneBinding, {
+        status: 'placeholder_upgraded',
+        accountPhoneMasked: masked(phone),
+        observedPhoneMasked: masked(phone),
+      });
+      const upgraded = await prisma.user.findUnique({ where: { id: legacy.id } });
+      assert.equal(upgraded?.phone, phone);
+      assert.equal(upgraded?.wechatOpenId, openid);
+    });
+  });
+
+  test('F15 占位账号的 openid + 手机号已属账号 A → 登录 A（不再 409），openid 从占位账号迁到 A', async () => {
+    const openid = 'openid-legacy2-' + Math.random().toString(36).slice(2);
+    const legacy = await seedLegacyWechatAccount(openid);
+    const phoneA = uniquePhone();
+    const tokenA = await login(phoneA);
+    await withWechatMock({ 'lc-legacy2': openid }, { 'pc-taken': phoneA }, async () => {
+      const r = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-taken', loginCode: 'lc-legacy2' } });
+      assert.equal(r.status, 200, '手机号能定位到账号 = 就是这个人，不再报 PHONE_TAKEN');
+      assert.equal(r.body.isNew, false);
+      assert.equal(r.body.token, tokenA);
+      assert.deepEqual(r.body.phoneBinding, {
+        status: 'wechat_relinked',
+        accountPhoneMasked: masked(phoneA),
+        observedPhoneMasked: masked(phoneA),
+      });
+      const a = await prisma.user.findUnique({ where: { id: tokenA } });
+      assert.equal(a?.wechatOpenId, openid);
+      const stale = await prisma.user.findUnique({ where: { id: legacy.id } });
+      assert.equal(stale?.wechatOpenId, null, '占位账号的微信绑定应被迁走');
+      assert.equal(stale?.phone, `wx_${openid}`, '占位账号的 phone 不因迁绑而改写');
+
+      const detached = await prisma.auditLog.findFirst({ where: { action: 'auth.wechat_identity_detached', userId: legacy.id }, orderBy: { createdAt: 'desc' } });
+      assert.ok(detached, '占位账号被迁走也要留审计');
+      assert.equal((detached!.payloadJson as any).phoneMasked, '微信账号', '占位号脱敏成「微信账号」，不落 openid 明文');
+      assert.ok(!JSON.stringify(detached!.payloadJson).includes(openid), '审计不得落 openid 明文');
+    });
   });
 });
 

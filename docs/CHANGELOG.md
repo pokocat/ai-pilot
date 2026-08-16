@@ -13,6 +13,12 @@
 - **原子发布**：`deploy-preprod.sh` 改在磁盘 `/opt/junshi-preprod/releases/release-*` 构建候选版本，在线 `/opt/junshi-preprod/server` 在候选 `dist/index.js` 就绪前不变；最终以符号链接原子切换，服务启动或本机 health 失败自动回滚上一目标，部署版本只在健康后落盘。
 - **硬资源闸**：构建前 `MemAvailable <3GiB` 直接拒绝；`npm ci`、`prisma generate`、`npm run build` 全部进入 transient systemd cgroup，限制 `MemoryMax=2G`、`MemorySwapMax=0`、`CPUQuota=100%`、`Nice=19` 与 idle IO。Swap、迁出预发/AIStar、ECS 扩容按用户决定暂缓，已写入 AGENTS §13。
 
+### 2026-08-15 · 手机号成为唯一用户身份，第三方身份改为附着绑定 · 影响面：登录契约、原生小程序与 H5 登录层、错误码文案、回归测试与文档
+
+- **新身份口径**：账号身份识别只认手机号；openid/unionid 降级为附着在账号上的第三方绑定。`/auth/wechat-phone` 一律按本次授权手机号定位账号，第三方身份自动跟随迁绑；`LoginPhoneBinding.status` 改为 `matched / placeholder_upgraded / wechat_relinked`，`mismatch` 及其「登录进原账号但不改号」的解释链路删除。该接口不再返回 `PHONE_TAKEN` / `WECHAT_ACCOUNT_CONFLICT`，显式换绑 `/auth/bind-phone` 的 409 `PHONE_TAKEN` 不变。
+- **端上改动**：原生登录层 `login-sheet` 与 Taro `Login` 把 `mismatch` 弹窗换成 `wechat_relinked` 的非阻断说明（「已按授权手机号登录」，并指路用原手机号验证码找回原账号）；登录层可见文案继续零平台名，审核红线断言保持并通过。Taro 纯 code 登录遇到 404 `PHONE_LOGIN_REQUIRED` 不再弹错误，直接切到手机号验证码阶段，登录成功后第三方身份自动附着；两套错误码表补 `PHONE_LOGIN_REQUIRED` 兜底文案。
+- **占位号**：`wx_<openid>` 占位手机号停止新增，存量仅允许首次补真实号时升级。
+
 ### 2026-08-15 · 预发矩阵验收抓到生图假二维码，收紧 actionZone 措辞与 no-text 子句 · 影响面：styleLibrary、imagePrompt
 
 - **发现**：8 版式 × 6 方向真实矩阵（48 单全部成功）验收中，photo_product 方向 3-4 张主视觉被 Seedream **画上了假二维码**（brief 未含任何码）。根因：`actionZone` 骨架措辞点名了 "for an overlaid QR code"，扩散模型见词起意把码画进主视觉。假码扫出来是空的，违反「绝不画假二维码」铁律。

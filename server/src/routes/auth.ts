@@ -1,4 +1,6 @@
-// 账号体系：微信小程序用 openid/unionid/本机号登录；手机号短信登录保留免码兼容兜底。
+// 账号体系：**手机号是账号的唯一登录身份键**。登录身份解析只看手机号；openid/unionid 只是
+// 附着在账号上的补充绑定（快捷登录关联 + 昵称头像场景），会随每次手机号快捷登录迁到当前账号。
+// 纯 openid 登录不再建号：未关联过手机号账号的 openid 直接 404 PHONE_LOGIN_REQUIRED。
 // 新账号自动建独立租户(Tenant)+用户(User)，业务数据按 tenantId/userId 行级隔离。
 // 登录态 token 经 services/userToken.ts：配 APP_JWT_SECRET 后签发 HS256 JWT，
 // 未配则回退历史口径 token=userId（校验侧同样兼容，平滑过渡）。
@@ -7,7 +9,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env, registrationDefaultPlanName } from '../env.js';
-import { code2Session, wechatAccountKey, getPhoneNumberByCode } from '../services/wechat.js';
+import { code2Session, getPhoneNumberByCode } from '../services/wechat.js';
 import { issueSmsCode, verifySmsCode } from '../services/sms.js';
 import { signUserToken } from '../services/userToken.js';
 import { resolveUser } from '../services/context.js';
@@ -93,9 +95,6 @@ async function createUserWithTenant(opts: {
   name: string;
   auditAction: string;
   auditPayload: object;
-  avatarUrl?: string;
-  wechatOpenId?: string;
-  wechatUnionId?: string;
 }): Promise<AuthUser> {
   // 2026-07-28 去免费档改版：产品不再有免费档，注册默认**不送任何套餐**（裸注册账号只读，
   // 见 app.ts 禁写闸）。唯一例外是测试期——TEST_DEFAULT_PLAN_NAME 配置后按正式购买链路
@@ -119,12 +118,8 @@ async function createUserWithTenant(opts: {
         tenantId: tenant.id,
         phone: opts.phone,
         name: opts.name,
-        avatarUrl: opts.avatarUrl,
         role: 'owner',
         benmingColor: 'green',
-        wechatOpenId: opts.wechatOpenId,
-        wechatUnionId: opts.wechatUnionId,
-        wechatLinkedAt: opts.wechatOpenId ? new Date() : undefined,
       },
     });
     if (plan) {
@@ -183,37 +178,82 @@ async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ u
   return { user, isNew: true };
 }
 
-type WechatLinkResult = { user: AuthUser; status: 'already_linked' | 'linked' | 'conflict' };
-
 function isUniqueConflict(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
 /**
- * 把微信凭证关联到手机号账号。
+ * 把本次微信凭证**强制**绑定到手机号账号上——微信身份跟随手机号，不再反过来。
  *
- * 旧实现 catch 所有异常后继续登录：唯一键竞争与数据库故障都会被伪装成“登录成功但没关联”，
- * 用户随后在微信登录与短信登录之间横跳。现在只把可识别的身份冲突作为业务结果返回；
- * 数据库故障继续抛出，由路由明确失败并落 auth attempt。
+ * 手机号是唯一身份键，所以这里不存在「身份冲突」这种业务结果：openid 若原本挂在别的账号上，
+ * 先解绑（留审计）再绑到当前账号；当前账号原有的不同 openid 被本次覆盖（同样留审计）。
+ * 全程一个事务，避免解绑成功、改绑失败留下双方都没绑的中间态。
+ * 数据库故障继续抛出，不把 DB 故障伪装成登录成功。
  */
-async function linkWechatIdentity(user: AuthUser, openid: string, unionid?: string): Promise<WechatLinkResult> {
-  if (user.wechatOpenId && user.wechatOpenId !== openid) return { user, status: 'conflict' };
-  if (unionid && user.wechatUnionId && user.wechatUnionId !== unionid) return { user, status: 'conflict' };
-  if (user.wechatOpenId && (!unionid || user.wechatUnionId)) return { user, status: 'already_linked' };
-  try {
-    const linked = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        wechatOpenId: user.wechatOpenId || openid,
-        wechatUnionId: user.wechatUnionId || unionid,
-        wechatLinkedAt: user.wechatLinkedAt || new Date(),
+async function forceLinkWechatIdentity(
+  user: AuthUser,
+  openid: string,
+  unionid?: string,
+): Promise<{ user: AuthUser; moved: boolean }> {
+  const sameOpenid = user.wechatOpenId === openid;
+  const overwritten = !!user.wechatOpenId && !sameOpenid; // 本账号原有的另一个微信身份被顶掉
+  return prisma.$transaction(async (tx) => {
+    // 1) 该 openid/unionid 若挂在别的账号上，先解绑（审计只落布尔与掩码，不落凭证明文）。
+    const others = await tx.user.findMany({
+      where: {
+        id: { not: user.id },
+        OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])],
       },
+      select: { id: true, tenantId: true, phone: true },
     });
-    return { user: linked, status: 'linked' };
-  } catch (error) {
-    if (isUniqueConflict(error)) return { user, status: 'conflict' };
-    throw error;
-  }
+    for (const other of others) {
+      await tx.user.update({
+        where: { id: other.id },
+        data: { wechatOpenId: null, wechatUnionId: null, wechatLinkedAt: null },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: other.tenantId,
+          userId: other.id,
+          action: 'auth.wechat_identity_detached',
+          payloadJson: { toUserId: user.id, phoneMasked: maskAuditPhone(other.phone), wechat: true, unionid: !!unionid },
+        },
+      });
+    }
+
+    // 2) 绑到目标账号。openid 相同 → 只补缺失的 unionid；openid 变了 → unionid 以本次为准，
+    //    本次没返回就置 null（旧 unionid 属于旧微信身份，不能残留在新身份上）。
+    const linked = sameOpenid
+      ? unionid && !user.wechatUnionId
+        ? await tx.user.update({
+            where: { id: user.id },
+            data: { wechatUnionId: unionid, wechatLinkedAt: user.wechatLinkedAt ?? new Date() },
+          })
+        : user
+      : await tx.user.update({
+          where: { id: user.id },
+          data: { wechatOpenId: openid, wechatUnionId: unionid ?? null, wechatLinkedAt: new Date() },
+        });
+
+    const moved = others.length > 0 || overwritten;
+    if (moved) {
+      await tx.auditLog.create({
+        data: {
+          tenantId: user.tenantId,
+          userId: user.id,
+          action: 'auth.wechat_relinked',
+          payloadJson: {
+            ...(others[0] ? { fromUserId: others[0].id } : {}),
+            overwritten,
+            detached: others.length,
+            wechat: true,
+            unionid: !!unionid,
+          },
+        },
+      });
+    }
+    return { user: linked, moved };
+  });
 }
 
 function phoneBinding(status: LoginPhoneBinding['status'], accountPhone: string, observedPhone: string): LoginPhoneBinding {
@@ -343,22 +383,21 @@ export async function authRoutes(app: FastifyInstance) {
       const wx = await code2Session(parsed.data.code);
       const conditions = [{ wechatOpenId: wx.openid }, ...(wx.unionid ? [{ wechatUnionId: wx.unionid }] : [])];
       let user: AuthUser | null = await prisma.user.findFirst({ where: { OR: conditions } });
-      let isNew = false;
 
+      // 手机号是唯一身份键：纯 openid 不再建号。没关联过任何账号的微信身份必须先走手机号登录，
+      // 由 /auth/wechat-phone 把这次 openid 绑到手机号账号上，之后才能用它快捷复登。
       if (!user) {
-        isNew = true;
-        // 微信昵称多为匿名「微信用户」，不可靠；留空，首登建档采集真实称呼。
-        const name = parsed.data.nickname?.trim() || '';
-        user = await createUserWithTenant({
-          phone: wechatAccountKey(wx.openid),
-          name,
-          avatarUrl: parsed.data.avatarUrl, // 客户端「头像昵称填写能力」选取并上传后回传的公网链接（可选）
-          auditAction: 'auth.wechat_register',
-          auditPayload: { wechat: true, unionid: !!wx.unionid },
-          wechatOpenId: wx.openid,
-          wechatUnionId: wx.unionid,
+        await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
+          ok: false,
+          statusCode: 404,
+          wechat: true,
+          unionid: !!wx.unionid,
+          errorCode: 'PHONE_LOGIN_REQUIRED',
         });
-      } else if (!user.wechatOpenId || (wx.unionid && !user.wechatUnionId)) {
+        return reply.code(404).send({ error: '当前快捷登录尚未关联账号，请先用手机号登录', code: 'PHONE_LOGIN_REQUIRED' });
+      }
+
+      if (!user.wechatOpenId || (wx.unionid && !user.wechatUnionId)) {
         user = await prisma.user.update({
           where: { id: user.id },
           data: {
@@ -368,19 +407,17 @@ export async function authRoutes(app: FastifyInstance) {
           },
         });
       }
-      if (!isNew) {
-        await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'auth.wechat_login', payload: { wechat: true, unionid: !!wx.unionid } });
-      }
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'auth.wechat_login', payload: { wechat: true, unionid: !!wx.unionid } });
       await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
         ok: true,
         statusCode: 200,
         wechat: true,
         unionid: !!wx.unionid,
         nicknameProvided: !!parsed.data.nickname,
-        isNew,
+        isNew: false,
       }, user);
 
-      return loginResult(user, isNew, await onboardedOf(user));
+      return loginResult(user, false, await onboardedOf(user));
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
@@ -394,7 +431,8 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  // 本机号一键登录：getPhoneNumber 的 phoneCode 换手机号 → 统一登录建号；可选 loginCode 顺带关联 openid。
+  // 本机号一键登录（手机号唯一身份键的正门）：phoneCode 换手机号 → 按手机号定位/新建账号；
+  // 可选 loginCode 换到的 openid/unionid 一律强制绑到该账号（原挂别处先解绑，留审计）。
   app.post('/auth/wechat-phone', async (req, reply) => {
     const parsed = wechatPhoneSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -414,58 +452,47 @@ export async function authRoutes(app: FastifyInstance) {
         try { const wx = await code2Session(parsed.data.loginCode); openid = wx.openid; unionid = wx.unionid; } catch { /* 关联失败不阻断登录 */ }
       }
 
-      // 先按 openid/unionid 找已有微信账号（与 /auth/wechat-login 同一套识别口径）——
-      // 避免同一个人先用「微信一键登录」建号（phone=wx_<openid> 占位）、
-      // 后用本机号一键登录时按手机号查不到旧号从而另建新号，导致身份永久分裂。
-      const byWechat = openid
-        ? await prisma.user.findFirst({ where: { OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])] } })
-        : null;
-
+      // 身份解析只看手机号：手机号找到账号 = 就是这个人，不存在 PHONE_TAKEN / 微信身份冲突。
+      // 微信身份反过来跟随手机号账号走（forceLinkWechatIdentity 负责强制迁绑 + 审计）。
       let user: AuthUser;
       let isNew: boolean;
-      let binding: LoginPhoneBinding | undefined;
-      if (byWechat) {
+      let binding: LoginPhoneBinding;
+
+      /** 手机号已定位到账号：登录它，并把本次微信身份强制绑上来。 */
+      const loginAndLink = async (target: AuthUser): Promise<{ user: AuthUser; binding: LoginPhoneBinding }> => {
+        if (!openid) return { user: target, binding: phoneBinding('matched', target.phone, phone) };
+        const linked = await forceLinkWechatIdentity(target, openid, unionid);
+        return { user: linked.user, binding: phoneBinding(linked.moved ? 'wechat_relinked' : 'matched', linked.user.phone, phone) };
+      };
+
+      const byPhone = await prisma.user.findUnique({ where: { phone } });
+      if (byPhone) {
         isNew = false;
-        if (byWechat.phone === phone) {
-          user = byWechat;
-          binding = phoneBinding('matched', byWechat.phone, phone);
-        } else {
-          const taken = await prisma.user.findUnique({ where: { phone } });
-          if (taken && taken.id !== byWechat.id) {
-            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
-            return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
-          }
-          // 只允许历史纯微信占位号首次升级成真实手机号。已有真实号与本次授权号不同，
-          // 仍进入同一个 openid 账号，但绝不在登录动作里静默换绑；换号必须去设置用新号验证码显式确认。
-          if (byWechat.phone.startsWith('wx_')) {
-            try {
-              user = await prisma.user.update({ where: { id: byWechat.id }, data: { phone } });
-              binding = phoneBinding('placeholder_upgraded', phone, phone);
-            } catch (error) {
-              if (isUniqueConflict(error)) {
-                await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
-                return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
-              }
-              throw error;
-            }
-          } else {
-            user = byWechat;
-            binding = phoneBinding('mismatch', byWechat.phone, phone);
-          }
-        }
+        ({ user, binding } = await loginAndLink(byPhone));
       } else {
-        ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
-        if (openid) {
-          const linked = await linkWechatIdentity(user, openid, unionid);
-          if (linked.status === 'conflict') {
-            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
-              ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'WECHAT_ACCOUNT_CONFLICT',
-            }, user);
-            return reply.code(409).send({ error: '当前登录身份已关联其他账号，请改用原账号登录或联系客服', code: 'WECHAT_ACCOUNT_CONFLICT' });
+        const byWechat = openid
+          ? await prisma.user.findFirst({ where: { OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])] } })
+          : null;
+        if (byWechat && byWechat.phone.startsWith('wx_')) {
+          // 历史纯微信占位账号（wx_<openid>）首次补上真实手机号：保留老数据，不新建账号。
+          // 这是「登录动作里改 phone」的唯一例外，其余换号一律走 /auth/bind-phone 显式验证。
+          isNew = false;
+          try {
+            user = await prisma.user.update({ where: { id: byWechat.id }, data: { phone } });
+            binding = phoneBinding('placeholder_upgraded', phone, phone);
+          } catch (error) {
+            if (!isUniqueConflict(error)) throw error;
+            // 竞态：这一瞬另一路请求已用该手机号建了号 → 退回「手机号定位账号」口径。
+            const raced = await prisma.user.findUnique({ where: { phone } });
+            if (!raced) throw error;
+            ({ user, binding } = await loginAndLink(raced));
           }
-          user = linked.user;
+        } else {
+          // 手机号没账号 → 以手机号建号。即便本次 openid 原挂在别的真实号账号上，
+          // 也是建这个手机号的新账号、把微信身份迁过来（手机号才是身份键）。
+          ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
+          ({ user, binding } = await loginAndLink(user));
         }
-        binding = phoneBinding('matched', user.phone, phone);
       }
 
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });

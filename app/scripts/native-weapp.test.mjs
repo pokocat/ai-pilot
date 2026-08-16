@@ -89,7 +89,8 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   // 2026-08-12 IA 重排：+1 = pages/pouch（锦囊作品页）。studio 降为过渡跳转页但仍注册（接老分享卡）。
   // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
   // 2026-08-13 成片封面：+1 = packages/video/cover（出片确认页的可选支线，填四个文本槽位）。
-  assert.equal(routes.length, 52, '路由数量变化时必须同步审计原生迁移覆盖');
+  // 2026-08-15 独立声音：+1 = packages/video/voices（我的声音列表页，声音可脱离形象单独存在）。
+  assert.equal(routes.length, 53, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -509,8 +510,8 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.safe-title-wrap\s*\{[^}]*text-align:\s*left;/s);
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
-  // 主包/既有分包 36 页 + 快出片分包 13 页（+templates 模板专区、+cover 成片封面），全部复用同一套胶囊几何。
-  assert.equal(navRoots.length, 49);
+  // 主包/既有分包 36 页 + 快出片分包 14 页（+templates 模板专区、+cover 成片封面、+voices 我的声音），全部复用同一套胶囊几何。
+  assert.equal(navRoots.length, 50);
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {
@@ -600,8 +601,9 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(nativeLoginWxml, /完成并开始入局/);
   assert.match(nativeLogin, /presentAfterAuth\(result\)[\s\S]*?if \(!name\)[\s\S]*?stage: 'complete'/);
   assert.match(nativeLogin, /submitWechatPhone\(event\)[\s\S]*?wx\.login[\s\S]*?api\.wechatPhoneLogin\(phoneCode, loginResult\.code\)/);
-  assert.match(nativeLogin, /phoneBinding[\s\S]*?status !== 'mismatch'[\s\S]*?手机号未自动更换/, '同一微信身份授权了不同手机号时必须非阻断说明，不能静默换绑');
-  assert.match(nativeLogin, /presentAfterAuth\(result\);[\s\S]*?presentPhoneBindingNotice\(result\);/, '身份不一致提醒必须发生在登录成功之后');
+  assert.match(nativeLogin, /phoneBinding[\s\S]*?status !== 'wechat_relinked'[\s\S]*?已按授权手机号登录/, '第三方身份自动迁绑到授权手机号账号时必须非阻断说明去向');
+  assert.doesNotMatch(nativeLogin, /'mismatch'/, '手机号已是唯一身份，登录层不得再保留 mismatch 分支');
+  assert.match(nativeLogin, /presentAfterAuth\(result\);[\s\S]*?presentPhoneBindingNotice\(result\);/, '迁绑提醒必须发生在登录成功之后');
   assert.match(nativeLogin, /finishAuth\(onboarded\)[\s\S]*?packages\/main\/onboarding\/index/);
   assert.match(nativeMock, /Object\.assign\(\{ id:[^}]*name: '', company: ''/, 'mock 新账号不得用兜底称呼跳过注册补全');
   assert.match(nativeMock, /function wechatPhoneLogin\(phoneCode\)/);
@@ -617,6 +619,9 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(h5Login, /openType="chooseAvatar" onChooseAvatar=\{onChooseAvatar\}/);
   assert.match(h5Login, /await api\.bindPhone\(phone, code\)/);
   assert.match(h5Login, /Taro\.navigateTo\(\{ url: '\/packages\/main\/onboarding\/index' \}\)/);
+  // 手机号是唯一身份：纯 code 登录遇到未关联身份时服务端不建号，端上必须转手机号验证码而不是报错。
+  assert.match(h5Login, /PHONE_LOGIN_REQUIRED[\s\S]{0,200}?setStage\('phone'\)/, '未关联的快捷登录应切到手机号验证码登录，不能只弹错误 toast');
+  assert.doesNotMatch(h5Login, /'mismatch'/, '手机号已是唯一身份，H5 登录不得再保留 mismatch 分支');
 });
 
 test('iOS 登录补档不得被底层原生输入框拦截，头像无结果必须有反馈', () => {
