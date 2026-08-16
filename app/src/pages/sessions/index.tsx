@@ -11,7 +11,6 @@ import { isChatPending } from '../../services/chatPending';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
-import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
 import type { AuthReason } from '../../services/authGate';
 import { getToken } from '../../services/token';
@@ -196,8 +195,9 @@ export default function Sessions() {
               {aliasOf(a.key) ? <Text className="wx-alias">{aliasOf(a.key)}</Text> : null}
               {unreadBadge(last)}
             </View>
+            {/* 2026-08「确认即启用」：启用不收费，锁态只说「需启用」，端上任何位置都不给启用动作标价。 */}
             <Text className="wx-time" style={locked ? { color: accent } : {}}>
-              {locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : ''}
+              {locked ? '需启用' : last ? relTime(last.updatedAt) : ''}
             </Text>
           </View>
           <Text className="wx-preview">{last?.snippet || `${duty} · ${syncDesc}`}</Text>

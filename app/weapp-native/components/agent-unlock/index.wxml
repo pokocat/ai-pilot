@@ -6,24 +6,11 @@
     <text class="au-role">{{agent.role}}</text>
     <text wx:if="{{agent.deliverableKey}}" class="au-deliver">擅长 · {{agent.deliverableKey}}</text>
 
-    <view class="au-price card">
-      <view class="au-price-col">
-        <text class="au-label">启用所需</text>
-        <view class="au-value"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="18"></native-icon><text>{{priceText}}</text></view>
-      </view>
-      <view class="au-divider"></view>
-      <view class="au-price-col">
-        <text class="au-label">我的余额</text>
-        <text class="au-balance {{enough?'':'low'}}">{{balanceText}}</text>
-      </view>
-    </view>
-
-    <text class="au-note">启用后会加入你的工作台，永久可用；后续深度产出按当前方案消耗权益点。</text>
-    <view wx:if="{{!enough}}" class="au-warning"><native-icon name="alert" tone="red" size="13"></native-icon><text>权益点不足，请到「我的 · 方案与权益」调整</text></view>
+    <text class="au-note">启用后会加入你的工作台，永久可用；对话与深度产出按你当前方案的额度另行计算。</text>
 
     <view class="au-actions">
       <button class="au-btn ghost" bindtap="close">暂不启用</button>
-      <button class="au-btn primary {{enough?'':'insufficient'}}" bindtap="confirm">{{busy?'启用中…':priceText+' 启用'}}</button>
+      <button class="au-btn primary" bindtap="confirm">{{busy?'启用中…':'确认启用'}}</button>
     </view>
   </view>
 </view>

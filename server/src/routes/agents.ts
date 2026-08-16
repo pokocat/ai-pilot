@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { verifyUserToken } from '../services/userToken.js';
-import { chargeCredits, getBalance } from '../services/credits.js';
+import { getBalance } from '../services/credits.js';
 import { ownedAgentKeys, publicOwned } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { parseAttribution, recordActivation } from '../services/activation.js';
@@ -33,7 +33,9 @@ export async function agentRoutes(app: FastifyInstance) {
     return publicAgent(overlayPublished(a, ver), owned);
   });
 
-  // 解锁/购买智能体：仅 unlock 类可购买，消耗算力（按次次数）。free/metered 无需购买。
+  // 启用智能体：仅 unlock 类需要显式启用，「确认即启用」不收费。
+  // 2026-08 计费改造：对话走额度、产出物走独立钻石计费，启用动作本身不再扣权益点
+  // （落库/门禁/来源归因/审计一律保留，只旁路收费；agent.price 仍供 metered 与后台展示用）。
   app.post<{ Params: { key: string }; Body: { source?: string; refId?: string } }>('/agents/:key/purchase', async (req, reply): Promise<AgentPurchaseResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const agent = await prisma.agent.findUnique({ where: { key: req.params.key } });
@@ -50,19 +52,17 @@ export async function agentRoutes(app: FastifyInstance) {
         if (existing) {
           return { alreadyOwned: true, creditBalance: await getBalance(user.id), pricePaid: 0 };
         }
-        const creditBalance = await chargeCredits(user.tenantId, user.id, agent.price, `启用智能体 · ${agent.name}`, tx);
-        const pricePaid = creditBalance < 0 ? 0 : agent.price;
         await tx.userAgent.create({
-          data: { userId: user.id, agentKey: agent.key, source: 'purchase', pricePaid },
+          data: { userId: user.id, agentKey: agent.key, source: 'purchase', pricePaid: 0 },
         });
-        return { alreadyOwned: false, creditBalance, pricePaid };
+        return { alreadyOwned: false, creditBalance: await getBalance(user.id), pricePaid: 0 };
       });
       if (!purchased.alreadyOwned) {
         await recordAudit({
           tenantId: user.tenantId,
           userId: user.id,
           action: 'user.agent.purchase',
-          payload: { agentKey: agent.key, agentName: agent.name, price: agent.price, creditBalance: purchased.creditBalance },
+          payload: { agentKey: agent.key, agentName: agent.name, pricePaid: 0, creditBalance: purchased.creditBalance },
         });
         // D-1 开通来源归因：仅首次解锁记事件（幂等重复不重复计）。source 从请求体读、缺省 catalog、表外回落。
         const { source, refId } = parseAttribution(req.body?.source, req.body?.refId);
@@ -76,12 +76,9 @@ export async function agentRoutes(app: FastifyInstance) {
         alreadyOwned: purchased.alreadyOwned,
       };
     } catch (e) {
-      // 并发重复购买：另一个请求已写入开通记录（唯一约束 userId_agentKey）→ 幂等返回、不重复扣费
+      // 并发重复启用：另一个请求已写入开通记录（唯一约束 userId_agentKey）→ 幂等返回
       if ((e as { code?: string }).code === 'P2002') {
         return { ok: true, agentKey: agent.key, pricePaid: 0, creditBalance: await getBalance(user.id), alreadyOwned: true };
-      }
-      if ((e as { statusCode?: number; code?: string }).code === 'INSUFFICIENT_CREDITS') {
-        return reply.code(402).send({ error: (e as Error).message, code: 'INSUFFICIENT_CREDITS' });
       }
       throw e;
     }

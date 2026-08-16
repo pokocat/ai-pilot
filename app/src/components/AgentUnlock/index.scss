@@ -7,25 +7,9 @@
 .au-role { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
 .au-deliver { font-size: 12px; font-weight: 600; margin-top: 6px; }
 
-.au-price {
-  width: 100%; margin-top: 18px; padding: 14px 16px;
-  display: flex; align-items: center; justify-content: space-between;
-  border-radius: 14px; background: var(--surface, #f6f6f7);
-}
-.au-pl { display: flex; flex-direction: column; gap: 5px; }
-.au-pk { font-size: 11px; color: var(--ink-3); }
-.au-pv-row { display: inline-flex; align-items: center; }
-.au-pv { font-size: 22px; font-weight: 600; }
-.au-pv .unit { font-size: 12px; font-weight: 500; }
-.au-bal { font-size: 15px; font-weight: 600; }
-.au-divider { width: 1px; height: 30px; background: var(--line, #e4e4e7); }
-
-.au-note { font-size: 11.5px; color: var(--ink-3); margin-top: 14px; text-align: center; line-height: 1.5; }
-.au-low { display: flex; align-items: center; gap: 2px; margin-top: 10px; font-size: 11.5px; color: var(--danger); }
+.au-note { font-size: 11.5px; color: var(--ink-3); margin-top: 18px; text-align: center; line-height: 1.5; }
 
 /* 按钮形与态走公共 .btn/.btn-ghost/.btn-primary，此处只定尺寸分配 */
 .au-btns { width: 100%; display: flex; gap: 12px; margin-top: 20px; }
 .au-btn { flex: 1; }
 .au-btn.ghost { flex: 0 0 96px; }
-/* 余额不足：视觉置灰但仍可点（点击给出「去调整方案」提示，非硬禁用） */
-.au-btn.insufficient { opacity: .5; }

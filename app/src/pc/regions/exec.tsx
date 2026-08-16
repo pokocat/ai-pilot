@@ -280,7 +280,7 @@ function CreativeGrid({ st }: { st: PcState }) {
   return (
     <section className="pc-exec-creative">
       <SectionHead kicker="CONTENT OUTPUT" title="内容出品" aside={<button type="button" className="pc-exec-text-btn" onClick={() => platform.navigate('/packages/work/gallery/index')}>作品库 →</button>} />
-      <div className="pc-exec-creative-grid">{rows.map((a) => <button type="button" key={a.key} onClick={() => openChat(st, a.key)}><span className="pc-exec-creative-av">{portraitOf(a.key) ? <i style={{ backgroundImage: `url(${portraitOf(a.key)})` }} /> : a.name.slice(0, 1)}</span><span><b>{a.name}</b><small>{a.role}</small></span><em>{a.billing === 'unlock' && !a.owned ? '待解锁' : '立即出品'} →</em></button>)}</div>
+      <div className="pc-exec-creative-grid">{rows.map((a) => <button type="button" key={a.key} onClick={() => openChat(st, a.key)}><span className="pc-exec-creative-av">{portraitOf(a.key) ? <i style={{ backgroundImage: `url(${portraitOf(a.key)})` }} /> : a.name.slice(0, 1)}</span><span><b>{a.name}</b><small>{a.role}</small></span><em>{a.billing === 'unlock' && !a.owned ? '需启用' : '立即出品'} →</em></button>)}</div>
     </section>
   );
 }

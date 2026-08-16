@@ -131,13 +131,13 @@ export interface Agent {
   deliverableKey: string | null;
 }
 
-/** 购买/解锁智能体结果（POST /agents/:key/purchase） */
+/** 启用智能体结果（POST /agents/:key/purchase）。2026-08 起「确认即启用」，启用动作不收费 */
 export interface AgentPurchaseResult {
   ok: true;
   agentKey: string;
-  pricePaid: number;     // 本次消耗算力
-  creditBalance: number; // 解锁后余额（<0=不限量）
-  alreadyOwned: boolean; // 幂等：已开通则为 true、不重复扣费
+  pricePaid: number;     // 本次消耗算力（启用不再收费，恒为 0；保留字段兼容旧端）
+  creditBalance: number; // 启用后余额（<0=不限量），启用不会改变它
+  alreadyOwned: boolean; // 幂等：已开通则为 true
 }
 
 /** 运营端列表项（GET /admin/agents） */
