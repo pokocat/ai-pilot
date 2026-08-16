@@ -2892,9 +2892,11 @@ function auditLabel(action: string): string {
     'auth.login': '手机号登录',
     'auth.sms.send_attempt': '短信验证码尝试',
     'auth.login.attempt': '手机号登录尝试',
-    'auth.wechat_register': '微信注册',
+    'auth.wechat_register': '微信注册（历史）', // 手机号唯一身份后不再产生新记录，存量日志仍需可读
     'auth.wechat_login': '微信登录',
     'auth.wechat_login.attempt': '微信登录尝试',
+    'auth.wechat_relinked': '微信身份改绑本账号',
+    'auth.wechat_identity_detached': '微信身份被迁走',
     'auth.wechat_phone.attempt': '本机号登录尝试',
     'auth.carrier_onetap.attempt': '运营商一键登录尝试',
     'auth.onetap_register': '一键登录注册',

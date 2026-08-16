@@ -600,8 +600,9 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(nativeLoginWxml, /完成并开始入局/);
   assert.match(nativeLogin, /presentAfterAuth\(result\)[\s\S]*?if \(!name\)[\s\S]*?stage: 'complete'/);
   assert.match(nativeLogin, /submitWechatPhone\(event\)[\s\S]*?wx\.login[\s\S]*?api\.wechatPhoneLogin\(phoneCode, loginResult\.code\)/);
-  assert.match(nativeLogin, /phoneBinding[\s\S]*?status !== 'mismatch'[\s\S]*?手机号未自动更换/, '同一微信身份授权了不同手机号时必须非阻断说明，不能静默换绑');
-  assert.match(nativeLogin, /presentAfterAuth\(result\);[\s\S]*?presentPhoneBindingNotice\(result\);/, '身份不一致提醒必须发生在登录成功之后');
+  assert.match(nativeLogin, /phoneBinding[\s\S]*?status !== 'wechat_relinked'[\s\S]*?已按授权手机号登录/, '第三方身份自动迁绑到授权手机号账号时必须非阻断说明去向');
+  assert.doesNotMatch(nativeLogin, /'mismatch'/, '手机号已是唯一身份，登录层不得再保留 mismatch 分支');
+  assert.match(nativeLogin, /presentAfterAuth\(result\);[\s\S]*?presentPhoneBindingNotice\(result\);/, '迁绑提醒必须发生在登录成功之后');
   assert.match(nativeLogin, /finishAuth\(onboarded\)[\s\S]*?packages\/main\/onboarding\/index/);
   assert.match(nativeMock, /Object\.assign\(\{ id:[^}]*name: '', company: ''/, 'mock 新账号不得用兜底称呼跳过注册补全');
   assert.match(nativeMock, /function wechatPhoneLogin\(phoneCode\)/);
@@ -617,6 +618,9 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(h5Login, /openType="chooseAvatar" onChooseAvatar=\{onChooseAvatar\}/);
   assert.match(h5Login, /await api\.bindPhone\(phone, code\)/);
   assert.match(h5Login, /Taro\.navigateTo\(\{ url: '\/packages\/main\/onboarding\/index' \}\)/);
+  // 手机号是唯一身份：纯 code 登录遇到未关联身份时服务端不建号，端上必须转手机号验证码而不是报错。
+  assert.match(h5Login, /PHONE_LOGIN_REQUIRED[\s\S]{0,200}?setStage\('phone'\)/, '未关联的快捷登录应切到手机号验证码登录，不能只弹错误 toast');
+  assert.doesNotMatch(h5Login, /'mismatch'/, '手机号已是唯一身份，H5 登录不得再保留 mismatch 分支');
 });
 
 test('iOS 登录补档不得被底层原生输入框拦截，头像无结果必须有反馈', () => {

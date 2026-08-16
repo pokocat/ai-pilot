@@ -94,13 +94,13 @@ Component({
     },
     presentPhoneBindingNotice(result) {
       const binding = result && result.phoneBinding;
-      if (!binding || binding.status !== 'mismatch') return;
-      const accountPhone = String(binding.accountPhoneMasked || '原绑定号');
-      const observedPhone = String(binding.observedPhoneMasked || '本次授权号');
-      // 登录已经成功，提醒只解释“为什么还是原账号”，不把用户挡在登录门外。
+      if (!binding || binding.status !== 'wechat_relinked') return;
+      const accountPhone = String(binding.accountPhoneMasked || '本次授权的手机号');
+      // 手机号是唯一身份：登录已按授权号进入对应账号，第三方身份自动跟随迁绑。
+      // 这里只解释“原来那个账号去哪了”，不阻断，也不出现平台名（审核红线）。
       setTimeout(() => wx.showModal({
-        title: '手机号未自动更换',
-        content: `已进入 ${accountPhone} 对应的原账号。本次授权的 ${observedPhone} 未自动绑定；如需更换，请到「主公－设置」验证新号码。`,
+        title: '已按授权手机号登录',
+        content: `本次快捷登录此前关联过另一个手机号账号，现已按你授权的 ${accountPhone} 登录当前账号。如需找回原账号，请用原手机号的短信验证码登录。`,
         showCancel: false,
         confirmText: '知道了',
       }), 120);

@@ -381,25 +381,33 @@ export interface BindPhoneRequest { phoneCode?: string; phone?: string; code?: s
 export interface BindPhoneResult { ok: boolean; phone: string; wechatLinked: boolean; }
 /** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
 export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
+/** 微信快捷登录（POST /auth/wechat-login）：只放行**已关联**手机号账号的 openid/unionid。
+ *  纯 code 不再建号：未关联过任何账号 → 404 PHONE_LOGIN_REQUIRED，须先走手机号登录
+ *  （/auth/wechat-phone 会把这次 openid 绑到手机号账号上），之后才能用它快捷复登。 */
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 /** 本机号一键登录（POST /auth/wechat-phone）：phoneCode=getPhoneNumber 的 code；loginCode=wx.login 的 code（可选，用于关联 openid）。 */
 export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
 /**
- * 手机号快捷登录与账号既有绑定号的核对结果。
+ * 手机号快捷登录的身份解析结果。
  *
- * 账号归属真源始终是不可变的 User.id；openid 与手机号只是登录凭证。服务端只有在历史
- * `wx_<openid>` 占位号首次补成真实手机号时才自动写库。已有真实号与本次授权号不一致时，
- * 登录仍进入原 openid 账号，但只下发脱敏提示，不得静默换绑。
+ * 账号归属真源仍是不可变的 User.id，但**登录身份解析只看手机号**：手机号是账号唯一的登录
+ * 身份键，openid/unionid 只是附着其上的补充绑定。每次手机号快捷登录成功后，本次微信身份
+ * 都会自动迁绑到该手机号账号上（原挂在别的账号则先解绑，账号原有的旧 openid 被覆盖，两边留审计）。
+ * 账号自己的 phone 不会在登录动作里静默变更，唯一例外是历史 `wx_<openid>` 占位号首次升级为真实号。
+ *
+ * - matched：微信身份本来就在这个账号上、或首次关联，无迁移；
+ * - placeholder_upgraded：历史纯微信占位账号首次补上真实手机号；
+ * - wechat_relinked：微信身份发生了迁绑/覆盖，登录成功后的**非阻断**提醒（不再有冲突报错）。
  */
 export interface LoginPhoneBinding {
-  status: 'matched' | 'placeholder_upgraded' | 'mismatch';
+  status: 'matched' | 'placeholder_upgraded' | 'wechat_relinked';
   accountPhoneMasked: string;
   observedPhoneMasked: string;
 }
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;
   user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
-  /** 仅手机号快捷登录需要；旧客户端忽略即可。mismatch 是登录成功后的非阻断提醒。 */
+  /** 仅手机号快捷登录需要；旧客户端忽略即可。wechat_relinked 是登录成功后的非阻断提醒。 */
   phoneBinding?: LoginPhoneBinding;
 }
 

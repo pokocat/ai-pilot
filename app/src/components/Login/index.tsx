@@ -125,14 +125,14 @@ export default function Login({ open, reason, onClose, onLoggedIn }: Props) {
 
   const presentPhoneBindingNotice = (result: LoginResult) => {
     const binding = result.phoneBinding;
-    if (!binding || binding.status !== 'mismatch') return;
-    const accountPhone = binding.accountPhoneMasked || '原绑定号';
-    const observedPhone = binding.observedPhoneMasked || '本次授权号';
-    // 登录本身已经成功；这里只解释账号归属，并把换号动作留给设置里的新号短信验证。
+    if (!binding || binding.status !== 'wechat_relinked') return;
+    const accountPhone = binding.accountPhoneMasked || '本次授权的手机号';
+    // 手机号是唯一身份：登录已按授权号进入对应账号，第三方身份自动跟随迁绑。
+    // 这里只解释原账号的去向，不阻断登录。
     setTimeout(() => {
       void Taro.showModal({
-        title: '手机号未自动更换',
-        content: `已进入 ${accountPhone} 对应的原账号。本次授权的 ${observedPhone} 未自动绑定；如需更换，请到设置验证新号码。`,
+        title: '已按授权手机号登录',
+        content: `本次快捷登录此前关联过另一个手机号账号，现已按你授权的 ${accountPhone} 登录当前账号。如需找回原账号，请用原手机号的短信验证码登录。`,
         showCancel: false,
         confirmText: '知道了',
       });
@@ -149,8 +149,16 @@ export default function Login({ open, reason, onClose, onLoggedIn }: Props) {
       presentAfterAuth(result.onboarded);
       presentPhoneBindingNotice(result);
     } catch (e) {
-      const err = e as Error & { data?: { code?: string } };
-      const message = err?.data?.code === 'WECHAT_CONFIG_MISSING'
+      const err = e as Error & { code?: string; statusCode?: number; data?: { code?: string } };
+      const code = err?.code || err?.data?.code;
+      // 手机号是唯一身份：该微信身份还没关联任何账号时服务端不建号，转手机号验证码登录，
+      // 登录成功后同一微信身份会自动附着到这个手机号账号上。
+      if (code === 'PHONE_LOGIN_REQUIRED' || err?.statusCode === 404) {
+        setStage('phone');
+        Taro.showToast({ title: '请用手机号验证码登录，之后可继续用微信快捷登录', icon: 'none' });
+        return;
+      }
+      const message = code === 'WECHAT_CONFIG_MISSING'
         ? '本地未配置微信登录，请用手机号登录'
         : err?.message || '微信登录失败';
       Taro.showToast({ title: message, icon: 'none' });

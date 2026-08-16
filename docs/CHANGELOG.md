@@ -6,6 +6,12 @@
 
 ## 变更日志
 
+### 2026-08-15 · 手机号成为唯一用户身份，第三方身份改为附着绑定 · 影响面：登录契约、原生小程序与 H5 登录层、错误码文案、回归测试与文档
+
+- **新身份口径**：账号身份识别只认手机号；openid/unionid 降级为附着在账号上的第三方绑定。`/auth/wechat-phone` 一律按本次授权手机号定位账号，第三方身份自动跟随迁绑；`LoginPhoneBinding.status` 改为 `matched / placeholder_upgraded / wechat_relinked`，`mismatch` 及其「登录进原账号但不改号」的解释链路删除。该接口不再返回 `PHONE_TAKEN` / `WECHAT_ACCOUNT_CONFLICT`，显式换绑 `/auth/bind-phone` 的 409 `PHONE_TAKEN` 不变。
+- **端上改动**：原生登录层 `login-sheet` 与 Taro `Login` 把 `mismatch` 弹窗换成 `wechat_relinked` 的非阻断说明（「已按授权手机号登录」，并指路用原手机号验证码找回原账号）；登录层可见文案继续零平台名，审核红线断言保持并通过。Taro 纯 code 登录遇到 404 `PHONE_LOGIN_REQUIRED` 不再弹错误，直接切到手机号验证码阶段，登录成功后第三方身份自动附着；两套错误码表补 `PHONE_LOGIN_REQUIRED` 兜底文案。
+- **占位号**：`wx_<openid>` 占位手机号停止新增，存量仅允许首次补真实号时升级。
+
 ### 2026-08-15 · 修复真机声音增强上传被 multipart 字段上限截断 · 影响面：服务端上传基座、快出片声音/形象克隆、回归测试
 
 - **真机证据与根因**：预发真机两次 `POST /api/video/avatar/clone` 均在 3–9ms 内返回 422，未进入 AIStar。计费版克隆上传会发送 7 个 multipart 字段（微信连空的可选字段也会逐项发送），但 Fastify 全局上限仍为 5；排在最后的 `clientRequestId/expectedCredits` 触发 `ERR_STREAM_PREMATURE_CLOSE`，英文技术错误被端上安全降成“上传未能完成”。
