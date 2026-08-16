@@ -512,7 +512,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 
 生产当前**确实是跨服务器公网 HTTPS 调用**，不是走本机 `:8081`。但两台 ECS 已在同一 VPC `/20`：军师私网地址为 `172.30.184.223`，AIStar 私网地址为 `172.30.184.224`。目标拓扑应保留两台机器的资源隔离，把军师生产回源改成只允许 `172.30.184.223 → 172.30.184.224` 的私网入口，而不是继续绕公网，也不是把 AIStar Clip 生产挤进军师宿主机。
 
-2026-08-12 只读资源核验显示，军师宿主为 4 核 / 7.3 GiB、无 Swap、可用内存约 1.4 GiB；现有 `aistareco-clip-preprod` Java 已常驻约 644 MiB，FFmpeg 出片还会产生瞬时 CPU/内存/磁盘压力。因此当前**不具备再常驻一套 Clip 生产的安全余量**。若未来确需同机，必须先扩容并完成资源限额、生产数据与存储迁移、systemd/env/端口隔离、service token 轮换、回滚和压力验收；不得改进程名称或直接复用 `aistareco-clip-preprod` 冒充生产迁移。
+2026-08-15 事故复盘确认，军师宿主为 4 核 / 7.3 GiB、无 Swap；`/tmp` 是最大占物理内存 50% 的 tmpfs，AIStar Clip 历次部署遗留的时间戳 JAR 曾让 Shmem 从约 48MiB 阶梯增长到约 2.97GiB，部署军师预发时 `MemAvailable` 仅约 670MiB。Dify 已下线（Compose 容器/网络删除，`/opt/dify` 数据保留），AIStar Clip 脚本已补当前/历史 JAR 清理。军师预发改为磁盘 release 候选构建 + `/opt/junshi-preprod/server` 原子链接切换，构建前要求至少 3GiB `MemAvailable`，并用 transient systemd cgroup 限制为 2GiB/单核/idle IO。现有 `aistareco-clip-preprod` Java 与 FFmpeg 仍会产生瞬时 CPU/内存/磁盘压力，因此当前**不具备再常驻一套 Clip 生产的安全余量**。Swap、迁机、8C16G 扩容按 2026-08-15 用户决定暂缓；若未来确需同机，必须先完成资源限额、生产数据与存储迁移、systemd/env/端口隔离、service token 轮换、回滚和压力验收，不得改进程名称或直接复用 `aistareco-clip-preprod` 冒充生产迁移。
 
 #### 服务与配置归属
 
@@ -547,6 +547,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 ## 10. 运维
 - 健康检查：`GET /api/health`（可挂监控/负载均衡探针）。
 - 日志：`journalctl -u junshi-api -f`（或 pm2 logs）。
+- 预发发布：`bash scripts/deploy-preprod.sh`。候选版本在 `/opt/junshi-preprod/releases/release-<sha>-<utc>` 完成依赖、Prisma 生成和 server build，`dist/index.js` 就绪后才原子替换 `/opt/junshi-preprod/server` 符号链接；启动/本机 health 失败自动回滚。默认 `MemAvailable <3072MiB` 拒绝，构建 cgroup 为 `MemoryMax=2G`、`MemorySwapMax=0`、`CPUQuota=100%`。不要绕过闸门在在线目录手工 `npm ci/build`。
 - 现有固定 ECS（`ecs-user@8.136.36.175`，`/opt/junshi` 上传包式部署）升级：从本机仓库根目录执行 `bash scripts/deploy-prod.sh`，默认发布 `server + admin`；如需同步 H5，加 `DEPLOY_H5=1`。不要在远端 `git pull`，脚本会上传当前 git `HEAD` 归档、保留 `server/.env`、构建重启 API、覆盖 `/var/www/junshi/admin/`，并在 H5 模式下把 `app/dist-h5/` 覆盖到 `/var/www/junshi/h5/` 后做公网 smoke；原生微信迁移后 `app/dist/` 已不是 H5 产物。裸 IP 只验 `/api/health`；`/admin/` 只验域名入口，裸 IP `/admin` 预期为 404。
 - 首次部署或换新机器：仍按 §4 裸机步骤准备数据库、systemd、Nginx 与 HTTPS，再把 `scripts/deploy-prod.sh` 的 `DEPLOY_HOST`/`REMOTE_ROOT`/`PUBLIC_BASE`/`PUBLIC_DOMAIN` 指向新环境。
 - 回滚：保留上一个 `dist/` 与前端产物；DB 变更前先 `pg_dump` 备份。

@@ -39,6 +39,7 @@ RUNTIME_USER="junshi"
 PUBLIC="https://wxapi.aibuzz.cn/api_preprod"
 
 SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
+RELEASE_ID="${SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
 
 log(){ printf "\033[1;36m[preprod]\033[0m %s\n" "$*"; }
@@ -53,28 +54,39 @@ scp -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking
 
 log "远端建立/更新 preprod"
 ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$DEPLOY_HOST" \
-  "SHA='${SHA}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' RESEED='$RESEED' bash -se" <<'REMOTE'
+  "SHA='${SHA}' RELEASE_ID='${RELEASE_ID}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' RESEED='$RESEED' bash -se" <<'REMOTE'
 set -euo pipefail
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
-RELEASE="/tmp/junshi-preprod-release-${SHA}"
 DEPLOY_USER="$(id -un)"; DEPLOY_GROUP="$(id -gn)"
+DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
+RELEASES_ROOT="$PREPROD_ROOT/releases"
+RELEASE="$RELEASES_ROOT/release-${RELEASE_ID}"
+CANDIDATE_SERVER="$RELEASE/server"
+LIVE_SERVER="$PREPROD_ROOT/server"
 NGINX_CONF="/etc/nginx/conf.d/junshi.conf"
+MIN_AVAILABLE_MB="${PREPROD_MIN_AVAILABLE_MB:-3072}"
+BUILD_MEMORY_MAX="${PREPROD_BUILD_MEMORY_MAX:-2G}"
+BUILD_CPU_QUOTA="${PREPROD_BUILD_CPU_QUOTA:-100%}"
 
-echo "== 解包 =="
-rm -rf "$RELEASE"; mkdir -p "$RELEASE"; tar -xzf "$ARCHIVE" -C "$RELEASE"
-sudo mkdir -p "$PREPROD_ROOT/server"
+cleanup_stage() {
+  rm -f "$ARCHIVE"
+}
+trap cleanup_stage EXIT
+
+echo "== 建立候选 release（磁盘构建，不覆盖在线 server）=="
+sudo install -d -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" -m 0755 "$PREPROD_ROOT" "$RELEASES_ROOT"
+if [[ "$RELEASE" != "$RELEASES_ROOT"/release-* ]]; then
+  echo "!! 非法 release 路径：$RELEASE" >&2
+  exit 1
+fi
+sudo rm -rf "$RELEASE"
+sudo install -d -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" -m 0755 "$RELEASE"
+tar -xzf "$ARCHIVE" -C "$RELEASE"
+[ -d "$CANDIDATE_SERVER" ] || { echo "!! 候选 release 缺少 server/" >&2; exit 1; }
 
 # 保留已存在的 preprod .env
-ENV_BAK=""
-if [ -f "$PREPROD_ROOT/server/.env" ]; then ENV_BAK="/tmp/preprod-env-${SHA}.bak"; sudo cp -p "$PREPROD_ROOT/server/.env" "$ENV_BAK"; fi
-
-for path in package.json admin app chats deploy docs project scripts server shared AGENTS.md PRODUCT.md IMPLEMENTATION.md README.md; do
-  sudo rm -rf "$PREPROD_ROOT/$path"
-  if [ -e "$RELEASE/$path" ]; then
-    sudo cp -R "$RELEASE/$path" "$PREPROD_ROOT/$path"
-    sudo chown -R "$DEPLOY_USER:$DEPLOY_GROUP" "$PREPROD_ROOT/$path"
-  fi
-done
+ENV_SOURCE=""
+if [ -f "$LIVE_SERVER/.env" ]; then ENV_SOURCE="$LIVE_SERVER/.env"; fi
 
 echo "== 数据库 $PREPROD_DB =="
 DB_CREATED=0
@@ -88,23 +100,23 @@ fi
 sudo -u postgres psql -d "$PREPROD_DB" -c "CREATE EXTENSION IF NOT EXISTS vector" >/dev/null 2>&1 || echo "  (pgvector 扩展稍后由 pgvector.sql 处理)"
 
 echo "== preprod .env =="
-if [ -n "$ENV_BAK" ] && [ -f "$ENV_BAK" ]; then
-  sudo cp -p "$ENV_BAK" "$PREPROD_ROOT/server/.env"
+if [ -n "$ENV_SOURCE" ]; then
+  sudo cp -p "$ENV_SOURCE" "$CANDIDATE_SERVER/.env"
   echo "  沿用已存在的 preprod .env"
 else
-  sudo cp -p "$PROD_ROOT/server/.env" "$PREPROD_ROOT/server/.env"
+  sudo cp -p "$PROD_ROOT/server/.env" "$CANDIDATE_SERVER/.env"
   # 只替换 DB 路径段 /junshi?schema=public（不动同名的用户名 junshi:）
-  sudo sed -i "s#/junshi?schema=public#/${PREPROD_DB}?schema=public#g" "$PREPROD_ROOT/server/.env"
-  if sudo grep -qE '^PORT=' "$PREPROD_ROOT/server/.env"; then
-    sudo sed -i -E "s#^PORT=.*#PORT=${PORT}#" "$PREPROD_ROOT/server/.env"
+  sudo sed -i "s#/junshi?schema=public#/${PREPROD_DB}?schema=public#g" "$CANDIDATE_SERVER/.env"
+  if sudo grep -qE '^PORT=' "$CANDIDATE_SERVER/.env"; then
+    sudo sed -i -E "s#^PORT=.*#PORT=${PORT}#" "$CANDIDATE_SERVER/.env"
   else
-    echo "PORT=${PORT}" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
+    echo "PORT=${PORT}" | sudo tee -a "$CANDIDATE_SERVER/.env" >/dev/null
   fi
-  if sudo grep -qE '^AI_FALLBACK_MOCK=' "$PREPROD_ROOT/server/.env"; then
-    sudo sed -i -E "s#^AI_FALLBACK_MOCK=.*#AI_FALLBACK_MOCK=false#" "$PREPROD_ROOT/server/.env"
+  if sudo grep -qE '^AI_FALLBACK_MOCK=' "$CANDIDATE_SERVER/.env"; then
+    sudo sed -i -E "s#^AI_FALLBACK_MOCK=.*#AI_FALLBACK_MOCK=false#" "$CANDIDATE_SERVER/.env"
   fi
-  sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$PREPROD_ROOT/server/.env"
-  sudo chmod 600 "$PREPROD_ROOT/server/.env"
+  sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$CANDIDATE_SERVER/.env"
+  sudo chmod 600 "$CANDIDATE_SERVER/.env"
   echo "  由生产 .env 派生（DATABASE_URL→${PREPROD_DB}, PORT=${PORT}, AI_FALLBACK_MOCK=false）"
 fi
 
@@ -113,22 +125,22 @@ fi
 # 不触达微信收款；每次部署都重申这个状态，防止手工改配后带着真商户出现。
 set_env_value() {
   local key="$1" value="$2"
-  if sudo grep -qE "^${key}=" "$PREPROD_ROOT/server/.env"; then
-    sudo sed -i -E "s#^${key}=.*#${key}=${value}#" "$PREPROD_ROOT/server/.env"
+  if sudo grep -qE "^${key}=" "$CANDIDATE_SERVER/.env"; then
+    sudo sed -i -E "s#^${key}=.*#${key}=${value}#" "$CANDIDATE_SERVER/.env"
   else
-    printf '%s=%s\n' "$key" "$value" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
+    printf '%s=%s\n' "$key" "$value" | sudo tee -a "$CANDIDATE_SERVER/.env" >/dev/null
   fi
 }
 
-sudo sed -i -E '/^WECHAT_PAY_[A-Z0-9_]*=/d' "$PREPROD_ROOT/server/.env"
+sudo sed -i -E '/^WECHAT_PAY_[A-Z0-9_]*=/d' "$CANDIDATE_SERVER/.env"
 set_env_value NODE_ENV development
 set_env_value PAY_MOCK_SUCCESS true
 set_env_value PAY_SANDBOX false
 set_env_value ALLOW_DEMO_PURCHASE false
 set_env_value CLIP_MEDIA_MODERATION_BYPASS true
-sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$PREPROD_ROOT/server/.env"
-sudo chmod 600 "$PREPROD_ROOT/server/.env"
-if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
+sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$CANDIDATE_SERVER/.env"
+sudo chmod 600 "$CANDIDATE_SERVER/.env"
+if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$CANDIDATE_SERVER/.env"; then
   echo "!! 预发 .env 仍含真实微信支付配置，拒绝部署" >&2
   exit 1
 fi
@@ -180,12 +192,29 @@ else
 fi
 
 echo "== 依赖 + prisma =="
-cd "$PREPROD_ROOT/server"
-npm ci
-npx prisma generate
+cd "$CANDIDATE_SERVER"
+# 预发与生产同机：构建期峰值必须被硬隔离。宿主机只有 4C/7.3GiB 且无 Swap，
+# 2026-08-15 部署前 /tmp tmpfs 已被 AIStar Clip 历史 JAR 占到约 3GiB，随后 npm ci
+# 把宿主拖到 SSH/HTTP 失联。先按 MemAvailable 拒绝危险部署，再用 transient cgroup
+# 把每个构建命令限制在单核/2GiB；nice/idle IO 只负责调度优先级，不能替代硬上限。
+AVAIL_MB=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+[ "$AVAIL_MB" -ge "$MIN_AVAILABLE_MB" ] || { echo "!! 可用内存仅 ${AVAIL_MB}MB (<${MIN_AVAILABLE_MB})，拒绝在生产宿主机上构建预发"; exit 1; }
+run_build_limited() {
+  sudo systemd-run --quiet --wait --pipe --collect \
+    --uid="$DEPLOY_USER" --gid="$DEPLOY_GROUP" \
+    --working-directory="$CANDIDATE_SERVER" --setenv="HOME=$DEPLOY_HOME" \
+    --property="MemoryMax=$BUILD_MEMORY_MAX" --property="MemorySwapMax=0" \
+    --property="CPUQuota=$BUILD_CPU_QUOTA" --property="Nice=19" \
+    --property="IOSchedulingClass=idle" -- "$@"
+}
+echo "  构建护栏：MemAvailable=${AVAIL_MB}MB · MemoryMax=${BUILD_MEMORY_MAX} · CPUQuota=${BUILD_CPU_QUOTA}"
+run_build_limited npm ci --no-audit --no-fund
+run_build_limited npx prisma generate
+run_build_limited npm run build
+[ -s "$CANDIDATE_SERVER/dist/index.js" ] || { echo "!! 候选构建缺少 dist/index.js" >&2; exit 1; }
 # preprod 为测试库：容忍新增唯一约束/列的 data-loss 提示（如 app_user.inviteCode 唯一约束；新列多为 NULL，PG 允许多 NULL）
-sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss"
-sudo -u postgres psql -d "$PREPROD_DB" -f "$PREPROD_ROOT/server/prisma/pgvector.sql" >/dev/null 2>&1 || echo "  (pgvector.sql 已处理或不需要)"
+sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$CANDIDATE_SERVER' && ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss"
+sudo -u postgres psql -d "$PREPROD_DB" -f "$CANDIDATE_SERVER/prisma/pgvector.sql" >/dev/null 2>&1 || echo "  (pgvector.sql 已处理或不需要)"
 
 echo "== 种子数据 =="
 # 破坏性：db:seed 会清空全部业务数据（用户/会话/报告/知识库/钱包/订单…）并重建
@@ -199,7 +228,7 @@ echo "== 种子数据 =="
 # 所以它一旦失败就是真出事：直接中止。此时新代码还没构建/重启，旧服务照常在跑。
 if [ "$RESEED" = "1" ] || [ "$DB_CREATED" = "1" ]; then
   [ "$DB_CREATED" = "1" ] && echo "  触发原因：本次刚建库（空库必须 seed）" || echo "  触发原因：--reseed"
-  if ! sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && npm run db:seed"; then
+  if ! sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$CANDIDATE_SERVER' && npm run db:seed"; then
     echo "!! seed 失败（真实报错见上方输出）。已中止，未构建、未重启，旧服务不受影响。" >&2
     exit 1
   fi
@@ -269,7 +298,7 @@ if [ "$AI_ENCRYPTED_N" -gt 0 ]; then
     exit 1
   fi
   sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" APP_ENCRYPTION_KEY="$PROD_ENCRYPTION_KEY" \
-    bash -c "cd '$PREPROD_ROOT/server' && npm run secrets:decrypt-ai"
+    bash -c "cd '$CANDIDATE_SERVER' && npm run secrets:decrypt-ai"
   unset PROD_ENCRYPTION_KEY
 else
   echo "  AI 凭证已是明文，无需迁移"
@@ -286,16 +315,52 @@ if [ "$AI_ENCRYPTED_AFTER" != "0" ]; then
 fi
 echo "  AI 凭证存储校验：历史密文 0 行"
 
-echo "== 构建 + 重启 =="
-sudo rm -rf dist
-npm run build
-sudo systemctl restart "$SERVICE"
-sleep 3
-sudo systemctl is-active --quiet "$SERVICE" || { echo "!! 服务未起来"; sudo journalctl -u "$SERVICE" -n 40 --no-pager; exit 1; }
+echo "== 原子切换候选 release =="
+PREVIOUS_TARGET=""
+if [ -L "$LIVE_SERVER" ]; then
+  PREVIOUS_TARGET="$(readlink -f "$LIVE_SERVER")"
+elif [ -d "$LIVE_SERVER" ]; then
+  PREVIOUS_TARGET="$RELEASES_ROOT/legacy-server-$(date -u +%Y%m%dT%H%M%SZ)"
+  sudo mv "$LIVE_SERVER" "$PREVIOUS_TARGET"
+fi
+NEXT_LINK="$PREPROD_ROOT/.server-next-${RELEASE_ID}"
+sudo rm -f "$NEXT_LINK"
+sudo ln -s "$CANDIDATE_SERVER" "$NEXT_LINK"
+sudo mv -Tf "$NEXT_LINK" "$LIVE_SERVER"
+
+rollback_release() {
+  echo "!! 候选 release 启动失败，回滚到 ${PREVIOUS_TARGET:-无}" >&2
+  if [ -n "$PREVIOUS_TARGET" ] && [ -d "$PREVIOUS_TARGET" ]; then
+    local rollback_link="$PREPROD_ROOT/.server-rollback-${RELEASE_ID}"
+    sudo rm -f "$rollback_link"
+    sudo ln -s "$PREVIOUS_TARGET" "$rollback_link"
+    sudo mv -Tf "$rollback_link" "$LIVE_SERVER"
+    sudo systemctl restart "$SERVICE" || true
+  fi
+}
+
+if ! sudo systemctl restart "$SERVICE"; then
+  rollback_release
+  sudo journalctl -u "$SERVICE" -n 60 --no-pager
+  exit 1
+fi
+HEALTHY=0
+for _ in $(seq 1 15); do
+  if sudo systemctl is-active --quiet "$SERVICE" && curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/tmp/junshi-preprod-health; then
+    HEALTHY=1
+    break
+  fi
+  sleep 2
+done
+if [ "$HEALTHY" != "1" ]; then
+  rollback_release
+  sudo journalctl -u "$SERVICE" -n 60 --no-pager
+  exit 1
+fi
 echo "== 本机健康检查 :$PORT =="
-curl -fsS "http://127.0.0.1:${PORT}/api/health"; echo
+cat /tmp/junshi-preprod-health; echo
 printf '%s\n' "${SHA}" | sudo tee "$PREPROD_ROOT/.deploy-version" >/dev/null
-echo "PREPROD_DEPLOYED ${SHA}"
+echo "PREPROD_DEPLOYED ${SHA} release=${RELEASE_ID} previous=${PREVIOUS_TARGET:-none}"
 REMOTE
 
 log "公网验证 $PUBLIC/health"

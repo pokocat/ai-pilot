@@ -6,6 +6,19 @@
 
 ## 变更日志
 
+### 2026-08-15 · 清除宿主机内存泄漏源并把预发改为原子、限额发布 · 影响面：Dify、deploy-preprod.sh、AIStar Clip 部署脚本、运维文档
+
+- **根因实证**：部署 8925cc2 到预发时宿主 `8.136.36.175` 的 `/tmp` tmpfs 已被 AIStar Clip 历次不清理的时间戳 JAR 推到约 2.97GiB Shmem，`MemAvailable` 只剩约 670MiB且无 Swap；预发 `npm ci` 随后把 CPU 推到约 84%，Prometheus、SSH、HTTP 在 22:42–22:46 陆续失联。重启后预发因在线 `server/` 已被覆盖、`dist/index.js` 缺失陷入 3 秒崩溃循环，补建后恢复。AIStar `deploy-clip-preprod.sh` 现用远端 `trap` 成功/失败都删除当前 `/tmp/aistareco-clip-*.jar`，预检再清超过 60 分钟的同 owner 残留。
+- **释放常驻资源**：用户确认 Dify 已停用；已对 `/opt/dify/docker` 执行 Compose `down --remove-orphans`，移除 12 个运行容器与网络，未带 `-v`，`/opt/dify` 约 290MiB 持久化数据保留。`MemAvailable` 当场从约 4.0GiB 升至约 5.2GiB，军师生产/预发、AIStar Clip、Nginx、Docker 均保持 active。
+- **原子发布**：`deploy-preprod.sh` 改在磁盘 `/opt/junshi-preprod/releases/release-*` 构建候选版本，在线 `/opt/junshi-preprod/server` 在候选 `dist/index.js` 就绪前不变；最终以符号链接原子切换，服务启动或本机 health 失败自动回滚上一目标，部署版本只在健康后落盘。
+- **硬资源闸**：构建前 `MemAvailable <3GiB` 直接拒绝；`npm ci`、`prisma generate`、`npm run build` 全部进入 transient systemd cgroup，限制 `MemoryMax=2G`、`MemorySwapMax=0`、`CPUQuota=100%`、`Nice=19` 与 idle IO。Swap、迁出预发/AIStar、ECS 扩容按用户决定暂缓，已写入 AGENTS §13。
+
+### 2026-08-15 · 预发矩阵验收抓到生图假二维码，收紧 actionZone 措辞与 no-text 子句 · 影响面：styleLibrary、imagePrompt
+
+- **发现**：8 版式 × 6 方向真实矩阵（48 单全部成功）验收中，photo_product 方向 3-4 张主视觉被 Seedream **画上了假二维码**（brief 未含任何码）。根因：`actionZone` 骨架措辞点名了 "for an overlaid QR code"，扩散模型见词起意把码画进主视觉。假码扫出来是空的，违反「绝不画假二维码」铁律。
+- **修复（两道保险）**：12 档 `actionZone` 改为只描述「空」（保留 action area 语义供叠层避让，不点名任何会被画出来的物体）；`NO_TEXT_CLAUSE` 扩为 `no text, no qr codes, no barcodes anywhere in the image`，恒为正文最后一句、任何层不可覆盖。守卫测试同步，creative 四件套 233/233 绿。
+- **顺带观察（待收口）**：无二维码时叠层 LLM 曾自拟「请添加军师参谋部企业微信」——brief 里没有这个渠道，属「多造信息」；photoHowTo 需补一条「行动区没给码时只写 CTA 原文，不得发明联系渠道」。
+
 ### 2026-08-15 · 海报版式池扩到 8 套并按信息密度分档，每套版式增设贴码行动区 · 影响面：模板渲染器、模板白名单/目录、/creative/status 契约、运营后台版式启停、渲染量测回归
 
 - **实证缺陷**：三套 540×720 版式（`person_hero` / `editorial` / `business_launch`）密度高度雷同——都是「标题 + 副标 + 三条卖点 + CTA」，只有配色与图带位置不同。用户想要「只说一句话」或「把议程说清楚」时，没有任何一套版式能承接，反馈集中在"看起来都一样"。
