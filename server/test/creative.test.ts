@@ -1638,3 +1638,63 @@ describe('海报成品图 · 版式池（确定性排版）', () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// 调用点不变式：给了 timeoutMs 就必须同时退出辅助档
+//
+// 2026-08-17 生产事故：manifesto 明明写着 `timeoutMs: 120_000`，线上却精确地在 60000ms 断，
+// 高级档海报三次尝试全挂 PREMIUM_VISUAL_FAILED（100% 出不了图）。根因不在这个常量，而在
+// `resolveAuxConfigAsync` 用 `{...routed}` **整份替换** cfg —— 调用方的 timeoutMs/temperature
+// 会被 aux 端点自己的值顶掉；再加上 rawText 的 phase 缺省是 `chat_completion`，这一档
+// `requestTimeoutMs` 直接吃 `cfg.timeoutMs` 原值，没有 chat_sync 那样的 150s 下限兜底。
+// 于是「写了 timeoutMs 但没关 aux」= 参数被静默丢弃，且没有任何日志说它被丢了。
+//
+// 用读源码的方式钉：这是**调用点约定**，不是某次返回值。行为侧（截断/空壳）另有打桩用例覆盖。
+describe('创作链路 · LLM 调用点不变式（源码级）', () => {
+  const files = ['manifesto.ts', 'philosophy.ts', 'briefDraft.ts'];
+
+  /** 粗切出每个 structured(...) 调用的参数块：从调用处到第一个 `});`。 */
+  function structuredCalls(source: string): string[] {
+    const out: string[] = [];
+    let from = 0;
+    for (;;) {
+      const at = source.indexOf('structured(', from);
+      if (at < 0) break;
+      const end = source.indexOf('});', at);
+      if (end < 0) break;
+      out.push(source.slice(at, end));
+      from = end + 3;
+    }
+    return out;
+  }
+
+  for (const name of files) {
+    test(`${name}：structured 调用凡带 timeoutMs 必带 allowAux:false`, async () => {
+      const fs = await import('node:fs');
+      const url = new URL(`../src/services/creative/${name}`, import.meta.url);
+      const source = fs.readFileSync(url, 'utf8');
+      const calls = structuredCalls(source).filter((c) => !c.startsWith('structured(') || true);
+      assert.ok(calls.length > 0, `没在 ${name} 里找到 structured() 调用——用例的切法失效了，先修用例`);
+      for (const call of calls) {
+        const body = call.replace(/\/\/[^\n]*/g, ''); // 去掉注释，避免注释里的字样蒙混过关
+        if (!/timeoutMs\s*:/.test(body)) continue;
+        assert.match(
+          body,
+          /allowAux\s*:\s*false/,
+          `${name} 里有一处 structured 调用给了 timeoutMs 却没写 allowAux:false —— `
+          + 'aux 路由会把 cfg 整份替换掉，那个 timeoutMs 会被静默丢弃（2026-08-17 高级档 100% 失败就是这个）',
+        );
+      }
+    });
+  }
+
+  test('宣言与哲学都必须显式给产出预算并退出辅助档（用户可见的长产出不走小模型）', async () => {
+    const fs = await import('node:fs');
+    for (const name of ['manifesto.ts', 'philosophy.ts']) {
+      const url = new URL(`../src/services/creative/${name}`, import.meta.url);
+      const body = fs.readFileSync(url, 'utf8').replace(/\/\/[^\n]*/g, '');
+      assert.match(body, /maxTokens\s*:\s*\d/, `${name} 没显式给 maxTokens —— 会吃 provider 辅助档缺省的 700，中文长产出必被截断`);
+      assert.match(body, /allowAux\s*:\s*false/, `${name} 没退出辅助档 —— 这是用户可见的长产出，不属于后台抽取那一档`);
+    }
+  });
+});

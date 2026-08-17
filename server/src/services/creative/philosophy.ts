@@ -185,6 +185,13 @@ export async function generatePhilosophy(opts: {
       system: `${PHILOSOPHY_SYS}\n\n【本次创作方向】${directionFor(brief.directionKey).artDirection}\n\n【本次版式提示】${TEMPLATE_HINT[brief.templateKey]}`,
       user: briefDigest(brief, brandKit),
       maxChars: 1800,
+      // 与 manifesto 同一组理由（2026-08-17 一并补齐）：这份哲学有 7 个中文字段 + palette，
+      // 吃 provider 辅助档缺省的 700 token 会被截断；而不显式退出 aux，它就跑在
+      // 「用户看不见的后台抽取」那一档小模型上，且 timeoutMs 这类调用方参数会被 aux 配置整份顶掉。
+      // 哲学决定了整张海报的运动/空间/色彩/层级，静默回落成确定性版本等于把设计交还给模板。
+      maxTokens: 1600,
+      timeoutMs: 90_000,
+      allowAux: false,
     });
   } catch (err) {
     console.warn('[creative] 视觉哲学生成失败，回退确定性哲学：', (err as Error).message);

@@ -318,6 +318,16 @@ export async function generateManifesto(opts: {
       // （高级档还多一段影像路线要求），实测跑不进 60s → structured 返回 null → 整条 AI 路径
       // 判「宣言不可用」→ 悄悄回落模板。这条超时只作用于本次调用，不动全局。
       timeoutMs: MANIFESTO_TIMEOUT_MS,
+      // ★ 不加这一行，上面那个 timeoutMs 是**写了也不生效**的（2026-08-17 生产实锤）：
+      //   `resolveAuxConfigAsync` 用 `{...routed}` **整份替换** cfg，调用方的 timeoutMs/temperature
+      //   全被 aux 端点自己的值顶掉；而 rawText 的 phase 缺省是 `chat_completion`，这一档
+      //   `requestTimeoutMs` 直接吃 `cfg.timeoutMs` 原值，没有 150s 下限兜底（只有 chat_sync
+      //   与 deliverable 有）。于是线上真实行为是：宣言跑在 aux 的小模型上、超时按 60s 算，
+      //   首轮与纠错轮双双卡死在 60.0s → structured 恒 null → 高级档按「宣言不可用」整单失败退款。
+      //   实测一单三次尝试全挂 PREMIUM_VISUAL_FAILED（306s），高级档 100% 出不了图。
+      //   另一半理由与 briefDraft 同源：这是 4–6 段中文的长产出，本就不属于「用户看不见的
+      //   后台抽取」那一档，不该交给 aux 的小模型。
+      allowAux: false,
     });
   } catch (err) {
     console.warn('[creative] 宣言生成失败：', (err as Error).message);
