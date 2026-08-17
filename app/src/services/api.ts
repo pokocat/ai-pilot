@@ -301,7 +301,12 @@ export async function request<T>(path: string, method = 'GET', data?: object): P
       data,
       header: { 'Content-Type': 'application/json', 'x-user-id': tokenAtRequest },
       // 微信默认约 60s；同步生成只是旧环境兜底，必须至少覆盖服务端 150s 对话预算。
-      ...(path.startsWith('/generate-sync') ? { timeout: 180_000 } : {}),
+      // brief-draft 同样是「等模型」的接口：服务端 structured() 最多跑两轮（首轮 + 纠错轮），
+      // 每轮吃满 OPENAI_TIMEOUT_MS(60s) 就是 120s 才回落到确定性预填。端上若按默认 30s 放手，
+      // 用户看到的是「军师响应超时」，而服务端其实马上就会给出一份可用草稿。
+      ...(path.startsWith('/generate-sync') || path.startsWith('/creative/posters/brief-draft')
+        ? { timeout: 180_000 }
+        : {}),
     });
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');

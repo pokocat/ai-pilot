@@ -174,7 +174,12 @@ const api = {
     const qs = [];
     if (sessionId) qs.push(`sessionId=${query(sessionId)}`);
     if (messageId) qs.push(`messageId=${query(messageId)}`);
-    return isMock() ? mock.posterBriefDraft(sessionId, messageId) : request(`/creative/posters/brief-draft${qs.length ? `?${qs.join('&')}` : ''}`);
+    // 180s：这条是「等模型」的接口，不是普通读接口。服务端 structured() 最多跑两轮
+    // （首轮 + 校验失败后的纠错轮），每轮吃满 OPENAI_TIMEOUT_MS(60s) 就是 120s 才回落到
+    // 确定性预填。默认的 30s 会让端上先放手 —— 用户看到「军师响应超时」，而服务端其实
+    // 再等一会儿就会给出一份填好的需求单（2026-08-17 生产实测：典型 24s，偶发超 60s）。
+    // 长时间转圈不算问题：这一页本来就有「正在整理需求单 / 通常要几秒」的说明态。
+    return isMock() ? mock.posterBriefDraft(sessionId, messageId) : request(`/creative/posters/brief-draft${qs.length ? `?${qs.join('&')}` : ''}`, { timeout: 180000 });
   },
   uploadCreativeAsset: (filePath, role) => isMock() ? Promise.resolve({ id: `mock-asset-${Date.now()}`, role }) : upload(`/creative/uploads?role=${query(role)}`, filePath, {}, { name: 'file' }),
   createPosterJob: (body) => isMock() ? mock.createPosterJob(body) : request('/creative/posters', { method: 'POST', data: body }),
