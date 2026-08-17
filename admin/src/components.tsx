@@ -1,7 +1,7 @@
 // 运营后台共享组件：页头 / 三态渲染 / 二次确认 / 搜索框。
 // 组件类词汇见 admin/DESIGN.md；这里只负责组装，不写一次性 inline 样式。
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import Icon from './Icon';
 import { findSection, type SectionKey } from './nav';
 import { freshness, type Resource, type ResourceStatus } from './useResource';
@@ -117,6 +117,90 @@ export function EmptyState({ msg, hint }: { msg: string; hint?: string }) {
   return <div className="empty">{msg}{hint && <div className="usage-meta">{hint}</div>}</div>;
 }
 
+/* ────────────── 键盘与辅助技术基础设施 ──────────────
+   运营后台的弹层承载退款、改密钥、改密码等高风险动作。只有 role="dialog" 还不够：
+   打开后焦点必须进入弹层，Tab 不能跑到遮罩后的页面，Esc 可退出，关闭后还要回到触发控件。
+   统一 hook 避免三个弹层各做一半。 */
+const FOCUSABLE = [
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'a[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+export function useDialogFocus<R extends HTMLElement = HTMLDivElement>(onClose: () => void, preferred?: RefObject<HTMLElement>): RefObject<R> {
+  const rootRef = useRef<R>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const focusFirst = () => {
+      const target = preferred?.current
+        ?? root.querySelector<HTMLElement>('[autofocus]')
+        ?? root.querySelector<HTMLElement>(FOCUSABLE)
+        ?? root;
+      target.focus();
+    };
+    const frame = window.requestAnimationFrame(focusFirst);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)]
+        .filter((el) => el.getClientRects().length > 0 && el.getAttribute('aria-hidden') !== 'true');
+      if (items.length === 0) { e.preventDefault(); root.focus(); return; }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+      previous?.focus();
+    };
+  }, [preferred]);
+
+  return rootRef;
+}
+
+/** 统一开关：原来的 div.sw 鼠标能点、键盘和读屏却完全不可用。 */
+export function Switch({ checked, onChange, label, disabled = false, stopPropagation = false }: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+  stopPropagation?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`sw ${checked ? 'on' : ''}`}
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={(e) => { if (stopPropagation) e.stopPropagation(); onChange(!checked); }}
+    >
+      <i aria-hidden="true" />
+    </button>
+  );
+}
+
 /* ────────────── 二次确认 ──────────────
    替掉 window.confirm / window.prompt。原生弹窗的问题：
      ① 不回显「对谁、多少钱、哪一单」——退款原因居然是靠 prompt 收的；
@@ -144,12 +228,10 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const titleId = useId();
+  const descId = useId();
+  const requestClose = () => { if (!busy) onClose(); };
+  const dialogRef = useDialogFocus(requestClose);
 
   const blocked = !!spec.typed && typed.trim() !== spec.typed;
   const submit = async () => {
@@ -162,10 +244,10 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
   };
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="al-card modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={spec.title}>
-        <div className="al-label">{spec.title}</div>
-        <div className="blk-d">{spec.desc}</div>
+    <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+      <div ref={dialogRef} className="al-card modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} tabIndex={-1}>
+        <div className="al-label" id={titleId}>{spec.title}</div>
+        <div className="blk-d" id={descId}>{spec.desc}</div>
         {spec.echo && spec.echo.length > 0 && (
           <div className="cfm-echo">
             {spec.echo.map((r) => (
@@ -201,7 +283,7 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
             />
           </div>
         )}
-        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
+        {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
         <button
           type="button"
           className={`al-btn ${spec.danger ? 'danger' : ''}`}
@@ -210,7 +292,7 @@ export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec; onClose: (
         >
           <Icon name="check" size={15} /> {busy ? '执行中…' : spec.confirmText ?? '确认'}
         </button>
-        <button type="button" className="al-cancel" onClick={onClose}>取消</button>
+        <button type="button" className="al-cancel" onClick={requestClose} disabled={busy}>取消</button>
       </div>
     </div>
   );

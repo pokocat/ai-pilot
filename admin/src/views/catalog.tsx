@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, type AdminPlan, type AdminSku, type AdminEcoTool } from '../api';
-import { PageHead, ViewState, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 
 // 套餐目录：**线上套餐的唯一维护入口**。2026-08-01 起代码侧不再有 syncPlans 之类的同步脚本
@@ -147,9 +147,9 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
       <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => set({ features: e.target.value })} /></div>
       <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
       <div className="cfg">
-        <div className="cfg-row"><div className="cb"><div className="ct">常用配置</div><div className="cs">前台优先展示这一档</div></div><div className={`sw ${form.highlighted ? 'on' : ''}`} onClick={() => set({ highlighted: !form.highlighted })}><i /></div></div>
-        <div className="cfg-row"><div className="cb"><div className="ct">隐藏（停售）</div><div className="cs">套餐列表不返回；仅测试白名单手机号可见可购。在册用户的权益不受影响</div></div><div className={`sw ${form.hidden ? 'on' : ''}`} onClick={() => set({ hidden: !form.hidden })}><i /></div></div>
-        <div className="cfg-row"><div className="cb"><div className="ct">允许用户选择自动续费</div><div className="cs">同时保留单次购买；用户每次都需主动选择自动续费，默认不会勾选</div></div><div className={`sw ${form.autoRenewEnabled ? 'on' : ''}`} onClick={() => set({ autoRenewEnabled: !form.autoRenewEnabled })}><i /></div></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">常用配置</div><div className="cs">前台优先展示这一档</div></div><Switch checked={form.highlighted} onChange={(highlighted) => set({ highlighted })} label="常用配置" /></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">隐藏（停售）</div><div className="cs">套餐列表不返回；仅测试白名单手机号可见可购。在册用户的权益不受影响</div></div><Switch checked={form.hidden} onChange={(hidden) => set({ hidden })} label="隐藏套餐" /></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">允许用户选择自动续费</div><div className="cs">同时保留单次购买；用户每次都需主动选择自动续费，默认不会勾选</div></div><Switch checked={form.autoRenewEnabled} onChange={(autoRenewEnabled) => set({ autoRenewEnabled })} label="允许自动续费" /></div>
       </div>
       {form.autoRenewEnabled && <div className="ai-field"><div className="ai-fl">微信委托代扣模板 ID（通知后 24 小时扣费）</div><input className="ai-input" value={form.wechatContractPlanId} onChange={(e) => set({ wechatContractPlanId: e.target.value.replace(/\D/g, '') })} placeholder="商户平台审核通过后的数字模板 ID" /></div>}
     </>
@@ -318,7 +318,7 @@ export function SkusView({ toast }: { toast: (m: string) => void }) {
                 <div className="ai-field"><div className="ai-fl">{amountLabel(pack.kind)}</div><NumInput className="ai-input" min={1} step={1} value={pack.amount} onChange={(amount) => setPackForm({ amount })} /></div>
                 <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={pack.priceYuan} onChange={(priceYuan) => setPackForm({ priceYuan })} /></div>
                 <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={pack.sort} onChange={(sort) => setPackForm({ sort })} /></div>
-                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${pack.enabled ? 'on' : ''}`} onClick={() => setPackForm({ enabled: !pack.enabled })}><i /></div></div></div>
+                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><Switch checked={pack.enabled} onChange={(enabled) => setPackForm({ enabled })} label="上架增购包" /></div></div>
                 <div className="ai-actions">
                   <button className="ai-btn ghost" onClick={() => { setAdding(false); setPack(PACK_BLANK); }}>取消</button>
                   <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建增购包</button>
@@ -335,7 +335,7 @@ export function SkusView({ toast }: { toast: (m: string) => void }) {
                 <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
                 <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => setForm({ ...form, sort })} /></div>
                 {s.grantsModuleKey && <div className="ai-field"><div className="ai-fl">解锁模块（代码目录，不可改）</div><input className="ai-input" value={s.grantsModuleKey} disabled /></div>}
-                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => setForm({ ...form, enabled: !form.enabled })}><i /></div></div></div>
+                <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><Switch checked={form.enabled} onChange={(enabled) => setForm({ ...form, enabled })} label="上架商品" /></div></div>
                 <div className="ai-actions">
                   <button className="ai-btn ghost" onClick={() => setEditKey(null)}>取消</button>
                   {isPack(s.kind) && <button className="ai-btn ghost" onClick={() => remove(s)}><Icon name="alert" size={14} /> 删除</button>}
@@ -352,7 +352,7 @@ export function SkusView({ toast }: { toast: (m: string) => void }) {
                   </div>
                   <span className="tag off">{amountText(s)}</span>
                   <span className="user-balance">{yuanText(s.priceFen)}</span>
-                  <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
+                  <Switch checked={s.enabled} onChange={() => toggleEnabled(s)} label={`${s.enabled ? '下架' : '上架'}商品 ${s.name}`} stopPropagation />
                   <span className="edit"><Icon name="pen" size={15} /></span>
                 </div>
               </div>
@@ -425,7 +425,7 @@ export function EcoToolsView({ toast }: { toast: (m: string) => void }) {
             <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} placeholder="wx… · 须与本小程序同一开放平台主体关联" /></div>
             <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} placeholder="pages/index/index" /></div>
             <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
-            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><Switch checked={form.enabled} onChange={(enabled) => set({ enabled })} label="启用生态工具" /></div></div>
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(ECO_BLANK); }}>取消</button>
               <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button>
@@ -441,7 +441,7 @@ export function EcoToolsView({ toast }: { toast: (m: string) => void }) {
             <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
-            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><Switch checked={form.enabled} onChange={(enabled) => set({ enabled })} label="启用生态工具" /></div></div>
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
               <button className="ai-btn ghost" onClick={() => remove(t)}><Icon name="alert" size={14} /> 删除</button>
@@ -456,7 +456,7 @@ export function EcoToolsView({ toast }: { toast: (m: string) => void }) {
                 <div className="ct">{t.name} <span className="tag off">生态</span>{!t.enabled && <span className="tag off">停用</span>}{t.enabled && !t.appId && <span className="tag warn">缺 appId</span>}</div>
                 <div className="cs">{t.id}{t.appId ? ` · ${t.appId}` : ' · 未填 appId'}{t.desc ? ` · ${t.desc}` : ''}</div>
               </div>
-              <div className={`sw ${t.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(t); }}><i /></div>
+              <Switch checked={t.enabled} onChange={() => toggleEnabled(t)} label={`${t.enabled ? '停用' : '启用'}生态工具 ${t.name}`} stopPropagation />
               <span className="edit"><Icon name="pen" size={15} /></span>
             </div>
           </div>

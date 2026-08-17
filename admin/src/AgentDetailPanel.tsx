@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
 import { api, type AgentDetail, type AgentType, type AgentBilling, type AdminAgentUpdate, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
-import { ConfirmDialog, type ConfirmSpec } from './components';
+import { ConfirmDialog, ErrorState, Switch, type ConfirmSpec } from './components';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
 import StudioEval from './StudioEval';
@@ -66,7 +66,10 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [skillsEnabled, setSkillsEnabled] = useState(false);
   const [skillTools, setSkillTools] = useState<string[]>([]);
   const [agentMems, setAgentMems] = useState<AdminAgentMemoryItem[] | null>(null); // P1-C4：跨用户已学记忆治理
+  const [agentMemsLoading, setAgentMemsLoading] = useState(false);
+  const [agentMemsErr, setAgentMemsErr] = useState('');
   const [availTools, setAvailTools] = useState<SkillToolMeta[]>([]);
+  const [availToolsErr, setAvailToolsErr] = useState('');
   const [dryRunning, setDryRunning] = useState(''); // P2-10 工具试跑中的工具名
   const [toolStats, setToolStats] = useState<ToolStatItem[]>([]); // P2-10 per-tool 运行统计
   const [test, setTest] = useState<AiTestResult | null>(null);
@@ -102,21 +105,25 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const refreshMeta = () => api.agent(agentKey).then((d) => { setDirty(d.draftDirty ?? false); setPubVersion(d.publishedVersion ?? null); }).catch(() => { /* 徽标刷新失败不影响编辑 */ });
 
   // 可勾选的内置工具元信息（一次性加载）。
-  useEffect(() => { api.skillTools().then(setAvailTools).catch(() => setAvailTools([])); }, []);
+  const loadTools = () => {
+    setAvailToolsErr('');
+    api.skillTools().then(setAvailTools).catch((e) => setAvailToolsErr((e as Error)?.message || '技能目录加载失败'));
+  };
+  useEffect(loadTools, []);
   useEffect(() => { api.toolStats(agentKey).then((v) => setToolStats(v.stats)).catch(() => setToolStats([])); }, [agentKey]); // P2-10
 
   // 加载失败时给出可见反馈 + 返回入口，而不是渲染空白（旧版静默吞错，点编辑像「没反应」）
   if (loadErr) {
     return (
-      <div className="ad-detail show">
+      <section className="ad-detail show" aria-label="顾问详情加载失败">
         <div className="ad-dh">
-          <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
+          <button type="button" className="bk" onClick={onClose} aria-label="关闭顾问详情"><Icon name="arrow" size={18} /></button>
           <div className="dt"><div className="t">加载失败</div><div className="s">{agentKey}</div></div>
         </div>
         <div className="ad-db">
           <div className="ai-test err" style={{ marginTop: 0 }}><Icon name="spark" size={14} /> {loadErr}</div>
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -257,10 +264,19 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     });
   };
 
+  const loadAgentMems = () => {
+    setAgentMemsLoading(true);
+    setAgentMemsErr('');
+    api.agentMemories(agentKey)
+      .then((r) => setAgentMems(r.items))
+      .catch((e) => setAgentMemsErr((e as Error)?.message || '已学记忆加载失败'))
+      .finally(() => setAgentMemsLoading(false));
+  };
+
   return (
-    <div className="ad-detail show">
+    <section className="ad-detail show" aria-label={`顾问详情：${data.name}`}>
       <div className="ad-dh">
-        <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
+        <button type="button" className="bk" onClick={onClose} aria-label="关闭顾问详情"><Icon name="arrow" size={18} /></button>
         <div className="di"><Icon name={data.icon} size={18} /></div>
         <div className="dt">
           <div className="t">{data.name}{dirty && <span className="tag warn" style={{ marginLeft: 6 }}>草稿未发布</span>}</div>
@@ -270,7 +286,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
 
       <div className="studio-nav">
         {(['config', 'sandbox', 'versions', 'eval'] as StudioSection[]).map((k) => (
-          <div key={k} className={`sn ${section === k ? 'on' : ''}`} onClick={() => setSection(k)}>{SECTION_LABEL[k]}</div>
+          <button key={k} type="button" className={`sn ${section === k ? 'on' : ''}`} onClick={() => setSection(k)} aria-pressed={section === k}>{SECTION_LABEL[k]}</button>
         ))}
       </div>
 
@@ -303,9 +319,9 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="blk-d">控制这位智能体是注册赠送、付费解锁，还是按次计费（如图片生成类）。价格单位为「权益点」。</div>
           <div className="bill-seg">
             {BILLING.map(([v, l, d]) => (
-              <div key={v} className={`bill-opt ${billing === v ? 'on' : ''}`} onClick={() => { setBilling(v); if (v === 'free') setPrice(0); }}>
+              <button type="button" key={v} className={`bill-opt ${billing === v ? 'on' : ''}`} onClick={() => { setBilling(v); if (v === 'free') setPrice(0); }} aria-pressed={billing === v}>
                 <div className="bo-t">{l}</div><div className="bo-d">{d}</div>
-              </div>
+              </button>
             ))}
           </div>
           {billing !== 'free' && (
@@ -317,12 +333,12 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="ai-field">
             <div className="ai-fl">计费单位（已废弃 · 不再影响计费）</div>
             <div className="bill-seg">
-              <div className={`bill-opt ${meterUnit === 'text' ? 'on' : ''}`} onClick={() => setMeterUnit('text')}>
+              <button type="button" className={`bill-opt ${meterUnit === 'text' ? 'on' : ''}`} onClick={() => setMeterUnit('text')} aria-pressed={meterUnit === 'text'}>
                 <div className="bo-t">文本 · token 额度</div><div className="bo-d">对话扣 token×倍率（当前唯一口径）</div>
-              </div>
-              <div className={`bill-opt ${meterUnit === 'image' ? 'on' : ''}`} onClick={() => setMeterUnit('image')}>
+              </button>
+              <button type="button" className={`bill-opt ${meterUnit === 'image' ? 'on' : ''}`} onClick={() => setMeterUnit('image')} aria-pressed={meterUnit === 'image'}>
                 <div className="bo-t">图片 · 按张钻石</div><div className="bo-d">旧口径，已停用</div>
-              </div>
+              </button>
             </div>
             <div className="ai-note">
               2026-08-13 起<b>这一项不再参与计费判定</b>：对话一律扣月度 token 额度 × 下方倍率；
@@ -336,9 +352,9 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               <div className="ai-fl">定价档位 / 计费比例 —— 调教越好倍率越高卖越贵（当前：{tierName(billingRatio)} ×{billingRatio}）</div>
               <div className="bill-seg" style={{ marginBottom: 8 }}>
                 {([['标准', 1], ['进阶', 1.5], ['旗舰', 2]] as [string, number][]).map(([l, r]) => (
-                  <div key={l} className={`bill-opt ${billingRatio === r ? 'on' : ''}`} onClick={() => setBillingRatio(r)}>
+                  <button type="button" key={l} className={`bill-opt ${billingRatio === r ? 'on' : ''}`} onClick={() => setBillingRatio(r)} aria-pressed={billingRatio === r}>
                     <div className="bo-t">{l}</div><div className="bo-d">×{r}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
               <NumInput className="ai-input" min={0} step={0.1} value={billingRatio} onChange={setBillingRatio} />
@@ -352,7 +368,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="blk-d">定义这位顾问的角色、产出结构与语气。变量会在运行时注入企业档案与记忆。</div>
           <textarea className="ta" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={9} />
           <div className="var-row">
-            {VARS.map((v) => <span key={v} className="var" onClick={() => insertVar(v)}>＋ {v}</span>)}
+            {VARS.map((v) => <button type="button" key={v} className="var" onClick={() => insertVar(v)}>＋ {v}</button>)}
           </div>
         </div>
 
@@ -371,9 +387,9 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="blk-d">为这位智能体单独指定后端：跟随全局模型、自定义 OpenAI 兼容端点，或绑定一个 Dify 应用（走 chat-messages 接口）。</div>
           <div className="bill-seg">
             {PROVIDER_MODES.map(([v, l, d]) => (
-              <div key={v} className={`bill-opt ${mode === v ? 'on' : ''}`} onClick={() => { setMode(v); setTest(null); }}>
+              <button type="button" key={v} className={`bill-opt ${mode === v ? 'on' : ''}`} onClick={() => { setMode(v); setTest(null); }} aria-pressed={mode === v}>
                 <div className="bo-t">{l}</div><div className="bo-d">{d}</div>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -391,9 +407,10 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               <div className="cfg">
                 <div className="cfg-row">
                   <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答（需 OpenAI 兼容或 Claude 模型；当前生效模型为 mock 或 Dify 接入时技能不会执行）</div></div>
-                  <div className={`sw ${skillsEnabled ? 'on' : ''}`} onClick={() => setSkillsEnabled((v) => !v)}><i /></div>
+                  <Switch checked={skillsEnabled} onChange={setSkillsEnabled} label="启用技能调用" />
                 </div>
               </div>
+              {availToolsErr && <div className="ai-note"><ErrorState msg={availToolsErr} onRetry={loadTools} /></div>}
               {skillsEnabled && (
                 <div className="mem-list" style={{ marginTop: 8 }}>
                   {/* 只列 kind==='tool'：白名单而不是「排除 output」——排除法在新增第三种 kind（artifact，
@@ -406,11 +423,11 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                         <span className="mi"><Icon name="insight" size={16} /></span>
                         <div className="mb"><div className="mt">{t.name}{t.builtin && <span className="tag off">内置</span>}</div><div className="mm">{t.description}</div></div>
                         {on && <button className="mini-btn" disabled={dryRunning === t.name} onClick={() => runDry(t.name)}>{dryRunning === t.name ? '…' : '试跑'}</button>}
-                        <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
+                        <Switch checked={on} onChange={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])} label={`${on ? '停用' : '启用'}技能 ${t.name}`} />
                       </div>
                     );
                   })}
-                  {!availTools.some((t) => t.kind === 'tool') && <div className="blk-d">（暂无可用工具）</div>}
+                  {!availToolsErr && !availTools.some((t) => t.kind === 'tool') && <div className="blk-d">（暂无可用工具）</div>}
                 </div>
               )}
               {/* 成品交付（kind='artifact'）：勾选后该顾问才对外开放这项交付能力，但它不进模型工具循环
@@ -430,7 +447,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                             <div className="mt">{t.name}<span className="tag off">成品交付</span>{t.builtin && <span className="tag off">内置</span>}</div>
                             <div className="mm">{t.description}</div>
                           </div>
-                          <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
+                          <Switch checked={on} onChange={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])} label={`${on ? '停用' : '启用'}技能 ${t.name}`} />
                         </div>
                       );
                     })}
@@ -474,7 +491,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                 <div className="ai-fl">输入变量映射（Dify inputs）</div>
                 <textarea className="ta" rows={5} value={difyInputsText} onChange={(e) => setDifyInputsText(e.target.value)} placeholder={'{\n  "client_profile": "{企业档案}",\n  "memory": "{长期记忆}"\n}'} />
               </div>
-              <div className="var-row">{INPUT_VARS.map((v) => <span key={v} className="var" onClick={() => setDifyInputsText((t) => t + (!t || t.endsWith('\n') ? '' : ' ') + v)}>＋ {v}</span>)}</div>
+              <div className="var-row">{INPUT_VARS.map((v) => <button type="button" key={v} className="var" onClick={() => setDifyInputsText((t) => t + (!t || t.endsWith('\n') ? '' : ' ') + v)}>＋ {v}</button>)}</div>
               <div className="blk-d" style={{ margin: '6px 0 0' }}>键 = 你在 Dify 应用里声明的输入变量名；值里可用上面的占位符，运行时按每个用户的真实上下文填充。多轮会自动用 Dify 的 conversation_id 续接。</div>
             </>
           )}
@@ -493,19 +510,19 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="cfg">
             <div className="cfg-row">
               <div className="cb"><div className="ct">开启长期记忆</div><div className="cs">跨会话记住客户的偏好、结论与口径</div></div>
-              <div className={`sw ${mem.longTerm ? 'on' : ''}`} onClick={() => setMem({ ...mem, longTerm: !mem.longTerm })}><i /></div>
+              <Switch checked={mem.longTerm} onChange={(longTerm) => setMem({ ...mem, longTerm })} label="长期记忆" />
             </div>
             <div className="cfg-row">
               <div className="cb"><div className="ct">从对话中自动学习</div><div className="cs">每次对话后提炼要点，写入长期记忆</div></div>
-              <div className={`sw ${mem.autoLearn ? 'on' : ''}`} onClick={() => setMem({ ...mem, autoLearn: !mem.autoLearn })}><i /></div>
+              <Switch checked={mem.autoLearn} onChange={(autoLearn) => setMem({ ...mem, autoLearn })} label="自动学习" />
             </div>
             <div className="cfg-row">
               <div className="cb"><div className="ct">学习强度</div><div className="cs">更高更敏感，但也更易受单次对话影响</div></div>
-              <div className="seg">{INTENSITY.map(([v, l]) => <b key={v} className={mem.intensity === v ? 'on' : ''} onClick={() => setMem({ ...mem, intensity: v as MemoryIntensity })}>{l}</b>)}</div>
+              <div className="seg">{INTENSITY.map(([v, l]) => <button type="button" key={v} className={mem.intensity === v ? 'on' : ''} onClick={() => setMem({ ...mem, intensity: v as MemoryIntensity })} aria-pressed={mem.intensity === v}>{l}</button>)}</div>
             </div>
             <div className="cfg-row">
               <div className="cb"><div className="ct">记忆留存</div><div className="cs">超出时长的低价值记忆自动淡化</div></div>
-              <div className="seg">{RETENTION.map(([v, l]) => <b key={v} className={mem.retentionDays === v ? 'on' : ''} onClick={() => setMem({ ...mem, retentionDays: v as number })}>{l}</b>)}</div>
+              <div className="seg">{RETENTION.map(([v, l]) => <button type="button" key={v} className={mem.retentionDays === v ? 'on' : ''} onClick={() => setMem({ ...mem, retentionDays: v as number })} aria-pressed={mem.retentionDays === v}>{l}</button>)}</div>
             </div>
           </div>
         </div>
@@ -517,7 +534,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               <div key={key} className="mem-card">
                 <span className="mi"><Icon name={ic} size={16} /></span>
                 <div className="mb"><div className="mt">{t}</div><div className="mm">{m}</div></div>
-                <div className={`sw ${mem.sources.includes(key as MemorySource) ? 'on' : ''}`} onClick={() => toggleSource(key as MemorySource)}><i /></div>
+                <Switch checked={mem.sources.includes(key as MemorySource)} onChange={() => toggleSource(key as MemorySource)} label={`${t}记忆来源`} />
               </div>
             ))}
           </div>
@@ -527,8 +544,9 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
         {/* P1-C4：跨用户已学记忆治理——浏览并清理 auto-learn 写入的脏记忆 */}
         <div className="blk">
           <div className="blk-h"><Icon name="insight" size={15} /><span className="t">已学记忆 · 治理</span>{agentMems && <span className="badge">{agentMems.length}</span>}</div>
+          {agentMemsErr && <ErrorState msg={agentMemsErr} onRetry={loadAgentMems} />}
           {!agentMems ? (
-            <button className="ai-btn" onClick={() => api.agentMemories(agentKey).then((r) => setAgentMems(r.items)).catch(() => setAgentMems([]))}>查看该顾问跨用户已学到的记忆</button>
+            <button type="button" className="ai-btn" onClick={loadAgentMems} disabled={agentMemsLoading}>{agentMemsLoading ? '加载中…' : '查看该顾问跨用户已学到的记忆'}</button>
           ) : agentMems.length === 0 ? (
             <div className="blk-d">暂无已学记忆。</div>
           ) : (
@@ -552,7 +570,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
         <button className="sv" onClick={publish} disabled={publishing}><Icon name="spark" size={16} /> {publishing ? '发布中…' : '发布新版本'}</button>
       </div>
       </>)}
-    </div>
+    </section>
   );
 }
 

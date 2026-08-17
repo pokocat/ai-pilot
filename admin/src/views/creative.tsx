@@ -25,7 +25,7 @@ import {
   type AdminCreativeConfig, type AdminCreativeConfigUpdate, type AdminCreativeJobItem,
   type AdminCreativeVisualConfig, type AdminCreativeDirectionSample, type PosterDirectionKey,
 } from '../api';
-import { PageHead, ViewState, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, ConfirmDialog, ErrorState, Skeleton, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
 
@@ -567,7 +567,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                       关闭后入口隐藏、接口直接 403，队列里已经建好的任务照旧跑完。
                     </div>
                   </div>
-                  <div className={`sw ${draft.enabled ? 'on' : ''}`} onClick={() => isSuper && set({ enabled: !draft.enabled })}><i /></div>
+                  <Switch checked={draft.enabled} onChange={(enabled) => set({ enabled })} label="启用海报创作" disabled={!isSuper} />
                 </div>
               </div>
               <div className="ai-note">
@@ -631,7 +631,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   {TEMPLATES.map(([k, label, desc, density]) => (
                     <div key={k} className="cfg-row">
                       <div className="cb"><div className="ct">{label}</div><div className="cs">{desc} · {density} · <span className="tag off">{k}</span></div></div>
-                      <div className={`sw ${draft.templates[k] ? 'on' : ''}`} onClick={() => isSuper && setTpl(k, !draft.templates[k])}><i /></div>
+                      <Switch checked={draft.templates[k]} onChange={(enabled) => setTpl(k, enabled)} label={`${draft.templates[k] ? '停用' : '启用'}模板 ${label}`} disabled={!isSuper} />
                     </div>
                   ))}
                 </div>
@@ -663,7 +663,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   <div className="ct">启用主视觉生成</div>
                   <div className="cs">关闭（或缺接入点/模型）时「主视觉大片」不开放；「创意排版」不受影响</div>
                 </div>
-                <div className={`sw ${draft.visualEnabled ? 'on' : ''}`} onClick={() => isSuper && set({ visualEnabled: !draft.visualEnabled })}><i /></div>
+                <Switch checked={draft.visualEnabled} onChange={(visualEnabled) => set({ visualEnabled })} label="启用 AI 主视觉" disabled={!isSuper} />
               </div>
             </div>
 

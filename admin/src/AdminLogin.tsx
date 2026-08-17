@@ -1,13 +1,11 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Icon from './Icon';
 import { adminAuth, verifyAdminToken } from './api';
 import { setAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-// 运营后台登录：
-//   - 未初始化 → 用主密钥（ADMIN_TOKEN）初始化一个管理员账号+密码（自动登录）。
-//   - 已初始化 → 账号密码登录；另有「用密钥应急登录」入口（主密钥始终有效）。
-type Mode = 'loading' | 'init' | 'login' | 'master';
+// 运营后台登录：状态探测、初始化、日常登录、主密钥应急登录四条路径必须各自有完整反馈。
+type Mode = 'loading' | 'status-error' | 'init' | 'login' | 'master';
 
 export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
   const [mode, setMode] = useState<Mode>('loading');
@@ -18,9 +16,17 @@ export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => {
-    adminAuth.status().then((s) => setMode(s.initialized ? 'login' : 'init')).catch(() => setMode('login'));
+  const loadStatus = useCallback(() => {
+    setMode('loading');
+    setErr('');
+    adminAuth.status()
+      .then((s) => setMode(s.initialized ? 'login' : 'init'))
+      .catch((e) => {
+        setErr((e as Error)?.message || '无法连接后台服务');
+        setMode('status-error');
+      });
   }, []);
+  useEffect(loadStatus, [loadStatus]);
 
   const finish = (token: string) => { setAdminToken(token); onAuthed(); };
 
@@ -30,76 +36,92 @@ export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
     if (password !== confirm) return setErr('两次输入的密码不一致');
     if (!masterKey.trim()) return setErr('请输入主密钥（ADMIN_TOKEN）');
     setBusy(true); setErr('');
-    const r = await adminAuth.init({ masterKey: masterKey.trim(), username: username.trim(), password });
-    setBusy(false);
-    if (r.ok && r.data && 'token' in r.data) return finish(r.data.token);
-    setErr((r.data as { error?: string })?.error || '初始化失败，请检查主密钥');
+    try {
+      const r = await adminAuth.init({ masterKey: masterKey.trim(), username: username.trim(), password });
+      if (r.ok && r.data && 'token' in r.data) return finish(r.data.token);
+      setErr((r.data as { error?: string })?.error || '初始化失败，请检查主密钥');
+    } catch (e) {
+      setErr((e as Error)?.message || '初始化失败，请检查网络后重试');
+    } finally { setBusy(false); }
   };
 
   const doLogin = async () => {
     if (!username.trim() || !password) return setErr('请输入账号与密码');
     setBusy(true); setErr('');
-    const r = await adminAuth.login({ username: username.trim(), password });
-    setBusy(false);
-    if (r.ok && r.data && 'token' in r.data) return finish(r.data.token);
-    setErr((r.data as { error?: string })?.error || '账号或密码错误');
+    try {
+      const r = await adminAuth.login({ username: username.trim(), password });
+      if (r.ok && r.data && 'token' in r.data) return finish(r.data.token);
+      setErr((r.data as { error?: string })?.error || '账号或密码错误');
+    } catch (e) {
+      setErr((e as Error)?.message || '登录失败，请检查网络后重试');
+    } finally { setBusy(false); }
   };
 
   const doMaster = async () => {
     const t = masterKey.trim();
     if (!t) return setErr('请输入管理员密钥');
     setBusy(true); setErr('');
-    const ok = await verifyAdminToken(t);
-    setBusy(false);
-    if (ok) return finish(t);
-    setErr('密钥无效或无权限');
+    try {
+      const ok = await verifyAdminToken(t);
+      if (ok) return finish(t);
+      setErr('密钥无效或无权限');
+    } catch (e) {
+      setErr((e as Error)?.message || '校验失败，请检查网络后重试');
+    } finally { setBusy(false); }
   };
-
-  const onEnter = (fn: () => void) => (e: KeyboardEvent) => { if (e.key === 'Enter') fn(); };
 
   return (
     <div className="screen">
       <div className="admin-login">
-          <img className="al-mk" src={logo} alt="军师" />
-          <div className="al-t">运营后台</div>
-          <div className="al-s">JUNSHI · CONSOLE</div>
+        <img className="al-mk" src={logo} alt="军师" />
+        <div className="al-t">运营后台</div>
+        <div className="al-s">JUNSHI · CONSOLE</div>
 
-          {mode === 'loading' && <div className="al-card"><div className="al-note">加载中…</div></div>}
+        {mode === 'loading' && <div className="al-card" role="status"><div className="al-note">正在确认后台状态…</div></div>}
 
-          {mode === 'init' && (
-            <div className="al-card">
-              <div className="al-label">初始化管理员账号</div>
-              <input className="al-input" value={username} placeholder="设置账号（字母/数字/._-）" onChange={(e) => setUsername(e.target.value)} autoFocus />
-              <input className="al-input" type="password" value={password} placeholder="设置密码（至少 6 位）" onChange={(e) => setPassword(e.target.value)} />
-              <input className="al-input" type="password" value={confirm} placeholder="确认密码" onChange={(e) => setConfirm(e.target.value)} />
-              <input className="al-input" type="password" value={masterKey} placeholder="主密钥 ADMIN_TOKEN" onChange={(e) => setMasterKey(e.target.value)} onKeyDown={onEnter(doInit)} />
-              {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
-              <button className="al-btn" onClick={doInit} disabled={busy}><Icon name="check" size={15} /> {busy ? '初始化中…' : '初始化并进入'}</button>
-              <div className="al-note">首次进入：用后端环境变量 ADMIN_TOKEN 验证身份，设置日常登录的账号密码。</div>
-            </div>
-          )}
+        {mode === 'status-error' && (
+          <div className="al-card">
+            <div className="al-label">后台暂时无法连接</div>
+            <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>
+            <button type="button" className="al-btn" onClick={loadStatus}><Icon name="refresh" size={15} /> 重新连接</button>
+            <div className="al-note">连接恢复后会自动判断进入初始化还是日常登录，不会把接口失败误判成已有账号。</div>
+          </div>
+        )}
 
-          {mode === 'login' && (
-            <div className="al-card">
-              <div className="al-label">账号登录</div>
-              <input className="al-input" value={username} placeholder="账号" onChange={(e) => setUsername(e.target.value)} autoFocus />
-              <input className="al-input" type="password" value={password} placeholder="密码" onChange={(e) => setPassword(e.target.value)} onKeyDown={onEnter(doLogin)} />
-              {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
-              <button className="al-btn" onClick={doLogin} disabled={busy}><Icon name="check" size={15} /> {busy ? '登录中…' : '登录'}</button>
-              <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setErr(''); setMode('master'); }}>用密钥应急登录</div>
-            </div>
-          )}
+        {mode === 'init' && (
+          <form className="al-card" onSubmit={(e) => { e.preventDefault(); doInit(); }}>
+            <div className="al-label">初始化管理员账号</div>
+            <input className="al-input" value={username} aria-label="设置账号" autoComplete="username" placeholder="设置账号（字母/数字/._-）" onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <input className="al-input" type="password" value={password} aria-label="设置密码" autoComplete="new-password" placeholder="设置密码（至少 6 位）" onChange={(e) => setPassword(e.target.value)} />
+            <input className="al-input" type="password" value={confirm} aria-label="确认密码" autoComplete="new-password" placeholder="确认密码" onChange={(e) => setConfirm(e.target.value)} />
+            <input className="al-input" type="password" value={masterKey} aria-label="主密钥" placeholder="主密钥 ADMIN_TOKEN" onChange={(e) => setMasterKey(e.target.value)} />
+            {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
+            <button type="submit" className="al-btn" disabled={busy}><Icon name="check" size={15} /> {busy ? '初始化中…' : '初始化并进入'}</button>
+            <div className="al-note">首次进入：用后端环境变量 ADMIN_TOKEN 验证身份，设置日常登录的账号密码。</div>
+          </form>
+        )}
 
-          {mode === 'master' && (
-            <div className="al-card">
-              <div className="al-label">管理员密钥</div>
-              <input className="al-input" type="password" value={masterKey} placeholder="请输入 ADMIN_TOKEN" onChange={(e) => setMasterKey(e.target.value)} onKeyDown={onEnter(doMaster)} autoFocus />
-              {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
-              <button className="al-btn" onClick={doMaster} disabled={busy}><Icon name="check" size={15} /> {busy ? '校验中…' : '应急登录'}</button>
-              <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setErr(''); setMode('login'); }}>← 返回账号登录</div>
-            </div>
-          )}
-        </div>
+        {mode === 'login' && (
+          <form className="al-card" onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
+            <div className="al-label">账号登录</div>
+            <input className="al-input" value={username} aria-label="账号" autoComplete="username" placeholder="账号" onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <input className="al-input" type="password" value={password} aria-label="密码" autoComplete="current-password" placeholder="密码" onChange={(e) => setPassword(e.target.value)} />
+            {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
+            <button type="submit" className="al-btn" disabled={busy}><Icon name="check" size={15} /> {busy ? '登录中…' : '登录'}</button>
+            <button type="button" className="al-link" onClick={() => { setErr(''); setMode('master'); }}>用密钥应急登录</button>
+          </form>
+        )}
+
+        {mode === 'master' && (
+          <form className="al-card" onSubmit={(e) => { e.preventDefault(); doMaster(); }}>
+            <div className="al-label">管理员密钥</div>
+            <input className="al-input" type="password" value={masterKey} aria-label="管理员密钥" placeholder="请输入 ADMIN_TOKEN" onChange={(e) => setMasterKey(e.target.value)} autoFocus />
+            {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
+            <button type="submit" className="al-btn" disabled={busy}><Icon name="check" size={15} /> {busy ? '校验中…' : '应急登录'}</button>
+            <button type="button" className="al-link" onClick={() => { setErr(''); setMode('login'); }}>← 返回账号登录</button>
+          </form>
+        )}
       </div>
+    </div>
   );
 }

@@ -6,6 +6,13 @@
 
 ## 变更日志
 
+### 2026-08-17 · 运营后台按产品完整性补齐交互与失败恢复 · 影响面：admin 登录/命令面板/账户菜单/弹层/开关/顾问与用户操作
+
+- **状态不再说谎**：登录状态探测失败不再猜成“已初始化”，初始化/账号/密钥登录与改密网络异常都能解除 busy 并展示原始错误；命令面板找人、技能目录、已学记忆失败与真空结果分开，保留明确重试。
+- **键盘与读屏主链**：新增共享 `Switch` 与 `useDialogFocus`，26 个鼠标专用开关、计费/接入/评测分段、变量插入、主用户卡与技能/知识卡改为原生按钮语义；确认/改密/用户操作弹层支持首次聚焦、Tab 圈定、Escape、焦点归还和长内容视口内滚动。账户菜单移除 button 内嵌交互节点，补 `role=menu`；toast/error 分别补 status/alert。
+- **可读性与护栏**：次级文字灰提升对比度，白字主动作统一使用深金；状态色全部进入 `:root` token。`lint:ui` 新增阻断 `:root` 外 hex、字面量 z-index、`div.sw` 和空 catch，防止同类回退。未改 admin API、服务端或数据契约。
+- **验证**：admin UI lint、TypeScript、79 项测试与 Vite 生产构建通过；本地 Vite HTTP 200，并对 1440×900 登录形态做 Chromium 截图走查。
+
 ### 2026-08-17 · 生产发布 `8d69210` 并上传微信小程序 `0.2.38` 开发版 · 影响面：production server/admin、微信开发版
 
 - **后端先行**：发布前将生产库备份到 `/tmp/junshi-db-backup-20260817T101051Z.dump`（45,400,645 B、172 张表），Prisma 预检只有 `generation_job.thoughtSummary TEXT NOT NULL DEFAULT ''` 一条纯加法；`scripts/deploy-prod.sh` 成功把生产从 `4162adf` 切到 `8d69210`，`.deploy-history` 同时记入 `switched/ok`。

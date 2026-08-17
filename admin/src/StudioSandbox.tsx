@@ -36,12 +36,12 @@ export default function StudioSandbox({ agentKey, draftDirty }: { agentKey: stri
         <div className="blk-d">用「草稿」或「已发布版本」即时试跑一条消息，看产出与诊断。沙盒用模拟客户上下文、不拉真实用户数据、不计入计费统计。</div>
 
         <div className="bill-seg">
-          <div className={`bill-opt ${target === 'draft' ? 'on' : ''}`} onClick={() => setTarget('draft')}>
+          <button type="button" className={`bill-opt ${target === 'draft' ? 'on' : ''}`} onClick={() => setTarget('draft')} aria-pressed={target === 'draft'}>
             <div className="bo-t">草稿{draftDirty ? ' ●' : ''}</div><div className="bo-d">你正在编辑的最新配置</div>
-          </div>
-          <div className={`bill-opt ${target === 'published' ? 'on' : ''}`} onClick={() => setTarget('published')}>
+          </button>
+          <button type="button" className={`bill-opt ${target === 'published' ? 'on' : ''}`} onClick={() => setTarget('published')} aria-pressed={target === 'published'}>
             <div className="bo-t">已发布</div><div className="bo-d">C 端用户当前实际用的版本</div>
-          </div>
+          </button>
         </div>
 
         <div className="ai-field" style={{ marginTop: 8 }}>
@@ -50,7 +50,7 @@ export default function StudioSandbox({ agentKey, draftDirty }: { agentKey: stri
         </div>
 
         <div className="var-row">
-          <span className="var" onClick={() => setShowProfile((v) => !v)}>{showProfile ? '－ 收起模拟档案' : '＋ 模拟客户档案（可选）'}</span>
+          <button type="button" className="var" onClick={() => setShowProfile((v) => !v)} aria-expanded={showProfile}>{showProfile ? '－ 收起模拟档案' : '＋ 模拟客户档案（可选）'}</button>
         </div>
         {showProfile && (
           <div className="cfg" style={{ marginTop: 6 }}>

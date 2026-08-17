@@ -10,7 +10,7 @@
 //   cd admin && npm test
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, isForbidden } from './api.js';
+import { api, adminAuth, isForbidden } from './api.js';
 import { getAdminToken, setAdminToken } from './auth.js';
 
 interface FakeRes { status: number; ok: boolean; json: () => Promise<unknown> }
@@ -118,5 +118,24 @@ describe('admin api · 401 踢回登录页 / 403 只提示权限不足', () => {
     assert.deepEqual(events, []);
     assert.equal(isForbidden(e), false);
     assert.match(last?.url ?? '', /\/api\/admin\/creative\/config$/);
+  });
+});
+
+describe('admin 登录状态 · 失败不能伪装成未初始化', () => {
+  test('服务端 500：透出可重试错误，不返回 initialized=false', async () => {
+    stubFetch(500, { error: '数据库连接失败' });
+    const e = await expectReject(adminAuth.status());
+    assert.equal(e.message, '数据库连接失败');
+  });
+
+  test('网络断开：明确报连接失败', async () => {
+    (globalThis as unknown as { fetch: unknown }).fetch = () => Promise.reject(new Error('ECONNREFUSED'));
+    const e = await expectReject(adminAuth.status());
+    assert.match(e.message, /无法连接后台服务/);
+  });
+
+  test('状态成功：保留后端初始化事实', async () => {
+    stubFetch(200, { initialized: true, masterKeyEnabled: false });
+    assert.deepEqual(await adminAuth.status(), { initialized: true, masterKeyEnabled: false });
   });
 });

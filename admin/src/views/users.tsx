@@ -1,9 +1,9 @@
 // 用户：客服排查主战场——找人 → 看额度/用量/订单 → 处置（额度/钻石/套餐/模块/附身）。
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, uploadUserKnowledge, type ServiceAssignmentView, type AdminUserItem, type AdminUserDetail, type AdminUserUsage, type AdminUserPlanStatus, type AdminUserContext, type AdminUserQuotaView, type KnowledgeDetail, type AdminImpersonateResult } from '../api';
-import { PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, useDialogFocus, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { KV, sum, fmtTime, creditText, sourceLabel, fmtTokens, fmtCny, fmtYuan, fmtSize, planStatusText } from '../format';
 
@@ -88,7 +88,7 @@ export function UsersView({ onOpen, initialQ = '' }: { onOpen: (id: string) => v
               </div>
             )}
             {shown.map((u) => (
-              <div key={u.id} className="crd user-card" onClick={() => onOpen(u.id)}>
+              <button type="button" key={u.id} className="crd user-card card-button" onClick={() => onOpen(u.id)}>
                 <div className="crd-row">
                   <span className="crd-ic"><Icon name="user" size={18} /></span>
                   <div className="crd-b">
@@ -105,7 +105,7 @@ export function UsersView({ onOpen, initialQ = '' }: { onOpen: (id: string) => v
                   <KV k="钻石消耗" v={`${u.totalSpent}`} />
                   <KV k="30 天 Token" v={fmtTokens(u.tokenUsed30d)} />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -249,7 +249,7 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
   return (
     <div className="ad-detail show">
       <div className="ad-dh">
-        <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
+        <button type="button" className="bk" onClick={onClose} aria-label="返回用户列表"><Icon name="arrow" size={18} /></button>
         <div className="di"><Icon name="user" size={18} /></div>
         <div className="dt"><div className="t">{u.name}</div><div className="s">{u.phone} · 余额 {creditText(u.creditBalance)}</div></div>
       </div>
@@ -332,11 +332,11 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
               {ctx.knowledge.map((k) => (
                 <div key={k.id} className="mem-card">
                   <span className="mi"><Icon name="doc" size={16} /></span>
-                  <div className="mb" onClick={() => openDetail(k.id)}>
+                  <button type="button" className="mb mem-open" onClick={() => openDetail(k.id)} aria-expanded={openDoc === k.id}>
                     <div className="mt">{k.title || k.fileName || k.kind}<span className={`tag ${k.status === 'failed' ? '' : 'off'}`}>{KB_STATUS_LABEL[k.status] ?? k.status}</span>{k.fileType && <span className="tag">{k.fileType}</span>}</div>
                     <div className="mm">{k.sourceType} · {k.chunkCount} 切片{k.fileSize ? ' · ' + fmtSize(k.fileSize) : ''}{k.error ? ' · ⚠ ' + k.error : ''}</div>
                     {openDoc === k.id && docDetail && <div className="mm">{docDetail.textPreview.slice(0, 300)}{docDetail.textPreview.length > 300 ? '…' : ''}（{docDetail.chunks.length} 切片 · 维度 {[...new Set(docDetail.chunks.map((c) => c.dim))].join('/') || '—'}）</div>}
-                  </div>
+                  </button>
                   <button className="mini-btn" disabled={busy === 'k' + k.id} onClick={() => reembedKb(k.id)}>重嵌</button>
                   <button className="mini-btn danger" disabled={busy === 'k' + k.id} onClick={() => delKb(k.id, k.title || k.fileName || k.kind, k.chunkCount)}>删除</button>
                 </div>
@@ -357,10 +357,10 @@ type OpsKind = 'reset' | 'adjustQuota' | 'credits' | 'extend' | 'grantPlan' | 'm
 function Fold({ icon, title, count, open, onToggle, children }: { icon: string; title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
     <div className="blk">
-      <div className="blk-h" style={{ cursor: 'pointer' }} onClick={onToggle}>
+      <button type="button" className="blk-h blk-toggle" onClick={onToggle} aria-expanded={open}>
         <Icon name={icon} size={15} /><span className="t">{title}</span>
         <span className="badge">{open ? '收起' : count}</span>
-      </div>
+      </button>
       {open && children}
     </div>
   );
@@ -543,6 +543,9 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   const [moduleKey, setModuleKey] = useState('');
   // 改档会缩短用户有效期时服务端回 409（带确切损失天数），这里存原文并要求二次确认后才带 force 重试。
   const [shortenWarn, setShortenWarn] = useState('');
+  const titleId = useId();
+  const requestClose = () => { if (!busy) onClose(); };
+  const dialogRef = useDialogFocus<HTMLFormElement>(requestClose);
 
   useEffect(() => {
     if (kind === 'grantPlan') api.plans().then((ps) => setPlanList(ps.map((p: { id: string; name: string; price: number }) => ({ id: p.id, name: p.name, price: p.price })))).catch((e) => setErr((e as Error).message || '套餐列表加载失败，无法选择'));
@@ -624,9 +627,9 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   };
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="al-card" style={{ width: 300, margin: 0 }} onClick={(e) => e.stopPropagation()}>
-        <div className="al-label">{cfg.title}</div>
+    <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+      <form ref={dialogRef} className="al-card modal" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <div className="al-label" id={titleId}>{cfg.title}</div>
         <div className="blk-d">{cfg.desc}</div>
         {kind === 'adjustQuota' && (
           <>
@@ -659,12 +662,12 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
         {kind === 'module' && (
           <>
             <input className="al-input" value={moduleKey} placeholder="moduleKey（如 deep-contradiction）" onChange={(e) => setModuleKey(e.target.value)} />
-            <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={async () => {
+            <button type="button" className="al-link" onClick={async () => {
               const key = moduleKey.trim();
               if (!key) { setErr('请填写 moduleKey'); return; }
               try { await api.revokeUserModule(userId, key); toast(`已收回模块 ${key}`); onDone(); }
               catch (e) { setErr((e as Error).message || '收回失败'); }
-            }}>收回该模块（停用）</div>
+            }}>收回该模块（停用）</button>
           </>
         )}
         {kind === 'credits' && (
@@ -675,10 +678,10 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
             </div>
           </>
         )}
-        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
-        <button type="button" className="al-btn" onClick={submit} disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认'}</button>
-        <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={onClose}>取消</div>
-      </div>
+        {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
+        <button type="submit" className="al-btn" disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认'}</button>
+        <button type="button" className="al-cancel" onClick={requestClose} disabled={busy}>取消</button>
+      </form>
     </div>
   );
 }

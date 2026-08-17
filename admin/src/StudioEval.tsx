@@ -64,7 +64,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
       <div className="ad-db">
         <div className="blk">
           <div className="blk-h">
-            <span className="bk" style={{ cursor: 'pointer' }} onClick={() => { setSel(null); setRun(null); }}><Icon name="arrow" size={16} /></span>
+            <button type="button" className="bk" onClick={() => { setSel(null); setRun(null); }} aria-label="返回评测集"><Icon name="arrow" size={16} /></button>
             <span className="t">{sel.name}</span><span className="badge">{sel.caseCount} 用例</span>
           </div>
           <CaseEditor set={sel} onChanged={() => openSet(sel.id)} toast={toast} />
@@ -75,9 +75,9 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
           <div className="blk-d">用 LLM 评委按每条用例的评分标准给被测版本打 0-10 分，加权汇总。需配置真实模型（mock 无法评分）。</div>
           <div className="bill-seg">
             {(['draft', 'published'] as const).map((t) => (
-              <div key={t} className={`bill-opt ${target === t ? 'on' : ''}`} onClick={() => setTarget(t)}>
+              <button type="button" key={t} className={`bill-opt ${target === t ? 'on' : ''}`} onClick={() => setTarget(t)} aria-pressed={target === t}>
                 <div className="bo-t">{t === 'draft' ? '测草稿' : '测已发布'}</div>
-              </div>
+              </button>
             ))}
           </div>
           <button className="ai-btn primary block" disabled={busy || !sel.caseCount} onClick={startRun}><Icon name="spark" size={15} /> 开始跑分</button>

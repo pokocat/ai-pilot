@@ -3,7 +3,7 @@ import { useEffect, useState, type MouseEvent } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, type AdminAgent, type AgentType, type AgentBilling, type AdminUserItem, type SkillToolDef, type SkillToolUpsert, type SkillToolMeta, type AdminKnowledgeView, type AdminRetrievalDebug, type KnowledgeDetail } from '../api';
-import { PageHead, ViewState, ErrorState, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, ErrorState, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { billingTag } from '../format';
 
@@ -77,13 +77,13 @@ export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toa
         )}
         {!res.initial && list.length === 0 && !res.error && <div className="empty">还没有智能体。点上方「新增智能体」创建一个。</div>}
         {list.map((a) => (
-          <div key={a.key} className="crd agent-card" onClick={() => onOpen(a.key)}>
+          <div key={a.key} className="crd agent-card">
             <div className="crd-row">
               <span className="crd-ic"><Icon name={a.icon} size={18} /></span>
-              <div className="crd-b">
+              <button type="button" className="crd-b card-main" onClick={() => onOpen(a.key)}>
                 <div className="ct">{a.name} {billingTag(a.billing, a.price)} {!a.enabled && <span className="tag off">停用</span>} {a.draftDirty && <span className="tag warn">待发布</span>}</div>
                 <div className="cs">{a.publishedVersion ? `线上 v${a.publishedVersion}` : '未发布'} · 倍率 ×{a.billingRatio ?? 1} · {a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · 已开通 {a.ownerCount ?? 0}</div>
-              </div>
+              </button>
               <div className="crd-actions">
                 <button type="button" className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
                   {a.enabled ? '下架' : '上架'}
@@ -170,15 +170,15 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
             <div className="ai-field"><div className="ai-fl">展示名</div><input className="ai-input" placeholder="查订单" value={form.name} onChange={(e) => set({ name: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">描述（模型据此判断何时调用，写清楚）</div><textarea className="ta" rows={2} value={form.description} onChange={(e) => set({ description: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">请求方式</div>
-              <div className="bill-seg">{(['POST', 'GET'] as const).map((m) => <div key={m} className={`bill-opt ${form.httpMethod === m ? 'on' : ''}`} onClick={() => set({ httpMethod: m })}><div className="bo-t">{m}</div></div>)}</div>
+              <div className="bill-seg">{(['POST', 'GET'] as const).map((m) => <button type="button" key={m} className={`bill-opt ${form.httpMethod === m ? 'on' : ''}`} onClick={() => set({ httpMethod: m })} aria-pressed={form.httpMethod === m}><div className="bo-t">{m}</div></button>)}</div>
             </div>
             <div className="ai-field"><div className="ai-fl">接口 URL</div><input className="ai-input" placeholder="https://api.example.com/orders" value={form.httpUrl} onChange={(e) => set({ httpUrl: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">参数位置</div>
-              <div className="bill-seg">{([['body', 'JSON Body'], ['query', 'Query 参数']] as const).map(([v, l]) => <div key={v} className={`bill-opt ${form.argsLocation === v ? 'on' : ''}`} onClick={() => set({ argsLocation: v })}><div className="bo-t">{l}</div></div>)}</div>
+              <div className="bill-seg">{([['body', 'JSON Body'], ['query', 'Query 参数']] as const).map(([v, l]) => <button type="button" key={v} className={`bill-opt ${form.argsLocation === v ? 'on' : ''}`} onClick={() => set({ argsLocation: v })} aria-pressed={form.argsLocation === v}><div className="bo-t">{l}</div></button>)}</div>
             </div>
             <div className="ai-field"><div className="ai-fl">参数 Schema（JSON Schema）</div><textarea className="ta" rows={7} value={form.schemaText} onChange={(e) => set({ schemaText: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">静态请求头 JSON（含鉴权，如 {'{'}"Authorization":"Bearer xxx"{'}'}）{form.id ? ' · 留空保留现有' : ''}</div><textarea className="ta" rows={3} placeholder={form.id ? '留空则不修改已存请求头' : '{\n  "Authorization": "Bearer ..."\n}'} value={form.headersText} onChange={(e) => set({ headersText: e.target.value })} /></div>
-            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用</div><div className="cs">关闭后不出现在 agent 勾选列表</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用</div><div className="cs">关闭后不出现在 agent 勾选列表</div></div><Switch checked={form.enabled} onChange={(enabled) => set({ enabled })} label="启用自建技能" /></div></div>
             <div className="ai-actions">
               <button type="button" className="ai-btn ghost" onClick={() => setForm(null)}>取消</button>
               <button type="button" className="ai-btn primary" onClick={save}><Icon name="check" size={14} /> 保存</button>
@@ -198,14 +198,14 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
         {builtin.initial && <div className="skel"><div className="skel-b skel-r" /><div className="skel-b skel-r" /></div>}
         {!builtin.initial && nativeSkills.length === 0 && <div className="empty">没有内置技能。</div>}
         {nativeSkills.map((m) => (
-          <div key={m.name} className="mem-card actionable" onClick={() => setSelectedSkill(m)}>
+          <button type="button" key={m.name} className="mem-card actionable" onClick={() => setSelectedSkill(m)}>
             <span className="mi"><Icon name={m.kind === 'output' ? 'layers' : 'insight'} size={16} /></span>
             <div className="mb">
               <div className="mt">{m.displayName || m.name}<span className="tag off">{m.name}</span><span className="tag">{KIND_LABEL[m.kind] ?? m.kind}</span><span className="tag off">内置</span></div>
               <div className="mm">{m.description}</div>
             </div>
             <Icon name="arrow" size={14} />
-          </div>
+          </button>
         ))}
         <div className="sec-h"><span className="t">自定义 HTTP 工具</span><span className="s">运营自建</span></div>
         <button type="button" className="add-btn full" onClick={() => setForm({ ...BLANK_SKILL })}><Icon name="spark" size={15} /> 新增技能</button>
@@ -213,10 +213,10 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
         {list.map((d) => (
           <div key={d.id} className="mem-card">
             <span className="mi"><Icon name="insight" size={16} /></span>
-            <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(d)}>
+            <button type="button" className="mb mem-open" onClick={() => edit(d)}>
               <div className="mt">{d.name}<span className="tag off">{d.key}</span>{!d.enabled && <span className="tag">停用</span>}</div>
               <div className="mm">{d.httpMethod} {d.httpUrl}{d.hasHeaders ? ` · 含鉴权头(${d.headerKeys.join(',')})` : ''}</div>
-            </div>
+            </button>
             <button type="button" className="mini-btn danger" onClick={() => del(d)}>删除</button>
           </div>
         ))}
@@ -303,7 +303,7 @@ export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
               {data.items.length === 0 && <div className="empty">还没有知识库内容。用户在对话里 @ 引用资料 / 上传 / 沉淀成果后，会在此显示。</div>}
               {data.items.length > 0 && items.length === 0 && <div className="empty">该用户还没有知识库内容。</div>}
               {items.map((it) => (
-                <div key={it.id} className="mem-card actionable" onClick={() => openItem(it)}>
+                <button type="button" key={it.id} className="mem-card actionable" onClick={() => openItem(it)}>
                   <span className="mi"><Icon name="doc" size={16} /></span>
                   <div className="mb">
                     <div className="mt">{it.title}<span className="tag off">{KNOWLEDGE_KIND_LABEL[it.kind] ?? it.kind}</span>{it.stale && <span className="tag warn">旧维度</span>}</div>
@@ -311,7 +311,7 @@ export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
                     <div className="mm">{it.chunks} 切片 · 维度 {it.dims.join('/') || '—'} · {new Date(it.createdAt).toLocaleString()}</div>
                   </div>
                   <Icon name="arrow" size={14} />
-                </div>
+                </button>
               ))}
             </div>
           );

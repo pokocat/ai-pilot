@@ -62,6 +62,11 @@ for (const f of TSX) {
     }
     // 3) 表单控件带一次性 inline style
     if (/<(button|input|select)[^>]*style=\{\{/.test(line)) add(f, ln, `<${RegExp.$1}> 带一次性 inline style → 用组件类/修饰类（见 DESIGN.md）`);
+    // 4) 开关必须走共享 Switch（button + role=switch），禁止鼠标专用的 div.sw 回流。
+    if (/<div[^>]*className=.*\bsw\b/.test(line)) add(f, ln, `div.sw 只有鼠标能操作 → 使用 components.tsx 的 Switch`);
+    // 5) 取数失败不得吞掉并伪装成空态。
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('//') && !trimmed.startsWith('*') && !line.includes('`') && /\.catch\(\(\)\s*=>\s*\{\s*\}\)/.test(line)) add(f, ln, `空 catch 会把请求失败伪装成空数据 → 使用 useResource/ViewState 或显示可重试错误`);
   });
 }
 
@@ -73,8 +78,12 @@ css.split('\n').forEach((line, i) => {
   if (offset < rootEnd) return; // 跳过 :root 定义区
   for (const h of line.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
     const hex = h[0].toLowerCase();
-    if (tokenByValue.has(hex)) add(CSS, ln, `硬编码 ${h[0]} 等于 token → 改用 var(--${tokenByValue.get(hex)})`);
+    if (!ALLOW_HEX.has(hex)) {
+      const known = tokenByValue.get(hex);
+      add(CSS, ln, known ? `硬编码 ${h[0]} 等于 token → 改用 var(--${known})` : `硬编码颜色 ${h[0]} → 先在 :root 定义语义 token，再用 var()`);
+    }
   }
+  if (/\bz-index\s*:\s*\d+\b/.test(line)) add(CSS, ln, `z-index 使用字面量 → 改用 var(--z-*) 刻度`);
 });
 
 if (violations.length) {

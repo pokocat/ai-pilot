@@ -18,7 +18,7 @@ import {
   type AiRouteView, type AiRoutingStatus, type AiEndpointUpsert, type AiProbeReport, type AiRouteBudget,
 } from '../api';
 import { Field } from '../format';
-import { PageHead, ErrorState, Skeleton, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ErrorState, Skeleton, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { modelGatewayField, modelSupportsThinking, auxReuseBlock } from '../modelGateway';
 
 /** 用途的中文名与说明。后台不该把 purpose 的英文枚举直接甩给运营。 */
@@ -294,9 +294,9 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
               <Field label="Thinking 思考模式">
                 <div className="bill-seg">
                   {([['disabled', '关闭'], ['enabled', '手动预算'], ['adaptive', '自适应']] as const).map(([v, l]) => (
-                    <div key={v} className={`bill-opt ${form.thinkingMode === v ? 'on' : ''}`} onClick={() => set({ thinkingMode: v })}>
+                    <button type="button" key={v} className={`bill-opt ${form.thinkingMode === v ? 'on' : ''}`} onClick={() => set({ thinkingMode: v })} aria-pressed={form.thinkingMode === v}>
                       <div className="bo-t">{l}</div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </Field>
@@ -581,7 +581,7 @@ function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMe
                   : '关＝只用上面那一个；开＝按权重分流，某个端点被限流时不会全站停摆'}
               </div>
             </div>
-            <div className={`sw ${route.mode === 'pool' ? 'on' : ''}`} onClick={() => onMode(route.mode === 'pool' ? 'single' : 'pool')}><i /></div>
+            <Switch checked={route.mode === 'pool'} onChange={(pool) => onMode(pool ? 'pool' : 'single')} label="多路分流" />
           </div>
           {route.mode === 'pool' && (
             <div className="ai-sub-h">
@@ -589,7 +589,7 @@ function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMe
                 <div className="t">会话粘性</div>
                 <div className="s">同一会话固定落同一端点。上游提示词缓存按账号隔离，关掉会把缓存打散、成本上升</div>
               </div>
-              <div className={`sw ${route.sticky ? 'on' : ''}`} onClick={() => onSticky(!route.sticky)}><i /></div>
+              <Switch checked={route.sticky} onChange={onSticky} label="会话粘性" />
             </div>
           )}
           {route.mode === 'pool' && route.members.filter((m) => !m.primary).map((m) => {

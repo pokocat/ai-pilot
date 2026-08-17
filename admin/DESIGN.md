@@ -8,7 +8,7 @@ colors:
   surface-muted: "#F3F1EA"
   ink: "#16191D"
   ink-secondary: "#565C63"
-  ink-muted: "#969BA1"
+  ink-muted: "#6F747A"
   line: "#E7E4DB"
   line-soft: "#EFEDE5"
   command-gold: "#A07D2C"
@@ -74,7 +74,7 @@ spacing:
   page-x: "20px"
 components:
   button-primary:
-    backgroundColor: "{colors.command-gold}"
+    backgroundColor: "{colors.command-gold-deep}"
     textColor: "{colors.surface}"
     typography: "{typography.title}"
     rounded: "{rounded.lg}"
@@ -139,7 +139,7 @@ The palette is paper, ink, and command gold: warm neutrals carry the surface; go
 
 ### Primary
 - **Command Gold**: The primary action and active-state color. Use it for selected navigation, primary buttons, toggle-on surfaces, focused selections, progress bars, and small icons that carry action.
-- **Deep Command Gold**: Use for text on gold-tinted backgrounds and for stronger data emphasis where pure accent would feel too bright.
+- **Deep Command Gold**: Use for primary button/chip fills with white text (the regular command gold does not provide enough small-text contrast), text on gold-tinted backgrounds, and stronger data emphasis.
 - **Soft Command Gold**: Use as a background for icons, enabled states, badges, and low-pressure highlights.
 - **Bright Command Gold**: Use only as a secondary highlight in progress fills and toast icon accents.
 
@@ -160,7 +160,7 @@ The palette is paper, ink, and command gold: warm neutrals carry the surface; go
 
 ### Named Rules
 
-**The One Command Color Rule.** Gold is the only brand action color. Do not introduce purple, blue, neon, or rainbow model colors for visual excitement.
+**The One Command Color Rule.** Gold is the only brand action color. Regular gold marks focus/selection; deep gold carries white-text actions so normal-size labels meet contrast requirements. Do not introduce purple, blue, neon, or rainbow model colors for visual excitement.
 
 **The Status Is Not Brand Rule.** Green, red, and warning ochre are reserved for state. Never use them as decorative accents.
 
@@ -210,7 +210,7 @@ Elevation is a hybrid of tonal layering and very soft ambient shadow. Most struc
 Buttons are compact, familiar, and consistent. They use icons where useful and avoid ornamental shapes.
 
 - **Shape:** Gently curved rectangles for primary and ghost actions (12px radius); compact actions use 8px radius.
-- **Primary:** Command Gold background, white text, 44px height, 13.5px semibold text, icon gap 7px.
+- **Primary:** Deep Command Gold background, white text, 44px height, 13.5px semibold text, icon gap 7px. Regular Command Gold is reserved for focus rings, icons, and non-text selection surfaces.
 - **Hover / Focus:** Hover is a quiet tonal shift. Focus must be visible with a gold outline or border shift; do not rely on color alone.
 - **Ghost:** Transparent background, warm border, secondary ink text. Use for cancel, test, and secondary actions.
 - **Danger:** Red-tinted surface with red text and red border. Use only for destructive row actions.
@@ -322,6 +322,13 @@ request as "暂无数据" lies to the operator during exactly the incidents it e
 
 Screens consume these through `useResource` + `ViewState`; raw `.catch(() => {})` is prohibited.
 
+### Accessibility and Interaction Completeness
+
+- Native semantics are mandatory for actions: buttons stay `<button>`, toggles use the shared `Switch` (`role="switch"` + `aria-checked`), and selectable cards/segments must be keyboard reachable. A styled `div` with `onClick` is not a control.
+- Modal dialogs use `useDialogFocus`: focus enters on open, Tab stays inside, Escape closes, long content scrolls inside the viewport, and closing restores focus to the trigger. Title/error text uses `aria-labelledby` / `role="alert"`; success toast uses `role="status"`.
+- Async lookup failures are not empty results. Login status detection, command-palette user search, skill catalogs, and governance lists must show a retryable failure without discarding already loaded content.
+- Browser location remains the source of navigation truth. Keyboard accessibility must not replace hash routing, browser back, refresh restoration, or direct-link behavior.
+
 ### Destructive Confirmation
 
 `window.confirm`, `window.prompt`, and `window.alert` are prohibited (see Don'ts). Use `ConfirmDialog`.
@@ -402,5 +409,10 @@ Screens consume these through `useResource` + `ViewState`; raw `.catch(() => {})
 - 共享格式化（金额 / token / 时间 / 审计标签）放 `admin/src/format.tsx`，共享组件放 `admin/src/components.tsx`，不要在各页复制。
 - `lint:ui` 会**递归扫描** `admin/src` 下所有 `.tsx`（旧版是 6 个文件的硬编码清单，新文件能静默逃检）。
 
-### 6. 提交前必过
+### 6. 交互完整性
+- `Switch`、`useDialogFocus`、`ConfirmDialog` 是共享基础设施；禁止恢复 `div.sw`、无焦点管理的自制弹层或按钮里嵌交互节点。
+- 小号文字不得使用低对比灰；白字主按钮/选中 chip 统一用 `--accent-deep`。`lint:ui` 会阻断 `:root` 外的 hex、字面量 z-index、`div.sw` 与空 catch。
+- 登录、搜索、列表和详情都要区分 loading / empty / error / success；接口失败必须保留服务端可读错误和重试路径。
+
+### 7. 提交前必过
 - `cd admin && npm run lint:ui`（设计系统合规）+ `npx tsc --noEmit`（类型）必须全绿；`npm run build` 会自动先跑 lint:ui。新增/改动 UI 前先读本文件与 `Do's and Don'ts`。

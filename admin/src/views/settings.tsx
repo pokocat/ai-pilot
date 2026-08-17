@@ -5,7 +5,7 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, type AdminAccountItem, type AdminClonePricing, type AdminFeatureFlag, type AdminMonitorNotify, type AdminBenchmark } from '../api';
-import { PageHead, ErrorState, ViewState, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ErrorState, ViewState, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
 
@@ -480,7 +480,7 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
               <div className="stx">{f.label}{f.compliance ? ' · 合规开关' : ''}</div>
               <div className="smeta">{f.enabled ? '已开启' : '已关闭 · 全产品下线'} · {f.desc}</div>
             </div>
-            <div className={`sw ${f.enabled ? 'on' : ''}`} onClick={() => busy !== f.id && toggle(f)}><i /></div>
+            <Switch checked={f.enabled} onChange={() => toggle(f)} label={`${f.enabled ? '关闭' : '开启'}功能 ${f.label}`} disabled={busy === f.id} />
           </div>
         ))}
         {!list.length ? <div className="smeta">暂无可配置开关</div> : null}
@@ -532,7 +532,7 @@ export function SayingsView({ toast }: { toast: (m: string) => void }) {
           <div key={s.id} className={`say-row ${s.pushedDate ? 'say-today' : ''}`}>
             <span className="grip"><Icon name="layers" size={15} /></span>
             <div className="sb"><div className="stx">{strip(s.text)}</div><div className="smeta">{s.enabled ? '已启用 · 排期池' : '已停用'}</div></div>
-            <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={() => api.toggleSaying(s.id, !s.enabled).then(load)}><i /></div>
+            <Switch checked={s.enabled} onChange={(enabled) => api.toggleSaying(s.id, enabled).then(load)} label={`${s.enabled ? '停用' : '启用'}每日献策`} />
           </div>
         ))}
         <div className="add-row">
@@ -618,11 +618,11 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
             <div className="ai-field"><div className="ai-fl">账号</div><input className="ai-input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="如 zhangsan" /></div>
             <div className="ai-field"><div className="ai-fl">初始密码（≥6 位）</div><input className="ai-input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">角色</div>
-              <div className="bill-seg">{(['operator', 'owner'] as const).map((r) => <div key={r} className={`bill-opt ${form.role === r ? 'on' : ''}`} onClick={() => setForm({ ...form, role: r })}><div className="bo-t">{r === 'owner' ? 'owner 超管' : 'operator 运营'}</div><div className="bo-d">{r === 'owner' ? '可管账户 · 见全部 agent' : '仅负责选定 agent'}</div></div>)}</div>
+              <div className="bill-seg">{(['operator', 'owner'] as const).map((r) => <button type="button" key={r} className={`bill-opt ${form.role === r ? 'on' : ''}`} onClick={() => setForm({ ...form, role: r })} aria-pressed={form.role === r}><div className="bo-t">{r === 'owner' ? 'owner 超管' : 'operator 运营'}</div><div className="bo-d">{r === 'owner' ? '可管账户 · 见全部 agent' : '仅负责选定 agent'}</div></button>)}</div>
             </div>
             {form.role !== 'owner' && (
               <div className="ai-field"><div className="ai-fl">负责的 agent（可多选）</div>
-                <div className="mem-list">{agents.map((a) => <div key={a.key} className="mem-card"><div className="mb"><div className="mt">{a.name}</div><div className="mm">{a.key}</div></div><div className={`sw ${form.agentKeys.includes(a.key) ? 'on' : ''}`} onClick={() => setForm({ ...form, agentKeys: toggleKey(form.agentKeys, a.key) })}><i /></div></div>)}</div>
+                <div className="mem-list">{agents.map((a) => <div key={a.key} className="mem-card"><div className="mb"><div className="mt">{a.name}</div><div className="mm">{a.key}</div></div><Switch checked={form.agentKeys.includes(a.key)} onChange={() => setForm({ ...form, agentKeys: toggleKey(form.agentKeys, a.key) })} label={`授权智能体 ${a.name}`} /></div>)}</div>
               </div>
             )}
             <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setAdding(false)}>取消</button><button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button></div>
@@ -639,7 +639,7 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
             </div>
             {a.role !== 'owner' && (editId === a.id ? (
               <div style={{ marginTop: 8 }}>
-                <div className="mem-list">{agents.map((ag) => <div key={ag.key} className="mem-card"><div className="mb"><div className="mt">{ag.name}</div><div className="mm">{ag.key}</div></div><div className={`sw ${editKeys.includes(ag.key) ? 'on' : ''}`} onClick={() => setEditKeys(toggleKey(editKeys, ag.key))}><i /></div></div>)}</div>
+                <div className="mem-list">{agents.map((ag) => <div key={ag.key} className="mem-card"><div className="mb"><div className="mt">{ag.name}</div><div className="mm">{ag.key}</div></div><Switch checked={editKeys.includes(ag.key)} onChange={() => setEditKeys(toggleKey(editKeys, ag.key))} label={`授权智能体 ${ag.name}`} /></div>)}</div>
                 <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button><button className="ai-btn primary" onClick={() => saveKeys(a)}><Icon name="check" size={14} /> 保存</button></div>
               </div>
             ) : (

@@ -6,12 +6,13 @@
 //   ③ ⌘K 命令面板可直达任意一屏，也能按姓名/手机号直接跳到某个用户；
 //   ④ 桌面端左栏常驻、内容进 max-width 容器，不再把 1440px 屏当成手机用。
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Icon from './Icon';
 import { api, adminAuth, type AdminMe } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import AdminLogin from './AdminLogin';
 import CommandPalette from './CommandPalette';
+import { useDialogFocus } from './components';
 import { getAdminToken, clearAdminToken } from './auth';
 import { NAV_GROUPS, findSection, sectionsOf, visibleGroups, type GroupKey, type SectionKey } from './nav';
 import { navigate, onRouteChange, parseHash } from './router';
@@ -32,7 +33,6 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!getAdminToken());
   const [route, setRoute] = useState(parseHash);
   const [toast, setToast] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [palOpen, setPalOpen] = useState(false);
   const [me, setMe] = useState<AdminMe | null>(null);
@@ -89,31 +89,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // 账户菜单点外部关闭（旧版只有 toggle，点别处菜单一直挂着）。
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, [menuOpen]);
-
   if (!authed) return <AdminLogin onAuthed={() => setAuthed(true)} />;
 
   const key = (invalid ? 'home' : section!.key) as SectionKey;
   const detailUser = key === 'users' ? route.id : '';
   const detailAgent = key === 'agent' ? route.id : '';
 
-  const accountMenu = (
-    <button className="adm-av" onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }} title={me?.username ?? '账户'} aria-label="账户">
-      运营
-      {menuOpen && (
-        <div className="acct-menu" onClick={(e) => e.stopPropagation()}>
-          <div className="acct-menu-item" onClick={() => { setMenuOpen(false); setPwOpen(true); }}><Icon name="crown" size={14} /> 修改密码</div>
-          <div className="acct-menu-item" onClick={() => { setMenuOpen(false); adminAuth.logout(); clearAdminToken(); setAuthed(false); }}><Icon name="arrow" size={14} /> 退出登录</div>
-        </div>
-      )}
-    </button>
-  );
+  const logout = () => { adminAuth.logout(); clearAdminToken(); setAuthed(false); };
 
   return (
     <div className="screen">
@@ -147,7 +129,7 @@ export default function App() {
               <Icon name="search" size={15} /> 跳转 / 找人
               <span className="kbd">⌘K</span>
             </button>
-            {accountMenu}
+            <AccountMenu username={me?.username} onChangePassword={() => setPwOpen(true)} onLogout={logout} />
           </div>
         </aside>
 
@@ -157,7 +139,7 @@ export default function App() {
             <img className="adm-mk" src={logo} alt="军师" />
             <div className="adm-tt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
             <button type="button" className="top-key" onClick={() => setPalOpen(true)} aria-label="跳转或找人"><Icon name="search" size={16} /></button>
-            {accountMenu}
+            <AccountMenu username={me?.username} onChangePassword={() => setPwOpen(true)} onLogout={logout} />
           </div>
 
           {/* 组内分区（只有一屏的组不渲染，避免摆一个假 tab） */}
@@ -251,7 +233,69 @@ export default function App() {
         />
       )}
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} toast={showToast} />}
-      {toast && <div className="admin-toast show"><Icon name="check" size={14} />{toast}</div>}
+      {toast && <div className="admin-toast show" role="status" aria-live="polite"><Icon name="check" size={14} />{toast}</div>}
+    </div>
+  );
+}
+
+/** 账户菜单必须是「触发按钮 + 同级 menu」，不能把可点击 div 塞进 button。 */
+function AccountMenu({ username, onChangePassword, onLogout }: {
+  username?: string | null;
+  onChangePassword: () => void;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    window.addEventListener('pointerdown', onPointer);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointer);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const openFromKeyboard = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    setOpen(true);
+    window.requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+  };
+  const act = (fn: () => void) => { setOpen(false); fn(); };
+
+  return (
+    <div className="acct" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="adm-av"
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={openFromKeyboard}
+        title={username ?? '账户'}
+        aria-label={`账户${username ? `：${username}` : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+      >运营</button>
+      {open && (
+        <div className="acct-menu" id={menuId} role="menu" aria-label="账户操作">
+          <button type="button" className="acct-menu-item" role="menuitem" onClick={() => act(onChangePassword)}><Icon name="crown" size={14} /> 修改密码</button>
+          <button type="button" className="acct-menu-item" role="menuitem" onClick={() => act(onLogout)}><Icon name="arrow" size={14} /> 退出登录</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -263,28 +307,36 @@ function ChangePasswordModal({ onClose, toast }: { onClose: () => void; toast: (
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const titleId = useId();
+  const requestClose = () => { if (!busy) onClose(); };
+  const dialogRef = useDialogFocus<HTMLFormElement>(requestClose);
 
   const submit = async () => {
     if (next.length < 6) return setErr('新密码至少 6 位');
     if (next !== confirm) return setErr('两次输入的新密码不一致');
     setBusy(true); setErr('');
-    const r = await adminAuth.changePassword({ currentPassword: current, newPassword: next });
-    setBusy(false);
-    if (r.ok) { toast('密码已修改，请用新密码重新登录'); onClose(); window.dispatchEvent(new Event('admin:unauth')); return; }
-    setErr((r.data as { error?: string })?.error || '修改失败');
+    try {
+      const r = await adminAuth.changePassword({ currentPassword: current, newPassword: next });
+      if (r.ok) { toast('密码已修改，请用新密码重新登录'); onClose(); window.dispatchEvent(new Event('admin:unauth')); return; }
+      setErr((r.data as { error?: string })?.error || '修改失败');
+    } catch (e) {
+      setErr((e as Error)?.message || '修改失败，请检查网络后重试');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="al-card modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="修改登录密码">
-        <div className="al-label">修改登录密码</div>
+    <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+      <form ref={dialogRef} className="al-card modal" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <div className="al-label" id={titleId}>修改登录密码</div>
         <input className="al-input" type="password" value={current} placeholder="当前密码" onChange={(e) => setCurrent(e.target.value)} autoFocus />
         <input className="al-input" type="password" value={next} placeholder="新密码（至少 6 位）" onChange={(e) => setNext(e.target.value)} />
-        <input className="al-input" type="password" value={confirm} placeholder="确认新密码" onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
-        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
-        <button className="al-btn" onClick={submit} disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认修改'}</button>
-        <button type="button" className="al-cancel" onClick={onClose}>取消</button>
-      </div>
+        <input className="al-input" type="password" value={confirm} placeholder="确认新密码" onChange={(e) => setConfirm(e.target.value)} />
+        {err && <div className="al-err" role="alert"><Icon name="alert" size={13} /> {err}</div>}
+        <button type="submit" className="al-btn" disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认修改'}</button>
+        <button type="button" className="al-cancel" onClick={requestClose} disabled={busy}>取消</button>
+      </form>
     </div>
   );
 }

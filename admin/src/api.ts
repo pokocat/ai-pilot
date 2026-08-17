@@ -141,11 +141,19 @@ async function rawPost<T>(path: string, body: object): Promise<RawResult<T>> {
 // 运营后台账户：状态 / 初始化 / 登录 / 退出 / 改密。
 export const adminAuth = {
   status: async (): Promise<AdminAuthStatus> => {
+    let res: Response;
     try {
-      const res = await fetch(`${BASE}/admin/auth/status`);
-      if (res.ok) return res.json();
-    } catch { /* 默认未初始化 */ }
-    return { initialized: false, masterKeyEnabled: true };
+      res = await fetch(`${BASE}/admin/auth/status`);
+    } catch {
+      throw new Error('无法连接后台服务，请检查网络后重试');
+    }
+    if (!res.ok) {
+      let msg = `后台状态检查失败（HTTP ${res.status}）`;
+      try { msg = (await res.json() as { error?: string })?.error || msg; } catch { /* 非 JSON 响应保留 HTTP 文案 */ }
+      throw new Error(msg);
+    }
+    try { return await res.json(); }
+    catch { throw new Error('后台状态响应格式异常，请稍后重试'); }
   },
   init: (body: AdminInitRequest) => rawPost<AdminAuthResult>('/admin/auth/init', body),
   login: (body: AdminLoginRequest) => rawPost<AdminAuthResult>('/admin/auth/login', body),

@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from './Icon';
 import { api, type AdminUserItem } from './api';
+import { useDialogFocus } from './components';
 import { NAV_GROUPS, NAV_SECTIONS, scoreSection, type NavSection } from './nav';
 
 type Row =
@@ -24,20 +25,30 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
   onOpenUser: (id: string) => void;
 }) {
   const [q, setQ] = useState('');
-  const [users, setUsers] = useState<AdminUserItem[] | null>(null);
+  const [users, setUsers] = useState<AdminUserItem[]>([]);
+  const [userState, setUserState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [userError, setUserError] = useState('');
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocus(onClose, inputRef);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  const loadUsers = () => {
+    setUserState('loading');
+    setUserError('');
+    api.users()
+      .then((u) => { setUsers(u); setUserState('ready'); })
+      .catch((e) => {
+        setUserState('error');
+        setUserError((e as Error)?.message || '用户名单加载失败');
+      });
+  };
 
   // 用户名单懒加载：只在真的开始搜时拉一次（面板打开但只用来跳页面时不浪费请求）。
   useEffect(() => {
-    if (!q.trim() || users !== null) return;
-    let alive = true;
-    api.users().then((u) => { if (alive) setUsers(u); }).catch(() => { if (alive) setUsers([]); });
-    return () => { alive = false; };
-  }, [q, users]);
+    if (!q.trim() || userState !== 'idle') return;
+    loadUsers();
+  }, [q, userState]);
 
   const sections = useMemo(
     () => NAV_SECTIONS.filter((s) => !s.ownerOnly || isOwner),
@@ -55,7 +66,7 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
     if (!query) return secRows;
 
     const needle = query.toLowerCase();
-    const userRows: Row[] = (users ?? [])
+    const userRows: Row[] = users
       .filter((u) =>
         u.name?.toLowerCase().includes(needle) ||
         u.phone?.includes(needle) ||
@@ -91,11 +102,12 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
   }, [cursor]);
 
   const groupLabel = (k: string) => NAV_GROUPS.find((g) => g.key === k)?.label ?? '';
-  const searching = !!q.trim() && users === null;
+  const searching = !!q.trim() && (userState === 'idle' || userState === 'loading');
+  const activeId = rows[cursor] ? `palette-option-${cursor}` : undefined;
 
   return (
     <div className="pal-scrim" onClick={onClose}>
-      <div className="pal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="命令面板">
+      <div ref={dialogRef} className="pal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="命令面板" tabIndex={-1}>
         <div className="pal-top">
           <Icon name="search" size={16} />
           <input
@@ -106,11 +118,22 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
             onKeyDown={onKeyDown}
             placeholder="跳转到某一屏，或按姓名 / 手机号找用户…"
             aria-label="搜索页面或用户"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="palette-results"
+            aria-activedescendant={activeId}
           />
           <span className="kbd">esc</span>
         </div>
 
-        <div className="pal-list" ref={listRef}>
+        <div className="pal-list" ref={listRef} id="palette-results" role="listbox" aria-label="搜索结果" aria-busy={searching}>
+          {userState === 'error' && q.trim() && (
+            <div className="pal-error" role="alert">
+              <span>用户搜索失败：{userError}</span>
+              <button type="button" className="mini-btn" onClick={loadUsers}>重试</button>
+            </div>
+          )}
           {rows.length === 0 && (
             <div className="pal-empty">{searching ? '搜索中…' : `没有匹配「${q}」的页面或用户`}</div>
           )}
@@ -120,7 +143,10 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
               return (
                 <button
                   key={`s:${row.section.key}`}
+                  id={`palette-option-${i}`}
                   type="button"
+                  role="option"
+                  aria-selected={on}
                   className={`pal-i ${on ? 'on' : ''}`}
                   onMouseEnter={() => setCursor(i)}
                   onClick={() => pick(row)}
@@ -138,7 +164,10 @@ export default function CommandPalette({ isOwner, onClose, onGo, onOpenUser }: {
             return (
               <button
                 key={`u:${u.id}`}
+                id={`palette-option-${i}`}
                 type="button"
+                role="option"
+                aria-selected={on}
                 className={`pal-i ${on ? 'on' : ''}`}
                 onMouseEnter={() => setCursor(i)}
                 onClick={() => pick(row)}

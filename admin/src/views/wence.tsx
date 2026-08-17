@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
 import { api, type AdminWenceTemplate, type WenceTemplateKind } from '../api';
-import { PageHead, ViewState, EmptyState, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, EmptyState, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 
 /** 灰度开关 key（服务端 FEATURE_FLAG_CATALOG / services/wence.ts 的 WENCE_FLAG 同一个）。 */
@@ -248,7 +248,7 @@ export function WenceView({ toast }: { toast: (m: string) => void }) {
                   <div className="ct">{flag.label} <span className={`tag ${flag.enabled ? 'live' : 'off'}`}>{flag.enabled ? '灰度中' : '已关闭'}</span></div>
                   <div className="cs">{flag.enabled ? '按下方权重稳定分桶（同一用户每次进都是同一档）' : '全量走现状军师列表，权重不生效'}</div>
                 </div>
-                <div className={`sw ${flag.enabled ? 'on' : ''}`} onClick={() => busy !== WENCE_FLAG_ID && toggleFlag()}><i /></div>
+                <Switch checked={flag.enabled} onChange={toggleFlag} label="启用问策入口实验" disabled={busy === WENCE_FLAG_ID} />
               </div>
               <div className="ai-note">急停：关闭这个开关 = 全量回到现状列表（游客与登录用户都覆盖），不需要先把权重调回 0；重新打开时权重还是下面这一组，不会被清。</div>
             </div>
@@ -322,7 +322,7 @@ export function WenceView({ toast }: { toast: (m: string) => void }) {
                       {kind === 'proactive' ? ` · ${t.chips?.length ? `chips：${t.chips.join(' / ')}` : '无 chips'}` : ''}
                     </div>
                   </div>
-                  <div className={`sw ${t.enabled ? 'on' : ''}`} onClick={() => busy !== t.id && toggleTpl(t)}><i /></div>
+                  <Switch checked={t.enabled} onChange={() => toggleTpl(t)} label={`${t.enabled ? '停用' : '启用'}模板 ${t.text}`} disabled={busy === t.id} />
                 </div>
                 <div className="crd-actions" style={{ marginTop: 8 }}>
                   <button className="mini-btn" disabled={i === 0 || busy === t.id} onClick={() => move(i, i - 1)}>上移</button>
