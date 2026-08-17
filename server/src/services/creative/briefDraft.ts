@@ -272,6 +272,11 @@ async function resolveDraftSession(opts: {
 /** 抽取素材的上限：够覆盖一轮需求澄清，又不至于把整段长对话塞进抽取模型。 */
 const DRAFT_MESSAGE_LIMIT = 24;
 const DRAFT_TEXT_LIMIT = 6000;
+/**
+ * 抽取产出的 token 预算。**必须显式给**：这份壳有 17 个字段（含 artDirection 七个 {zh,en}
+ * 子对象）+ 2–3 句 designNote，中文 JSON 稳定要 1500+ token，而 rawText 的辅助档缺省只有 700。
+ */
+const DRAFT_MAX_TOKENS = 3000;
 
 /**
  * 把会话末尾若干条消息拼成抽取素材。
@@ -397,7 +402,21 @@ export async function buildPosterBriefDraft(opts: {
 
   let ai: z.infer<typeof DraftSchema> | null = null;
   try {
-    ai = await structured(DraftSchema, { system: DRAFT_SYS, user: text, maxChars: 1200 });
+    // ★ 两个上限都不能用缺省，2026-08-17 生产实测（同一段对话、同一个模型）：
+    //   · 不给 maxTokens → 辅助档缺省 700，首轮与纠错轮一起被拦腰截断，structured() 返回 null，
+    //     于是**每个字段都回退成空**，确认页看起来就是「聊了半天，进设计阶段全是空的」。
+    //     给 3000 之后 goal / audience / cta / visualDirection / designNote / 推荐理由全部抽得出来。
+    //     与 2026-07-30 海报宣言被 700 截断是同一个坑（见 gateway.ts structuredMetered 顶部注释）。
+    //   · maxChars 不能小于 DRAFT_TEXT_LIMIT：structured() 内部是 `user.slice(0, maxChars)`，取的是
+    //     **头部**，而 loadConversationText 刚按「结论在末尾」取过尾部——外层再切一刀头，等于把刚
+    //     保下来的结尾又丢掉。实测 2176 字的对话被 1200 砍掉最后 976 字，丢的正好是设计师定稿那几句。
+    //     两处上限统一到同一个常量，全链路只截一次，且截的是头。
+    ai = await structured(DraftSchema, {
+      system: DRAFT_SYS, user: text, maxChars: DRAFT_TEXT_LIMIT, maxTokens: DRAFT_MAX_TOKENS,
+    });
+    // structured() 解析失败只返回 null、不抛，所以这行**不能省**：上一次就是因为这里静悄悄，
+    // 线上空表单在 journalctl 里连一行 warn 都查不到，只能靠人肉复现才定位到截断。
+    if (!ai) console.warn('[creative] brief 草稿抽取无结果（模型输出未通过校验），回退确定性预填');
   } catch (e) {
     console.warn('[creative] brief 草稿抽取失败，回退确定性预填：', (e as Error).message);
   }

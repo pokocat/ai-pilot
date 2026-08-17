@@ -1379,6 +1379,63 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
     assert.equal(r.body.brief.headline, '标题', '确认拿到的是真结构化结果，不是解析失败后的兜底空值');
   });
 
+  // 2026-08-17 生产事故的回归钉：确认页「跟设计师聊完，进设计阶段整张表单是空的」。
+  // 根因不在提示词、也不在归一，而在这一次调用的两个上限：
+  //   ① 不给 maxTokens → 辅助档缺省 700 → 17 字段的中文 JSON 被拦腰截断 → structured() 返回 null
+  //      → 每个字段回退成空。而 structured() 解析失败只返回 null 不抛，线上连一行 warn 都没有；
+  //   ② maxChars 1200 < DRAFT_TEXT_LIMIT → structured() 内部 `slice(0, maxChars)` 取的是**头部**，
+  //      把 loadConversationText 刚按「结论在末尾」保下来的结尾又切掉（实测 2176 字砍掉最后 976 字）。
+  // 所以这条钉的不是返回值，而是**真实发出的那个请求**：预算给足、且结尾确实到了模型面前。
+  test('抽取请求带足产出预算，且长对话的结尾不被外层截掉', async () => {
+    const { token, tenantId } = await posterUser(100, '打桩预算用户');
+    const session = await prisma.session.create({
+      data: { tenantId, userId: token, agentKey: 'poster', title: '长对话' },
+    });
+    // 明显超过旧上限（1200 字）的一段对话，且结论只出现在最后一条。
+    const filler = '我们先把背景说清楚：这次要推的是给中小商家做的短视频代运营服务。'.repeat(50);
+    await prisma.message.create({
+      data: { sessionId: session.id, role: 'user', contentJson: { text: filler }, createdAt: new Date('2026-08-17T01:00:00Z') },
+    });
+    await prisma.message.create({
+      data: {
+        sessionId: session.id, role: 'user',
+        contentJson: { text: '最后定了：主标题就用「三条视频换一个新客」。' },
+        createdAt: new Date('2026-08-17T01:05:00Z'),
+      },
+    });
+
+    let sentBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+      sentBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ headline: '三条视频换一个新客' }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+
+    const maxTokens = Number(sentBody.max_tokens ?? 0);
+    assert.ok(
+      maxTokens >= 3000,
+      `产出预算必须显式给足（实际 ${maxTokens}）：缺省 700 会把这份 17 字段的中文 JSON 截断，structured() 返回 null，确认页整张表单变空`,
+    );
+
+    const sent = (sentBody.messages as { role: string; content: string }[] | undefined)
+      ?.find((m) => m.role === 'user')?.content ?? '';
+    assert.ok(sent.length > 1200, `素材又被切在 1200 字（实际送出 ${sent.length}）——旧的 maxChars 上限回来了`);
+    assert.ok(
+      sent.includes('三条视频换一个新客'),
+      '对话最后一句没送到模型面前：外层 slice 取了头部，把 loadConversationText 按「结论在末尾」保下来的结尾丢了',
+    );
+  });
+
   // 2026-08-16 军师推荐组合的**真实抽取分支**：上面纯函数用例验的是归一与兜底，
   // 这里验的是"抽取那一次调用真的把 tier/directionKey/recommendReason 带回来了"——
   // 两者缺一：只测纯函数，字段没接上链路也全绿；只测链路，脏输入的兜底又验不到。
