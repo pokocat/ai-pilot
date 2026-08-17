@@ -27,6 +27,22 @@ Page({
     showLogin: false,
   }),
 
+  /**
+   * 转发给朋友。**必须显式声明**：小程序页面不实现 onShareAppMessage 时，微信右上角 ⋯ 菜单里的
+   * 「转发给朋友」是**置灰**的——用户看到的就是「转发按钮点不动」（2026-08-17 报障）。
+   *
+   * path 刻意用快拍入口、**不带 workId**：与 mingpan / quickscan 两页同一条约定。成片是私有资产，
+   * 把 `work/index?workId=...` 转出去，对方要么因为不属于他而拿不到（本页无参直接 toast 退回），
+   * 要么等于把别人的作品塞给他看。转发卡片的作用是把人带进快拍，不是共享这一条片子。
+   */
+  onShareAppMessage() {
+    const title = String((this.data.work && this.data.work.title) || '').trim();
+    return {
+      title: title ? `${title} · 军师快拍` : '一分钟出一条能发的短视频 · 军师快拍',
+      path: '/packages/video/home/index',
+    };
+  },
+
   onLoad(options) {
     const workId = String((options && options.workId) || '');
     if (!workId) { host.toast('缺少作品参数'); host.back(); return; }

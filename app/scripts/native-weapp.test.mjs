@@ -2441,3 +2441,16 @@ test('存储空间：素材与成片共用一份额度，扩容价来自服务�
   assert.match(js, /host\.confirm\([\s\S]{0,200}?扣 \$\{storage\.packCredits\} 钻石/);
   assert.match(js, /INSUFFICIENT_CREDITS/, '钻石不够要引到充值，而不是甩一句失败');
 });
+
+test('成片页必须声明转发：不实现 onShareAppMessage，微信会把「转发给朋友」置灰', () => {
+  const js = read('weapp-native/packages/video/work/index.js');
+  // 2026-08-17 报障：「短视频生成完成之后转发按钮置灰」。页面上并没有自绘的转发按钮 ——
+  // 灰掉的是微信右上角 ⋯ 菜单里那一项，而它置灰的唯一原因就是页面没声明 onShareAppMessage。
+  assert.match(js, /onShareAppMessage\(\)\s*\{/, '成片页缺 onShareAppMessage → 转发项恒置灰');
+  const block = js.match(/onShareAppMessage\(\)\s*\{[\s\S]*?\n  \},/);
+  assert.ok(block, '取不到 onShareAppMessage 实现');
+  // path 必须是快拍入口、不带 workId：成片是私有资产，转出去对方也拿不到（本页无参会 toast 退回），
+  // 与 mingpan / quickscan 同一条约定。
+  assert.match(block[0], /path: '\/packages\/video\/home\/index'/, '转发落地页必须是快拍入口');
+  assert.doesNotMatch(block[0], /workId/, '转发路径不许带 workId —— 那是把别人的私有成片塞给对方');
+});
