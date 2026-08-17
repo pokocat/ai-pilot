@@ -364,7 +364,9 @@ const data = {
   thinkingText: '正在梳理上下文',
   // composerSeed = textarea 的一次性初值，只在交替挂载的那一刻写。不变量：写进去之后
   // 到下一次重建之前绝不再动它——中途改成 '' 就等于把用户正在编辑的文字回灌掉。
-  composerOdd: false, composerSeed: '', composerHeight: 124, keyboardHeight: 0, bottomAnchor: 'chat-bottom',
+  // bottomAnchor 初值必须是空串：非空等于一进页面就挂着常驻的「滚到底」绑定（见 toBottom 注释）。
+  // 首屏滚底由各条加载路径显式调 toBottom() 负责。
+  composerOdd: false, composerSeed: '', composerHeight: 124, keyboardHeight: 0, bottomAnchor: '',
   showLogin: false, loginReason: 'chat', errorText: '', errorNote: '', errorAction: '', refs: [], uploading: false,
   regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false, pasteDupId: '',
   imageSelectedCount: 0, imageLimit: 9,
@@ -687,7 +689,17 @@ const methods = {
       const status = await api.creativeStatus();
       if (!this.isCurrent(pageEpoch) || this._agentKey !== 'poster') return;
       const price = Number(status && status.pricePerPoster);
-      this.safeSetData({ posterEnabled: Boolean(status && status.enabled && Number.isFinite(price)), posterPrice: Number.isFinite(price) ? price : 0 });
+      const posterEnabled = Boolean(status && status.enabled && Number.isFinite(price));
+      // ★ 必须连 posterActionAt 一起重算：posterActionIndex() 开头就是 `!posterEnabled → -1`，
+      //   而本函数是**异步**的、在消息落屏之后才回来。此前只写 posterEnabled 不重算下标，于是
+      //   「进会话时按钮不出现，非得再发一句话才冒出来」——用户看到的就是出现时机飘（2026-08-17 报障）。
+      //   下标只依赖当前消息列表与这个开关，重算是纯函数、没有副作用。
+      //   重算必须放在**回调里**：posterActionIndex() 读的是 this.data.posterEnabled，写在同一个
+      //   setData 的参数里会在赋值前求值、拿到旧的 false，等于没改。
+      this.safeSetData({ posterEnabled, posterPrice: Number.isFinite(price) ? price : 0 }, () => {
+        if (!this.isCurrent(pageEpoch)) return;
+        this.safeSetData({ posterActionAt: this.posterActionIndex(this.data.messages) });
+      });
     } catch (_) {
       if (this.isCurrent(pageEpoch)) this.safeSetData({ posterEnabled: false, posterPrice: 0 });
     }
@@ -1934,7 +1946,24 @@ const methods = {
     else if (this.data.errorAction === 'credits') navTo('/packages/work/credits/index');
   },
   stop() {},
-  toBottom() { const epoch = this._epoch; this.safeSetData({ bottomAnchor: '' }); setTimeout(() => { if (this.isCurrent(epoch)) this.safeSetData({ bottomAnchor: 'chat-bottom' }); }, 20); },
+  /**
+   * 滚到底。**必须是一次性动作，不能留成常驻绑定**——这是「往上翻历史被一直拽回底部」的根因：
+   * `scroll-into-view="{{bottomAnchor}}"` 只要 id 非空，之后**任何一次** setData 重渲染都会重新
+   * 滚到该锚点。而此前这里设完 'chat-bottom' 就不管了，于是流式结束后它一直挂着：用户往上滑，
+   * 手一松、或者下一次心跳/测量/加载更多历史触发重渲染，视图立刻弹回底部（分页加载历史时最致命——
+   * 上滑触发加载 → 加载 setData → 弹回底部 → 永远看不到刚加载进来的那几条）。
+   * 所以应用完就松手：清空 → 20ms 后设锚点（让微信认到变化）→ 120ms 后再清空。
+   * 120ms 小于流式自动滚底的 180ms 节奏，流式期间每一拍都会重新武装，跟随不受影响。
+   */
+  toBottom() {
+    const epoch = this._epoch;
+    this.safeSetData({ bottomAnchor: '' });
+    setTimeout(() => {
+      if (!this.isCurrent(epoch)) return;
+      this.safeSetData({ bottomAnchor: 'chat-bottom' });
+      setTimeout(() => { if (this.isCurrent(epoch)) this.safeSetData({ bottomAnchor: '' }); }, 120);
+    }, 20);
+  },
 };
 
 

@@ -286,6 +286,22 @@ const DRAFT_TEXT_LIMIT = 6000;
  * 子对象）+ 2–3 句 designNote，中文 JSON 稳定要 1500+ token，而 rawText 的辅助档缺省只有 700。
  */
 const DRAFT_MAX_TOKENS = 3000;
+/**
+ * 抽取的单次挂钟预算。**必须显式给**，理由和 maxTokens 是两回事：
+ *
+ * 退出辅助档（`allowAux: false`）之后这次调用落到运营配的主模型上——线上是七牛 Claude 且开着
+ * adaptive thinking。**典型耗时约 22s**（2026-08-17 生产连测两次：23.7s / 21.6s），但**方差很大**，
+ * 实测出现过整整 60s 还没回来的尖峰。而 `cfg.timeoutMs` 缺省取的是
+ * `OPENAI_TIMEOUT_MS=60000`，`rawText` 的 phase 又是 `chat_completion`（`requestTimeoutMs` 只给
+ * `chat_sync`/`deliverable` 兜 150s/300s 下限，这一档吃原值），claude provider 那条非流式补全
+ * 同样用 `ep.timeoutMs` 原值 —— 于是恒定 60.0s 抛 `Request timed out.`，structured 返回 null，
+ * 确认页又变回空表单（2026-08-17 21:38 生产实锤：请求 21:38:47，60 秒后一行超时）。
+ *
+ * 150s 是拍在「客户端 180s 之内、又给足思考模型时间」这个夹缝里的。它不是为了等那 22s，
+ * 而是为了**吸收尖峰**：60s 这个缺省会把一次偶发的慢响应变成一张空表单，而用户看不出区别
+ * ——只会以为「聊了半天没带过来」。宁可偶尔转圈久一点，也不要把方差伪装成「抽不出来」。
+ */
+const DRAFT_TIMEOUT_MS = 150_000;
 
 /**
  * 把会话末尾若干条消息拼成抽取素材。
@@ -426,7 +442,7 @@ export async function buildPosterBriefDraft(opts: {
     // 闭合合法、zod 全过、每个字段是空 —— 确认页于是整张表单空着，任何 token 预算都救不了。
     ai = await structured(DraftSchema, {
       system: DRAFT_SYS, user: text, maxChars: DRAFT_TEXT_LIMIT, maxTokens: DRAFT_MAX_TOKENS,
-      allowAux: false,
+      allowAux: false, timeoutMs: DRAFT_TIMEOUT_MS,
     });
     // structured() 解析失败只返回 null、不抛，所以这行**不能省**：上一次就是因为这里静悄悄，
     // 线上空表单在 journalctl 里连一行 warn 都查不到，只能靠人肉复现才定位到截断。
