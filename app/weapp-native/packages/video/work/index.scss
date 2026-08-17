@@ -28,6 +28,10 @@
   font-size: 14px; color: var(--vd-ink-2);
 }
 
+/* 未接入的平台芯片：压低对比、去掉可点的暗示。仍然渲染是有意的——它说明「以后能代发」。 */
+.wd-platform.off { opacity: .45; }
+.wd-sec-note { display: block; margin: -6px 0 12px; font-size: 12px; line-height: 1.5; color: var(--vd-ink-3); }
+
 .wd-act { margin-top: 16px; }
 
 .wd-again { display: flex; align-items: center; gap: 12px; margin-top: 12px; }

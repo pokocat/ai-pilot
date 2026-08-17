@@ -40,12 +40,14 @@
         <!-- 代发 -->
         <view class="wd-section">
           <text class="wd-sec-kicker">下一步</text>
-          <text class="wd-sec-title">保存，或者直接发布</text>
+          <!-- 标题跟着能力走：代发没接通时不许承诺「直接发布」（上游恒 503，见 index.js 的 PUBLISH_READY）。 -->
+          <text class="wd-sec-title">{{publishReady ? '保存，或者直接发布' : '先保存下来，自己发'}}</text>
+          <text wx:if="{{!publishReady}}" class="wd-sec-note">一键代发到下面这些平台还在接入，暂时点不了</text>
           <view class="wd-platforms">
             <view
               wx:for="{{platforms}}"
               wx:key="key"
-              class="wd-platform {{publishing === item.key ? 'busy' : ''}}"
+              class="wd-platform {{publishing === item.key ? 'busy' : ''}} {{publishReady ? '' : 'off'}}"
               data-key="{{item.key}}"
               bindtap="publish"
             >{{publishing === item.key ? '提交中…' : item.label}}</view>

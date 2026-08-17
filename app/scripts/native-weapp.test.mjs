@@ -2454,3 +2454,24 @@ test('成片页必须声明转发：不实现 onShareAppMessage，微信会把�
   assert.match(block[0], /path: '\/packages\/video\/home\/index'/, '转发落地页必须是快拍入口');
   assert.doesNotMatch(block[0], /workId/, '转发路径不许带 workId —— 那是把别人的私有成片塞给对方');
 });
+
+test('平台代发未接入时不许摆可点的按钮：上游恒 503，点了只会白跑一趟', () => {
+  const js = read('weapp-native/packages/video/work/index.js');
+  const wxml = read('weapp-native/packages/video/work/index.wxml');
+  // 2026-08-17 查实：AIStar ClipWorkService.publish() 里 `if(!shiliu.mockMode()) throw 503
+  // CLIP_PUBLISH_NOT_CONFIGURED`，而生产必定走真实石榴网关 → mockMode() 恒 false → 四个平台按钮 100% 失败。
+  assert.match(js, /const PUBLISH_READY = (false|true);/, '代发可用性必须是一个显式开关，不能散落在判断里');
+  const ready = /const PUBLISH_READY = true;/.test(js);
+  if (!ready) {
+    // 关着的时候：不许弹确认框、不许打接口，且标题不许承诺「直接发布」。
+    assert.match(js, /if \(!PUBLISH_READY\) \{[^}]*host\.toast/, '未接入时必须直接说明，不走确认框');
+    const publishBlock = js.match(/publish\(event\)\s*\{[\s\S]*?\n  \},/);
+    assert.ok(publishBlock, '取不到 publish 实现');
+    assert.ok(
+      publishBlock[0].indexOf('!PUBLISH_READY') < publishBlock[0].indexOf('host.confirm'),
+      '早退必须在 host.confirm 之前——让用户确认一件做不到的事是最差的形态',
+    );
+    assert.match(wxml, /publishReady \? '保存，或者直接发布' : /, '标题必须跟着能力走，不许恒定承诺代发');
+    assert.match(wxml, /publishReady \? '' : 'off'/, '未接入的平台芯片必须置灰');
+  }
+});

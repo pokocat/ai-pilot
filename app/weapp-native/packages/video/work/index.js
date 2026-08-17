@@ -15,6 +15,19 @@ const PLATFORMS = [
   { key: 'shipinhao', label: '视频号' },
 ];
 
+/**
+ * 平台代发是否真的可用。**当前恒 false，因为上游没实现**（2026-08-17 查实）：
+ * AIStar `ClipWorkService.publish()` 里写着 `if (!shiliu.mockMode()) throw 503
+ * CLIP_PUBLISH_NOT_CONFIGURED「平台发布能力仍在接入验收中」`，只有石榴 mock 模式才会写一条
+ * 假的「Mock 已提交」。而生产是 production profile（禁 forceMock、allowMock 只在非生产生效），
+ * `required()` 必定返回真实网关 → `mockMode()` 恒 false → 四个平台按钮在生产上 100% 是 503。
+ *
+ * 所以这里不再让用户「点 → 确认发布 → 等接口 → 报错」——那是让人先确认一件做不到的事。
+ * 改成明说「即将开放」，把能用的那条路（保存到相册，自己发）留在原位。
+ * 上游接完平台授权后：把这个常量交给服务端下发的能力位，别再硬编码。
+ */
+const PUBLISH_READY = false;
+
 Page({
   data: host.hostBaseData({
     workId: '',
@@ -22,6 +35,7 @@ Page({
     work: null,
     durationText: '',
     platforms: PLATFORMS,
+    publishReady: PUBLISH_READY,
     saving: false,
     publishing: '',
     showLogin: false,
@@ -98,6 +112,8 @@ Page({
   publish(event) {
     const key = String(event.currentTarget.dataset.key || '');
     const platform = PLATFORMS.find((item) => item.key === key);
+    // 上游未接入时直接说清楚，不走确认框也不打接口（见 PUBLISH_READY 注释）。
+    if (!PUBLISH_READY) { host.toast('平台代发还在接入，先保存到相册自己发'); return; }
     if (!host.requireLogin(this, 'execute')) return;
     if (!platform || this.data.publishing) return;
     host.confirm({
