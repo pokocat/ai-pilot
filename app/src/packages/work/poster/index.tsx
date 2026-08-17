@@ -596,7 +596,7 @@ export default function PosterConfirmPage() {
           <View className="ps-loading">
             <View className="ps-spin" style={{ borderTopColor: accent }} />
             <Text className="ps-loading-t serif">正在整理需求单</Text>
-            <Text className="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要几秒。</Text>
+            <Text className="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要二十秒左右。</Text>
             <View className="ps-sk-card" />
             <View className="ps-sk-line" />
             <View className="ps-sk-line short" />

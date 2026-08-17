@@ -6,7 +6,9 @@
     <view wx:if="{{loading}}" class="ps-loading">
       <view class="ps-spin"></view>
       <text class="ps-loading-t serif">正在整理需求单</text>
-      <text class="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要几秒。</text>
+      <!-- 「二十秒左右」是量出来的（2026-08-17 生产连测 23.7s / 21.6s），不是估的。原来写「几秒」
+           偏乐观：读到「几秒」的人在第 15 秒就会以为卡死了。宁可说得比实际保守一点。 -->
+      <text class="ps-loading-d">军师在把刚才那段对话读成一张需求单，通常要二十秒左右。</text>
       <view class="ps-sk-card"></view>
       <view class="ps-sk-line"></view>
       <view class="ps-sk-line short"></view>
