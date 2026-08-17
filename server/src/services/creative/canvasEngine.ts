@@ -21,7 +21,7 @@
 //   ③ 失败一律**返回**而不是抛：调用方要靠返回值按 tier 决定回落或退款；抛异常会丢失可诊断原因。
 import { completeText } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
-import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS, FONT_SERIF } from './templates.js';
+import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS, FONT_SERIF, QR_HOLD_TEXT } from './templates.js';
 import { DECOR_ATTR, MEASURE_LIMITS, violationsCritique, type PosterViolation } from './canvasMeasure.js';
 import {
   CANVAS_PLACEHOLDER, CANVAS_SPEC, availablePlaceholders, ensureAiMark, fillPlaceholders,
@@ -338,7 +338,16 @@ function canvasUserPrompt(o: {
     placeholders.length
       ? `${placeholders.join('  ')}（只有这些可用；服务端会在渲染前替换成真实图片字节）`
       : '无（用户没有上传任何素材：请完全用 CSS/SVG 图形与排印作画，不要留空的图位，也不要写任何占位符）',
-    o.assets.qrUrl ? `二维码占位符 ${CANVAS_PLACEHOLDER.qr} 必须放在白底静区容器里，并带 data-role="qr"` : '',
+    // 码位：**有码放码，没码也要留位**。确定性模板池把这条当不变式（templates.ts「占位不是省略」：
+    // 二维码在与不在都占同一块面积），成品页也写着「可自行粘贴二维码」。而这里以前只在 qrUrl 存在时
+    // 才提一句、量测器的 expectQr 也只在有真码时才查 —— 于是 AI 路径在用户没传码时把整块省掉，
+    // 印出来就是 CTA 写着「扫码看案例」却无处可扫（2026-08-17 生产实拍确认，两条路径给出的成品不一致）。
+    o.assets.qrUrl
+      ? `二维码占位符 ${CANVAS_PLACEHOLDER.qr} 必须放在白底静区容器里，并带 data-role="qr"`
+      : `用户没上传二维码，但 CTA 往往写着「扫码」：**必须**在成品下方留一块贴码位 ——`
+        + `白底方块（边长不小于 ${MEASURE_LIMITS.qrMinPx}px）、虚线描边、四周留白，`
+        + `带 data-role="qr-hold" 和「${QR_HOLD_TEXT}」细字角标，让用户可以自己把码贴上去。`
+        + '这块面积不许省略，也不许自己画二维码图形（绝不画假二维码）。',
   ];
   return lines.filter((l) => l !== '').join('\n');
 }

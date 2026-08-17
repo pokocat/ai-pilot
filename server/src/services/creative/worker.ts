@@ -5,6 +5,7 @@
 // 状态以 creative_job 行为真源（不是进程内 Map）：这是从两处教训来的硬要求——会话 generating 活在
 // sessionGeneration 的内存 Map 里（重启即丢），知识库 processDocument 曾 fire-and-forget（重启把条目
 // 永久卡在 parsing 且无人捞）。所以第一天就配 sweep 兜底 + 幂等退款。
+import sharp from 'sharp';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db.js';
 import { now } from '../clock.js';
@@ -177,6 +178,25 @@ async function resolveTemplateAssets(input: JobExecutionInput, visualAssetId: st
     qrUrl: await pick(input.brief.qrAssetId),
     visualUrl: await pick(visualAssetId),
   };
+}
+
+/**
+ * 探一张图的像素尺寸。**读不出来就返回空**（不抛）：尺寸是元信息，缺了不该让整单出图失败。
+ *
+ * 为什么需要它：主视觉（kind='visual'）此前建行时不传 width/height，于是库里恒为 null
+ * ——成品图那条有尺寸、它没有，后台看素材尺寸是一片空（2026-08-17 生产实测：
+ * visual 4137657 字节但 ?x?）。供应商只回字节流，尺寸只能自己量。
+ */
+async function imageDimensions(buffer: Buffer): Promise<{ width?: number; height?: number }> {
+  try {
+    const meta = await sharp(buffer, { animated: false, failOn: 'error' }).metadata();
+    return {
+      ...(meta.width ? { width: meta.width } : {}),
+      ...(meta.height ? { height: meta.height } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 async function saveAsset(opts: {
@@ -636,6 +656,7 @@ async function runPhotoVisual(
     const saved = await saveAsset({
       jobId: job.id, tenantId: job.tenantId, userId: job.userId, kind: 'visual',
       buffer: submitted.image.buffer, mimeType: submitted.image.mimeType,
+      ...(await imageDimensions(submitted.image.buffer)),
       metadata: {
         route: 'photo',
         styleKey: assembled.styleKey,
@@ -709,6 +730,7 @@ async function runTemplatePipeline(
           const saved = await saveAsset({
             jobId: job.id, tenantId: job.tenantId, userId: job.userId, kind: 'visual',
             buffer: submitted.image.buffer, mimeType: submitted.image.mimeType,
+            ...(await imageDimensions(submitted.image.buffer)),
             metadata: { prompt, provider: provider.name, moderation: { provider: verdict.provider, skipped: !!verdict.skipped } },
           });
           visualAssetId = saved.id;
