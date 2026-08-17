@@ -1371,8 +1371,16 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
       assert.ok(capturedSystem.includes(marker), `DRAFT_SYS 里的「${marker}」原则丢失或被截断`);
     }
     // 结尾的 JSON 格式约定仍在尾部完整在场（没被前面新增的大段文字挤出窗口）。
-    assert.ok(capturedSystem.includes('只输出 JSON'), 'JSON 输出格式约定被淹没/顶掉');
-    assert.ok(capturedSystem.slice(-200).includes('"designNote":""}'), 'designNote 没有出现在 JSON 壳的既定位置——格式约定被改写');
+    assert.ok(capturedSystem.includes('只输出一个 JSON 对象'), 'JSON 输出格式约定被淹没/顶掉');
+    // designNote 仍排在键名清单的最后一位（它是最容易被后加字段挤走的一项）。
+    assert.ok(
+      capturedSystem.includes('recommendReason, designNote'),
+      'designNote 不在键名清单的末位——格式约定被改写',
+    );
+    // 2026-08-17：末尾**不许**再出现可以照抄的空值模板。给了空壳，模型会把它当答案原样交回来
+    // （生产实测：返回闭合合法但 15 个字段全空的 JSON，zod 全过，确认页整张表单空着）。
+    assert.ok(!capturedSystem.includes('"goal":""'), '又把值全为空的 JSON 壳写回提示词了——模型会照抄');
+    assert.ok(capturedSystem.includes('不是答案模板'), '缺少「键名清单不是答案模板」这条明规则');
     // 首轮（1 次调用）就通过了 schema 校验；若为 2 说明触发了「回喂修复」轮，
     // 意味着模型首轮输出没通过 zod 校验——即便这里是打桩、必过 schema，也该恒为 1。
     assert.equal(callCount, 1, '首轮即应通过 schema 校验；为 2 则说明抽取分支已经不稳定（触发了修复轮）');
@@ -1381,7 +1389,7 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
 
   // 2026-08-17 生产事故的回归钉：确认页「跟设计师聊完，进设计阶段整张表单是空的」。
   // 根因不在提示词、也不在归一，而在这一次调用的两个上限：
-  //   ① 不给 maxTokens → 辅助档缺省 700 → 17 字段的中文 JSON 被拦腰截断 → structured() 返回 null
+  //   ① 不给 maxTokens → 辅助档缺省 700 → 15 字段的中文 JSON 被拦腰截断 → structured() 返回 null
   //      → 每个字段回退成空。而 structured() 解析失败只返回 null 不抛，线上连一行 warn 都没有；
   //   ② maxChars 1200 < DRAFT_TEXT_LIMIT → structured() 内部 `slice(0, maxChars)` 取的是**头部**，
   //      把 loadConversationText 刚按「结论在末尾」保下来的结尾又切掉（实测 2176 字砍掉最后 976 字）。
@@ -1404,9 +1412,19 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
       },
     });
 
+    // 配一个**与主档不同 baseUrl** 的辅助档路由：抽取若落到 aux，请求就会打到这个地址上。
+    // 线上 aux 是 deepseek-v4-flash，实测会把键名清单原样回吐成一份全空 JSON —— 这一步
+    // 是用户正盯着确认页等的活，不许走后台小模型那条道。
+    await configurePurpose('aux', {
+      label: 'brief-draft 辅助档陷阱', provider: 'openai',
+      baseUrl: 'http://aux-trap.test/v1', model: 'flash-trap', apiKey: 'sk-test-aux-123',
+    });
+
     let sentBody: Record<string, unknown> = {};
+    let sentUrl = '';
     globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
       if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+      sentUrl = String(url);
       sentBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return {
         ok: true,
@@ -1421,10 +1439,15 @@ describe('海报成品图 · brief-draft designNote 抽取分支（打桩 provid
     const r = await api('GET', `/api/creative/posters/brief-draft?sessionId=${session.id}`, { token });
     assert.equal(r.status, 200, JSON.stringify(r.body));
 
+    assert.ok(
+      !sentUrl.includes('aux-trap.test'),
+      `抽取落到辅助档小模型了（${sentUrl}）：确认页是用户正等着的一步，不许走 aux 那条道`,
+    );
+
     const maxTokens = Number(sentBody.max_tokens ?? 0);
     assert.ok(
       maxTokens >= 3000,
-      `产出预算必须显式给足（实际 ${maxTokens}）：缺省 700 会把这份 17 字段的中文 JSON 截断，structured() 返回 null，确认页整张表单变空`,
+      `产出预算必须显式给足（实际 ${maxTokens}）：缺省 700 会把这份 15 字段的中文 JSON 截断，structured() 返回 null，确认页整张表单变空`,
     );
 
     const sent = (sentBody.messages as { role: string; content: string }[] | undefined)

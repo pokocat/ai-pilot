@@ -1149,6 +1149,20 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
      * 调用方判「产出不完整」→ 悄悄回落。缺省不传 = 老行为。
      */
     timeoutMs?: number;
+    /**
+     * 是否允许落到辅助档小模型。缺省 `!o.model`（既有行为：没指定 model 就走 aux）。
+     *
+     * ★ 2026-08-17 加这个开关的原因：aux 档的设计初衷是「用户看不见的后台抽取」，注释见
+     * aiConfig.ts 的 auxTierConfig（还会切到独立并发车道，把主配额留给用户可见的生成）。
+     * 但 `structured()` 是全仓通用原语，**默认值等于把所有新增抽取都归进后台那一类** ——
+     * 海报需求单抽取是用户正盯着确认页等的活，就这么静悄悄落到了线上 aux 档的
+     * deepseek-v4-flash 上：实测它会把提示词末尾的字段清单原样回吐成一份全空 JSON
+     * （闭合合法、zod 全过、每个字段是空），于是确认页整张表单空着，还查不出错。
+     *
+     * 所以「用户可见的抽取」必须能显式退出 aux，而且要在调用点写清楚——不要靠传一个
+     * 假的 model 名去反向关掉它（那样还会覆盖运营在后台配的模型）。
+     */
+    allowAux?: boolean;
   },
 ): Promise<StructuredOutcome<z.output<S>>> {
   let attempts = 0;
@@ -1170,15 +1184,16 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
     attempts++;
     const mt = o.maxTokens ? { maxTokens: o.maxTokens } : {};
+    const allowAux = o.allowAux ?? !o.model;
     const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, {
-      allowAux: !o.model, ...mt, signal: o.signal, usageMeta: o.usageMeta,
+      allowAux, ...mt, signal: o.signal, usageMeta: o.usageMeta,
     }));
     if (first.ok) return { data: first.data, attempts, live };
     // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
     const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
     attempts++;
     const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, {
-      allowAux: !o.model, ...mt, signal: o.signal, usageMeta: o.usageMeta,
+      allowAux, ...mt, signal: o.signal, usageMeta: o.usageMeta,
     }));
     return { data: second.ok ? second.data : null, attempts, live };
   } catch (err) {
@@ -1207,7 +1222,7 @@ export async function structured<S extends z.ZodTypeAny>(
   schema: S,
   o: {
     system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
-    signal?: AbortSignal; usageMeta?: UsageMeta; timeoutMs?: number;
+    signal?: AbortSignal; usageMeta?: UsageMeta; timeoutMs?: number; allowAux?: boolean;
   },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;

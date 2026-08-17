@@ -133,8 +133,17 @@ const DRAFT_SYS = [
   `- recommendReason 一句话、不超过 ${RECOMMEND_REASON_LIMIT} 字，写给客户看：说清为什么用这个方式、这张图靠什么立住；`,
   '  不出现 key、参数、模型、渲染这类技术说法，也不要写成"我们推荐您选择……"的客套话。',
   '',
-  // designNote 恒在壳的最后一位（既有单测钉住这个位置：它是最容易被后加字段挤走的一项）。
-  '只输出 JSON：{"scene":"","goal":"","audience":"","headline":"","subheadline":"","proofPoints":[],"cta":"","visualDirection":"","artDirection":{"backdrop":{"zh":"","en":""},"lighting":{"zh":"","en":""}},"templateKey":"","templateReason":"","tier":"","directionKey":"","recommendReason":"","designNote":""}',
+  // ★ 2026-08-17：这里原来给的是一份**值全为空串的 JSON 壳**，实测被模型当成答案模板照抄回来 ——
+  //   返回 553 字符、括号闭合、zod 全过，但 15 个字段全是空，确认页于是整张表单空着且查不出错
+  //   （生产 aux 档 deepseek-v4-flash 上稳定复现）。所以只给**键名清单**，不给可以照抄的空值，
+  //   并把「不许原样交回空值」写成一条明规则。designNote 仍固定排在最后一位
+  //   （既有单测钉住这个位置：它是最容易被后加字段挤走的一项）。
+  '只输出一个 JSON 对象，不要任何解释或围栏。键固定为这 15 个，顺序照此排列：',
+  'scene, goal, audience, headline, subheadline, proofPoints, cta, visualDirection, artDirection,',
+  'templateKey, templateReason, tier, directionKey, recommendReason, designNote',
+  '其中 proofPoints 是字符串数组，artDirection 是对象（子字段见上），其余都是字符串。',
+  '⚠️ 上面是**键名清单，不是答案模板**：不要把空字符串原样填回来交差。',
+  '只有「这段对话里确实找不到」的字段才留空——凡是客户或设计师说过的，都必须落到对应字段里。',
 ].join('\n');
 
 function isTemplateKey(v: unknown): v is TemplateKey {
@@ -273,7 +282,7 @@ async function resolveDraftSession(opts: {
 const DRAFT_MESSAGE_LIMIT = 24;
 const DRAFT_TEXT_LIMIT = 6000;
 /**
- * 抽取产出的 token 预算。**必须显式给**：这份壳有 17 个字段（含 artDirection 七个 {zh,en}
+ * 抽取产出的 token 预算。**必须显式给**：这份壳有 15 个字段（含 artDirection 七个 {zh,en}
  * 子对象）+ 2–3 句 designNote，中文 JSON 稳定要 1500+ token，而 rawText 的辅助档缺省只有 700。
  */
 const DRAFT_MAX_TOKENS = 3000;
@@ -411,8 +420,13 @@ export async function buildPosterBriefDraft(opts: {
     //     **头部**，而 loadConversationText 刚按「结论在末尾」取过尾部——外层再切一刀头，等于把刚
     //     保下来的结尾又丢掉。实测 2176 字的对话被 1200 砍掉最后 976 字，丢的正好是设计师定稿那几句。
     //     两处上限统一到同一个常量，全链路只截一次，且截的是头。
+    // allowAux: false —— 这一次抽取**不许落到辅助档小模型**。aux 是给「用户看不见的后台抽取」
+    // 准备的（见 gateway.structuredMetered 上 allowAux 的注释），而这里是用户正盯着确认页等的
+    // 一步：线上 aux 档是 deepseek-v4-flash，实测它会把字段清单原样回吐成一份全空 JSON，
+    // 闭合合法、zod 全过、每个字段是空 —— 确认页于是整张表单空着，任何 token 预算都救不了。
     ai = await structured(DraftSchema, {
       system: DRAFT_SYS, user: text, maxChars: DRAFT_TEXT_LIMIT, maxTokens: DRAFT_MAX_TOKENS,
+      allowAux: false,
     });
     // structured() 解析失败只返回 null、不抛，所以这行**不能省**：上一次就是因为这里静悄悄，
     // 线上空表单在 journalctl 里连一行 warn 都查不到，只能靠人肉复现才定位到截断。
