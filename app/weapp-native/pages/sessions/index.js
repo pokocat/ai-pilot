@@ -6,10 +6,10 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
 const { getToken } = require('../../services/token');
-const { baseData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
 const { TABS, visualTabs } = require('../../services/tabbar');
 const { chatCore, useStreamRenderer } = require('../../chat-core/behavior');
-// mock 数据档案开关（只有 mock 包渲染角标；非 mock 构建下是死代码）。
+// 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 const { GUEST_PRELUDE, FALLBACK_HINTS } = require('../../data/wence-defaults');
 
@@ -125,7 +125,7 @@ Page({
     const snapshot = store.snapshot();
     // 先补 overlay 再 syncTabBar：顺序反过来会让 custom-tab-bar 先亮一帧再被浮岛顶掉。
     if (this.data.form === 'chat') store.setOverlay(true, 'wence-isle');
-    this.setData({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, mockProfileLabel: snapshot.mock ? mockProfile.label() : '', isleTabs: visualTabs(snapshot.themeClass) });
+    this.setData(Object.assign({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, mockProfileLabel: snapshot.mock ? mockProfile.label() : '', isleTabs: visualTabs(snapshot.themeClass) }, backendEnvironmentData()));
     syncTabBar(this, 0);
     this._enterAt = Date.now();
     this.boot(false);
@@ -141,6 +141,7 @@ Page({
 
   // 数据档案切换后整页重进：问策的会话/提示都在 onShow 链路里成型，reLaunch 比逐个重取干净。
   switchMockProfile() {
+    if (!this.data.isMock) return;
     mockProfile.switchProfile(() => { wx.reLaunch({ url: '/pages/sessions/index' }); });
   },
   onUnload() {

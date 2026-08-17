@@ -80,6 +80,7 @@ export function asReply(content: unknown): ChatReply {
     : [];
   return {
     text: stripSerializedAsksTail(txt(c.text), asks ?? []),
+    ...(txt(c.thoughtSummary).trim() ? { thoughtSummary: txt(c.thoughtSummary).trim() } : {}),
     ...(Array.isArray(c.points) ? { points: c.points.map(txt).filter(Boolean) } : {}),
     ...(Array.isArray(c.acts) ? { acts: c.acts as ChatReply['acts'] } : {}),
     ...(asks?.length ? { asks } : {}),

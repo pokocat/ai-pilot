@@ -20,7 +20,7 @@
 新建 `server/src/services/mingpan.ts`：
 
 - 复用 `computeChart`（paipan.ts）得到八字侧（四柱/旺衰/格局/喜用/调候/大运/逐月）。
-- 新增紫微全盘：`astro.bySolar(...)`（iztro，与现有命宫主星同一调用口径：真太阳时校正后的本地时间、`hourToTimeIndex` 含晚子时、`fixLeap` 与现状一致），展开：
+- 新增紫微全盘：`astro.bySolar(...)`（iztro，与现有命宫主星同一调用口径：真太阳时校正后的本地时间、`hourToTimeIndex` 含子初、`fixLeap` 与现状一致），展开：
   - 盘面元信息：五行局 `fiveElementsClass`、命主 `soul`、身主 `body`、命宫/身宫地支、阴阳（年干阴阳+性别 → 阳男/阴男/阳女/阴女）。
   - 十二宫 `palaces[12]`：宫名、天干、地支、`isSoul`/`isBody`、主星（名+亮度 brightness+生年四化 mutagen）、辅星 minorStars、杂曜 adjectiveStars、大限 `decadal.range`（虚岁）。
 - 缺时辰（`birthHour == null`）：`ziwei: null`、`yinzheng: null`，八字侧照常（三柱）。
@@ -44,7 +44,7 @@ interface MingpanReport {
   base: {
     solarDate: string; lunarDate: string; gender: '男' | '女';
     hourKnown: boolean; trueSolarApplied: boolean; birthPlace?: string | null;
-    hourLabel: string | null;  // 原始录入时辰名（巳时/早子时/晚子时…）；缺时辰 null。按录入口径，非真太阳时校正后钟点
+    hourLabel: string | null;  // 原始录入时辰名（巳时/子时（子正）/子时（子初换日）…）；缺时辰 null。按录入口径，非真太阳时校正后钟点
   };
   bazi: {
     pillars: ChartView['pillars'];
@@ -108,7 +108,7 @@ interface MingpanReport {
 
 自上而下：
 
-1. **命主档头**：kicker「命盘报告 · 八字紫微印证」+ 公历/农历/性别/时辰 + 徽记（真太阳时已校正 / 晚子时口径），右上角印章元素（参考现有 pk-seal）。
+1. **命主档头**：kicker「命盘报告 · 八字紫微印证」+ 公历/农历/性别/时辰 + 徽记（真太阳时已校正 / 子初换日 · 23:00），右上角印章元素（参考现有 pk-seal）。
 2. **八字案卷**：四柱表（列 = 年月日时；行 = 天干十神/干支/藏干十神/纳音），日主旺衰（档位 + 加权分 + basis 小字）、五行统计横条（5 色仅用 accent 深浅与 ink 灰阶区分，不上彩虹色）、格局卡（name + traits/suits/avoid）、喜用与调候。
 3. **紫微命盘**：经典 4×4 十二宫图——外圈 12 格，中宫 2×2 合并显示「五行局/命主/身主/阴阳」。每格：宫名、干支、主星（亮度小字上标）、四化徽记（禄权科忌小方章：禄权用 accent、科用 ink-2、忌用暗红 #8C2F2F 一处即可以变量声明）、大限虚岁区间；命宫/身宫格描边高亮。**格子点按 → 底部弹层**展示该宫全量星曜（主/辅/杂）与大限。手机 375px 下每格 ~86px，星名 11-12px，注意截断策略（辅星最多显示 4 个 +「…」，全量进弹层）。
 4. **两盘印证**：主轴速览（八字一句/紫微一句，各带 basis 折叠小字）、五行对照（aligned 徽记）、生年四化落宫 4 条。

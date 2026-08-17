@@ -10,6 +10,13 @@ describe('asReply 收口落库回复', () => {
     });
   });
 
+  test('保留可重新展开的公开思路摘要', () => {
+    assert.deepEqual(asReply({ text: '先守现金流。', thoughtSummary: '先核对现金流，再判断扩张节奏。' }), {
+      text: '先守现金流。',
+      thoughtSummary: '先核对现金流，再判断扩张节奏。',
+    });
+  });
+
   test('整条不是对象 / 缺 text 也要给出可渲染形状（否则渲染期整页白屏）', () => {
     assert.deepEqual(asReply(null), { text: '' });
     assert.deepEqual(asReply('不是对象'), { text: '' });

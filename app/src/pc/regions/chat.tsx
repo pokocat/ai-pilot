@@ -65,6 +65,8 @@ interface Bubble {
   uid: string;
   role: 'user' | 'agent';
   text: string;
+  thoughtSummary?: string;
+  thoughtOpen?: boolean;
   points?: string[];
   /** 报告类消息（role='report'）：PC 一期不复刻报告卡，降级成「标题 + 分段」并入军师气泡。 */
   sections?: { h: string; b: string }[];
@@ -120,7 +122,7 @@ function bubblesOf(messages: SessionDetail['messages']): Bubble[] {
       };
     }
     const r = asReply(m.content);
-    return { uid, role: 'agent' as const, text: r.text, points: r.points };
+    return { uid, role: 'agent' as const, text: r.text, thoughtSummary: r.thoughtSummary, thoughtOpen: false, points: r.points };
   });
 }
 
@@ -305,8 +307,13 @@ export default function Main({ st }: { st: PcState }) {
     onGeneration: () => { /* PC 一期不展示 generation 阶段/图片进度，只保留 busy 一态 */ },
     startChat: () => {
       resetTokenBuf();
-      setMsgs((m) => [...m, { uid: nextUid(), role: 'agent', text: '', streaming: true }]);
+      setMsgs((m) => [...m, { uid: nextUid(), role: 'agent', text: '', thoughtOpen: true, streaming: true }]);
       follow(true);
+    },
+    appendThought: (text) => {
+      if (!text) return;
+      patchLive((b) => ({ ...b, thoughtSummary: `${b.thoughtSummary || ''}${text}`.trimStart().slice(0, 600), thoughtOpen: true }));
+      follow();
     },
     appendToken: (t) => {
       tokenBufRef.current += t;
@@ -317,7 +324,7 @@ export default function Main({ st }: { st: PcState }) {
     setChat: (reply) => {
       resetTokenBuf();
       const r = asReply(reply);
-      patchLive((b) => ({ ...b, text: r.text, points: r.points }));
+      patchLive((b) => ({ ...b, text: r.text, thoughtSummary: r.thoughtSummary, thoughtOpen: false, points: r.points }));
     },
     startReport: () => {
       resetTokenBuf();
@@ -336,7 +343,7 @@ export default function Main({ st }: { st: PcState }) {
       follow();
     },
     reportFooter: () => { /* PC 一期不渲染报告页脚（trust / actions），完整版在方案库里看 */ },
-    finishChat: () => { flushTokenBuf(); patchLive((b) => ({ ...b, streaming: false })); follow(true); },
+    finishChat: () => { flushTokenBuf(); patchLive((b) => ({ ...b, streaming: false, thoughtOpen: false })); follow(true); },
     finishReport: () => { patchLive((b) => ({ ...b, streaming: false })); follow(true); },
     error: (_kind, message, retry) => {
       flushTokenBuf();
@@ -370,7 +377,7 @@ export default function Main({ st }: { st: PcState }) {
           text: res.deliverable.meta ? `《${res.deliverable.title}》 · ${res.deliverable.meta}` : `《${res.deliverable.title}》`,
           sections: (res.deliverable.sections || []).map((x) => ({ h: x.h || '', b: sectionBody(x) })),
         }
-        : (() => { const r = asReply(res.reply); return { uid: nextUid(), role: 'agent' as const, text: r.text || '军师暂时没有接上，请重试', points: r.points, retryText: r.text ? undefined : retryText }; })();
+        : (() => { const r = asReply(res.reply); return { uid: nextUid(), role: 'agent' as const, text: r.text || '军师暂时没有接上，请重试', thoughtSummary: r.thoughtSummary, thoughtOpen: false, points: r.points, retryText: r.text ? undefined : retryText }; })();
       setMsgs((m) => {
         const i = m.length - 1;
         if (i >= 0 && m[i].role === 'agent' && m[i].streaming) {
@@ -674,6 +681,16 @@ export default function Main({ st }: { st: PcState }) {
                     <Avatar agentKey={agent.key} name={agent.name} />
                     <span className="pc-chat-name">{agent.name}</span>
                   </div>
+                  {m.thoughtSummary && (
+                    <button
+                      type="button"
+                      className={`pc-chat-thought${m.thoughtOpen ? ' open' : ''}`}
+                      onClick={() => setMsgs((current) => current.map((item) => item.uid === m.uid ? { ...item, thoughtOpen: !item.thoughtOpen } : item))}
+                    >
+                      <span className="pc-chat-thought-head"><span>{m.streaming ? '● ' : ''}思路摘要</span><span>{m.thoughtOpen ? '收起' : '展开'}</span></span>
+                      {m.thoughtOpen && <span className="pc-chat-thought-body">{m.thoughtSummary}</span>}
+                    </button>
+                  )}
                   <div className="pc-chat-body">
                     {m.text}
                     {m.streaming && <span className="pc-chat-caret" />}

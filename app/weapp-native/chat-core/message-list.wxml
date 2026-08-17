@@ -30,6 +30,14 @@
         <text wx:if="{{item.report&&item.streaming&&item.streamHint}}" class="stream-hint report-note">{{item.streamHint}}</text>
         <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
         <view wx:else class="ai-text">
+          <view wx:if="{{item.thoughtSummary}}" class="thought-card {{item.thoughtOpen?'open':''}}" data-index="{{messageIndex}}" catchtap="toggleThought">
+            <view class="thought-head">
+              <view wx:if="{{item.streaming}}" class="thought-live"></view>
+              <text class="thought-label">思路摘要</text>
+              <text class="thought-toggle">{{item.thoughtOpen?'收起':'展开'}}</text>
+            </view>
+            <text wx:if="{{item.thoughtOpen}}" class="thought-body" user-select>{{item.thoughtSummary}}</text>
+          </view>
           <block wx:if="{{item.streamRenderId}}">
             <view wx:if="{{!item.streamStarted}}" class="stream-wait"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text wx:if="{{item.streamHint}}" class="stream-hint">{{item.streamHint}}</text></view>
             <towxml wx:else towxmlId="{{item.streamRenderId}}" speed="6" openTyper="{{true}}" theme="light" data-stream-id="{{item.streamRenderId}}" bindfinish="onStreamTypingFinish"></towxml>

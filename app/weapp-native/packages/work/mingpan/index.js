@@ -4,7 +4,7 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 
 const shichen = [
-  ['不确定', null], ['早子 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['晚子 23-24', 23],
+  ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
 ].map(([label, hour], index) => ({ label, hour, index }));
 const branchClass = { 巳: 'mp-b-si', 午: 'mp-b-wu', 未: 'mp-b-wei', 申: 'mp-b-shen', 辰: 'mp-b-chen', 酉: 'mp-b-you', 卯: 'mp-b-mao', 戌: 'mp-b-xu', 寅: 'mp-b-yin', 丑: 'mp-b-chou', 子: 'mp-b-zi', 亥: 'mp-b-hai' };
 const huaClass = { 禄: 'lu', 权: 'quan', 科: 'ke', 忌: 'ji' };
@@ -51,6 +51,10 @@ Page({
     } catch (error) { const code = String(error.code || error.data && error.data.code || ''); if (code === 'FEATURE_DISABLED') this.setData({ loaded: true, disabled: true, report: null }); else { const kind = store.handleApiError(error, { silent: true }); this.setData({ loaded: true, report: null, authed: kind !== 'unauthorized', showLogin: kind === 'unauthorized' }); } }
   },
   input(event) { this.setData({ [event.currentTarget.dataset.field]: event.detail.value }); this.refreshValid(); },
+  changeRegion(event) {
+    const region = Array.isArray(event.detail.value) ? event.detail.value.filter(Boolean) : [];
+    this.setData({ place: region.join(' / ') });
+  },
   select(event) { const field = event.currentTarget.dataset.field; let value = event.currentTarget.dataset.value; if (field === 'hourIdx') value = Number(value); this.setData({ [field]: value }); this.refreshValid(); },
   refreshValid() { setTimeout(() => this.setData({ valid: validDate(this.data.calendar, this.data.year, this.data.month, this.data.day) }), 0); },
   async saveBirth() {

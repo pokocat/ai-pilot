@@ -30,6 +30,7 @@ import {
   type EndpointCapture,
 } from '../services/llmPool.js';
 import { chatMaxTokens } from './thinking.js';
+import { extractPublicThought, PublicThoughtStreamParser } from './publicThought.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -168,8 +169,15 @@ function deliverableText(d: Deliverable): string {
 // 军师反问选项：把模型回复尾部的 ```ask 块解析成结构化 asks 并从正文剥离。
 // 未命中原样透传；mock 等已直接带 asks 的结果不受影响。所有 ChatReply 出口统一过这一层。
 function withAsks(reply: ChatReply): ChatReply {
-  const { text, asks } = extractAsks(reply.text);
-  return asks ? { ...reply, text, asks } : { ...reply, text };
+  const publicThought = extractPublicThought(reply.text);
+  const { text, asks } = extractAsks(publicThought.text);
+  const thoughtSummary = publicThought.thoughtSummary || reply.thoughtSummary;
+  return {
+    ...reply,
+    text,
+    ...(asks ? { asks } : {}),
+    ...(thoughtSummary ? { thoughtSummary } : {}),
+  };
 }
 
 /**
@@ -628,6 +636,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
 }
 
 export type ChatStreamEvent =
+  | { type: 'thought_delta'; text: string }
   | { type: 'delta'; text: string }
   | { type: 'done'; result: ChatReply; usage: Usage; providerInvoked: boolean };
 type ProviderChatStreamEvent =
@@ -646,6 +655,9 @@ function* chunkText(text: string): Generator<string> {
 
 async function* chunkedChatFallback(ctx: GenContext, meta?: UsageMeta, inputModerated = false): AsyncGenerator<ChatStreamEvent> {
   const { result, usage, providerInvoked } = await chatComplete(ctx, meta, { inputModerated });
+  if (result.thoughtSummary) {
+    for (const piece of chunkText(result.thoughtSummary)) yield { type: 'thought_delta', text: piece };
+  }
   for (const piece of chunkText(result.text)) yield { type: 'delta', text: piece };
   yield { type: 'done', result, usage, providerInvoked };
 }
@@ -661,6 +673,7 @@ async function* tracedChatProviderStream(
   let text = '';
   let done: { result: ChatReply; usage: Usage } | null = null;
   const capture = createEndpointCapture();
+  const publicThought = new PublicThoughtStreamParser();
   const iterator = stream[Symbol.asyncIterator]();
   let iteratorFinished = false;
   try {
@@ -672,11 +685,12 @@ async function* tracedChatProviderStream(
       const ev = step.value;
       if (ev.type === 'delta') {
         text += ev.text;
-        yield ev;
+        for (const visible of publicThought.push(ev.text)) yield visible;
       } else {
         done = { result: ev.result, usage: ev.usage };
       }
     }
+    for (const visible of publicThought.finish()) yield visible;
     if (!done) throw Object.assign(new Error(`${provider} 流式响应未返回完整结果`), { code: 'AI_EMPTY_RESPONSE' });
     const actual = withActualEndpoint({ result: done.result, usage: done.usage, provider, model }, capture);
     await recordTrace({
@@ -748,7 +762,7 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
         const oa = await import('./providers/openai.js');
         providerInvoked = true;
         for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
-          if (ev.type === 'delta') emitted = true;
+          if (ev.type !== 'done') emitted = true;
           yield ev;
         }
         return;
@@ -765,7 +779,7 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
         const oa = await import('./providers/openai.js');
         providerInvoked = true;
         for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
-          if (ev.type === 'delta') emitted = true;
+          if (ev.type !== 'done') emitted = true;
           yield ev;
         }
         return;
@@ -774,7 +788,7 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
         const cl = await import('./providers/claude.js');
         providerInvoked = true;
         for await (const ev of tracedChatProviderStream(ctx, meta, 'claude', cfg.model, cl.claudeChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
-          if (ev.type === 'delta') emitted = true;
+          if (ev.type !== 'done') emitted = true;
           yield ev;
         }
         return;
@@ -791,6 +805,9 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
     noteChatNonStream('stream_failed');
     noteGenDegraded('chat_stream_failed');
     const fallback = withAsks(mockChat(ctx));
+    if (fallback.thoughtSummary) {
+      for (const piece of chunkText(fallback.thoughtSummary)) yield { type: 'thought_delta', text: piece };
+    }
     for (const piece of chunkText(fallback.text)) yield { type: 'delta', text: piece };
     yield { type: 'done', result: fallback, usage: ZERO_USAGE, providerInvoked };
     return;

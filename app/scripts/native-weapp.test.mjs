@@ -1224,9 +1224,9 @@ test('战局/锦囊/图籍：底部渐隐遮罩必须存在且不吞点击', () 
   for (const page of ['pages/home', 'pages/pouch', 'pages/thinktank']) {
     assert.match(read(sourceRoot, `${page}/index.wxml`), /<view class="native-bottom-fade"><\/view>/, `${page} 缺底部渐隐`);
   }
-  // MOCK 角标是数据档案开关，必须可点（历史上它 pointer-events:none 且钉在状态栏下，等于假按钮）。
-  assert.doesNotMatch(appStyle, /\.native-mock-badge \{[^}]*pointer-events: none;/s, 'MOCK 角标不得禁用点击');
-  assert.match(appStyle, /\.native-mock-badge \{[^}]*bottom: calc\(env\(safe-area-inset-bottom\) \+ 88px\)/s, 'MOCK 角标必须落在底栏上方的可点区');
+  // 开发环境角标在 mock 时仍是数据档案开关，必须可点（历史上 pointer-events:none 且钉在状态栏下，等于假按钮）。
+  assert.doesNotMatch(appStyle, /\.native-env-badge \{[^}]*pointer-events: none;/s, '开发环境角标不得禁用点击');
+  assert.match(appStyle, /\.native-env-badge \{[^}]*bottom: calc\(env\(safe-area-inset-bottom\) \+ 88px\)/s, '开发环境角标必须落在底栏上方的可点区');
 });
 
 test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，studio 只做过渡跳转', () => {
@@ -1771,6 +1771,25 @@ test('mock 原生包按 token 在本地数据与真实会话间切换', async ()
   assert.match(creative, /String\(getApiBaseUrl\(\) \|\| ''\)/, '真实会话的相对成品地址必须按运行时 API 还原');
   for (const file of walk(sourceRoot).filter((entry) => entry.endsWith('.js') && !entry.endsWith('services/runtime-mode.js'))) {
     assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /env\.BASE_URL/, `仍有固定构建 API 旁路：${path.relative(sourceRoot, file)}`);
+  }
+});
+
+test('后端环境角标只在开发版显示，并按真实请求地址区分四种环境', () => {
+  const environment = cjsRequire(path.join(sourceRoot, 'services/backend-environment.js'));
+  assert.equal(environment.classifyBackendEnvironment({ mock: true, baseUrl: 'http://localhost:4000/api' }), 'mock');
+  assert.equal(environment.classifyBackendEnvironment({ mock: false, baseUrl: 'https://127-0-0-1.example/api' }), 'local');
+  assert.equal(environment.classifyBackendEnvironment({ mock: false, baseUrl: 'https://preview.trycloudflare.com/api' }), 'local');
+  assert.equal(environment.classifyBackendEnvironment({ mock: false, baseUrl: 'https://wxapi.aibuzz.cn/api_preprod' }), 'preprod');
+  assert.equal(environment.classifyBackendEnvironment({ mock: false, baseUrl: 'https://wxapi.aibuzz.cn/api' }), 'prod');
+  assert.equal(environment.shouldShowBackendEnvironmentBadge('develop'), true);
+  assert.equal(environment.shouldShowBackendEnvironmentBadge('trial'), false);
+  assert.equal(environment.shouldShowBackendEnvironmentBadge('release'), false);
+  assert.equal(environment.shouldShowBackendEnvironmentBadge(''), false, '微信版本身份不可用时必须安全隐藏');
+
+  for (const page of ['pages/home', 'pages/sessions', 'pages/pouch', 'pages/thinktank', 'pages/profile']) {
+    const markup = read(sourceRoot, `${page}/index.wxml`);
+    assert.match(markup, /wx:if="\{\{showBackendEnvironmentBadge\}\}"[^>]*native-env-badge/, `${page} 必须消费统一开发环境角标`);
+    assert.match(markup, /\{\{backendEnvironmentLabel\}\}/, `${page} 必须展示真实后端环境`);
   }
 });
 

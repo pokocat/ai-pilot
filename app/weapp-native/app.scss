@@ -129,11 +129,12 @@ page .native-ob-head {
   padding: var(--native-nav-top) var(--native-nav-right) 10px 16px;
 }
 
-/* MOCK 角标 = mock 包的数据档案开关（点按切「经营中 / 空态」）。
+/* 后端环境角标：只在微信开发版显示 MOCK / LOCAL / PREPROD / PROD；体验版与正式版强制隐藏。
+   MOCK 环境同时保留数据档案开关（点按切「经营中 / 空态」）。
    原先钉在状态栏下、且 pointer-events:none —— 位置在胶囊同高、手指够不着，事件也被吃掉，
    等于一个假按钮。改到底栏胶囊上方左侧（底栏 bottom 14 + 高 66，这里让开到 88），
-   并给足 28px 高的命中区。非 mock 构建不渲染这个节点，线上无影响。 */
-.native-mock-badge {
+   并给足 28px 高的命中区。 */
+.native-env-badge {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom) + 88px);
   left: 12px;
@@ -151,7 +152,7 @@ page .native-ob-head {
   letter-spacing: .04em;
   box-shadow: 0 3px 10px rgba(22, 25, 29, .18);
 }
-.native-mock-badge:active { opacity: .82; }
+.native-env-badge.is-switchable:active { opacity: .82; }
 
 /* 底部渐隐：悬浮胶囊底栏与屏幕底缘之间有一条未遮盖的带，内容滚过时会从中穿过、被 home
    indicator 半切（2026-08-12 DevTools 截图实证，锦囊/图籍最明显）。这里让内容在触到那条带

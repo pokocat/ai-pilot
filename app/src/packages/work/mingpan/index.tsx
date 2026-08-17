@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, Button } from '@tarojs/components';
+import { View, Text, Input, Button, Picker } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
@@ -111,6 +111,10 @@ export default function MingpanReportPage() {
   }));
 
   const valid = validBirth(calendar, +year, +month, +day);
+  const changeRegion = (value: unknown) => {
+    const region = Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : [];
+    setPlace(region.join(' / '));
+  };
   const saveBirth = async () => {
     if (!valid || busy) return;
     setBusy(true);
@@ -300,15 +304,16 @@ export default function MingpanReportPage() {
             </View>
           ))}
         </View>
-        {/* 出生地：用于真太阳时校正。刻意做成选填而不是必填——识别不出只是少一层精度且可解释，
-            而逼用户随便填（「本地」「老家」）反而会让服务端匹配到无关城市，把盘算成别人的盘。 */}
-        <Input
-          className="mp-input mp-place"
-          value={place}
-          maxlength={20}
-          placeholder="出生城市（选填，用于真太阳时校正）"
-          onInput={(e) => setPlace(e.detail.value)}
-        />
+        {/* 原生 region picker 是省/市/区三级滚轮，减少手输别名导致的城市识别失败；仍保持选填。 */}
+        <Picker mode="region" onChange={(e) => changeRegion(e.detail.value)}>
+          <View className={`mp-region ${place ? 'selected' : ''}`}>
+            <View className="mp-region-copy">
+              <Text className="mp-region-label">出生地区</Text>
+              <Text className="mp-region-value">{place || '滚动选择省 / 市 / 区'}</Text>
+            </View>
+            <Text className="mp-region-arrow">›</Text>
+          </View>
+        </Picker>
         <View className={`mp-btn ${valid && !busy ? '' : 'off'}`} style={valid && !busy ? { background: accent } : {}} onClick={saveBirth}>
           <Text>{busy ? '立盘中…' : editing ? '更新生辰 · 重新立盘' : '录入生辰 · 立盘'}</Text>
         </View>
@@ -316,6 +321,7 @@ export default function MingpanReportPage() {
         {editing ? (
           <View className="mp-form-cancel" onClick={closeEditBirth}><Text>取消</Text></View>
         ) : null}
+        <Text className="mp-form-tip">23:00 起按次日子时排盘；例如 3 月 16 日 23:30，日柱与农历按 3 月 17 日计算。</Text>
         <Text className="mp-form-tip">时辰不确定可选「不确定」——八字按三柱推演，紫微须时辰方可立盘。</Text>
         <Text className="mp-form-tip">出生地越偏离东经 120°，真太阳时差得越多：成都约差 1 小时，乌鲁木齐超过 2 小时，足以改时柱。</Text>
       </View>
@@ -348,7 +354,7 @@ function renderHead(r: MingpanReport, seal: string, onEditBirth: () => void) {
       </View>
       <View className="mp-badges">
         {b.trueSolarApplied ? <Text className="mp-badge">真太阳时已校正</Text> : null}
-        <Text className="mp-badge">晚子时口径</Text>
+        <Text className="mp-badge">子初换日 · 23:00</Text>
         {!b.hourKnown ? <Text className="mp-badge warn">时辰未定 · 三柱推演</Text> : null}
       </View>
       {/* 未校正态必须显式说出来。只在 true 时亮徽章、false 时一片沉默，等于让用户默认自己

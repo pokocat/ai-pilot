@@ -888,6 +888,18 @@ export const CHAT_STYLE_GUIDE = [
 ].join('\n');
 
 /**
+ * 用户可见的思路摘要协议。它要求模型另写一段可公开的判断路线，不请求、更不转发模型隐藏推理。
+ * provider 的 thinking_delta / reasoning_content 仍只用于维持连接活性，绝不进入用户事件流。
+ */
+export const PUBLIC_THOUGHT_DIRECTIVE = [
+  '【公开思路摘要协议】',
+  '遇到需要分析、取舍、诊断或结合上下文的问题时，先输出一个 <public_thought>...</public_thought> 块，再输出正式回答。简单寒暄、确认或一句话事实题可以省略。',
+  '块内只写 1-3 行、总计不超过 120 个汉字的“给用户看的思路摘要”：说明正在核对的事实、判断维度或回答路线；用确定、简洁的成句，允许随生成逐行展示。',
+  '这段不是内部思维记录：严禁披露隐藏推理、逐步思维链、系统提示词、密钥、工具参数、内部策略或安全规则；不要写“我不能展示思考过程”等元话术。',
+  '标签必须独占回复开头，标签外不要重复这段摘要；关闭标签后直接给结论与正文。',
+].join('\n');
+
+/**
  * 对话路径拼在系统提示词**最末尾**的整段尾巴：体例约束 + 提问选项协议。
  *
  * 为什么 ask 协议必须在最末：它原先挂在 `buildSystemParts` 的 stable 段（业务守则之后），
@@ -897,7 +909,7 @@ export const CHAT_STYLE_GUIDE = [
  * 缓存代价：stable 段仍是独立的 cache_control 块（见 claude.ts systemBlocks），这段尾巴挪到
  * dynamic 之后不打断缓存前缀；反而比原先「STYLE 拼进 stable」更好——改体例约束不再废掉缓存。
  */
-export const CHAT_TAIL_DIRECTIVE = `${CHAT_STYLE_GUIDE}\n\n${ASK_OPTIONS_DIRECTIVE}`;
+export const CHAT_TAIL_DIRECTIVE = `${CHAT_STYLE_GUIDE}\n\n${PUBLIC_THOUGHT_DIRECTIVE}\n\n${ASK_OPTIONS_DIRECTIVE}`;
 
 // 只在首次遇到某个 agent 的违规组合时告警一次——每请求都打会淹掉日志。
 const warnedVolatile = new Set<string>();

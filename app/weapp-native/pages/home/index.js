@@ -4,8 +4,8 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
-const { baseData, syncTabBar } = require('../../services/page');
-// mock 数据档案：只有 mock 包才渲染角标，非 mock 构建下这几行是死代码（留着无害）。
+const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+// 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
 const PHASE_WORD = { 进攻: '攻', 防守: '守', 平稳: '稳中蓄力' };
@@ -180,7 +180,7 @@ Page({
   onLoad() { this._backfill = {}; this._orderResultText = ''; this._goalDraft = ''; this._bizDraft = {}; this._forceVerdicts = {}; },
   onShow() {
     const state = store.snapshot();
-    this.setData({
+    this.setData(Object.assign({
       themeClass: state.themeClass,
       colorKey: state.colorKey,
       isMock: state.mock,
@@ -188,7 +188,7 @@ Page({
       authed: state.authed,
       onboarded: state.onboarded,
       onboardingKnown: state.onboardingKnown,
-    });
+    }, backendEnvironmentData()));
     syncTabBar(this, 1);
     // 拉一次复盘账本判红点（15 秒节流、失败静默），拿到后再同步一遍底栏。
     store.loadReviewBadge().then(() => syncTabBar(this, 1)).catch(() => {});
@@ -324,6 +324,7 @@ Page({
   selectSegment(event) { this.setData({ segment: Number(event.currentTarget.dataset.index) }); },
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据，用来验收满态与空态两种排版。 */
   switchMockProfile() {
+    if (!this.data.isMock) return;
     mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
   },
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },

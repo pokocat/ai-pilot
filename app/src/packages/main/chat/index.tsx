@@ -39,7 +39,7 @@ import './index.scss';
 type Msg =
   | { role: 'greet'; agent: Agent; uid?: string }
   | { role: 'user'; text: string; refs?: MessageRef[]; uid?: string }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; errorAction?: ChatErrorAction; streaming?: boolean; uid?: string }
+  | { role: 'assistant'; reply: ChatReplyT; thoughtOpen?: boolean; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; errorAction?: ChatErrorAction; streaming?: boolean; uid?: string }
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string; errorAction?: ChatErrorAction; uid?: string }
   | { role: 'memory'; agentName: string; uid?: string };
 
@@ -743,7 +743,7 @@ export default function Chat() {
       }
       // assistant / system：contentJson 正常是 { text, points?, asks? }；缺 text 或整个不是对象时
       // 补成 { text: '' }，否则渲染期 m.reply.text / m.reply.asks 会抛错。
-      else out.push({ role: 'assistant', reply: asReply(m.content), uid: m.id });
+      else out.push({ role: 'assistant', reply: asReply(m.content), thoughtOpen: false, uid: m.id });
     });
     return out;
   }
@@ -1025,7 +1025,16 @@ export default function Chat() {
       },
       startReport: () => { patchReport((d) => d); setTimeout(scrollToEnd, 30); },
       // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
-      startChat: () => { resetTokenBuf(); setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true, uid: nextMsgUid() }]); setTimeout(scrollToEnd, 30); },
+      startChat: () => { resetTokenBuf(); setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, thoughtOpen: true, streaming: true, uid: nextMsgUid() }]); setTimeout(scrollToEnd, 30); },
+      appendThought: (text) => {
+        if (!text) return;
+        patchChat((msg) => ({
+          ...msg,
+          thoughtOpen: true,
+          reply: { ...msg.reply, thoughtSummary: `${msg.reply.thoughtSummary || ''}${text}`.trimStart().slice(0, 600) },
+        }));
+        followBottom();
+      },
       reportBegin: (data) => patchReport((d) => ({ ...d, title: data.title || d.title, icon: data.icon || d.icon, meta: data.meta || d.meta })),
       reportSection: (section) => {
         patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
@@ -1047,7 +1056,7 @@ export default function Chat() {
       // 权威完整回复整体替换 reply：先把缓冲清掉（其内容已被 reply 覆盖），避免残余 token 事后重复追加。
       // SSE 的 chat 事件在「provider 流没吐出最终结果」时会带 null（服务端 send('chat', reply2) 的
       // reply2 可为 null）——直接塞进 msg.reply 会让下一帧 m.reply.text 抛错、整页白屏。过 asReply 收口。
-      setChat: (reply) => { resetTokenBuf(); patchChat((msg) => ({ ...msg, reply: asReply(reply) })); },
+      setChat: (reply) => { resetTokenBuf(); patchChat((msg) => ({ ...msg, reply: asReply(reply), thoughtOpen: false })); },
       finishReport: (messageId, refNotices) => {
         // 自动存入由 liveGen 侧统一触发（保证退页面后台完成也入库），此处只收 streaming 态。
         patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
@@ -1055,7 +1064,7 @@ export default function Chat() {
       },
       finishChat: (messageId, refNotices) => {
         flushTokenBuf(); // 收尾先把残余 token 落屏，再置 streaming=false（否则末尾几十字会随定时器丢失）
-        patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
+        patchChat((msg) => ({ ...msg, streaming: false, thoughtOpen: false, refNotices }));
         followBottom(true);
       },
       // 断流对账「已落库」：本轮结果以服务端为准整体重绘，与加载路径同一套 restore，不留半截中断卡。
@@ -2347,6 +2356,23 @@ export default function Chat() {
               <View key={m.uid} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
                 <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
+                  {m.reply?.thoughtSummary ? (
+                    <View
+                      className={`thought-card ${m.thoughtOpen ? 'open' : ''}`}
+                      onClick={() => setMsgs((current) => current.map((message, index) => (
+                        index === i && message.role === 'assistant'
+                          ? { ...message, thoughtOpen: !message.thoughtOpen }
+                          : message
+                      )))}
+                    >
+                      <View className="thought-head">
+                        {m.streaming ? <View className="thought-live" style={{ background: accent }} /> : null}
+                        <Text className="thought-label">思路摘要</Text>
+                        <Text className="thought-toggle">{m.thoughtOpen ? '收起' : '展开'}</Text>
+                      </View>
+                      {m.thoughtOpen ? <Text className="thought-body" selectable>{m.reply.thoughtSummary}</Text> : null}
+                    </View>
+                  ) : null}
                   {m.streaming && !m.reply?.text ? (
                     <View className="stream-wait">
                       <View className="think-dots">

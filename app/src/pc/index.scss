@@ -441,6 +441,14 @@
 }
 .pc-chat-av-img { width: 100%; height: 100%; background-size: cover; background-position: center; }
 .pc-chat-name { font-size: 12.5px; font-weight: 600; color: var(--pc-ink-2); }
+.pc-chat-thought {
+  width: calc(100% - 32px); margin: 0 0 10px 32px; padding: 9px 11px;
+  border: 1px solid var(--pc-line); border-radius: 10px; background: var(--pc-surface-2);
+  color: var(--pc-ink-2); text-align: left; cursor: pointer;
+}
+.pc-chat-thought-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 600; }
+.pc-chat-thought-head span:last-child { color: var(--pc-ink-3); font-size: 11px; font-weight: 400; }
+.pc-chat-thought-body { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--pc-line); font-size: 12.5px; font-weight: 400; line-height: 1.65; white-space: pre-line; }
 .pc-chat-body {
   padding: 1px 4px 0 32px;
   font-size: 15.5px; line-height: 1.78; color: var(--pc-ink); white-space: pre-line;

@@ -113,18 +113,26 @@ test('真太阳时：乌鲁木齐(东经87.6°)正午出生 → 校正约-130分
   assert.equal(urumqi.pillars.day.ganZhi, noon.pillars.day.ganZhi);
 });
 
-test('晚子时流派(sect 2)：23:30 与次日 0:30 同属一日 → 日柱同、时柱不同', () => {
-  // 早子 0:30 与晚子 23:30 同为 1988-03-15 出生（前端时辰表拆早子 hour0 / 晚子 hour23）。
-  const early = computeChart({ ...KNOWN, hour: 0, minute: 30 }, 2026);
-  const late = computeChart({ ...KNOWN, hour: 23, minute: 30 }, 2026);
-  // sect 2：晚子日柱算当天 → 两者日柱相同
-  assert.equal(early.pillars.day.ganZhi, '己巳');
-  assert.equal(late.pillars.day.ganZhi, '己巳');
-  assert.equal(late.pillars.day.ganZhi, early.pillars.day.ganZhi);
-  // 时柱不同：早子取当日日干起子时(甲子)，晚子取次日日干起子时(丙子)
-  assert.equal(early.pillars.time?.ganZhi, '甲子');
+test('子初换日(sect 1)：3月16日23:30 按 3月17日 / 农历二月十八 / 次日日柱排盘', () => {
+  const late = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 23, minute: 30, gender: 'male' }, 2026);
+  const nextEarly = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 17, hour: 0, minute: 30, gender: 'male' }, 2026);
+  assert.equal(late.solarDate, '2025-03-17');
+  assert.equal(late.lunarDate, '二〇二五年二月十八');
+  assert.equal(late.pillars.day.ganZhi, '乙酉');
   assert.equal(late.pillars.time?.ganZhi, '丙子');
-  assert.notEqual(late.pillars.time?.ganZhi, early.pillars.time?.ganZhi);
+  assert.equal(late.pillars.day.ganZhi, nextEarly.pillars.day.ganZhi);
+  assert.equal(late.pillars.time?.ganZhi, nextEarly.pillars.time?.ganZhi);
+});
+
+test('子初换日以真太阳时为准：22:45 经度校正跨到 23 点后换日', () => {
+  const standard = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 22, minute: 45, gender: 'male' }, 2026);
+  const corrected = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 22, minute: 45, gender: 'male', longitude: 126.6 }, 2026);
+  assert.equal(standard.solarDate, '2025-03-16');
+  assert.equal(standard.pillars.day.ganZhi, '甲申');
+  assert.equal(corrected.solarDate, '2025-03-17');
+  assert.equal(corrected.lunarDate, '二〇二五年二月十八');
+  assert.equal(corrected.pillars.day.ganZhi, '乙酉');
+  assert.equal(corrected.pillars.time?.ganZhi, '丙子');
 });
 
 test('立春换年：2000 立春(约 2/4 傍晚)前后各一天，10 时出生年柱切换 己卯→庚辰', () => {
@@ -206,7 +214,7 @@ test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致'
   assert.equal(loaded?.hourKnown, false);
 });
 
-test('v3 升级不静默覆盖存量 v2 快照；用户主动重排才写 v3', async () => {
+test('v4 升级不静默覆盖存量 v2 快照；用户主动重排才写 v4', async () => {
   const token = await login(uniquePhone(), '命盘版本用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   const legacy = { ...computeChart(KNOWN, 2026), engineVersion: 'paipan-v2' };
@@ -227,5 +235,22 @@ test('v3 升级不静默覆盖存量 v2 快照；用户主动重排才写 v3', a
 
   assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v2', '读取存量盘不得自动升级');
   await computeAndStoreChart({ tenantId: user.tenantId, userId: user.id, input: KNOWN, targetYear: 2026 });
-  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v3', '用户主动重排才升级');
+  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v4', '用户主动重排写当前 v4');
+});
+
+test('存量 v3 首次读取惰性升级 v4，避免报告与对话日柱不一致', async () => {
+  const token = await login(uniquePhone(), '命盘v3升级用户');
+  const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
+  const input = { calendar: 'solar', year: 2025, month: 3, day: 16, hour: 23, minute: 30, gender: 'male' } as const;
+  const old = { ...computeChart(input, 2026), engineVersion: 'paipan-v3', solarDate: '2025-03-16', lunarDate: '二〇二五年二月十七' };
+  await prisma.natalChart.create({ data: {
+    tenantId: user.tenantId, userId: user.id, engineVersion: 'paipan-v3', gender: 'male', calendar: 'solar',
+    birthDate: '2025-03-16', birthHour: 23, birthMinute: 30, trueSolarApplied: false, chartJson: old,
+  } });
+  const upgraded = await loadChart(user.id);
+  assert.equal(upgraded?.engineVersion, 'paipan-v4');
+  assert.equal(upgraded?.solarDate, '2025-03-17');
+  assert.equal(upgraded?.lunarDate, '二〇二五年二月十八');
+  assert.equal(upgraded?.pillars.day.ganZhi, '乙酉');
+  assert.equal((await prisma.natalChart.findUniqueOrThrow({ where: { userId: user.id } })).engineVersion, 'paipan-v4');
 });

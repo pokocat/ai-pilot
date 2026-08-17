@@ -363,6 +363,16 @@ fi
 # 冒烟全过，补记结果行。有 switched 无 ok = 这次发布中途挂了，事后一眼可辨。
 record_history ok
 
+# 智能体配置漂移巡检（只读、只警告、绝不阻断）。
+# 上面那句 `prisma db push` 只同步表结构，**不动数据**；而运行时读的是 agent.publishedVersionId
+# 指向的 agent_version 快照。所以 systemPrompt / deliverableKey / skillsConfig 改了代码并部署后
+# 依然是旧的，且没有任何报错——2026-08-16 海报设计师停在 v2 就是这么漏过去的。
+# 放在 record_history ok 之后：巡检结果不参与「本次发布成不成」的判定，只在收尾处提醒人去后台发布。
+echo "== agent config drift check (warn only) =="
+sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" bash -c \
+  'cd "$APP_ROOT/server" && npm run --silent agents:check-drift' \
+  || echo "⚠ 漂移巡检未跑完（不阻断发布）：登机后手动 cd $APP_ROOT/server && npm run agents:check-drift"
+
 echo "DEPLOYED ${SHA}"
 REMOTE
 

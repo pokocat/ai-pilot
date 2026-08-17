@@ -1,13 +1,13 @@
-// 排盘引擎 v3：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
+// 排盘引擎 v4：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
 // 铁律：算 → 存 → 拼指令，AI 只负责行文。本文件产出的所有结论都是可复算的（同输入同输出），
 // 引擎带版本号（升级后可按版本批量复算）；启发式规则（身强弱/喜用/攻守）在 basis 字段写明依据，
 // 属 v1 简化口径，后续版本细化时以版本号区分，不悄悄改变历史命盘。
 //
-// 引擎边界（v3）：
+// 引擎边界（v4）：
 // - 真太阳时：经度平太阳时（(经度-120)×4 分钟）+ 均时差（Spencer 级数，见 equationOfTimeMinutes），
 //   合成后误差降到分钟级；仅在有经度时叠加（无经度不校正）。
-// - 晚子时流派：EightChar.setSect(2)——晚子（23:00-23:59）日柱算「当天」（大陆主流排盘软件口径），
-//   时柱按次日日干起子时。前端时辰表已拆早子(hour 0)/晚子(hour 23)，令 23 点出生者不再被当次日 0 点排。
+// - 子初换日：EightChar.setSect(1)——23:00 起进入次日子时，日柱与命理日期均按次日计算；
+//   前端时辰表拆分子正(hour 0)/子初(hour 23)，避免把两个子时入口拍平成同一个小时。
 // - 旺衰/格局/调候：移植子平法加权算法（services/baziEnrich.ts，MIT 出处见该文件头），
 //   月令权重最高、透根分层；格局按月令藏干透干取格；新增调候用神。仍不处理从格/化格等特殊格局
 //   （极旺/极弱会在结论标「可能从强/从弱」提示，但正格照常论）。
@@ -21,10 +21,10 @@ import {
   type SiZhu, type Tiangan, type Dizhi, type WangShuaiVerdict,
 } from './baziEnrich.js';
 
-// v3 固化此前已上线但未正确升版的三处输出变化：城市匹配、真太阳时 UTC 进位、
-// trueSolarApplied 判据；并修复出生地文本含两个城市时被城市表声明顺序误选的问题。
-// 存量 v1/v2 chartJson 快照由 loadChart 原样读取，不静默重算；只有用户主动重排才写 v3。
-export const PAIPAN_ENGINE_VERSION = 'paipan-v3';
+// v4 将此前 v3 的晚子时当日口径改为命理界更常用的 23:00 子初换日，并让报告公历/农历展示
+// 与日柱共用同一有效日期。存量 v3 在首次 loadChart 时惰性重算，避免报告与对话拿到两套日柱；
+// 更早的 v1/v2 仍原样读取，不静默改写历史快照。新排/主动重排一律写 v4。
+export const PAIPAN_ENGINE_VERSION = 'paipan-v4';
 
 export interface PaipanInput {
   calendar: 'solar' | 'lunar';
@@ -56,11 +56,12 @@ export function validatePaipanInput(b: Partial<PaipanInput> | undefined, maxYear
   if (hourKnown && (!Number.isInteger(Number(raw.hour)) || Number(raw.hour) < 0 || Number(raw.hour) > 23)) {
     return { ok: false, error: '时辰不合法（0-23，或不填表示不确定）' };
   }
-  // 出生地：只做长度上限（与前端 maxlength=20 对齐）。内容不校验——城市识别由 matchCity 负责，
+  // 出生地：只做长度上限。命盘页 region picker 会提交省/市/区全称，40 字覆盖最长行政区组合；
+  // 内容不校验——城市识别由 matchCity 负责，
   // 识别不出就是不校正，不该在这里把用户挡回去。
   if (raw.birthPlace !== undefined && raw.birthPlace !== null) {
     if (typeof raw.birthPlace !== 'string') return { ok: false, error: '出生地格式不合法' };
-    if (raw.birthPlace.length > 20) return { ok: false, error: '出生地过长（不超过 20 字）' };
+    if (raw.birthPlace.length > 40) return { ok: false, error: '出生地过长（不超过 40 字）' };
   }
   // 经度：以前原样透传，字符串 "121.5" 会静默不校正、NaN 会一路落库让 Prisma 抛错，
   // 最后被外层 catch 成「生辰无法排盘，请检查日期」——错误信息与真实原因完全无关。
@@ -99,8 +100,8 @@ export interface MonthOutlook {
 
 export interface ChartView {
   engineVersion: string;
-  solarDate: string;      // 校正后用于排盘的公历日期 YYYY-MM-DD
-  lunarDate: string;      // 对应农历（中文）
+  solarDate: string;      // 真太阳时校正 + 子初换日后用于排盘的公历有效日期 YYYY-MM-DD
+  lunarDate: string;      // 与日柱共用同一有效日期的农历（中文）
   hourKnown: boolean;
   trueSolarApplied: boolean;
   gender: '男' | '女';
@@ -145,13 +146,25 @@ function supports(dayElement: string, other: string): boolean {
   return other === dayElement || GEN[other] === dayElement;
 }
 
-// 小时 → iztro 时辰序号（0=早子 00-01, 1=丑 01-03, …, 11=亥 21-23, 12=晚子 23-24）
+// 小时 → iztro 时辰序号（0=子正 00-01, 1=丑 01-03, …, 11=亥 21-23, 12=子初 23-24）
 function hourToTimeIndex(hour: number): number {
   if (hour >= 23) return 12;
   return Math.floor((hour + 1) / 2);
 }
 
 function pad2(n: number): string { return `${n}`.padStart(2, '0'); }
+
+/** 纯日历加一天：用 UTC 避开宿主时区/DST，保留时分秒。 */
+function nextCalendarDay(solar: Solar): Solar {
+  const utc = new Date(Date.UTC(
+    solar.getYear(), solar.getMonth() - 1, solar.getDay() + 1,
+    solar.getHour(), solar.getMinute(), solar.getSecond(),
+  ));
+  return Solar.fromYmdHms(
+    utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate(),
+    utc.getUTCHours(), utc.getUTCMinutes(), utc.getUTCSeconds(),
+  );
+}
 
 /**
  * 均时差（equation of time），单位分钟：真太阳时 = 平太阳时 + EoT。
@@ -209,7 +222,7 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
 
 /**
  * 紫微全盘（十二宫展开）：与 computeChart 内命宫/身宫主星同一调用口径——
- * 同样的真太阳时校正后本地时间、同样的 hourToTimeIndex（含晚子时映射）、fixLeap=true、zh-CN。
+ * 同样的真太阳时校正后本地时间、同样的 hourToTimeIndex（含子初映射）、fixLeap=true、zh-CN。
  * 缺时辰返回 null（紫微必须有时辰立盘）。命盘报告层（mingpan.ts）复用此函数展开全盘，
  * 保证与对话简报里的命宫/身宫主星逐字一致，不产生第二套排盘口径。
  * 返回类型由 iztro 推断（FunctionalAstrolabe），下游用 ReturnType 取用，避免深路径类型导入。
@@ -231,9 +244,12 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
   const { solar, trueSolarApplied, hourKnown } = resolveSolar(input);
   const lunar = solar.getLunar();
   const ec = lunar.getEightChar();
-  // 晚子时流派：显式 setSect(2)——晚子（23:00-23:59）日柱算「当天」、时柱按次日日干起子时
-  // （大陆主流排盘软件口径）。lunar-typescript@1.8.6 默认已是 2，此处显式声明以固化流派、防库升级默认漂移。
-  ec.setSect(2);
+  // 子初换日：显式 setSect(1)——23:00-23:59 的日柱按次日算，时柱也随次日日干起子时。
+  // lunar-typescript@1.8.6 默认是 sect 2（晚子仍算当天），必须显式固化，防库升级或默认值漂移。
+  ec.setSect(1);
+  // 报告上的公历/农历也必须与日柱同日。否则会出现“日柱已换、农历仍停在前一天”的半修复。
+  const effectiveSolar = hourKnown && solar.getHour() === 23 ? nextCalendarDay(solar) : solar;
+  const effectiveLunar = effectiveSolar.getLunar();
 
   const pillar = (ganZhi: string, shiShenGan: string, hideGan: string[], shiShenZhi: string[], naYin: string): PillarView =>
     ({ ganZhi, shiShenGan, hideGan, shiShenZhi, naYin });
@@ -319,8 +335,8 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
 
   return {
     engineVersion: PAIPAN_ENGINE_VERSION,
-    solarDate: `${solar.getYear()}-${pad2(solar.getMonth())}-${pad2(solar.getDay())}`,
-    lunarDate: `${lunar.getYearInChinese()}年${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`,
+    solarDate: `${effectiveSolar.getYear()}-${pad2(effectiveSolar.getMonth())}-${pad2(effectiveSolar.getDay())}`,
+    lunarDate: `${effectiveLunar.getYearInChinese()}年${effectiveLunar.getMonthInChinese()}月${effectiveLunar.getDayInChinese()}`,
     hourKnown,
     trueSolarApplied,
     gender: input.gender === 'male' ? '男' : '女',
@@ -375,7 +391,30 @@ export async function computeAndStoreChart(args: {
 /** 读取用户命盘（无则 null）。 */
 export async function loadChart(userId: string): Promise<ChartView | null> {
   const row = await prisma.natalChart.findUnique({ where: { userId } });
-  return row ? (row.chartJson as unknown as ChartView) : null;
+  if (!row) return null;
+  const stored = row.chartJson as unknown as ChartView;
+  // v4 是日柱正确性修复，不允许报告页现算 v4、对话却继续读 v3。仅对上一版 v3 惰性升级；
+  // v1/v2 可能还承载更早算法差异，继续保持可追溯，不在读路径无边界重排。
+  if (row.engineVersion !== 'paipan-v3') return stored;
+  const [year, month, day] = row.birthDate.split('-').map(Number);
+  const input: PaipanInput = {
+    calendar: row.calendar === 'lunar' ? 'lunar' : 'solar',
+    year, month, day,
+    hour: row.birthHour, minute: row.birthMinute ?? 0,
+    gender: row.gender === 'female' ? 'female' : 'male',
+    birthPlace: row.birthPlace ?? undefined,
+    longitude: row.longitude ?? undefined,
+  };
+  const upgraded = computeChart(input, stored.monthlyOutlook?.year ?? new Date().getFullYear());
+  await prisma.natalChart.update({
+    where: { id: row.id },
+    data: {
+      engineVersion: PAIPAN_ENGINE_VERSION,
+      trueSolarApplied: upgraded.trueSolarApplied,
+      chartJson: upgraded as unknown as object,
+    },
+  });
+  return upgraded;
 }
 
 /** 命盘 → 注入对话的【天势档案】块（结构化数据 + 使用铁律；AI 只翻译不计算）。 */

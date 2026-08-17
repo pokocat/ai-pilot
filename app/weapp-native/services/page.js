@@ -1,4 +1,5 @@
 const store = require('./store');
+const { backendEnvironmentData } = require('./backend-environment');
 
 function capsuleMetrics() {
   try {
@@ -37,7 +38,7 @@ function baseData(extra) {
     navTop: metrics.navTop,
     navRowHeight: metrics.navRowHeight,
     navRightInset: metrics.navRightInset,
-  }, extra || {});
+  }, backendEnvironmentData(), extra || {});
 }
 
 function syncTabBar(page, selected) {
@@ -52,4 +53,4 @@ function syncTabBar(page, selected) {
   }
 }
 
-module.exports = { baseData, capsuleInset, capsuleMetrics, syncTabBar };
+module.exports = { baseData, backendEnvironmentData, capsuleInset, capsuleMetrics, syncTabBar };

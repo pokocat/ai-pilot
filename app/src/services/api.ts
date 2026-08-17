@@ -181,10 +181,10 @@ export interface MpPalace {
   decadal: { start: number; end: number } | null;   // 大限虚岁区间
 }
 export interface MingpanReport {
-  engineVersion: string;               // 当前新盘为 'paipan-v3'；存量快照可为 v1/v2
+  engineVersion: string;               // 当前新盘为 'paipan-v4'；存量快照可为 v1/v2/v3
   base: {
     solarDate: string; lunarDate: string; gender: '男' | '女';
-    hourKnown: boolean; hourLabel: string | null;  // 时辰名（如「巳时」「早子时」「晚子时」）；缺时辰为 null
+    hourKnown: boolean; hourLabel: string | null;  // 时辰名（如「巳时」「子时（子初换日）」）；缺时辰为 null
     trueSolarApplied: boolean; birthPlace?: string | null;
   };
   bazi: {

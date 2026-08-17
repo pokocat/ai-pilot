@@ -899,6 +899,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
+          else if (ev.type === 'thought_delta') send('thought', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
@@ -981,6 +982,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
+          else if (ev.type === 'thought_delta') send('thought', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }

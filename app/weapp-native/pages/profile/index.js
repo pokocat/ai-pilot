@@ -1,8 +1,8 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
-const { baseData, syncTabBar } = require('../../services/page');
-// mock 数据档案开关（只有 mock 包渲染角标；非 mock 构建下是死代码）。
+const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+// 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
 const MENU_GROUPS = [
@@ -69,7 +69,7 @@ Page({
   }),
   onShow() {
     const state = store.snapshot();
-    this.setData({ themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock, mockProfileLabel: state.mock ? mockProfile.label() : '', authed: state.authed });
+    this.setData(Object.assign({ themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock, mockProfileLabel: state.mock ? mockProfile.label() : '', authed: state.authed }, backendEnvironmentData()));
     syncTabBar(this, 4);
     this.load();
   },
@@ -115,6 +115,7 @@ Page({
     });
   },
   switchMockProfile() {
+    if (!this.data.isMock) return;
     mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
   },
   retry() { this.setData({ loadFailed: false }); this.load(); },

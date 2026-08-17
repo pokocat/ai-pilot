@@ -19,17 +19,17 @@ const GAN_YINYANG: Record<string, '阳' | '阴'> = { 甲: '阳', 乙: '阴', 丙
 
 const HUA_ORDER: Record<string, number> = { 禄: 0, 权: 1, 科: 2, 忌: 3 };
 
-// 十二时辰地支序（1-2丑…21-22亥），早子(0)/晚子(23)单列。
+// 十二时辰地支序（1-2丑…21-22亥），子正(0)/子初(23)单列。
 const SHICHEN_ZHI = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
 
 /**
  * 由原始录入 birthHour 推时辰名（档头显示用户录入口径，非真太阳时校正后钟点——校正另有徽记说明）。
- * 0=早子时、23=晚子时；其余 (hour+1)/2 取地支（1-2丑…21-22亥）。null → null。
+ * 0=子正、23=子初（23 点换日）；其余 (hour+1)/2 取地支（1-2丑…21-22亥）。null → null。
  */
 export function hourLabelOf(hour: number | null | undefined): string | null {
   if (hour == null) return null;
-  if (hour === 0) return '早子时';
-  if (hour === 23) return '晚子时';
+  if (hour === 0) return '子时（子正）';
+  if (hour === 23) return '子时（子初换日）';
   return `${SHICHEN_ZHI[Math.floor((hour + 1) / 2)]}时`;
 }
 

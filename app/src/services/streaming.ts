@@ -12,6 +12,7 @@ export type StreamErrorKind = 'disconnect' | 'fatal';
 export interface StreamHandlers {
   onSession?: (id: string) => void;
   onGeneration?: (data: { generationId: string; sessionId?: string; snapshotVersion?: number; phase?: GenerationPhase; status?: GenerationStatus; imageProgress?: ImageGenerationProgress | null; refNotices?: string[] }) => void;
+  onThought?: (text: string) => void; // 模型显式撰写的用户可见思路摘要；不是隐藏 reasoning
   onToken?: (text: string, replace?: boolean) => void; // 增量 token；replace=true 表示权威全文替换
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
   onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
@@ -111,6 +112,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
       if (Array.isArray(d?.refNotices) && d.refNotices.length) h.onRefNotices?.(d.refNotices);
     }
     else if (e.event === 'session') h.onSession?.(d?.id ?? '');
+    else if (e.event === 'thought') { state.rendered = true; h.onThought?.(d?.text ?? ''); }
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? '', d?.replace === true); }
     else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }
     else if (e.event === 'meta' && d?.kind === 'report' && h.onReportStart) { state.rendered = true; h.onReportStart(); }

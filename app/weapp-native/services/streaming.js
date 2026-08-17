@@ -50,6 +50,7 @@ function generateStream(body, handlers) {
         if (entry.event === 'generation' || entry.event === 'snapshot') { state.generationId = data.generationId || data.id || state.generationId; state.sessionId = data.sessionId || state.sessionId; handlers.onGeneration && handlers.onGeneration(data); }
         else if (entry.event === 'session') { state.sessionId = data.id || state.sessionId; handlers.onSession && handlers.onSession(state.sessionId); }
         else if (entry.event === 'meta') { state.kind = data.kind || state.kind; handlers.onMeta && handlers.onMeta(data); }
+        else if (entry.event === 'thought') { rendered = true; handlers.onThought && handlers.onThought(String(data.text || '')); }
         else if (entry.event === 'token') { rendered = true; handlers.onToken && handlers.onToken(String(data.text || ''), data.replace === true); }
         else if (entry.event === 'chat') { rendered = true; state.reply = data; handlers.onChat && handlers.onChat(data); }
         else if (entry.event === 'begin') { rendered = true; state.kind = 'report'; state.deliverable = { title: data.title || '', icon: data.icon || 'doc', meta: data.meta || '', sections: [], trust: '', actions: [] }; handlers.onReport && handlers.onReport(state.deliverable); }

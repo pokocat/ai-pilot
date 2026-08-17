@@ -227,7 +227,11 @@ function normalizeReply(reply) {
     id: textOf(item && item.id), factKey: textOf(item && item.factKey), valueText: textOf(item && item.valueText), reason: textOf(item && item.reason),
   })).filter((item) => item.id && item.factKey && item.valueText) : [];
   const factConfirmation = factItems.length ? { title: textOf(rawFact.title) || '这条是我的推断，想请你核一下', items: factItems } : null;
-  return { text: stripSerializedAsksTail(value.text, value.asks), points, asks, factConfirmation, truncated: value.truncated === true };
+  return {
+    text: stripSerializedAsksTail(value.text, value.asks),
+    thoughtSummary: textOf(value.thoughtSummary).trim(),
+    points, asks, factConfirmation, truncated: value.truncated === true,
+  };
 }
 
 function decorateActiveAsks(messages, busy) {
@@ -272,7 +276,7 @@ function normalizeMessage(message, index) {
   };
   const reply = normalizeReply(content);
   return {
-    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
+    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
     // 快捷回应：服务端 SessionMessage.chips 原样带进消息对象（当前唯一写入方是进场主动消息）。
     // 无 chips 的消息拿到空数组，模板据此不渲染这一排。
     chips: stringList(message && message.chips),
@@ -414,6 +418,7 @@ const methods = {
     this._generationId = '';
     this._streamIndex = null;
     this._streamText = '';
+    this._thoughtText = '';
     this._streamShown = '';
     this._streamAutoScrollTimer = null;
     this._streamDoneStatus = '';
@@ -857,6 +862,12 @@ const methods = {
     const data = [item.text].concat(item.points || []).filter(Boolean).join('\n\n');
     wx.setClipboardData({ data });
   },
+  toggleThought(event) {
+    const index = Number(event.currentTarget.dataset.index);
+    const item = this.data.messages[index];
+    if (!item || !item.thoughtSummary) return;
+    this.safeSetData({ [`messages[${index}].thoughtOpen`]: !item.thoughtOpen });
+  },
 
   // 关键：textarea 完全不绑定 value。输入法每次 onInput 只写普通 JS 字段，绝不 setData 回灌文字。
   // 这避免 Taro controlled textarea 在华为 + 百度输入法上反复 setData 导致重复上屏、光标跳尾。
@@ -1196,6 +1207,7 @@ const methods = {
     this._streamDoneStatus = '';
     this._streamIndex = null;
     this._streamText = '';
+    this._thoughtText = '';
     this._streamShown = '';
     if (this._plainStreamTimer) clearTimeout(this._plainStreamTimer);
     this._plainStreamTimer = null;
@@ -1239,6 +1251,7 @@ const methods = {
           this._runKnowledgeUsed = mergedStrings(this._runKnowledgeUsed, data.knowledgeUsed);
           if (data.kind === 'chat') this.ensureStreamItem(false); else if (data.kind === 'report') this.ensureStreamItem(true);
         },
+        onThought: (chunk) => { if (active()) this.updateStreamThought(chunk); },
         onToken: (chunk, replace) => { if (active()) this.updateStreamText(chunk, replace); },
         onChat: (reply) => { if (active()) this.updateStreamReply(reply); },
         onReport: (deliverable) => { if (active()) this.updateStreamReport(deliverable); },
@@ -1327,12 +1340,25 @@ const methods = {
       id: uid(report ? 'report' : 'assistant'), role: 'assistant', text: '', points: [], asks: [], activeAsk: false, report: Boolean(report), reportReady: false, streaming: true,
       typing: !report, streamStarted: false, streamRenderId,
       streamHint: this.data.thinkingText,
+      thoughtSummary: this._thoughtText || '', thoughtOpen: true,
       knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
     };
     this._streamIndex = this.data.messages.length;
     this.safeSetData({ messages: this.data.messages.concat(item), showThinking: false });
     this.toBottom();
     return this._streamIndex;
+  },
+  updateStreamThought(chunk) {
+    const text = textOf(chunk);
+    if (!text) return;
+    const index = this.ensureStreamItem(false);
+    this._thoughtText = `${this._thoughtText || ''}${text}`.trimStart().slice(0, 600);
+    this.safeSetData({
+      [`messages[${index}].thoughtSummary`]: this._thoughtText,
+      [`messages[${index}].thoughtOpen`]: true,
+      [`messages[${index}].streamHint`]: '正在组织回答',
+    });
+    this.toBottom();
   },
   updateStreamText(chunk, replace) {
     const index = this.ensureStreamItem(false); const current = this.data.messages[index] || {};
@@ -1378,6 +1404,8 @@ const methods = {
     }
     const patch = {
       [`messages[${index}].text`]: value.text,
+      [`messages[${index}].thoughtSummary`]: value.thoughtSummary || this._thoughtText || '',
+      [`messages[${index}].thoughtOpen`]: false,
       [`messages[${index}].points`]: value.points,
       [`messages[${index}].asks`]: value.asks,
       [`messages[${index}].factConfirmation`]: value.factConfirmation,
@@ -1427,6 +1455,8 @@ const methods = {
         finished.asks = reply.asks;
         finished.factConfirmation = reply.factConfirmation;
         finished.truncated = reply.truncated;
+        finished.thoughtSummary = reply.thoughtSummary || this._thoughtText || finished.thoughtSummary || '';
+        finished.thoughtOpen = false;
       }
       if (finished.report) {
         finished.reportReady = isReportReady(messageId, finished.deliverable);
@@ -1463,6 +1493,7 @@ const methods = {
     }
     this._streamIndex = null;
     this._streamText = '';
+    this._thoughtText = '';
     this._streamShown = '';
     this._generationId = '';
     this._pollSeq += 1;
@@ -1500,6 +1531,7 @@ const methods = {
     }
     this.safeSetData(patch);
     this._streamText = '';
+    this._thoughtText = '';
     this._streamShown = '';
     if (!this.data.messages.some((item, itemIndex) => itemIndex !== index && item && item.typing)) this.stopStreamAutoScroll();
   },
@@ -1710,7 +1742,7 @@ const methods = {
     else {
       const reply = normalizeReply(result.reply || { text: result.partialText, truncated: result.status === 'truncated' });
       item = {
-        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
+        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
       };
     }
@@ -1721,6 +1753,7 @@ const methods = {
       const next = this.data.messages.slice(); next[this._streamIndex] = item; this._streamIndex = null; this.safeSetData(this.askPatch(next, false));
     } else this.safeSetData(this.askPatch(this.data.messages.concat(item), false));
     this._streamText = '';
+    this._thoughtText = '';
     this._streamShown = '';
     this._generationId = '';
     this._pollSeq += 1;

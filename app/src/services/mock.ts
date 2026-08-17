@@ -314,7 +314,7 @@ function sampleChartM(): ChartSummary {
   const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
   const TURN = new Set([3, 7, 11]);
   return {
-    engineVersion: 'paipan-v3',
+    engineVersion: 'paipan-v4',
     hourKnown: true,
     pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
     dayMaster: { gan: '戊', element: '土', strength: '身强' },
@@ -364,7 +364,7 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
     { name: '兄弟', stem: '戊', branch: '辰', isSoul: false, isBody: false, majorStars: [M('天同', '平', null), M('天梁', '得', null)], minorStars: ['天钺'], adjectiveStars: ['天喜'], decadal: { start: 116, end: 125 } },
   ];
   return {
-    engineVersion: 'paipan-v3',
+    engineVersion: 'paipan-v4',
     base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied, birthPlace },
     bazi: {
       pillars: {
@@ -416,7 +416,7 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
         { star: '廉贞', hua: '忌', palace: '财帛' },
       ],
     },
-    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v3 · 数据由算法层确定性推算，${yr} 年为准。`,
+    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v4 · 数据由算法层确定性推算，${yr} 年为准。`,
   };
 }
 

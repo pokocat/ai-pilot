@@ -39,7 +39,7 @@ describe('命盘报告 GET /profile/chart/report', () => {
     const rep = r.body;
 
     // —— 档头 ——
-    assert.equal(rep.engineVersion, 'paipan-v3');
+    assert.equal(rep.engineVersion, 'paipan-v4');
     assert.equal(rep.base.gender, '男');
     assert.equal(rep.base.hourKnown, true);
     assert.equal(rep.base.hourLabel, '巳时'); // 原始录入 10:30 → 巳时（9-10 时）

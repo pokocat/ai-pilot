@@ -56,6 +56,7 @@ export interface LiveGenView {
   onSession(sessionId: string): void;
   onGeneration(data: { generationId: string; phase?: GenerationPhase; status?: GenerationStatus; imageProgress?: ImageGenerationProgress | null; refNotices?: string[] }): void;
   startChat(): void;
+  appendThought(text: string): void;
   appendToken(text: string): void;
   replaceToken(text: string): void;
   setChat(reply: ChatReply): void;
@@ -115,6 +116,7 @@ interface LiveGenEntry {
   kind: LiveKind;
   stage: LiveStage;
   text: string;                // 聊天累计 token
+  thought: string;             // 模型主动撰写的公开思路摘要（不含隐藏 reasoning）
   reply?: ChatReply;           // 完整聊天回复（onChat 到达后）
   reportBeginData?: { title: string; icon: string; meta: string };
   sections: (DeliverableSection & { index?: number })[];
@@ -281,6 +283,12 @@ function makeHandlers(entry: LiveGenEntry): StreamHandlers {
     onSession: (id) => { if (id) { bindSession(entry, id); entry.view?.onSession(id); } },
     onReportStart: () => startReport(entry),
     onChatStart: () => startChat(entry),
+    onThought: (text) => {
+      if (entry.kind === 'report') return;
+      startChat(entry);
+      entry.thought += text;
+      entry.view?.appendThought(text);
+    },
     onReportBegin: (data) => {
       startReport(entry);
       entry.reportBeginData = data;
@@ -408,6 +416,7 @@ export function startLiveGen(p: LiveGenStartParams): string {
     kind: null,
     stage: 'active',
     text: '',
+    thought: '',
     sections: [],
     pendingRefNotices: [],
     learnedAgentName: '',
@@ -451,6 +460,7 @@ function replay(entry: LiveGenEntry, view: LiveGenView) {
   // 仅重放「进行中」内容以重建气泡；已 done/error 的对账交给调用方（以落库消息为准），此处不重放终态。
   if (entry.kind === 'chat') {
     view.startChat();
+    if (entry.thought) view.appendThought(entry.thought);
     if (entry.text) view.replaceToken(entry.text);
     if (entry.reply) view.setChat(entry.reply);
   } else if (entry.kind === 'report') {

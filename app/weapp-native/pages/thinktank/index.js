@@ -1,8 +1,8 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
-const { baseData, syncTabBar } = require('../../services/page');
-// mock 数据档案：只有 mock 包才渲染角标，非 mock 构建下这几行是死代码（留着无害）。
+const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+// 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
 const PROCESS_STEPS = ['识别资料来源和文件类型', '去重并标记敏感信息', '按案卷目标生成分类结构', '输出待确认资料和问题清单'];
@@ -97,12 +97,12 @@ Page({
   }),
   onShow() {
     const state=store.snapshot();
-    this.setData({themeClass:state.themeClass,colorKey:state.colorKey,isMock:state.mock,mockProfileLabel:state.mock?mockProfile.label():'',authed:state.authed,segment:state.authed?this.data.segment:0});
+    this.setData(Object.assign({themeClass:state.themeClass,colorKey:state.colorKey,isMock:state.mock,mockProfileLabel:state.mock?mockProfile.label():'',authed:state.authed,segment:state.authed?this.data.segment:0},backendEnvironmentData()));
     syncTabBar(this,3);
     this.load();
   },
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据。 */
-  switchMockProfile(){mockProfile.switchProfile(()=>{this.setData({mockProfileLabel:mockProfile.label()});this.load();});},
+  switchMockProfile(){if(!this.data.isMock)return;mockProfile.switchProfile(()=>{this.setData({mockProfileLabel:mockProfile.label()});this.load();});},
   requireLogin(reason) { if(store.isAuthed()) return true; this.setData({showLogin:true,loginReason:reason||'upload'}); return false; },
   closeLogin(){this.setData({showLogin:false});}, loggedIn(){this.setData({showLogin:false,authed:true});this.load();},
   switchSegment(event){this.setData({segment:Number(event.currentTarget.dataset.index)});},

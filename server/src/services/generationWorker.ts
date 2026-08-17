@@ -597,7 +597,7 @@ async function processJob(job: GenerationJob): Promise<void> {
           lastSnapshotAt = Date.now();
           charsSinceSnapshot = 0;
         }
-      } else {
+      } else if (event.type === 'done') {
         reply = event.result;
         providerUsage = event.usage;
         providerInvoked = event.providerInvoked;

@@ -1073,6 +1073,8 @@ export interface AdminCreativeJobsView {
 export interface ChatAsk { q: string; options: string[]; }
 export interface ChatReply {
   text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
+  /** 模型主动撰写、允许向用户展示的简短思路摘要；不是供应商隐藏推理或 chain-of-thought。 */
+  thoughtSummary?: string;
   factConfirmation?: FactConfirmationCard; // 独立确认卡，不复用 asks/chips
   /**
    * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：

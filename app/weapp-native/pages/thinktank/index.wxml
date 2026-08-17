@@ -1,5 +1,5 @@
 <view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
-  <view wx:if="{{isMock}}" class="native-mock-badge" bindtap="switchMockProfile"><text>MOCK · {{mockProfileLabel}}</text></view>
+  <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad think think-native">
