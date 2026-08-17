@@ -537,6 +537,7 @@ model GenerationJob {
   contextJson                  Json?
   contextFrozenAt              DateTime?
   partialText                  String                         @default("") @db.Text
+  thoughtSummary               String                         @default("") @db.Text
   replyJson                    Json?
   snapshotVersion              Int                            @default(0)
   usageJson                    Json?

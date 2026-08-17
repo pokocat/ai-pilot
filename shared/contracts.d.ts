@@ -1212,6 +1212,7 @@ export interface ImageGenerationProgress {
 }
 export interface GenerationView extends GenerationSummary {
   partialText: string;
+  thoughtSummary?: string; // durable 生成的用户可见思路摘要快照；不是 provider hidden reasoning
   reply?: ChatReply;
   deliverable?: Deliverable;
   usage?: { inputTokens: number; outputTokens: number; cachedInput?: number; billableTokens: number } | null;

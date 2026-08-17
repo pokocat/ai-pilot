@@ -472,6 +472,7 @@ export function generationView(job: GenerationJob): GenerationView {
   return {
     ...generationSummary(job),
     partialText: job.partialText,
+    ...(job.thoughtSummary ? { thoughtSummary: job.thoughtSummary } : {}),
     ...(job.kind === GenerationKind.chat && reply ? { reply: reply as ChatReply } : {}),
     ...(job.kind === GenerationKind.report && reply ? { deliverable: reply as Deliverable } : {}),
     usage: usageObject(job.usageJson),
@@ -820,6 +821,7 @@ export async function writeGenerationSnapshot(args: {
   workerId: string;
   leaseVersion: number;
   text: string;
+  thoughtSummary?: string;
   leaseMs?: number;
 }): Promise<number> {
   return prisma.$transaction(async (tx) => {
@@ -833,6 +835,7 @@ export async function writeGenerationSnapshot(args: {
       },
       data: {
         partialText: args.text,
+        ...(args.thoughtSummary !== undefined ? { thoughtSummary: args.thoughtSummary } : {}),
         snapshotVersion: { increment: 1 },
         heartbeatAt: at,
         leaseExpiresAt: new Date(at.getTime() + (args.leaseMs ?? DEFAULT_LEASE_MS)),
@@ -882,6 +885,7 @@ export async function persistGenerationResult(args: {
         kind: args.kind === 'report' ? GenerationKind.report : GenerationKind.chat,
         phase: GenerationPhase.finalize,
         partialText: args.partialText,
+        thoughtSummary: args.kind === 'chat' ? ((args.content as ChatReply).thoughtSummary ?? '') : '',
         replyJson: args.content as unknown as Prisma.InputJsonValue,
         snapshotVersion: { increment: 1 },
       },
@@ -934,7 +938,11 @@ export async function finalizeGeneration(args: {
     }
     const status = GenerationStatus[args.status];
     if (status !== GenerationStatus.failed && !job.resultMessageId && job.partialText) {
-      const reply: ChatReply = { text: job.partialText, truncated: status !== GenerationStatus.completed };
+      const reply: ChatReply = {
+        text: job.partialText,
+        ...(job.thoughtSummary ? { thoughtSummary: job.thoughtSummary } : {}),
+        truncated: status !== GenerationStatus.completed,
+      };
       const message = await tx.message.create({
         data: { sessionId: job.sessionId, role: 'assistant', contentJson: reply as unknown as Prisma.InputJsonValue },
       });

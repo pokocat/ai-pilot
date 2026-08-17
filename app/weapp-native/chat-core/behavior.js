@@ -1666,6 +1666,19 @@ const methods = {
     const progressPatch = { thinkingText };
     if (this._streamIndex != null && this.data.messages[this._streamIndex]) progressPatch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
     this.safeSetData(progressPatch);
+    const snapshotThought = textOf(result.thoughtSummary).slice(0, 600);
+    if (snapshotThought && snapshotThought !== this._thoughtText) {
+      if (snapshotThought.startsWith(this._thoughtText || '')) this.updateStreamThought(snapshotThought.slice((this._thoughtText || '').length));
+      else {
+        const index = this.ensureStreamItem(false);
+        this._thoughtText = snapshotThought;
+        this.safeSetData({
+          [`messages[${index}].thoughtSummary`]: snapshotThought,
+          [`messages[${index}].thoughtOpen`]: true,
+          [`messages[${index}].streamHint`]: '正在组织回答',
+        });
+      }
+    }
     if (result.kind === 'report' || result.deliverable) {
       const index = this.ensureStreamItem(true);
       const deliverable = result.deliverable;
@@ -1740,7 +1753,7 @@ const methods = {
       knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
     };
     else {
-      const reply = normalizeReply(result.reply || { text: result.partialText, truncated: result.status === 'truncated' });
+      const reply = normalizeReply(result.reply || { text: result.partialText, thoughtSummary: result.thoughtSummary, truncated: result.status === 'truncated' });
       item = {
         id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),

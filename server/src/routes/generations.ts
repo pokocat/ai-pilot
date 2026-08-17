@@ -39,6 +39,7 @@ export async function pipeGenerationSSE(
   let closed = false;
   let lastVersion = Math.max(-1, opts.after ?? -1);
   let previousText = '';
+  let previousThought = '';
   reply.raw.on('close', () => { closed = true; });
   while (!closed && !reply.raw.writableEnded && !reply.raw.destroyed) {
     const row = await prisma.generationJob.findUnique({ where: { id: generationId } });
@@ -50,6 +51,12 @@ export async function pipeGenerationSSE(
     if (view.snapshotVersion > lastVersion || TERMINAL.has(view.status)) {
       send(reply, 'snapshot', view);
       if (opts.compatibilityEvents) {
+        // 增量 parser 会暂时保留标签内首尾换行，最终 ChatReply 会 trim；比较前统一规范化，
+        // 否则终态快照会因空白差异被误判为整段替换，再把完整摘要重复发一次。
+        const thought = (view.thoughtSummary || '').trim();
+        const thoughtDelta = thought.startsWith(previousThought) ? thought.slice(previousThought.length) : thought;
+        if (thoughtDelta) send(reply, 'thought', { text: thoughtDelta });
+        previousThought = thought;
         const text = view.partialText || '';
         const delta = text.startsWith(previousText) ? text.slice(previousText.length) : text;
         if (delta) send(reply, 'token', { text: delta, replace: !text.startsWith(previousText) });

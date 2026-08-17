@@ -43,6 +43,8 @@ const WORKER_POLL_MS = 300;
 const HEARTBEAT_MS = 5_000;
 const SNAPSHOT_MS = 400;
 const SNAPSHOT_CHARS = 192;
+const THOUGHT_SNAPSHOT_MS = 200;
+const THOUGHT_SNAPSHOT_CHARS = 48;
 const CHAT_JOB_MAX_RUNTIME_MS = 300_000;
 const ASK_RECOVERY_BUDGET_MS = 3_000;
 const EFFECT_STALE_MS = 5 * 60_000;
@@ -495,6 +497,7 @@ async function processJob(job: GenerationJob): Promise<void> {
 
   let attemptNo: number | null = null;
   let accumulated = job.partialText || '';
+  let thoughtSummary = job.thoughtSummary || '';
   let providerUsage: Usage | null = null;
   let providerInvoked = false;
   let frozenContext: FrozenContext | null = null;
@@ -579,6 +582,8 @@ async function processJob(job: GenerationJob): Promise<void> {
     let reply: ChatReply | null = null;
     let lastSnapshotAt = Date.now();
     let charsSinceSnapshot = 0;
+    let lastThoughtSnapshotAt = 0;
+    let thoughtCharsSinceSnapshot = 0;
     for await (const event of chatCompleteStream(frozen.ctx, {
       tenantId: job.tenantId,
       userId: job.userId,
@@ -593,9 +598,19 @@ async function processJob(job: GenerationJob): Promise<void> {
         accumulated += event.text;
         charsSinceSnapshot += event.text.length;
         if (charsSinceSnapshot >= SNAPSHOT_CHARS || Date.now() - lastSnapshotAt >= SNAPSHOT_MS) {
-          await writeGenerationSnapshot({ jobId: job.id, workerId, leaseVersion, text: accumulated });
+          await writeGenerationSnapshot({ jobId: job.id, workerId, leaseVersion, text: accumulated, thoughtSummary });
           lastSnapshotAt = Date.now();
           charsSinceSnapshot = 0;
+        }
+      } else if (event.type === 'thought_delta') {
+        thoughtSummary += event.text;
+        thoughtCharsSinceSnapshot += event.text.length;
+        const at = Date.now();
+        if (!lastThoughtSnapshotAt || thoughtCharsSinceSnapshot >= THOUGHT_SNAPSHOT_CHARS || at - lastThoughtSnapshotAt >= THOUGHT_SNAPSHOT_MS) {
+          await writeGenerationSnapshot({ jobId: job.id, workerId, leaseVersion, text: accumulated, thoughtSummary });
+          lastThoughtSnapshotAt = at;
+          lastSnapshotAt = at;
+          thoughtCharsSinceSnapshot = 0;
         }
       } else if (event.type === 'done') {
         reply = event.result;
@@ -604,7 +619,11 @@ async function processJob(job: GenerationJob): Promise<void> {
       }
     }
     if (!reply && !accumulated) throw Object.assign(new Error('AI 流式响应为空'), { code: 'AI_EMPTY_RESPONSE' });
-    let finalReply: ChatReply = reply ?? { text: accumulated, truncated: true };
+    let finalReply: ChatReply = reply ?? {
+      text: accumulated,
+      ...(thoughtSummary ? { thoughtSummary } : {}),
+      truncated: true,
+    };
     // provider done 的 text 是去重、清理推荐块后的权威正文；快照最终以它替换，不拼接。
     accumulated = finalReply.text || accumulated;
     const measured = conservativeUsage(providerUsage, frozen.ctx, accumulated, providerInvoked);
@@ -670,7 +689,7 @@ async function processJob(job: GenerationJob): Promise<void> {
       }).catch(() => {});
     }
     if (accumulated) {
-      await writeGenerationSnapshot({ jobId: job.id, workerId, leaseVersion, text: accumulated }).catch(() => {});
+      await writeGenerationSnapshot({ jobId: job.id, workerId, leaseVersion, text: accumulated, thoughtSummary }).catch(() => {});
     }
     await finalizeGeneration({
       jobId: job.id,

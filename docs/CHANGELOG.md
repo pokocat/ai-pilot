@@ -6,6 +6,13 @@
 
 ## 变更日志
 
+### 2026-08-17 · 修复 durable 对话只在收尾显示思路摘要 · 影响面：GenerationJob 快照、SSE 兼容流、原生/H5 断线续接
+
+- **预发真请求抓到缺口**：模型输出和最终 `ChatReply.thoughtSummary` 都正确，但 durable worker 只快照正文，`/generate` 因而只有 `snapshot/token/chat/done`、没有生成中的 `thought`。
+- **思路也做权威快照**：`generation_job.thoughtSummary` 独立保存最多 600 字的公开摘要；worker 以更短节奏递增写入，SSE 兼容层先统一首尾空白再只补发新增片段，避免最终 `trim` 后把摘要全文重复一次；终态/截断回填仍保留摘要。供应商隐藏 reasoning 继续丢弃，不改变安全边界。
+- **断线可续显**：`GenerationView.thoughtSummary` 进入全栈契约；原生小程序与 H5 轮询恢复会整体对齐最新摘要，不重复追加，首次连接仍走独立 `thought` 事件流。
+- **回归**：新增 durable 两段思路快照 → 两段 `thought` → 正文 `token` → `done` 的数据库/SSE 回归，防止再次退化为“回答结束后才出现摘要”。
+
 ### 2026-08-17 · 开发版增加真实后端环境角标 · 影响面：原生小程序五个主 Tab、运行环境识别、真机预览验收
 
 - **四种环境一眼可辨**：五个主 Tab 复用原 MOCK 角标位置，按当前真实请求链路显示 `MOCK / LOCAL / PREPROD / PROD`；不只看构建 mode，因此 mock 包落入真实附身 JWT 后也会同步显示实际服务端环境。

@@ -1,5 +1,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import type { FastifyReply } from 'fastify';
 import { api, cleanBusiness, closeApp, getApp, login, seedBaseline, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { enqueueDurableGeneration } from '../src/services/generationRequest.ts';
@@ -15,6 +17,7 @@ import {
 } from '../src/services/generationJobs.ts';
 import { tickGenerationWorker } from '../src/services/generationWorker.ts';
 import { durableGenerationBody } from '../src/routes/sessions.ts';
+import { pipeGenerationSSE } from '../src/routes/generations.ts';
 
 describe('GenerationJob durable lifecycle', () => {
   before(async () => {
@@ -61,6 +64,66 @@ describe('GenerationJob durable lifecycle', () => {
     assert.ok(done.resultMessageId);
     assert.equal((await prisma.session.findUniqueOrThrow({ where: { id: first.session.id } })).activeGenerationId, null);
     assert.equal(await prisma.message.count({ where: { sessionId: first.session.id, role: 'assistant' } }), 1);
+  });
+
+  test('durable thought snapshots stream incrementally before the answer and survive terminal fallback', async () => {
+    const phone = uniquePhone();
+    await login(phone, '思路快照用户');
+    const user = await prisma.user.findUniqueOrThrow({ where: { phone } });
+    const created = await enqueueDurableGeneration(user, {
+      text: '请先判断现金流风险，再给行动顺序',
+      agentKey: 'general',
+      clientRequestId: `generation-thought-${Date.now()}`,
+    });
+    const claimed = await claimNextGenerationJob('worker-thought', 15_000);
+    assert.equal(claimed?.id, created.job.id);
+    await writeGenerationSnapshot({
+      jobId: created.job.id,
+      workerId: 'worker-thought',
+      leaseVersion: claimed!.leaseVersion,
+      text: '',
+      thoughtSummary: '\n先核对',
+    });
+
+    let body = '';
+    const raw = new EventEmitter() as EventEmitter & {
+      writableEnded: boolean;
+      destroyed: boolean;
+      write: (chunk: string) => boolean;
+    };
+    raw.writableEnded = false;
+    raw.destroyed = false;
+    raw.write = (chunk) => { body += chunk; return true; };
+    const stream = pipeGenerationSSE({ raw } as unknown as FastifyReply, created.job.id, { compatibilityEvents: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await writeGenerationSnapshot({
+      jobId: created.job.id,
+      workerId: 'worker-thought',
+      leaseVersion: claimed!.leaseVersion,
+      text: '结论：先守住现金流。',
+      thoughtSummary: '\n先核对现金流\n',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 420));
+    await prisma.generationJob.update({
+      where: { id: created.job.id },
+      data: {
+        status: 'completed',
+        phase: 'finalize',
+        replyJson: { text: '结论：先守住现金流。', thoughtSummary: '先核对现金流' },
+        snapshotVersion: { increment: 1 },
+        completedAt: new Date(),
+      },
+    });
+    await stream;
+
+    assert.match(body, /event: thought\ndata: \{"text":"先核对"\}/);
+    assert.match(body, /event: thought\ndata: \{"text":"现金流"\}/, '后续快照只能补发新增思路，不能整段重复');
+    assert.equal(body.match(/event: thought/g)?.length, 2, '终态 trim 不能导致完整摘要重复补发');
+    assert.match(body, /event: token\ndata: \{"text":"结论：先守住现金流。","replace":false\}/);
+    assert.match(body, /event: done/);
+    const stored = await prisma.generationJob.findUniqueOrThrow({ where: { id: created.job.id } });
+    assert.equal(stored.thoughtSummary, '\n先核对现金流\n');
   });
 
   test('queued explicit cancel is durable, idempotent and never starts provider', async () => {

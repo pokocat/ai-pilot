@@ -838,14 +838,28 @@ export default function Chat() {
           const snapshot = await api.generation(activeGenerationId).catch(() => null);
           if (!aliveRef.current || seq !== pollSeqRef.current) return;
           if (snapshot) setThinkingText(generationProgressText(snapshot.imageProgress));
-          if (detail.activeGeneration?.kind !== 'report' && snapshot?.partialText) {
+          if (detail.activeGeneration?.kind !== 'report' && (snapshot?.partialText || snapshot?.thoughtSummary)) {
             setMsgs((current) => {
               const next = current.slice();
               const tail = next[next.length - 1];
               if (tail?.role === 'assistant' && tail.streaming) {
-                next[next.length - 1] = { ...tail, reply: { ...(tail.reply || { text: '' }), text: snapshot.partialText } };
+                next[next.length - 1] = {
+                  ...tail,
+                  thoughtOpen: !!snapshot.thoughtSummary,
+                  reply: {
+                    ...(tail.reply || { text: '' }),
+                    text: snapshot.partialText || tail.reply?.text || '',
+                    thoughtSummary: snapshot.thoughtSummary || tail.reply?.thoughtSummary,
+                  },
+                };
               } else {
-                next.push({ role: 'assistant', reply: { text: snapshot.partialText }, streaming: true, uid: `generation:${activeGenerationId}` });
+                next.push({
+                  role: 'assistant',
+                  reply: { text: snapshot.partialText || '', thoughtSummary: snapshot.thoughtSummary },
+                  thoughtOpen: !!snapshot.thoughtSummary,
+                  streaming: true,
+                  uid: `generation:${activeGenerationId}`,
+                });
               }
               return next;
             });
