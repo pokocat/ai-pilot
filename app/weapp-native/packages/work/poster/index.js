@@ -103,7 +103,9 @@ Page({
     // 服务端下发 recommendation（方式 / 方向 / 版式 + 一句理由）时，这三项已经替用户定好了：
     // 页面主视图是一张方案卡（说明 + 理由 + 组合摘要 + 价格），三处修改收进低调入口，点开才出现。
     // 没有 recommendation（老服务端 / 抽取失败）时 hasReco=false，三个选择器回退成常驻展开。
-    hasReco: false, recoReason: '', panel: '',
+    // panel 默认 'way'：确认页一进来就把两档出图方式摊开对比（2026-08-17 产品决定）。
+    // 高级档不可用时那块面板整体不渲染，此时这个默认值等于「三块都收着」，与旧行为一致。
+    hasReco: false, recoReason: '', panel: 'way',
     plan: { way: '', direction: '', template: '', density: '', price: null },
     // 「换方式」两档各配一张该档下的真实样例缩略图（取自 status.directions，不进代码包）。
     wayStd: { previewUrl: '', name: '' }, wayPro: { previewUrl: '', name: '' },
@@ -161,6 +163,7 @@ Page({
       return null;
     });
     const [status, draft] = await Promise.all([statusPromise, draftPromise]);
+    if (status) this._statusAt = Date.now();
     if (status && !status.enabled) { this.setData({ disabled: true, loading: false }); return; }
     const hasDraftBrief = Boolean(draft && draft.brief && typeof draft.brief === 'object');
     const draftNote = String((draft && draft.designNote) || '').trim();
@@ -280,10 +283,25 @@ Page({
     return { previewUrl: String(pick && pick.previewUrl || ''), name: String(pick && pick.name || '') };
   },
 
+  /**
+   * 样例图的地址是 OSS **签名 URL，窗口只有 10–20 分钟**（见服务端 SAMPLE_URL_WINDOW_SEC），
+   * 而本页的 status 只在进场拉一次。`<image>` 渲染过一次就留着位图，所以早就画出来的标准档三张
+   * 一直在，而 premium 那几张是**点开「出图方式」或切档时才第一次渲染**的——那时签名早过期，
+   * 于是只有它们空着（2026-08-17 报障：主视觉大片与人物意象没缩略图，服务端数据其实完好）。
+   *
+   * 所以在「即将第一次渲染那些卡」的两个入口上做陈旧检查：超过 5 分钟（小于签名窗口）就静默
+   * 重拉一次。走既有的 refreshTemplates()——它明确不碰 recommendation，不会把用户已做的选择盖回去。
+   */
+  refreshStatusIfStale() {
+    if (this._statusAt && Date.now() - this._statusAt < 300000) return;
+    this.refreshTemplates();
+  },
+
   /** 三个低调入口：点开一个、再点收起。没有推荐时三块本来就常驻展开，这个开关也就不渲染。 */
   openPanel(event) {
     const key = String(event.currentTarget.dataset.panel || '');
     this.setData({ panel: this.data.panel === key ? '' : key });
+    this.refreshStatusIfStale();
   },
 
   chooseDensity(event) {
@@ -350,6 +368,7 @@ Page({
       'errors.direction': '',
     });
     this.refreshPlan();
+    this.refreshStatusIfStale();
   },
   chooseDirection(event) {
     this.setData({ directionKey: String(event.currentTarget.dataset.key || ''), 'errors.direction': '' });
@@ -464,6 +483,7 @@ Page({
   async refreshTemplates() {
     try {
       const status = normalizeStatus(await api.creativeStatus());
+      this._statusAt = Date.now();
       const templateKey = status.templates.some((item) => item.key === this.data.templateKey) ? this.data.templateKey : (status.templates[0] && status.templates[0].key || '');
       const tier = this.data.tier === 'premium' && status.premiumAvailable ? 'premium' : 'standard';
       const activeDirections = status.directions.filter((item) => item.tier === tier);

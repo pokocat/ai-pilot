@@ -31,9 +31,9 @@
         <!-- 三个低调入口，一律用动词。有推荐才渲染：没推荐时下面三块本来就摊开着，
              再摆三个开关只会让人以为还有别的东西藏着。 -->
         <view wx:if="{{hasReco}}" class="ps-plan-acts">
-          <view wx:if="{{premiumOn}}" class="ps-plan-act {{panel==='way'?'on':''}}" data-panel="way" bindtap="openPanel"><text>换方式</text></view>
-          <view class="ps-plan-act {{panel==='direction'?'on':''}}" data-panel="direction" bindtap="openPanel"><text>换方向</text></view>
-          <view class="ps-plan-act {{panel==='template'?'on':''}}" data-panel="template" bindtap="openPanel"><text>调整版式</text></view>
+          <view wx:if="{{premiumOn}}" class="ps-plan-act {{panel==='way'?'on':''}}" data-panel="way" bindtap="openPanel"><text>出图方式</text></view>
+          <view class="ps-plan-act {{panel==='direction'?'on':''}}" data-panel="direction" bindtap="openPanel"><text>画面内容</text></view>
+          <view class="ps-plan-act {{panel==='template'?'on':''}}" data-panel="template" bindtap="openPanel"><text>排版密度</text></view>
         </view>
       </view>
       <!-- 老服务端只给「为什么这样设计」、给不出推荐理由时，那句话仍旧原样展示，不白丢。 -->

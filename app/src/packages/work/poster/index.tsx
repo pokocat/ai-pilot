@@ -627,14 +627,14 @@ export default function PosterConfirmPage() {
                 <View className="ps-plan-acts">
                   {premiumOn ? (
                     <View className={`ps-plan-act${panel === 'way' ? ' on' : ''}`} onClick={() => openPanel('way')}>
-                      <Text>换方式</Text>
+                      <Text>出图方式</Text>
                     </View>
                   ) : null}
                   <View className={`ps-plan-act${panel === 'direction' ? ' on' : ''}`} onClick={() => openPanel('direction')}>
-                    <Text>换方向</Text>
+                    <Text>画面内容</Text>
                   </View>
                   <View className={`ps-plan-act${panel === 'template' ? ' on' : ''}`} onClick={() => openPanel('template')}>
-                    <Text>调整版式</Text>
+                    <Text>排版密度</Text>
                   </View>
                 </View>
               ) : null}

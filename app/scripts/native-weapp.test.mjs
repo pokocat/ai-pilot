@@ -2024,12 +2024,21 @@ test('海报设计师成果卡、成品图路由与原地启用保持双层硬�
     assert.match(poster, new RegExp(`${method}\\(event\\)[\\s\\S]{0,420}this\\.refreshPlan\\(\\)`),
       `${method} 之后摘要行与价格必须当场更新`);
   }
-  // 三个入口一律动词（此前踩过的坑：疑问句入口让人以为不点开就漏了东西）。
-  for (const verb of ['换方式', '换方向', '调整版式']) {
-    assert.match(posterWxml, new RegExp(`data-panel="[a-z]+" bindtap="openPanel"><text>${verb}<`), `入口文案要用动词：${verb}`);
+  // 三个入口的文案（2026-08-17 改名：换方式/换方向/调整版式 → 出图方式/画面内容/排版密度）。
+  // 原来的守卫写的是「一律动词」，那是为了防疑问句入口（「要换个方式吗？」会让人以为不点开就漏了东西）。
+  // 新名字是名词短语，动词那条不再适用；真正要守的是**不出现疑问句、不出现内部字段名**，所以改成
+  // 逐字钉住这三个标签本身——它们是产品定过的文案，改动必须是显式的。
+  for (const label of ['出图方式', '画面内容', '排版密度']) {
+    assert.match(posterWxml, new RegExp(`data-panel="[a-z]+" bindtap="openPanel"><text>${label}<`), `入口文案：${label}`);
   }
-  assert.doesNotMatch(posterWxml, /<text[^>]*>[^<{]*(tier|directionKey|templateKey|密度)/,
-    '面向用户的文案里不许出现 tier / directionKey / 密度 这类内部词');
+  assert.doesNotMatch(posterWxml, /bindtap="openPanel"><text>[^<]*[？?]/, '入口不许写成疑问句');
+  // 内部字段名一律不许露给用户。「密度」原来也在这张黑名单上（当时判定它是设计术语），
+  // 2026-08-17 产品选定「排版密度」作入口文案，故只对这一个标签开口子，其它位置照旧禁用。
+  assert.doesNotMatch(posterWxml, /<text[^>]*>[^<{]*(tier|directionKey|templateKey)/,
+    '面向用户的文案里不许出现 tier / directionKey / templateKey 这类内部词');
+  const densityMentions = posterWxml.match(/<text[^>]*>[^<{]*密度[^<]*<\/text>/g) || [];
+  assert.deepEqual(densityMentions.map((m) => m.replace(/<[^>]+>/g, '')), ['排版密度'],
+    '「密度」只允许出现在那一个入口标签上，别处仍视为内部术语');
   // ★ 没有 recommendation（老服务端 / 抽取失败）时回退现行为：三个选择器常驻展开，入口不渲染。
   assert.match(poster, /const reco = normalizeRecommendation\(draft && draft\.recommendation/, '推荐组合走共享归一');
   assert.match(poster, /updates\.hasReco = !!reco;/, 'hasReco 由归一结果决定，不是猜的');

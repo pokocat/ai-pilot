@@ -808,6 +808,32 @@ describe('海报成品图 · 军师推荐组合（纯函数：白名单校验与
     assert.equal(pre.reason, '这张要靠人物气场立住，用实拍质感出主视觉');
   });
 
+  // 2026-08-17 产品决定：高级档可下单时**默认推 premium**（旧口径是「只有模型明确说 premium 才认」）。
+  // 这一格正是旧用例的盲区：原来只覆盖「模型说 premium」与「premium 不可用」两种，所以策略反转那次
+  // 83 个用例全绿、没有一条报警。没有这条钉子，以后谁把默认改回 standard 也不会有人发现。
+  test('高级档可下单时默认推 premium：模型选了 standard 也改推，且模型那句理由必须作废', () => {
+    const out = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_bold_type', templateKey: 'manifesto_min', reason: '不额外出图也立得住' },
+      { ...BARE, premiumAvailable: true },
+    );
+    assert.equal(out.tier, 'premium', '高级档可下单 → 默认推贵档');
+    assert.equal(directionFor(out.directionKey).tier, 'premium', '方向必须跟着换到同档，否则组合下不了单');
+    assert.notEqual(
+      out.reason, '不额外出图也立得住',
+      '模型那句是替 standard 写的，配到 premium 组合上就是自相矛盾——必须作废，换确定性模板句',
+    );
+    assert.ok(out.reason.length > 0 && out.reason.length <= RECOMMEND_REASON_LIMIT, '仍要给一句不超长的理由');
+
+    // 反面：高级档下不了单时仍是 standard，且模型那句理由照用。
+    // 这条防的是把「默认贵档」实现成无条件 premium —— 那会让确认页推一个下不了单的组合。
+    const off = resolveRecommendation(
+      { tier: 'standard', directionKey: 'graphic_bold_type', templateKey: 'manifesto_min', reason: '不额外出图也立得住' },
+      { ...BARE, premiumAvailable: false },
+    );
+    assert.equal(off.tier, 'standard', '高级档不可用时不许硬推 premium');
+    assert.equal(off.reason, '不额外出图也立得住', '档位与模型选择一致 → 理由照用');
+  });
+
   test('非法值逐项回退：档位/方向/版式各自兜底，不因一项非法丢掉整组判断', () => {
     const out = resolveRecommendation(
       { tier: 'deluxe', directionKey: 'photo_hero_x', templateKey: 'gone_template', reason: '' },

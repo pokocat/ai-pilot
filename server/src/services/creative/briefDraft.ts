@@ -120,8 +120,11 @@ const DRAFT_SYS = [
   //   服务端再做一次白名单与一致性校验（模型说了不算，见 resolveRecommendation）。
   '【军师推荐组合：tier / directionKey / recommendReason】',
   '确认页会把这套组合直接预选上，用户不改也能出图——所以不要推一个"还得再问问客户"的组合。',
-  '- tier 两档：standard（默认）与 premium。**只有当这张画面必须靠人物、产品或场景的实拍质感才立得住时，才推 premium**；',
-  '  "这样更好看""显得更高级"不是理由。凡是靠一句话、字号、留白、图形就能讲清楚的内容，一律 standard；',
+  // 2026-08-17 口径反转（产品决定）：以前这里写「standard 默认，只有必须靠实拍才推 premium」。
+  // 现在默认 premium。服务端 resolveRecommendation 同步改了，两处必须一致——否则模型按 standard
+  // 写的理由会配到 premium 的组合上，用户读到的是自相矛盾的一句话。
+  '- tier 两档：premium（默认）与 standard。**默认推 premium**：它先出实拍质感主视觉再排中文，多数商业海报吃这一套；',
+  '  只有当这张画面的说服力靠一句话、字号、留白或一个图形母题就已经立住、再加一张实拍反而是干扰时，才退回 standard；',
   '- directionKey 按语义选，且**必须与 tier 同档**：',
   '  standard 档 —— graphic_bold_type（让一句主张当画面主角）、graphic_symbol（提炼一个专属图形母题）、',
   '  graphic_portrait（用客户本人照片，**只有他确实上传了本人照才可以推**）；',
@@ -230,10 +233,17 @@ export function resolveRecommendation(
   raw: { tier?: unknown; directionKey?: unknown; templateKey?: unknown; reason?: unknown },
   ctx: RecommendationContext,
 ): PosterRecommendation {
-  // 只有模型明确说 premium、且高级档此刻真的能下单，才认。默认 standard。
+  // ★ 2026-08-17 产品决定：**高级档可下单时默认推 premium**，反转此前「默认不推贵档」的口径
+  //   （旧实现：只有模型明确说 premium 才认，其余一律 standard）。确认页的默认扣费因此从 10 钻变 25 钻。
+  //
+  //   副作用必须一起处理：模型的理由是**按它自己选的那一档**写的。如果它选了 standard 而我们改推
+  //   premium，那句理由就在替另一档说话（"不额外出图也立得住" 配着一张实拍主视觉），用户会读出矛盾。
+  //   所以档位与模型的选择不一致时整条理由作废、退回确定性模板句。提示词那边已同步改成默认 premium，
+  //   正常情况下模型会直接给 premium，理由仍用它写的那句 —— 那句更贴这次对话。
+  const tier: PosterTier = ctx.premiumAvailable ? 'premium' : 'standard';
   const wantsPremium = raw.tier === 'premium';
-  const tier: PosterTier = wantsPremium && ctx.premiumAvailable ? 'premium' : 'standard';
   const downgraded = wantsPremium && !ctx.premiumAvailable;
+  const tierMatchesModel = wantsPremium === (tier === 'premium');
 
   let directionKey: PosterDirectionKey | null = isPosterDirectionKey(raw.directionKey) ? raw.directionKey : null;
   if (directionKey) {
@@ -247,7 +257,7 @@ export function resolveRecommendation(
     ? raw.templateKey
     : fallbackTemplateKey(ctx.scene, ctx.proofPointCount);
 
-  const aiReason = clip(typeof raw.reason === 'string' ? raw.reason : '', RECOMMEND_REASON_LIMIT);
+  const aiReason = tierMatchesModel ? clip(typeof raw.reason === 'string' ? raw.reason : '', RECOMMEND_REASON_LIMIT) : '';
   const reason = !downgraded && aiReason
     ? aiReason
     : fallbackReason({ tier, directionKey: finalDirection, templateKey, downgraded });
