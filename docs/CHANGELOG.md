@@ -6,6 +6,13 @@
 
 ## 变更日志
 
+### 2026-08-17 · 生产发布 `8d69210` 并上传微信小程序 `0.2.38` 开发版 · 影响面：production server/admin、微信开发版
+
+- **后端先行**：发布前将生产库备份到 `/tmp/junshi-db-backup-20260817T101051Z.dump`（45,400,645 B、172 张表），Prisma 预检只有 `generation_job.thoughtSummary TEXT NOT NULL DEFAULT ''` 一条纯加法；`scripts/deploy-prod.sh` 成功把生产从 `4162adf` 切到 `8d69210`，`.deploy-history` 同时记入 `switched/ok`。
+- **线上验收**：`junshi-api` active、`NRestarts=0`，数据库 schema diff 为 `No difference detected`，公网 health 为 `{"ok":true,"db":"up"}`，域名 `/admin/` 与现有 H5 均 200、裸 IP `/admin/` 保持 404；Prometheus 57 条规则、智能体行为漂移 0。生产运行时实算 2025-03-16 23:30 得到排盘日 2025-03-17、农历二月十八、乙酉日，公开思路摘要解析仍先于正文且不泄漏协议标签。
+- **微信上传**：在 `8d69210` 的独立干净 worktree 中先 dry-run，再以 `0.2.38` /「命盘子时换日、地区选择与对话思路提示」上传到 AppID `wx810ebe6dfef8e75f`；构建锁定 `native-weapp / server / https://wxapi.aibuzz.cn/api`，总包 2.2 MB（2,321,514 B）。开发版已进入微信后台；`develop` 显示生产环境角标，`trial/release` 强制隐藏。
+- **平台边界**：CLI 不会自动转体验版、提交审核或发布；仓库记录的经营主体/备案/联系方式与微信后台隐私指引仍待负责人补齐，因此本次没有越过该合规门槛提交审核。部署期 Prisma generate 仍打印既有 `.env EACCES` 告警（文件保持 `junshi:junshi 0600`），随后由运行用户完成 db push、构建、重启与全部 smoke，不影响本次上线，但历史部署脚本权限时序问题仍未消失。
+
 ### 2026-08-17 · 修复 durable 对话只在收尾显示思路摘要 · 影响面：GenerationJob 快照、SSE 兼容流、原生/H5 断线续接
 
 - **预发真请求抓到缺口**：模型输出和最终 `ChatReply.thoughtSummary` 都正确，但 durable worker 只快照正文，`/generate` 因而只有 `snapshot/token/chat/done`、没有生成中的 `thought`。
