@@ -1180,7 +1180,13 @@ export type ClientEventName =
   | 'wence_enter' | 'proactive_show' | 'chip_tap' | 'hint_tap'
   | 'first_message_send' | 'drawer_open' | 'attach_open' | 'tab_switch'
   | 'execution_enter' | 'order_complete' | 'backfill_save' | 'review_start'
-  | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click';
+  | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click'
+  // 邀请漏斗前两段（2026-08-18）。后两段不占事件名：注册段从 `ReferralAttribution`（每次带码进线一行，
+  // outcome 六种）算，首开通段从 `ActivationEvent(source='invite')` 算——那两件事服务端本来就有账本，
+  // 再补一份客户端埋点只会出现「端上报了、库里没有」的对不上账。
+  // share_expose：用户点开「转发给朋友」/「分享到朋友圈」时由 services/share.js 上报（props: channel + 当日素材序号）。
+  // invite_landing：带码落地时由 services/invite.js 在捕获成功处上报（props: channel=query|scene），游客态照发。
+  | 'share_expose' | 'invite_landing';
 /** POST /events 请求体：鉴权可选（游客也上报，userId 空）。props 序列化后限 2KB，超限截断。 */
 export interface ClientEventRequest { name: ClientEventName; props?: Record<string, unknown> }
 export interface ClientEventResult { ok: true }
@@ -2875,3 +2881,111 @@ export interface ClipCaptureRequirements {
 }
 export interface ClipConsentResult { id: string; status: 'submitted' | 'verified' | 'rejected'; accepted: boolean; verified: boolean; }
 export interface ClipAuditEntry { id: string; createdAt?: string; createdText?: string; scope?: string; action?: string; status: string; }
+
+/* ────────────── 运营后台「邀请增长」三视图（P3，全只读） ──────────────
+   一份数据三个投影（方案 §4.3）：① 本体 Schema 说明图（静态类图 + overview 的真实行数）；
+   ② 邀请关系树（吃 Referral 的物化路径 lv1/lv2/lv3，从左到右分层）；
+   ③ 风控二部图（IP ↔ 新号，来自 ReferralAttribution.clientIp）。
+   ④ 转化漏斗本期不做：曝光/落地两段依赖 P2 埋点，开通来源已在「处方漏斗」页。
+   **公理 5「风控预警不阻断」**：这组契约里没有任何写操作——不提供封禁/拉黑/停发奖。 */
+
+/** 租户筛选项（两张表都有 tenantId；只列真的有邀请边的租户）。 */
+export interface AdminReferralTenantOption { tenantId: string; name: string; edges: number }
+/** 通用「分类 → 计数」行（归因结果分布 / 建边来源分布）。 */
+export interface AdminReferralCount { key: string; count: number }
+
+export interface AdminReferralOverview {
+  days: number;
+  /** null = 全租户 */
+  tenantId: string | null;
+  /** Referral 行数（全量；关系是永久的，没有时间窗） */
+  edgesTotal: number;
+  /** 窗口内新建的关系数（boundAt 在窗口内） */
+  edgesInWindow: number;
+  /** 窗口内的归因留痕条数（含失败留痕——失败也留痕是这张表的设计意图） */
+  attributionsInWindow: number;
+  /** 已生成邀请码的用户数（User.inviteCode 惰性生成，故这不等于注册用户数） */
+  codedUsers: number;
+  /** bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp */
+  byOutcome: AdminReferralCount[];
+  /** share_friend / share_timeline / poster_qr / manual */
+  bySource: AdminReferralCount[];
+  tenants: AdminReferralTenantOption[];
+}
+
+export interface AdminReferralTreeNode {
+  userId: string;
+  name: string | null;
+  phone: string | null;
+  /** 直邀人数 = 节点大小编码。**任意深度都准**（从全量 groupBy 取，不是从本次子树数出来的） */
+  directCount: number;
+  /** 颜色编码：activated=已开通付费（口径同 planGate），registered=仅注册 */
+  status: 'activated' | 'registered';
+  /** 风控标记：该新号落在超阈值的 IP 聚集组里。与 status 正交——预警不阻断，关系照常有效 */
+  risk: boolean;
+  /** 0=根（邀请人自己），1/2/3 = L1/L2/L3 */
+  depth: number;
+  /** 这条边的建立时刻与来源（根节点为 null，因为根不是本树里的一条边） */
+  boundAt: string | null;
+  source: string | null;
+  children: AdminReferralTreeNode[];
+}
+
+export interface AdminReferralTree {
+  tenantId: string | null;
+  /** 展示的根节点数上限；roots 是「直邀最多的前 N 人」，是投影不是全景 */
+  rootLimit: number;
+  /** 作用域内的邀请人总数（有直邀的人数），用于说明 roots 只是其中一部分 */
+  inviterTotal: number;
+  /** 作用域内的关系边总数 */
+  edgeTotal: number;
+  /** 树上「风控标记」着色所依据的 IP 聚集窗口天数（树本身全量，风控有窗口） */
+  riskWindowDays: number;
+  /** 边数触顶被截断：页面必须如实说明，不能让人以为这就是全部 */
+  truncated: boolean;
+  roots: AdminReferralTreeNode[];
+}
+
+export interface AdminReferralRiskMember {
+  userId: string;
+  name: string | null;
+  phone: string | null;
+  inviteCode: string;
+  outcome: string;
+  createdAt: string;
+  userAgent: string | null;
+}
+
+export interface AdminReferralRiskGroup {
+  clientIp: string;
+  /** 去重后的新号数 = 聚集度，与阈值比的就是它 */
+  userCount: number;
+  /** 该 IP 的归因记录条数（含建号失败的留痕，那些没有 newUserId、不计入 userCount） */
+  attributionCount: number;
+  /** 涉及的邀请码数：1 = 单码批量进线（最像刷号）；多码更可能是共享出口 IP */
+  codeCount: number;
+  /** 涉及的码主数 */
+  referrerCount: number;
+  firstAt: string;
+  lastAt: string;
+  /** 已展开的新号（可能少于 userCount：一组最多展开 40 个） */
+  members: AdminReferralRiskMember[];
+}
+
+export interface AdminReferralRisk {
+  days: number;
+  tenantId: string | null;
+  /** 聚集阈值（去重新号数 ≥ 该值才入列），来自运营配置，不写死在代码里 */
+  threshold: number;
+  /** false = 运营还没配，用的是代码兜底默认值（页面要如实说明） */
+  configured: boolean;
+  /** 阈值所在的功能开关 id，页面据此把运营指到「配置 · 功能开关」那一屏 */
+  flagKey: string;
+  /** 窗口内出现过的 IP 数——让「扫过 N 个 IP 但没有聚集」与「一条数据都没有」分得开 */
+  scannedIps: number;
+  /** 带 IP 的归因记录数（IP 列是后加的，老记录没有，不参与判定） */
+  scannedAttributions: number;
+  /** 被标记的新号总数（超阈值组内去重后） */
+  flaggedUsers: number;
+  groups: AdminReferralRiskGroup[];
+}

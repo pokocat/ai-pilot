@@ -127,6 +127,37 @@ function currentPoster(now) {
   return pool[dayIndex(now) % pool.length];
 }
 
+/** 当日素材序号（轮到第几套）。埋点只报这个整数——见 trackShareExpose 里关于「不带内容」的说明。 */
+function posterIndex(now) {
+  const pool = posterPool();
+  return pool.length ? dayIndex(now) % pool.length : 0;
+}
+
+/**
+ * 分享曝光埋点（`share_expose`，邀请漏斗第一段）。
+ *
+ * **三条硬约束，缺一条都会把分享弄坏**：
+ *   ① `onShareAppMessage` / `onShareTimeline` 的返回值是微信**同步**取走的，所以埋点只能
+ *      fire-and-forget——绝不 await。`api.track` 本身就是裸 `wx.request` + 空回调
+ *      （见 services/api.js：刻意不走 `request()`，否则「带 token 的 401」会触发全局 onAuthLost
+ *      把用户从对话里踢出去），这里只负责调它。
+ *   ② 整个调用被 try 包住：连 `require('./api')` 都在 try 里。分享是转化入口，
+ *      **宁可丢一条统计，也不能因为埋点让分享变慢或失败**。
+ *   ③ props **只带通道与当日素材序号**，不带页面路径、页面内容、邀请码或任何个人数据。
+ *      同一天全站分享的是同一套固定海报，序号足以还原「用户看到的是哪张卡」；
+ *      带上页面就等于把「谁在账本页点了转发」写进埋点库，与「分享内容与页面解耦」自相矛盾。
+ *
+ * 为什么**懒 require('./api')**：api.js 顶层 `require('./invite')`、store.js 顶层 `require('./api')`，
+ * 而 share.js 被全部 54 个页面在模块顶层引入。把 api 提到顶层就是往这条加载链中间再插一环，
+ * 一旦哪天成环，拿到的是半初始化的 exports（CJS 不报错，只是静默变哑）。懒引用把风险收敛到
+ * 「用户点了分享才加载」，且 require 有缓存，第二次起就是查表。
+ */
+function trackShareExpose(channel) {
+  try {
+    require('./api').api.track('share_expose', { channel, poster: posterIndex() });
+  } catch (_) { /* 埋点不可用（模块没加载起来 / 宿主无 wx）：分享照常，绝不冒泡 */ }
+}
+
 /** 当前用户的邀请码（未登录 / `/me` 未回来时为空串，此时退回无参路径）。 */
 function currentCode() {
   try {
@@ -190,15 +221,27 @@ function withShare(page, opts) {
   // 于是它们只要漏写 imageUrl，微信就会退回截**当前页**当封面——从命盘 / 成片这类
   // 页面转发出去等于把个人内容贴到聊天窗里。逐页去补容易再漏，所以在这里统一兜：
   // 页面自己给了图就用它的，没给就补品牌底图。往后新增自定义分享页也不可能漏。
-  merged.onShareAppMessage = withDefaultImage(merged.onShareAppMessage, CARD_FRIEND);
-  if (wantTimeline) merged.onShareTimeline = withDefaultImage(merged.onShareTimeline, CARD_TIMELINE);
+  //
+  // 曝光埋点也兜在这一层（**不在 mixin 里**），同一个理由的另一面：埋在 mixin 里，
+  // 那 4 个覆盖了 mixin 的成果型分享页就一条都不上报，漏斗第一段凭空少掉最活跃的几页；
+  // 埋在这里则 54 页统一一条、且**不会双报**（wrapper 只包最终生效的那个回调）。
+  merged.onShareAppMessage = wrapShareCallback(merged.onShareAppMessage, CARD_FRIEND, 'friend');
+  if (wantTimeline) merged.onShareTimeline = wrapShareCallback(merged.onShareTimeline, CARD_TIMELINE, 'timeline');
   return merged;
 }
 
-/** 包一层：回调结果缺 imageUrl 时补默认图；回调没定义或返回空则原样放过。 */
-function withDefaultImage(fn, fallback) {
+/**
+ * 包一层：① 先 fire-and-forget 上报一次曝光；② 回调结果缺 imageUrl 时补默认图。
+ * 回调没定义或返回空则原样放过。
+ *
+ * 顺序刻意是「先报再算」：无论页面自己的回调返回什么、甚至抛错，曝光这件事已经发生了
+ * （用户确实点开了转发菜单），漏斗第一段不该因为某页回调有 bug 就少一条。
+ * 上报本身在 trackShareExpose 里已经 try 住，不会影响下面的同步返回。
+ */
+function wrapShareCallback(fn, fallback, channel) {
   if (typeof fn !== 'function') return fn;
   return function wrapped(...args) {
+    trackShareExpose(channel);
     const result = fn.apply(this, args);
     if (!result || typeof result !== 'object') return result;
     return result.imageUrl ? result : Object.assign({}, result, { imageUrl: fallback });
@@ -212,6 +255,7 @@ module.exports = {
   pathWithCode,
   timelineQuery,
   currentPoster,
+  posterIndex,
   dayIndex,
   posterPool,
   BUILTIN_POSTERS,

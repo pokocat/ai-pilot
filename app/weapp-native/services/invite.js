@@ -33,6 +33,28 @@ function safeGet(key) {
 }
 
 /**
+ * 落地打开埋点（`invite_landing`，邀请漏斗第二段）。
+ *
+ * **必须能在游客态工作**：点开分享卡的那个人此刻还没有账号，他正是漏斗的分母。
+ * `POST /events` 鉴权可选（无 token = 游客、userId 记空），`api.track` 也是无 token 就不带头，
+ * 所以这条路天然通。
+ *
+ * **必须绝对不影响启动**：这段代码跑在 `app.js` 的 `onLaunch` 极早期——store 还没 bootstrap、
+ * token 可能还没读出来。`api.track` 自身是 fire-and-forget + 全静默（裸 wx.request，失败空回调），
+ * 外面再包一层 try：模块没加载起来、宿主没有 wx、什么都可能，**都不许把冷启动带崩**。
+ *
+ * 为什么在函数体内 `require('./api')` 而不是文件顶部：`services/api.js` 顶层就
+ * `require('./invite')`（登录请求统一带邀请码），顶部引用直接成环——Node 的 CJS 环不报错，
+ * 但先加载的那一侧会拿到**半初始化**的 exports，症状是静默变哑（`api` 是 undefined 而不是报错），
+ * 正是最难查的一类。放在调用时点则两边都已加载完毕（onLaunch 时 store→api 这条链早就跑完了）。
+ */
+function trackLanding(channel) {
+  try {
+    require('./api').api.track('invite_landing', { channel });
+  } catch (_) { /* 埋点不可用：捕获照常、启动照常 */ }
+}
+
+/**
  * 从启动 / 页面参数里捕获邀请码。
  *
  * 覆盖口径 = **末次触点**：新码覆盖旧码，捕获时间一并更新。理由：用户先点了 A 的分享没注册、
@@ -44,6 +66,9 @@ function captureInvite(options) {
   const source = options || {};
   const query = source.query || source || {};
   let code = isInviteCode(query.ic) ? query.ic : '';
+  // 通道：query = 分享卡 `?ic=`；scene = 小程序码（海报）。埋点只报这一个枚举，不报码本身
+  // ——邀请码是可以反查到人的，埋点库没有必要存它（服务端在绑定时点已经完整留痕了 attribution）。
+  let channel = code ? 'query' : '';
   if (!code && typeof query.scene === 'string') {
     // scene 由微信按 URL 编码回传；解码失败绝不能让启动流程抛出去。
     let scene = '';
@@ -51,13 +76,17 @@ function captureInvite(options) {
     // scene 可能是裸邀请码，也可能是 `ic:JSxxxx` 这种带前缀的形态（海报小程序码用后者，
     // 给将来的多用途 scene 留出命名空间）。
     const candidate = scene.indexOf('ic:') === 0 ? scene.slice(3) : scene;
-    if (isInviteCode(candidate)) code = candidate;
+    if (isInviteCode(candidate)) { code = candidate; channel = 'scene'; }
   }
   if (!code) return '';
   try {
     wx.setStorageSync(KEY, code);
     wx.setStorageSync(AT_KEY, Date.now());
   } catch (_) { /* 存不下就这一跳不计归因，不影响任何功能 */ }
+  // **每次捕获都报**，包括 onShow 那次「小程序已在后台、又点了一张分享卡」——重复进入本身
+  // 就是漏斗要看的数据（同一个人被同一张卡拉回来几次），去重交给取数侧，不在端上偷偷合并。
+  // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
+  trackLanding(channel);
   return code;
 }
 

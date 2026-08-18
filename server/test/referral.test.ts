@@ -1,12 +1,17 @@
-// 邀请关系链：注册时绑定、五种归因结果全留痕、深环拒绝、物化路径平移、读数口径。
+// 邀请关系链：注册时绑定、五种归因结果全留痕、深环拒绝、物化路径平移、读数口径，
+// 以及邀请漏斗第四段（付费开通 → ActivationEvent.source='invite'）。
 //
 // 这些断言守的是三条公理（单推荐人 / 无环 / 物化三级），以及一条产品铁律：
 // **归因失败绝不能阻断注册**，且失败必须留痕（否则推荐人无从解释「客户为什么没归到我」）。
+// 漏斗那一段另有一条同源铁律：**归因绝不能阻断支付**，且不许覆盖既有的位子归因。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { bindOnRegister, isInviteCodeShape, referralConfig, ReferralAlreadyBound, traceOutsideTransaction } from '../src/services/referral.ts';
+import { markPaidAndApply } from '../src/services/wechatPay.ts';
+import { applyPlanPurchase } from '../src/services/purchase.ts';
+import { parseAttribution } from '../src/services/activation.ts';
 
 before(async () => {
   await getApp();
@@ -167,9 +172,9 @@ test('窗口天数读运营配置而不是写死：配 60 天读到 60，脏值/
   // 端到端的窗口行为由上一条 expired 用例用默认值覆盖，这里只钉「值确实来自配置」。
   const set = async (payload: unknown) => {
     await prisma.featureFlag.upsert({
-      where: { id: 'referral' },
+      where: { id: 'referral-window' },
       update: { payload: payload as never },
-      create: { id: 'referral', enabled: true, payload: payload as never },
+      create: { id: 'referral-window', enabled: true, payload: payload as never },
     });
   };
   try {
@@ -184,7 +189,7 @@ test('窗口天数读运营配置而不是写死：配 60 天读到 60，脏值/
     assert.equal(cfg.rewardInviter, null);
     assert.equal(cfg.dailyCap, null);
   } finally {
-    await prisma.featureFlag.delete({ where: { id: 'referral' } }).catch(() => {});
+    await prisma.featureFlag.delete({ where: { id: 'referral-window' } }).catch(() => {});
   }
 });
 
@@ -367,4 +372,133 @@ test('注销账号连带清掉关系链与归因（含「我作为别人上级�
   assert.equal(await prisma.referral.count({ where: { lv1: inviter } }), 0, '以注销者为上级的边必须删掉');
   assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0);
   assert.equal(await prisma.referralAttribution.count({ where: { referrerId: inviter } }), 0, '归因记录不得留存');
+});
+
+// ── 邀请漏斗第四段：付费开通 → ActivationEvent(source='invite')（2026-08-18 接上写入方）───────
+//
+// 该取值 08-18 就进了枚举，但一直**没有任何写入方**，于是漏斗最后一段算不出来。写入方挂在
+// `markPaidAndApply`（真金入账的唯一收口），刻意**不挂** `applyPlanPurchase`——后者还被
+// 注册测试期自动开通 / 演示购买 / 运营手工开通三条非付费路径共用，挂那里会把免费白发算成邀请开通。
+
+/** 某用户的开通事件（source → 条数），用来同时验「该有的有」「不该被覆盖的还在」。 */
+async function activationSources(userId: string): Promise<Record<string, number>> {
+  const rows = await prisma.activationEvent.findMany({ where: { userId }, select: { source: true } });
+  return rows.reduce<Record<string, number>>((acc, r) => { acc[r.source] = (acc[r.source] ?? 0) + 1; return acc; }, {});
+}
+
+/** 造一笔套餐订单并走**真实的** markPaidAndApply 入账（与线上回调同一条路径）。 */
+async function payPlanOrder(userId: string, outTradeNo: string, attrSource = 'prescription'): Promise<{ applied: boolean; reason?: string }> {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: await anyPlanId() } });
+  await prisma.paymentOrder.create({
+    data: {
+      outTradeNo, tenantId: user.tenantId, userId, planId: plan.id, amount: plan.price,
+      provider: 'wechat', status: 'created',
+      attrSource, attrRefId: attrSource === 'prescription' ? 'rx_funnel' : null,
+    },
+  });
+  return markPaidAndApply({ outTradeNo, transactionId: `wx_${outTradeNo}`, tradeState: 'SUCCESS', rawJson: {} });
+}
+
+test('有推荐人的用户付费开通：落一条 source=invite，且原本的位子归因（处方位）一条不少', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  assert.ok(await prisma.referral.findUnique({ where: { userId: invitee } }), '前置：关系必须已建边');
+
+  const r = await payPlanOrder(invitee, 'ot_invite_funnel_1', 'prescription');
+  assert.equal(r.applied, true, `应入账，实际 ${JSON.stringify(r)}`);
+
+  // 两条并存：位子归因（从哪儿成交）+ 邀请归因（被谁带来）。这是两个维度，覆盖任何一条都是错。
+  assert.deepEqual(await activationSources(invitee), { prescription: 1, invite: 1 });
+  const ev = await prisma.activationEvent.findFirstOrThrow({ where: { userId: invitee, source: 'invite' } });
+  assert.equal(ev.itemType, 'plan', 'invite 行仍指向真实成交的那件商品，便于对账');
+  assert.equal(ev.refId, null, '推荐人不冗余进 refId：Referral 是不可变更账本，按 userId join 即得');
+  assert.equal(ev.tenantId, (await prisma.user.findUniqueOrThrow({ where: { id: invitee } })).tenantId);
+});
+
+test('没有推荐人的用户付费开通：只有位子归因，绝不落 invite', async () => {
+  const solo = await register();
+  const r = await payPlanOrder(solo, 'ot_invite_funnel_2', 'catalog');
+  assert.equal(r.applied, true);
+  assert.deepEqual(await activationSources(solo), { catalog: 1 }, '没关系链就不该出现 invite（否则漏斗分子灌水）');
+});
+
+test('invite 归因按人去重：重复回调、第二笔订单、并发两笔都只留一条', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+
+  // ① 同一订单重复回调：被 appliedAt 幂等挡在入账之前，自然也不会重复归因。
+  await payPlanOrder(invitee, 'ot_invite_dedup_1', 'catalog');
+  const again = await markPaidAndApply({ outTradeNo: 'ot_invite_dedup_1', tradeState: 'SUCCESS', rawJson: {} });
+  assert.equal(again.applied, false);
+  assert.equal(again.reason, 'already_applied');
+
+  // ② 同一用户的第二笔订单（续费/加购）：漏斗问的是「转化成付费用户的人数」，不是订单数。
+  await payPlanOrder(invitee, 'ot_invite_dedup_2', 'market');
+
+  // ③ 并发两笔到账：ActivationEvent 上没有唯一约束，靠 activation:invite:{userId} advisory lock 串行化。
+  const [a, b] = await Promise.all([
+    payPlanOrder(invitee, 'ot_invite_dedup_3', 'catalog'),
+    payPlanOrder(invitee, 'ot_invite_dedup_4', 'catalog'),
+  ]);
+  assert.equal(a.applied, true);
+  assert.equal(b.applied, true);
+
+  assert.equal(
+    await prisma.activationEvent.count({ where: { userId: invitee, source: 'invite' } }), 1,
+    'invite 行必须恰好一条（首次付费开通），四笔入账不许出现第二条',
+  );
+  // 位子归因反过来必须**每笔都有**（它记的是订单事实，不去重）。
+  assert.equal(await prisma.activationEvent.count({ where: { userId: invitee, source: { not: 'invite' } } }), 4);
+});
+
+test('非付费开通不进邀请漏斗：applyPlanPurchase（注册自动开通 / 演示 / 运营手工）不落 invite', async () => {
+  // 这条钉住 ④ 的挂点选择。挂 applyPlanPurchase 会让「开着注册自动开通时，被邀人注册当场就算首开通」，
+  // 「注册 → 首开通」永远 100%，漏斗直接失去意义。
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: invitee } });
+  const plan = await prisma.plan.findUniqueOrThrow({ where: { id: await anyPlanId() } });
+
+  await applyPlanPurchase({ id: user.id, tenantId: user.tenantId }, plan, { reason: '测试期开通', source: 'test_default_grant' });
+  assert.deepEqual(await activationSources(invitee), {}, '免费/演示/运营开通不该产生任何开通归因事件');
+});
+
+test('端上不许自称 invite：请求体里的 source=invite 一律回落 catalog（否则谁都能刷漏斗）', async () => {
+  assert.equal(parseAttribution('invite', 'x').source, 'catalog');
+  assert.equal(parseAttribution('prescription', 'rx_1').source, 'prescription', '真正的位子来源不受影响');
+
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  await payPlanOrder(invitee, 'ot_invite_forge_1', 'invite');
+  // 伪造的那条被打回 catalog；invite 行仍由服务端按 Referral 判定后另落一条。
+  assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 });
+});
+
+test('归因窗口与奖励配置分属两个 flag：改窗口不得抹掉奖励配置', async () => {
+  // PATCH /admin/flags/:id 是整块覆盖 payload（setFeatureFlagPayload 用 update: { payload }），
+  // 所以两者共用一个 id 时，运营改窗口会静默清掉奖励配置。这条用例把「分开」钉住。
+  await prisma.featureFlag.upsert({
+    where: { id: 'referral' },
+    update: { payload: { rewardInviter: { kind: 'credits', amount: 5 } } as never },
+    create: { id: 'referral', enabled: true, payload: { rewardInviter: { kind: 'credits', amount: 5 } } as never },
+  });
+  try {
+    // 模拟运营在后台改窗口：整块覆盖 referral-window 的 payload
+    await prisma.featureFlag.upsert({
+      where: { id: 'referral-window' },
+      update: { payload: { window: 45 } as never },
+      create: { id: 'referral-window', enabled: true, payload: { window: 45 } as never },
+    });
+    const cfg = await referralConfig({ fresh: true });
+    assert.equal(cfg.windowDays, 45, '窗口应读到新值');
+    assert.deepEqual(cfg.rewardInviter, { kind: 'credits', amount: 5 }, '奖励配置不得被改窗口抹掉');
+  } finally {
+    await prisma.featureFlag.delete({ where: { id: 'referral' } }).catch(() => {});
+    await prisma.featureFlag.delete({ where: { id: 'referral-window' } }).catch(() => {});
+  }
 });

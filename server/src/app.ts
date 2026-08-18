@@ -46,6 +46,7 @@ import { payRoutes } from './routes/pay.js';
 import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
+import { adminReferralRoutes } from './routes/adminReferral.js';
 import { videoRoutes } from './routes/video.js';
 import { registerHttpAudit } from './services/audit.js';
 import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
@@ -294,6 +295,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
+  // 运营后台「邀请增长」三视图的只读聚合。单独封装（自挂同一把 requireAdmin）而不是塞进
+  // adminRoutes：admin.ts 已 2900+ 行，三个投影各自要做一次成形，详见该文件头注释。
+  await app.register(adminReferralRoutes, { prefix: '/api' });
 
   // 创作任务 worker（海报成品图）：DB 队列 + FOR UPDATE SKIP LOCKED 抢占，2s 轮询。
   // test 环境内部直接 return（测试用 tickCreativeWorker 手动驱动）。功能开关在每轮 tick 里判

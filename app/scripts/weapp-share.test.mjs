@@ -206,6 +206,34 @@ function loadShare(me) {
   }
 }
 
+/**
+ * 桩掉 `./api`，收集 `api.track` 的调用。
+ *
+ * 与 `loadShare` 不同，这个 patch 必须在**调用期间**保持生效：share.js 与 invite.js 都是在
+ * 回调/函数体里**懒 require('./api')**（理由见两文件注释——api.js 顶层 `require('./invite')`，
+ * 顶部引用会成环并拿到半初始化的 exports），load 完就还原的话根本拦不到。
+ *
+ * `mode` 三态，对应三种要守的现实：
+ *   · 'ok'      正常上报，收集调用；
+ *   · 'throw'   `api.track` 本身抛（比如 wx.request 在某基础库版本上抛）；
+ *   · 'require' 连 `require('./api')` 都失败（模块加载链断了）。
+ * 后两种都必须**完全不影响**分享回调与冷启动捕获。
+ */
+function stubApiTrack(mode = 'ok') {
+  const Module = cjsRequire('node:module');
+  const original = Module.prototype.require;
+  const calls = [];
+  Module.prototype.require = function patched(id) {
+    if (id === './api') {
+      if (mode === 'require') throw new Error('桩：api 模块加载失败');
+      if (mode === 'throw') return { api: { track() { throw new Error('桩：wx.request 抛了'); } } };
+      return { api: { track: (name, props) => { calls.push({ name, props }); } } };
+    }
+    return original.apply(this, arguments);
+  };
+  return { calls, restore() { Module.prototype.require = original; } };
+}
+
 /** 加载 services/invite.js，桩一个最小 wx storage。 */
 function loadInvite(store = {}) {
   const invitePath = path.join(sourceRoot, 'services/invite.js');
@@ -340,4 +368,120 @@ test('四个成果型分享页确实走的是 withShare 包装（否则上一条
     assert.match(src, /Page\(withShare\(/, `${route} 必须经 withShare 包装`);
     assert.match(src, /onShareAppMessage\(\)\s*\{/, `${route} 应保留自己的成果型分享`);
   }
+});
+
+// ── 邀请漏斗埋点（P2，2026-08-18）：分享曝光 share_expose + 落地打开 invite_landing。
+// 这两条事件是漏斗前两段，注册段从 ReferralAttribution 算、首开通段从 ActivationEvent(source=invite) 算。
+// 埋点是**背景动作**：分享与冷启动这两条主链路的正确性优先级远高于任何一条统计。
+
+test('分享曝光埋点：两个通道各报一条 share_expose，且回调返回值一字不变', () => {
+  const share = loadShare({ inviteCode: 'JS2K7P' });
+  const stub = stubApiTrack();
+  try {
+    const page = share.withShare({}, { timeline: true });
+    const friend = page.onShareAppMessage();
+    const timeline = page.onShareTimeline();
+
+    assert.deepEqual(stub.calls.map((c) => c.name), ['share_expose', 'share_expose'], '两个入口各一条');
+    assert.equal(stub.calls[0].props.channel, 'friend');
+    assert.equal(stub.calls[1].props.channel, 'timeline');
+    assert.equal(stub.calls[0].props.poster, share.posterIndex(), '带当日素材序号，便于还原用户看到的是哪张卡');
+    // props 只许有这两个键：带上页面路径/内容/邀请码等于把「谁在账本页点了转发」写进埋点库，
+    // 与「分享内容与页面解耦」自相矛盾。
+    for (const c of stub.calls) assert.deepEqual(Object.keys(c.props).sort(), ['channel', 'poster'], 'props 不得夹带内容或个人数据');
+
+    // 埋点不得改变返回值（微信是同步取走这个对象的）
+    assert.equal(friend.title, share.currentPoster().title);
+    assert.equal(friend.path, `${share.LANDING}?ic=JS2K7P`);
+    assert.equal(friend.imageUrl, share.CARD_FRIEND);
+    assert.equal(timeline.query, 'ic=JS2K7P');
+    assert.equal(timeline.imageUrl, share.CARD_TIMELINE);
+  } finally { stub.restore(); }
+});
+
+test('分享曝光埋点：页面自定义的分享回调同样上报，且恰好一条（不漏也不双报）', () => {
+  // 埋点刻意兜在 withShare 的 wrapper 而不是 mixin 里：那 4 个成果型分享页**整体覆盖**了 mixin，
+  // 埋在 mixin 里它们就一条都不上报，漏斗第一段会凭空少掉最活跃的几页。
+  const share = loadShare({ inviteCode: 'JS2K7P' });
+  const stub = stubApiTrack();
+  try {
+    const page = share.withShare({
+      onShareAppMessage() { return { title: '我的命盘报告', path: '/packages/work/mingpan/index?ic=JS2K7P', imageUrl: '/assets/custom.png' }; },
+    });
+    const r = page.onShareAppMessage();
+    assert.equal(stub.calls.length, 1, 'wrapper 只包最终生效的那个回调，不可能双报');
+    assert.equal(stub.calls[0].name, 'share_expose');
+    assert.equal(stub.calls[0].props.channel, 'friend');
+    assert.deepEqual(r, { title: '我的命盘报告', path: '/packages/work/mingpan/index?ic=JS2K7P', imageUrl: '/assets/custom.png' }, '页面自己的返回值一字不改');
+  } finally { stub.restore(); }
+});
+
+test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调都不抛错且返回值仍然正确', () => {
+  for (const mode of ['throw', 'require']) {
+    const share = loadShare({ inviteCode: 'JS2K7P' });
+    const expected = { title: share.currentPoster().title, path: `${share.LANDING}?ic=JS2K7P`, image: share.CARD_FRIEND };
+    const stub = stubApiTrack(mode);
+    try {
+      const page = share.withShare({}, { timeline: true });
+      let friend;
+      let timeline;
+      assert.doesNotThrow(() => { friend = page.onShareAppMessage(); }, `mode=${mode}：转发回调不得抛错`);
+      assert.doesNotThrow(() => { timeline = page.onShareTimeline(); }, `mode=${mode}：朋友圈回调不得抛错`);
+      assert.equal(friend.title, expected.title, `mode=${mode}：标题不变`);
+      assert.equal(friend.path, expected.path, `mode=${mode}：归因路径不变`);
+      assert.equal(friend.imageUrl, expected.image, `mode=${mode}：封面图不变`);
+      assert.ok(timeline.imageUrl, `mode=${mode}：朋友圈封面仍在`);
+    } finally { stub.restore(); }
+  }
+});
+
+test('落地打开埋点：每次成功捕获都报一条 invite_landing（重复进入照报），通道分 query / scene', () => {
+  const stub = stubApiTrack();
+  try {
+    const { mod } = loadInvite();
+    mod.captureInvite({ query: { ic: 'JS2K7P' } });
+    mod.captureInvite({ query: { scene: 'ic%3AJSWXYZ' } });
+    // onShow 那次「小程序已在后台、又点了一张分享卡」：重复进入本身就是漏斗要看的数据，
+    // 端上不偷偷合并，去重交给取数侧。
+    mod.captureInvite({ query: { ic: 'JS2K7P' } });
+    assert.deepEqual(stub.calls.map((c) => c.name), ['invite_landing', 'invite_landing', 'invite_landing']);
+    assert.deepEqual(stub.calls.map((c) => c.props.channel), ['query', 'scene', 'query']);
+    // 邀请码本身绝不进埋点库（它能反查到人，而服务端在绑定那一刻已完整留痕 attribution）
+    for (const c of stub.calls) assert.deepEqual(Object.keys(c.props), ['channel']);
+
+    const before = stub.calls.length;
+    for (const bad of [{ query: { ic: 'not-a-code' } }, { query: { scene: 'S0123456789abcdef01234567' } }, {}]) {
+      mod.captureInvite(bad);
+    }
+    assert.equal(stub.calls.length, before, '没捕获到码就不该有落地事件，否则漏斗分母被灌水');
+  } finally { stub.restore(); }
+});
+
+test('落地埋点炸了不得影响冷启动：track 抛 / require 抛，captureInvite 照常返回码并写 storage', () => {
+  for (const mode of ['throw', 'require']) {
+    const stub = stubApiTrack(mode);
+    try {
+      const { mod, store } = loadInvite();
+      let code;
+      assert.doesNotThrow(() => { code = mod.captureInvite({ query: { ic: 'JS2K7P' } }); }, `mode=${mode}：捕获不得抛错`);
+      assert.equal(code, 'JS2K7P', `mode=${mode}：码照常返回`);
+      assert.equal(store['junshi.invite'], 'JS2K7P', `mode=${mode}：码照常落 storage`);
+    } finally { stub.restore(); }
+  }
+});
+
+test('事件名必须同时在 SSOT 与服务端白名单里（漏一处就是静默 400、库里一条都没有）', () => {
+  // 两处必须一起改：shared/contracts.d.ts 的 ClientEventName 与 server/src/routes/wence.ts 的 EVENT_NAMES。
+  // 只改端上不改服务端，事件会被 400 掉且端上完全静默（api.track 的 fail 是空实现），
+  // 症状是「代码明明埋了、库里查不到」——这条守卫就是为它。
+  const repoRoot = path.resolve(appRoot, '..');
+  const contracts = fs.readFileSync(path.join(repoRoot, 'shared/contracts.d.ts'), 'utf8');
+  const wenceRoute = fs.readFileSync(path.join(repoRoot, 'server/src/routes/wence.ts'), 'utf8');
+  for (const name of ['share_expose', 'invite_landing']) {
+    assert.match(contracts, new RegExp(`'${name}'`), `shared/contracts.d.ts 的 ClientEventName 缺 ${name}`);
+    assert.match(wenceRoute, new RegExp(`'${name}'`), `server/src/routes/wence.ts 的 EVENT_NAMES 缺 ${name}`);
+  }
+  // 端上真的用了这两个名字（防止改名后只剩白名单里的死取值）
+  assert.match(read('services/share.js'), /track\('share_expose'/);
+  assert.match(read('services/invite.js'), /track\('invite_landing'/);
 });

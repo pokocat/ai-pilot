@@ -194,7 +194,11 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
 }
 
 // D-1/WO-12：处方多来源漏斗——处方六态转化（按 toolKey）+ 开通来源计数（ActivationEvent）。
-const RX_SOURCE_LABEL: Record<string, string> = { prescription: '处方位', catalog: '货架', market: '生态市场' };
+// ★ 口径警告：前三项是「从哪个位子成交的」三个**互斥**答案；`invite`（2026-08-18 接上写入方）
+// 是另一个维度——「这个人是被谁带来的」，由服务端在付费入账后按 Referral 另落一行，
+// 一个被邀请来的人从处方位成交会同时出现在「处方位」和「邀请」两格里。
+// 所以这几个数字**不能相加**当总开通数，「邀请」那格读作「其中有多少笔来自被邀请的人（首次付费，按人去重）」。
+const RX_SOURCE_LABEL: Record<string, string> = { prescription: '处方位', catalog: '货架', market: '生态市场', invite: '邀请（重叠口径）' };
 
 export function FunnelView() {
   const [days, setDays] = useState(30);
