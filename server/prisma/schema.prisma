@@ -513,6 +513,8 @@ model GenerationJob {
   requestFingerprint           String
   parentGenerationId           String?
   status                       GenerationStatus               @default(queued)
+  // 入队时按套餐 tierRank 快照（0-9）；claim 按「priority + 等待时长老化」排序，不是纯 FIFO。
+  priority                     Int                            @default(0)
   phase                        GenerationPhase                @default(queue)
   kind                         GenerationKind                 @default(chat)
   requestedOutput              String                         @default("unspecified")
@@ -575,6 +577,7 @@ model GenerationJob {
   @@unique([userId, clientRequestId])
   @@unique([userId, deliveryPlanId, stageKey, stageAttempt])
   @@index([status, leaseExpiresAt, createdAt])
+  @@index([status, priority, createdAt])
   @@index([sessionId, createdAt])
   @@index([tenantId, createdAt])
   @@map("generation_job")
