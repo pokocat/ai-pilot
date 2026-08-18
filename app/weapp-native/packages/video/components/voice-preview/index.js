@@ -9,8 +9,9 @@
 const api = require('../../api');
 
 /** 默认样例：挑的是有语气、有停顿的句子，比「一二三四」更能听出像不像本人。 */
-const SAMPLE = '早上七点，我把卷帘门拉起来，这条街就算醒了。';
-const MAX = 200;
+const SAMPLE = '早上七点，我把卷帘门拉起来，这条街就算醒了。';  // 24 字，留足自定义空间
+/** 与服务端 80 字上限对齐 —— 让输入框自己拦住，别等写完再被 422 打回。 */
+const MAX = 80;
 
 Component({
   properties: {
@@ -30,8 +31,16 @@ Component({
 
   observers: {
     open(value) {
+      // 每次开关都换一个代次：关掉浮层（或换成另一条声音）之后，在途的那次合成回来时
+      // 代次已经对不上，会被直接丢弃。否则用户关了浮层，几秒后突然从看不见的地方响起来。
+      this.gen = (this.gen || 0) + 1;
       if (value) this.setData({ text: SAMPLE, error: '', played: false, busy: false });
-      else this.destroyAudio();
+      else { this.destroyAudio(); this.setData({ busy: false }); }
+    },
+    voiceId() {
+      this.gen = (this.gen || 0) + 1;
+      this.destroyAudio();
+      this.setData({ busy: false, error: '', played: false });
     },
   },
 
@@ -57,8 +66,11 @@ Component({
       if (!text) { this.setData({ error: '先写一句想听的话' }); return; }
       if (this.data.busy) return;
       this.setData({ busy: true, error: '' });
+      this.gen = (this.gen || 0) + 1;
+      const gen = this.gen;
       api.previewVoiceById(this.properties.voiceId, text)
         .then((result) => {
+          if (gen !== this.gen) return;
           this.setData({ busy: false });
           // mock 态的 outputRef 是个假 id（MockShiliuGateway 直接把任务 id 当 outputRef 返回），
           // 不是可播地址。不认这个标志的话，用户会对着一个静默失败的按钮反复点。
@@ -70,6 +82,7 @@ Component({
           this.playAudio(result.audioUrl);
         })
         .catch((error) => {
+          if (gen !== this.gen) return;
           this.setData({ busy: false, error: (error && error.message) || '试听失败，请稍后再试' });
         });
     },

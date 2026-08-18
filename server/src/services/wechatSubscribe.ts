@@ -375,30 +375,6 @@ export function notifyPosterReady(args: {
   });
 }
 
-/**
- * 出片完成/失败通知。**永不抛**，理由同 notifyPosterReady。
- *
- * 用户原话：「这个能不能设计成看到大概什么时候完成？」——ETA 需要先攒够耗时样本才能给准，
- * 但「不用一直盯着」这件事今天就能解决：出好了微信推给他。
- */
-export function notifyClipRendered(args: {
-  tenantId: string;
-  userId: string;
-  title: string;
-  workId?: string | null;
-  ok: boolean;
-}): void {
-  void sendWechatSubscribeMessage({
-    tenantId: args.tenantId,
-    userId: args.userId,
-    scene: 'clip',
-    title: args.title || '你的视频',
-    statusText: args.ok ? '已出片' : '未出片',
-    note: args.ok ? '视频已经生成好，点击查看' : '这次没出成，积分已退回',
-    workId: args.workId,
-  });
-}
-
 export function notifyReportReady(args: {
   tenantId: string;
   userId: string;

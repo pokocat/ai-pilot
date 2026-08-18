@@ -38,3 +38,10 @@
 .rd-leave { width: 100%; margin-top: 16px; }
 .rd-note { font-size: 11px; color: var(--vd-faint); margin-top: 10px; }
 .rd-fail-icon { width: 56px; height: 56px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; border-radius: 18px; background: var(--vd-danger-soft); }
+
+/* 「出好了通知我」：出片要等好几分钟，这一张卡是让用户能安心退出的唯一出口。 */
+.rd-notify { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 14px; }
+.rn-copy { flex: 1; min-width: 0; }
+.rn-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.rn-sub { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.rn-btn { flex: none; width: 88px; min-height: 40px; }

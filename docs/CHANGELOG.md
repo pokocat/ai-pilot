@@ -18,6 +18,20 @@
 - 修复成片详情页用旧 `videoUrl` 拦截保存：现在始终调用军师同源下载接口，由 BFF 刷新上游短签名后再返回视频流。
 - 同步更新快出片技术方案，并补回归断言覆盖模型字段与下载前置条件。
 
+### 2026-08-18 · 快出片按群反馈重做出片前可控性与错误闭环 · 影响面：原生小程序、军师 BFF、订阅通知、积分状态机、AIStar clip
+
+来源：主理人公社 AI 学习群真实反馈，逐条编号与方案见 `docs/[OPUS5]VIDEO_PREVIEW_FEEDBACK_PLAN_2026-08-18.md`（F01–F16 / V01）。
+
+- **请求标识只在「原单确实结束」时才换**：`CLIP_RENDER_CREATING` / `CLIP_CLONE_CREATING` / `CLIP_CLONE_ACCEPTING` 都表示上一单还活着，此时换号会再建一笔 hold 和一个上游 job（克隆还会让用户重传一遍文件）。出片确认页此前的 `renderRequestId` 只在 onLoad 生成一次，撞上 `CLIP_RENDER_REQUEST_CLOSED` 后整页永久无法出片。
+- **出片失败后项目不再锁死**：`ClipProjectService.save` 只放行 `draft`，而全仓没有任何一处把状态改回去。worker 失败与用户取消现在统一走 `ClipRenderService.releaseProject`，并带活跃 job 守卫（旧 job 不得重置已被新 job 占用的项目）。
+- **积分状态单向**：`settleVideoJob` 禁止 `refunded → settled`。此前取消/删除刚退完款、撞上并发的一次 succeeded 查询就会把账面写回已结算，而退款流水已经发生。
+- **出片完成通知**：新增 `clip` 订阅场景（复用「服务进度通知」模板，不申请新模板）+ 进度页订阅入口 + `clip-render-notification` 后台 job。该 job 同时补上一个洞：`settleVideoJob` 此前只在小程序轮询 `GET /video/jobs/:id` 时触发，用户中途退出的话，出片失败的积分永远退不回来。推送幂等靠 hold 上的一次原子认领（`submitted → notifying`），并加进程内互斥。
+- **声音试听脱离 project**：新增 `POST /me/clip/voices/{id}/preview` 与军师 BFF 透传（不扣钻石，5 次 / 5 分钟 + 80 字），端上新增分包内 `voice-preview` 组件，训练完成页 / 我的声音 / 分身管理三处入口。此前唯一入口在文案页，必须先建项目才听得到。
+- **配画面页**：合并相邻段可选保留上/下段素材；「这段要念 N 秒 · 视频或图片都行」改成事前预算；素材库入口前置；「预览」正名为「分镜清单」；新增素材连播（纯端上、无音频无字幕、以真正开始播放为起点计时）。
+- **封面**：成片页单列可保存的封面图并说清它只是第一帧与平台缩略图；确认页区分「没设置」与「填了没开启」。`COVER_DURATION_SEC` 保持 0.04 不动。
+- **计费口径**：端上删掉 b-roll 一档——服务端权威报价 total 只有 tts+avatar+assemble，`ClipProperties` 连该价键都不存在。
+- **验证**：小程序构建 + 181 项测试通过；server `tsc` 通过、`video.test.ts` 24 项通过（全量 1804/1822，18 项失败是测试库缺 `generation_job.priority` 的既有 schema drift，与本次改动无关）；AIStar 编译与 `check:api-contract` 通过。
+
 ### 2026-08-18 · 快出片单次直传、异步受理与成片保存修复 · 影响面：原生小程序、军师 BFF、AIStar clip、积分幂等、相册权限
 
 - **先止损**：生产 `AIDRAMA_CLIP_TIMEOUT_MS` 从 60 秒临时提高到 240 秒并重启验活，旧版小程序在治本版本发布前不再于 60 秒固定报“没反应”。

@@ -78,8 +78,12 @@ Page({
 
   onLoad() { this.load(); },
   onShow() { if (!this.data.loading) this.load(); },
-  onHide() { this.stopPolling(); },
-  onUnload() { this.stopPolling(); },
+  // 页面切走/销毁时要关掉试听：音频还在响、overlay 计数也会漏掉一层。
+  onHide() { this.stopPolling(); if (this.data.voicePreviewOpen) this.closeVoicePreview(); },
+  onUnload() {
+    this.stopPolling();
+    if (this.data.voicePreviewOpen) host.setOverlay(false, 'video-voice-preview');
+  },
 
   load() {
     this.stopPolling();

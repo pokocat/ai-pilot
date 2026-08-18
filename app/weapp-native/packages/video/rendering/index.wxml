@@ -34,7 +34,15 @@
         </view>
       </view>
 
-      <view class="vd-btn ghost rd-leave" bindtap="leave">先去忙，好了通知我</view>
+      <view wx:if="{{notifyTemplate && !failed && status !== 'succeeded'}}" class="rd-notify vd-card">
+      <view class="rn-copy">
+        <text class="rn-title">{{notifySubscribed ? '出好了会微信通知你' : '不想一直等着？'}}</text>
+        <text class="rn-sub">{{notifySubscribed ? '可以放心退出，成片好了微信会推给你。' : '开启通知后就能退出小程序，出好了微信提醒你来看。'}}</text>
+      </view>
+      <view wx:if="{{!notifySubscribed}}" class="vd-btn ghost rn-btn {{notifyRequesting ? 'disabled' : ''}}" bindtap="requestNotify">{{notifyRequesting ? '开启中…' : '通知我'}}</view>
+    </view>
+
+    <view class="vd-btn ghost rd-leave" bindtap="leave">先去忙，好了通知我</view>
       <text class="rd-note">关掉小程序也不影响出片</text>
     </block>
 
