@@ -53,4 +53,4 @@ Page(withShare({
     } });
   },
   async finishPrescription() { const rx = this._rx; if (!rx) return; try { await api.prescriptionAction(rx.id, 'activated'); wx.showToast({ title: '已记为启用', icon: 'none' }); setTimeout(() => wx.navigateBack(), 500); } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '状态更新失败' }); } },
-}, { timeline: true }));
+}));

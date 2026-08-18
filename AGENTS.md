@@ -267,8 +267,8 @@ H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份
 
 ### 7.6 全站分享与邀请归因（2026-08-18）
 - **为什么以前「不能转发」**：微信的规则是页面不实现 `onShareAppMessage`，右上角 ··· 里的「转发给朋友」就**置灰**。改动前 54 个原生页面只有 4 个实现了（天时日历 / 命盘 / 速诊 / 快拍成片），5 个主 Tab 一个都没有，`onShareTimeline` 全站为零。注意 `app/src/**/index.config.ts` 里的 `enableShareAppMessage` 是 **Taro 的注册开关，对原生产物无效**——看到它以为「转发已经开了」是错的。
-- **分享内容与页面解耦**：`weapp-native/services/share.js` 的 `withShare(page, opts)` 用 `Object.assign` 合并（**不用 `Behavior`**：页面级 behaviors 对生命周期合并语义随基础库版本漂移，而分享回调漏挂是静默失效——按钮变灰不报错），**页面自定义同名方法优先**。全站 54 页统一挂载，分享出去是**固定海报素材池**（图 + 文案）按**本地自然日**确定性轮动（禁 `Math.random`；用 `年*372+月*31+日` 而不是 `Date.now()/86400000`，后者按 UTC 切日会在东八区早上 8 点换素材）。落地页固定为 `/pages/sessions/index`——**不能用速诊页**，它 `onLoad` 就 `setData({ showLogin: true })`，陌生访客第一屏会是登录弹层。素材文案切**真实经营痛点**（获客贵 / 现金流紧 / 方向不定），不用「宜攻宜守」这类盘面语；图走网络 URL 不打进包（主包体积有上限），为空时整个 `imageUrl` 字段不下发、让微信截图兜底。
-- **朋友圈按白名单开**（9 页：问策 / 速诊 / 命盘 / 天时日历 / 快拍成片 / 作品廊 / 生态市场 / 图籍与详情）。技术原因：`onShareTimeline` 的落地页被微信**强制为当前页**、只能带 query 改不了 path，私密页开朋友圈等于把陌生访客直接丢在账本或登录门上。
+- **分享内容与页面解耦**：`weapp-native/services/share.js` 的 `withShare(page, opts)` 用 `Object.assign` 合并（**不用 `Behavior`**：页面级 behaviors 对生命周期合并语义随基础库版本漂移，而分享回调漏挂是静默失效——按钮变灰不报错），**页面自定义同名方法优先**。全站 54 页统一挂载，分享出去是**固定海报素材池**（图 + 文案）按**本地自然日**确定性轮动（禁 `Math.random`；用 `年*372+月*31+日` 而不是 `Date.now()/86400000`，后者按 UTC 切日会在东八区早上 8 点换素材）。落地页固定为 `/pages/sessions/index`——**不能用速诊页**，它 `onLoad` 就 `setData({ showLogin: true })`，陌生访客第一屏会是登录弹层。素材文案切**真实经营痛点**（获客贵 / 现金流紧 / 招人难 / 方向不定，4 套轮动），不用「宜攻宜守」这类盘面语。**`imageUrl` 绝不能留空**：留空时微信会截**当前页**当封面，从账本 / 档案 / 订单页转发就把个人经营数据带进了分享卡缩略图，「内容与页面解耦」也就成了空话。现固定用 `app/src/assets/share/card-friend.png`（750×600，5:4 原样显示）与 `card-timeline.png`（600×600，1:1 居中裁剪）两张品牌底图，构建时随 `src/assets` 整目录拷进 `dist-native/assets/`；图上不写字，文案由 title 承载。
+- **朋友圈只开 3 页**（问策 / 命盘 / 天时日历）。`onShareTimeline` 的落地页被微信**强制为当前页**、只能带 query 改不了 path，所以能开朋友圈的页面必须同时满足两条：① 进页生命周期不对游客弹登录；② 不依赖必填参数。据此排除了速诊 / 作品廊 / 生态市场 / 图籍及详情（`onLoad` 即 `setData({ showLogin: true })`）与快拍成片、资料详情（依赖 `workId`/`id`，朋友圈带不回去，访客会落在「缺少作品参数」的失败态）。`app/scripts/weapp-share.test.mjs` 有「朋友圈白名单必须游客友好」的守卫持续把关。**转发通道不受此限**（它的落地页统一指向问策 tab，与当前页无关），所以 54 页全都能转发。
 - **归因链路**：`services/invite.js` 在 `app.js` 的 `onLaunch(options)` **与 `onShow(options)`** 两处捕获（游客也可能从分享进来，他之后某一刻才登录；只在 onLaunch 捕获会漏掉「小程序已在后台、从另一张分享卡再次进入」）。只认本仓邀请码形状 `/^JS[0-9A-HJKMNP-TV-Z]{4}$/`，scene 里别人的参数原样放过不吞；`decodeURIComponent` 失败不得中断启动。覆盖口径是**末次触点**（新码覆盖旧码并更新捕获时间）——「一人只归因一个推荐人」是**绑定那一刻**的公理，不是捕获阶段的约束。**铁律：捕获到码绝不触发任何跳转或登录弹层**（2026-08-05 整改口径，驳回原因正是「未浏览体验服务即要求授权登录」）。登录时由 `services/api.js` 统一从 invite.js 读取并带上，88 个引用 login-sheet 的页面零改动；`store.afterLogin` 成功后清码（一次性凭证，不清会每次登录都重复上报、把风控视图弄脏）。
 
 ### 7.5 PC 工作台（`/pc/` / `copilot.aibuzz.cn`，2026-08-10）
@@ -827,6 +827,13 @@ mock 可随时预览；**正式上传/审核**还需：
 ---
 
 ## 13. 已知限制 / TODO
+
+- [ ] **邀请体系的后续四件事（2026-08-18 全站分享 + 关系链落地时明确延后）**：
+  ① **奖励机制**——本期只记关系不发奖，`services/referral.ts` 已留运营配置栏位（`referral.rewardInviter` / `rewardInvitee` / `rewardOnPaid` / `dailyCap` / `ladder`）与幂等 key 形状注释锚（`referral:{referrerId}:{newUserId}:{stage}`）；开闸时发放走 `credits.ts` 的 `appendCreditDelta`（已支持 idempotencyKey），并用邀请人行锁串行化「同一码多个新号同时进线」的发奖判定。**阶梯奖励只许虚拟权益形态，现金 ¥/人 是微信审核红线。**
+  ② **海报素材池服务端下发**——前端 `services/share.js` 的 `posterPool()` 已留读取点（读 `/me` 的 `sharePosters`，拿不到用内置三套兜底），服务端下发与运营后台维护界面未做，**契约里也还没有该字段**，实现时要先补 `shared/contracts.d.ts`。素材图现在是空串（微信自动截图兜底），运营出图后填网络 URL，别打进包（主包体积上限）。
+  ③ **埋点四段与漏斗**——`ClientEvent` 的分享曝光 / 落地打开 / 注册 / 首开通四段未接，`ActivationEvent.source='invite'` 已加但还没有写入方。
+  ④ **运营后台「邀请增长」四视图**——本体 Schema / 邀请层级树（物化 lv1~lv3 正是为它写全的）/ 转化漏斗 / IP 风控二部图，均未做；方案见 `docs/[OPUS5]WEAPP_SHARE_REFERRAL_PLAN_2026-08-18.md` §4.3。注意 `admin/` 零图表依赖，四视图要手写 SVG，且必须守 `admin/DESIGN.md` 的 Engineering Compliance（token 颜色 / `useResource`+`ViewState` / 禁空 catch）。
+- [ ] **朋友圈白名单只有 3 页**（问策 / 命盘 / 天时日历）：速诊、作品廊、生态市场、图籍及详情的 `onLoad` 会对游客直接弹登录；快拍成片与资料详情依赖 `workId`/`id` 这类必填参数，而朋友圈只能带 query、回不到带参页面。若要把它们纳入：前者先让进页生命周期对游客友好（改成动作触发才弹登录），后者要么让页面在缺参时也有公开可看的内容、要么给它写自己的 `onShareTimeline` 把必填参数塞进 query。`app/scripts/weapp-share.test.mjs` 的守卫会持续把关。
 
 - **运营后台剩余 P2 键盘语义债（2026-08-17）**：本轮已把所有开关、主用户卡、智能体主动作、技能/知识主卡、计费/接入/评测分段与弹层改为原生按钮/对话语义；仍有少量旧 `div onClick` 行（观测 trace、评测历史、订单复制、商品/基准编辑卡及两处内嵌详情遮罩）主要依赖鼠标。它们不阻断现有运营主链，但下一轮改对应页面时必须拆成显式按钮或可聚焦行，并补 Enter/Space、可见 focus 与详情关闭焦点归还；禁止继续扩散新的 `div onClick`。
 - **Notion 工程变更日志待补 2026-08-15 宿主机事故闭环**：本次已完成 Dify 下线、AIStar Clip `/tmp` JAR 泄漏修复、军师预发原子 release 与资源 cgroup，并以真实预发 8925cc2 验收生产/预发/AIStar 三服务健康；完整产品可读结论在 `docs/CHANGELOG.md` 顶部。当前会话无已安装的 Notion 连接器，无法同步「军师 · 工程变更日志（持续更新）」；连接恢复后应补到页面顶部，完成后删除本条。

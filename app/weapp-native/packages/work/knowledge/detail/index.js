@@ -88,4 +88,4 @@ Page(withShare({
     }
     return 'pending';
   },
-}, { timeline: true }));
+}));
