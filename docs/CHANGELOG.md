@@ -6,6 +6,56 @@
 
 ## 变更日志
 
+### 2026-08-18 · 运营后台「邀请增长」三视图（本体 Schema / 邀请关系树 / IP 风控二部图）· 影响面：`admin/src/views/referral.tsx`（新）、`admin/src/nav.ts`、`admin/src/api.ts`、`admin/src/styles/admin.css`、`server/src/routes/adminReferral.ts`（新）、`routes/admin.ts` 开关目录、`app.ts` 注册、契约新增、AGENTS §9.0/§9.1/§13
+
+**为什么要做**：`Referral` 的物化路径 `lv1/lv2/lv3` 从第一天就写全，理由就是「运营侧的邀请关系树要看完整链路」——但在此之前运营侧**一个视图都没有**，那三列冗余字段谁也用不上；`ReferralAttribution.clientIp/userAgent` 同理，采了却没人看。这次把三个投影落到后台，那些列才第一次兑现价值。
+
+**视图选型（这是本次主要的判断，不是审美偏好）**：
+
+- **① 本体 Schema 用 UML 类图，刻意不用力导向图**。这一屏回答「模型长什么样」，读者要看的是字段与基数；力导向图实例一多就是毛球，且每次刷新布局都不一样，没有稳定的阅读逻辑。类框与连线写死几何（说明的是模型，不随数据变），**唯一动态的是行数**——一张说明图旁边不给真实行数，读者无法判断「这些表到底有没有在跑」。另外把归因结果分布也放在这屏：`unknown_code` / `expired` / `already_bound` 这些**失败留痕**本来就是这张表存在的理由（推荐人问「我的客户为什么没归到我」时的唯一凭据），不给出来等于白采。
+- **② 邀请关系树用从左到右的层级树**。邀请关系天然有方向（谁邀谁）和层级（L1→L2→L3），树布局可预测、可折叠、可下钻。布局选的是**「每个可见节点占一行 + 直角折线」**而不是父节点居中的 tidy tree：后者展开一个节点会整屏重排、上下文跳掉，前者只在下面插入行；而且一行一个节点**天然不会重叠**（同一行不可能有两个节点），这一点是量出来的——全展开后逐个 `getBBox()` 比过，文本两两不相交、也不压节点。编码：半径=直邀人数（sqrt 压缩，免得大 V 把小节点压成看不见的点），底色=开通状态，**红环=风控标记且与底色正交**（一个已付费用户同样可能被标记，压成同一维会丢信息）。
+- **③ 风控用 IP ↔ 新号二部图**。正常用户分散在各自 IP、一个 IP 一两个人；刷号聚集成一个 IP 连一串新号的扇形——扇形宽窄一眼可比，散点或表格都做不到。
+- **④ 转化漏斗本期不做，只留位**。原因不是没时间：曝光/落地两段要读 `ClientEvent`，而它至今**只写不查、没有聚合读端点**；开通来源那一段本来就在「处方漏斗」页（按 `ActivationEvent.source` 分组）。在这里再造一个漏斗必然与那页口径打架，所以第四个 tab 只放说明并指向那一页，同时写明 `invite` 桶与 `prescription/catalog/market` 三桶**重叠不可相加**。
+
+**零图表依赖怎么守**：`admin` 的 dependencies 只有 react/react-dom，三张图全手写 SVG。约束是**颜色一律在 `admin.css` 的 `.rf-*` 组件类里用 token 定义，`.tsx` 里只算几何**（x/y/r/width）——`lint:ui` 会阻断 `:root` 外的 hex，而且这样三张图的配色只有一处可改。踩到并修掉的两个具体坑：① 最后一列右侧没留够标签宽度时，**L3 的元信息会被 viewBox 直接裁掉**（现在由 `T_TAIL` 兜住，并用 `getBBox()` 断言无越界）；② 树节点原来第三行放「下级超出三级视野」，行距只有 38px，实测与下一行标签相撞，已压进元信息同一行。宽图统一裹在 `.rf-scroll` 里自己横滚，实测四个 tab 在 375px 宽下 `documentElement.scrollWidth === clientWidth`（页面主体不横滚）。
+
+**端点为什么单独成文件**：`routes/adminReferral.ts` 自挂**同一把** `requireAdmin`（口径与 `admin.ts` 一字不差，没有新发明）。理由是 `admin.ts` 已 2900+ 行，而三个投影各自要做一次成形；前端刚把 2841 行的 App.tsx 拆成 `views/`，没道理在服务端把同一笔债重开一次。
+
+**取数形状（避免 N+1 是硬要求）**：树接口用**物化路径一条 `OR`（`lv1/lv2/lv3` 各有索引）一次取全三级子树**，配合一次 `groupBy(lv1)`（给出任意深度都准的直邀数——第三级节点的下级不在本次结果里，但它的直邀数在这张表里，所以树末端**不会谎报成 0**，而是显式标「下级超出三级视野」）+ 一次 `findMany` 补名字/套餐，全程 4 条查询、没有逐层展开的回头请求。风控接口两步：`groupBy(clientIp)` 拿候选（**记录数 ≥ 阈值是去重新号数的安全超集**，Prisma 的 groupBy 不能 count distinct，所以先粗筛不会漏判）→ 只对候选拉明细在内存里按 `newUserId` 去重（同一个人反复点码只算一个新号）。
+
+**阈值归运营，不写死**：聚集阈值是功能开关 `referral-risk` 的 `payload.ipMin`（默认 5，区间 2~200，单位「个新号/IP」），区间与默认值由 `routes/adminReferral.ts` 导出、`FEATURE_FLAG_CATALOG` 引用，「开关页能改的范围」与「视图判定用的范围」是同一份。**刻意另立一个 flag id 而不是复用 `referral` 的 payload**：`PATCH /admin/flags/:id` 的 number 分支是 `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，两个数值挤同一个 flag，运营改完归因窗口就会把阈值抹掉。读阈值走 `{ fresh: true }` 绕过 60s 缓存（运营改完当场要能验证，否则会以为改动没生效）。
+
+**读失败不许伪装成空**：三个端点里没有任何兜底 catch，配置或查询失败一律 5xx 交给 `useResource`/`ViewState` 渲染成「加载失败 + 重试」。空态则给**显式零计数**——风控还回 `scannedIps`，让「近 30 天扫过 214 个 IP、没有一个达标」与「一条数据都没有」在界面上是两句不同的话（前者是正常形态，后者才要去查链路）。
+
+**口径同源**：「已开通付费」复用 `planGate` 的判定（有 `planId` 且 `isExpired(planExpiresAt, now())` 为假，时钟走 `clock.now()` 而非 `new Date()`），与「我的邀请」的 `activatedCount`、与套餐页是同一个答案，套餐到期会如实回落成「仅注册」；树上的风控标记与二部图用**同一批超阈值 IP 组**，两屏不会各说一套。**公理 5「风控预警不阻断」**：这一页没有任何封禁/拉黑/停发奖动作，端点也只有 GET（用例直接钉住 POST/PATCH/DELETE 一律 404）。
+
+**验证**：`admin` 的 `npm run lint:ui` 与 `npx tsc -b` 全绿；server `npx tsc --noEmit` 零错误、`npm test` **1877/1877 全绿**（含本次新增的 14 例）；新增 `server/test/adminReferralViews.test.ts` 14 例（无凭证 401 / 已登录非管理员 403、物化路径 A→B→C→D 分层为 depth 1/2/3 且第三级不再展开、节点大小=直邀数、状态着色含到期回落、租户可筛、只回超阈值组且改运营配置就改结果、按去重新号数算聚集、树与二部图同源、风控端点无写方法、空作用域 200 + 显式零计数、查询打断回 5xx 不伪装成空）。三张图另用桩数据在真实构建里逐个量过（`getBBox()` 断言不裁切/不重叠、375px 下页面不横滚）。**一条环境坑记下来**：开发机若 shell 里导出了 `TEST_DEFAULT_PLAN_NAME`（本机是「入门版」），新注册用户会自动开通套餐，断言「仅注册」的用例必须显式把 `planId` 清掉，否则在有 / 没有该变量的两台机器上一红一绿。
+
+### 2026-08-18 · 邀请漏斗四段接上写入方（`ActivationEvent.source='invite'` 终于有人写了）· 影响面：契约 `ClientEventName`、`routes/wence.ts` 埋点白名单、`services/activation.ts`、`services/wechatPay.ts` 支付收口、原生小程序 share/invite、admin 开通来源读数口径、AGENTS §7.2/§7.6/§8.1/§13
+
+**为什么要做**：08-18 那一批把 `invite` 加进了 `ACTIVATION_SOURCES`，也写下了「漏斗四段」的方案，但**四段一段都没接**：`share_expose` / `invite_landing` 两个事件不存在，`ActivationEvent.source='invite'` 有枚举值却**没有任何写入方**。结果是「分享 → 落地 → 注册 → 首开通」这条链在库里断成两截，运营问「邀请到底带来了多少开通」时算不出来——不是数字不好看，是根本没有数字。
+
+**这次的四段口径（三段落库、一段复用既有账本）**：
+
+- ① `share_expose`（新事件名）：用户点开「转发给朋友」/「分享到朋友圈」时报。落点刻意在 `services/share.js` 的 `withShare` **wrapper** 里，不在两个 mixin 里——那 4 个成果型分享页（速诊 / 命盘 / 天时日历 / 成片）是**整体覆盖** mixin 的，埋在 mixin 里它们一条都不报，而它们恰好是最活跃的几页（这正是上一轮 `imageUrl` 兜底踩过的同一个坑的另一面）；埋在 wrapper 里则 54 页统一一条、且不可能双报。props 只有 `channel`（`friend`/`timeline`）与 `poster`（当日素材序号），**不带页面路径 / 页面内容 / 邀请码**：带上页面就等于把「谁在账本页点了转发」写进埋点库，与「分享内容与页面解耦」自相矛盾。
+- ② `invite_landing`（新事件名）：`captureInvite` 捕获成功即报，props 只有 `channel`（`query`=分享卡 / `scene`=小程序码）。**每次捕获都报**，含 `onShow` 那次重复进入——同一个人被同一张卡拉回来几次本身就是漏斗要看的数据，端上不偷偷合并。这条几乎全是**游客**上报（点开卡的人此刻还没有账号），正是漏斗分母的来源，`POST /events` 鉴权可选恰好为它而设。
+- ③ 注册段**不占事件名**：从 `ReferralAttribution` 算（每次带码进线一行，六种 outcome 全留痕）。再补一份客户端埋点只会造出「端上报了、库里没有」的对不上账，服务端账本比端上准。
+- ④ 首开通段：新增 `services/activation.ts` 的 `recordInviteActivation`，在**付费入账成功后**判该用户有无推荐人（查 `Referral`），有则落一条 `source='invite'`。
+
+**④ 为什么挂 `markPaidAndApply` 而不是 `applyPlanPurchase`**（这是本次唯一需要判断的挂点问题）：`applyPlanPurchase` 还被三条**非付费**路径共用——注册测试期自动开通（`routes/auth.ts`，`source='test_default_grant'`）、演示购买（`routes/plans.ts`）、运营手工开通（`routes/admin.ts`）。挂那里有两个方向都错：正向会把免费白发算成邀请开通，**开着注册自动开通时被邀人「注册当场即首开通」，「注册 → 首开通」这一段永远 100%**，漏斗直接失去意义；反向那条路径跑在建号事务内，而关系绑定是建号提交**之后**才另开小事务做的，那一刻 `Referral` 还不存在、查推荐人必然为空，连该记的也记不到。`markPaidAndApply` 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，已有 `outTradeNo` advisory lock + `appliedAt` 幂等锚点），所以 invite 判定就贴着既有的 `recordActivation` 走。
+
+**`source` 冲突怎么判的（写错会让运营后台处方位开通数凭空变少）**：`prescription/catalog/market` 回答的是「从哪个位子成交的」，值来自下单请求、随 `PaymentOrder.attrSource` 存档；`invite` 回答「这个人是被谁带来的」——**两个维度，不是一组互斥枚举**（被邀请来的人照样可能从处方位下单）。所以选择**再落一行**、绝不覆盖。代价必须明说：按 source 分组的各桶从此**重叠、不可相加**，这条口径就地写在读数侧 `admin/src/views/revenue.tsx`，那格也标成「邀请（重叠口径）」，免得有人把几个数字加起来当总开通数。推荐人 id 刻意**不冗余进 `refId`**——`Referral` 是不可变更账本（userId 主键 = 单推荐人），按 userId join 一步就得，冗余一份只会漂移。
+
+**顺手堵了一个能被端上刷的口子**：`parseAttribution` 原本照 `ACTIVATION_SOURCES` 全量放行，也就是说任何客户端在下单请求里写 `source:'invite'` 就能凭空给邀请漏斗刷开通数（而且会被下面的「一人一条」去重当成真的、把真实那条挤掉）。现在前端可声明的来源收窄为三项，`invite` 一律回落 `catalog`——**它是服务端按账本判定的事实，端上说了不算**。
+
+**幂等与「绝不阻断」的实现方式**：invite 行**按人去重**（一人最多一条 = 首次付费开通，因为漏斗问的是人数不是订单数：续费、加购、买第二个 SKU 都不该再进分子），靠 `activation:invite:{userId}` 事务级 advisory lock 串行化 check-then-insert（`ActivationEvent` 上没有唯一约束，不上锁的话同一用户两笔订单并发到账会双写）。整段跑在支付事务**提交之后**、自带小事务、内部吞掉全部异常（永不 reject，只记 warn）。**塞进支付事务里是错的**：Postgres 事务内任一语句失败即整体 aborted，`.catch(() => {})` 也救不回来（`services/referral.ts` 的 P2002 分支已经踩过一次），一次 DB 抖动就能回滚一笔已经算成功的入账——漏一条统计远好过让一笔真钱卡在未入账。选择 `await` 而不是像到账订阅消息那样 fire-and-forget，是因为它只有两条本地查询且永不抛，await 既不增加失败面又免得进程在回调响应后被回收时丢掉这条统计；订阅消息要发外网 HTTP，那才必须不等。
+
+**端上两条埋点如何做到不拖累分享与启动**：都走既有的 `api.track`（裸 `wx.request` + 空回调，失败完全静默，**刻意不走 `request()`**——那条路上「带 token 的 401」会触发全局 `onAuthLost`，一条统计请求把正在打字的用户踢出对话）。`onShareAppMessage` / `onShareTimeline` 的返回值是微信**同步**取走的，所以埋点不 await、整段 try 住，**连 `require('./api')` 都在 try 里**（share.js 被 54 页在模块顶层引入，加载链断了不能连带把分享弄哑）。`invite.js` 里是**函数体内懒 require**：`services/api.js` 顶层就 `require('./invite')`（登录统一带邀请码），顶部引用直接成环——CJS 环不报错，但先加载的一侧拿到**半初始化**的 exports，症状是静默变哑，属最难查的一类。
+
+**验证**：server `npm test` **1877/1877 全绿**（`test/referral.test.ts` 新增 5 例：有推荐人开通落 invite 且位子归因一条不少 / 无推荐人不落 invite / 重复回调+第二笔订单+并发两笔都只留一条 / `applyPlanPurchase` 三条非付费路径不落 invite（这条钉住挂点选择）/ 端上伪造 `source:'invite'` 回落 catalog）；`app/scripts/weapp-share.test.mjs` 从 19 例增到 **25 例**（两通道各报一条且返回值一字不变、自定义分享页也上报且不双报、`track` 抛与 `require` 抛两种极端下回调都不抛错且 title/path/imageUrl 全对、落地埋点重复进入照报且脏码不报、埋点炸了 `captureInvite` 照常返回码并写 storage、**事件名必须同时在契约与服务端白名单里**）；`native-weapp.test.mjs` 90/90、两端 `tsc --noEmit` 零错误、原生构建通过。
+
+**残留（已记 §13）**：四段埋点齐了，但**漏斗还没有取数口**——`ClientEvent` 至今只写不查、没有任何读端点，前两段目前只能直接查库；要在后台看漏斗得先补一个按 `name + createdAt` 的聚合查询（`ClientEvent` 只有 `@@index([name, createdAt])`/`@@index([userId])`，想按 props 里的 `channel` 下钻要么加索引要么先物化）。`ClientEvent` 也仍无留存策略，而这两条事件放量后会是最大的写入源（游客照发、每次 onShow 重复进入都报），应与清理/分区任务一并规划。
+
 ### 2026-08-18 · 全站可转发 + 邀请关系链（只记关系不发奖）· 影响面：原生小程序全部页面、server 注册链路、Prisma 新增两表、契约、AGENTS §5/§7/§10
 
 **为什么以前不能转发**：不是被谁禁掉的，是微信规则——页面不实现 `onShareAppMessage`，右上角 ··· 里的「转发给朋友」就置灰。改动前 54 个原生页面只有 4 个实现了（天时日历 / 命盘 / 速诊 / 快拍成片），5 个主 Tab 一个都没有，所以用户在主界面看到的转发永远点不动；`onShareTimeline` 全站为零，「分享到朋友圈」菜单项根本不出现。另外 `app/src/**/index.config.ts` 里那三处 `enableShareAppMessage: true` 是 **Taro 的注册开关、对原生产物无效**，看到它以为已经开了是个真实误判点。而且原来那 4 处返回的是裸 path、`app.js` 的 `onLaunch()` 连 `options` 都没接，所以即便转发出去也记不下谁带来了谁。

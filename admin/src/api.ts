@@ -201,8 +201,14 @@ import type {
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   PosterDirectionKey,
   AdminClonePricing, AdminClonePricingUpdate,
+  AdminReferralOverview, AdminReferralTree, AdminReferralRisk,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
+// —— 邀请增长三视图（P3，全只读；风控只预警不阻断，故没有任何写方法）——
+export type {
+  AdminReferralOverview, AdminReferralTree, AdminReferralTreeNode, AdminReferralRisk,
+  AdminReferralRiskGroup, AdminReferralRiskMember, AdminReferralTenantOption, AdminReferralCount,
+} from '../../shared/contracts';
 // —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
 export type { AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
@@ -222,6 +228,16 @@ export type { AdminClonePricing, AdminClonePricingUpdate } from '../../shared/co
 // —— 附身登录（impersonation，owner-only）——
 export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
+
+/** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
+function referralQs(q: { days?: number; tenantId?: string; roots?: number }): string {
+  const p = new URLSearchParams();
+  if (q.days) p.set('days', String(q.days));
+  if (q.roots) p.set('roots', String(q.roots));
+  if (q.tenantId) p.set('tenantId', q.tenantId);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -326,6 +342,14 @@ export const api = {
   deleteSku: (key: string) => req<{ ok: boolean }>(`/admin/skus/${encodeURIComponent(key)}`, 'DELETE'),
   // —— D-1/WO-12 处方多来源漏斗（六态聚合 + 开通来源计数）——
   prescriptionFunnel: (days = 30) => req<AdminPrescriptionFunnel>(`/admin/prescriptions/funnel?days=${days}`),
+  // —— 邀请增长三视图（P3）：一份数据三个投影，全只读 ——
+  // 阈值不在前端算：风控聚集阈值归运营配置（FeatureFlag），服务端读出来一并回传。
+  referralOverview: (q: { days?: number; tenantId?: string } = {}) =>
+    req<AdminReferralOverview>(`/admin/referral/overview${referralQs(q)}`),
+  referralTree: (q: { tenantId?: string; roots?: number } = {}) =>
+    req<AdminReferralTree>(`/admin/referral/tree${referralQs(q)}`),
+  referralRisk: (q: { days?: number; tenantId?: string } = {}) =>
+    req<AdminReferralRisk>(`/admin/referral/risk${referralQs(q)}`),
   // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
   ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
   createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),

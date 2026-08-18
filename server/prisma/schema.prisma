@@ -1993,10 +1993,17 @@ model ActivationEvent {
   id        String   @id @default(cuid())
   tenantId  String
   userId    String
-  itemType  String // 'agent' | 'sku'
-  itemKey   String // agentKey 或 skuKey
-  source    String // 'prescription' | 'catalog' | 'market'
-  refId     String? // source=prescription 时的 prescriptionId
+  itemType  String // 'agent' | 'sku' | 'plan'
+  itemKey   String // agentKey / skuKey / planId
+  /// 'prescription' | 'catalog' | 'market' | 'invite'
+  ///
+  /// 前三个是**同一个问题的互斥答案**（从哪个位子成交的），值由下单请求带入；
+  /// `invite` 是**另一个维度**（这个人是被谁带来的），由服务端按 `Referral` 判定，
+  /// 在付费入账后**另落一行**（见 services/activation.ts 的 recordInviteActivation）。
+  /// 因此按 source 分组计数时，invite 桶与另外三桶**重叠，不可相加**。
+  /// invite 行按用户去重（一人最多一条 = 首次付费开通），服务的是邀请漏斗最后一段。
+  source    String
+  refId     String? // source=prescription 时的 prescriptionId（invite 行不冗余存推荐人，按 userId join Referral 即得）
   createdAt DateTime @default(now())
 
   @@index([tenantId, itemType, itemKey])

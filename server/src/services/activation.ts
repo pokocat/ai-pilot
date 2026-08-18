@@ -5,12 +5,24 @@ import type { Prisma } from '@prisma/client';
 
 // 归因来源枚举：prescription=处方位（军令语境开方）| catalog=货架/商城 | market=生态市场
 // | invite=邀请带来的开通（服务 D-1 漏斗里「邀请贡献了多少开通」这一问，与发奖无关）。缺省 catalog。
+//
+// ★ 前三个与 invite **不是同一个维度**，别把它们当成一组互斥枚举去相加（详见 recordInviteActivation
+// 的注释）：前三个回答「从哪个位子成交的」，来自下单请求；invite 回答「这个人是被谁带来的」，
+// 由服务端按 Referral 判定。因此 `parseAttribution` 刻意**不接受**前端传 'invite'（见下），
+// 而 invite 行由服务端在付费入账后另外补一条。
 export const ACTIVATION_SOURCES = ['prescription', 'catalog', 'market', 'invite'] as const;
 export type ActivationSource = (typeof ACTIVATION_SOURCES)[number];
 
-/** 解析 source + refId（refId 仅在 source=prescription 时有意义，其余丢弃）。 */
+/**
+ * 前端**可以**声明的位子来源。`invite` 不在其中：它是服务端按 Referral 账本判定的事实，
+ * 端上说了不算——否则任何客户端只要在下单请求里写 `source:'invite'`，
+ * 就能凭空给邀请漏斗刷出开通数（而且会被下面的「一人一条」去重逻辑当成真的，把真实那条挤掉）。
+ */
+const CLIENT_ACTIVATION_SOURCES: readonly string[] = ['prescription', 'catalog', 'market'];
+
+/** 解析 source + refId（refId 仅在 source=prescription 时有意义，其余丢弃）。表外与 'invite' 一律回落 catalog。 */
 export function parseAttribution(rawSource: unknown, rawRefId: unknown): { source: ActivationSource; refId: string | null } {
-  const source = typeof rawSource === 'string' && (ACTIVATION_SOURCES as readonly string[]).includes(rawSource)
+  const source = typeof rawSource === 'string' && CLIENT_ACTIVATION_SOURCES.includes(rawSource)
     ? (rawSource as ActivationSource)
     : 'catalog';
   const refId = source === 'prescription' && typeof rawRefId === 'string' && rawRefId.trim()
@@ -45,4 +57,67 @@ export async function recordActivation(
       source: args.source, refId: args.refId ?? null,
     },
   });
+}
+
+/** 一次付费入账里，用于补 invite 归因所需的最小信息（由 markPaidAndApply 在事务内攒出，事务外使用）。 */
+export interface InviteActivationTarget {
+  tenantId: string; userId: string; itemType: 'sku' | 'plan'; itemKey: string;
+}
+
+export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recorded' | 'failed';
+
+/**
+ * 邀请漏斗第四段：**付费开通成功**且该用户有推荐人时，补记一条 `source='invite'` 的 ActivationEvent。
+ * 这是 `ActivationEvent.source='invite'` 的唯一写入方（该取值 2026-08-18 就加进枚举了，但一直没人写）。
+ *
+ * ## 为什么是「补一条」而不是把既有 source 改成 invite
+ *
+ * `ActivationEvent.source` 的 prescription / catalog / market 回答的是**「从哪个位子成交的」**，
+ * 值在下单时随 `PaymentOrder.attrSource` 存下来；而「这个人是被谁带来的」是**另一个维度**——
+ * 被邀请来的人照样可能从处方位下单。两者正交，所以：
+ *   · **不能覆盖**：覆盖等于把「处方位成交」这条事实抹掉，运营后台「开通来源」那格（admin FunnelView
+ *     读 activationSourceCounts，按 source 分组计数）里处方位的数字会凭空变少，处方效果就再也说不清；
+ *   · 于是选择**再落一行** invite。代价必须明说：`activationSourceCounts` 的各桶从此**不互斥、不能相加**
+ *     （invite 桶与另外三桶重叠），读数侧 `admin/src/views/revenue.tsx` 已就地写了这条口径。
+ *
+ * 推荐人 id 刻意**不冗余进 refId**：`Referral` 是不可变更的账本（userId 主键 = 单推荐人），
+ * 按 userId join 一步就得，冗余一份只会漂移。refId 保持它原本唯一的语义（prescriptionId）。
+ *
+ * ## 为什么只记「首次」，幂等从哪来
+ *
+ * 漏斗那一段问的是「被邀请来的人里有多少**转化成了付费用户**」——是**人**的口径，不是订单口径：
+ * 同一个人续费、加购、再买一个 SKU 都不该再进一次分子。所以按 userId 去重，已有 invite 行就直接返回。
+ * 这一条同时兜住三种重复：① 同一订单重复回调（回调侧另有 appliedAt 幂等，这里是第二道）；
+ * ② 同一用户先后两笔订单；③ 同一用户两笔订单**并发**到账——ActivationEvent 上没有唯一约束，
+ * check-then-insert 必须自己串行化，故进来先取 `activation:invite:{userId}` 事务级 advisory lock
+ * （与 credits.ts / tokenQuota.ts 的按用户加锁同一套路，命名空间独立，不与支付侧的锁互相牵连）。
+ *
+ * ## 为什么跑在支付事务之外，而且从不抛错
+ *
+ * 这段查询绝不能给支付回调增加失败面。Postgres 里事务内任一语句失败即整体 aborted，
+ * 塞进 `markPaidAndApply` 的事务里，「查 Referral 时抖一下」就会连带回滚已经算成功的入账，
+ * 而且 `.catch(() => {})` 也救不回来——后续语句同样会失败（这个坑 referral.ts 的 P2002 分支踩过一次）。
+ * 所以它在入账事务**提交之后**才跑，自带一个只包「判推荐人 + 落一行」的小事务，
+ * 任何异常在函数内部就地吞掉并记 warn，返回 'failed'。**漏一条统计远好过让一笔真钱卡在未入账。**
+ * 查不到 Referral 就当没有推荐人（'no_referrer'），不重试、不报警。
+ */
+export async function recordInviteActivation(target: InviteActivationTarget): Promise<InviteActivationResult> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`activation:invite:${target.userId}`}))`;
+      const referral = await tx.referral.findUnique({ where: { userId: target.userId }, select: { referrerId: true } });
+      if (!referral) return 'no_referrer';
+      const existing = await tx.activationEvent.findFirst({
+        where: { userId: target.userId, source: 'invite' },
+        select: { id: true },
+      });
+      if (existing) return 'already_recorded';
+      await recordActivation({ ...target, source: 'invite' }, tx);
+      return 'recorded';
+    });
+  } catch (err) {
+    // 入账已经成功了，这里只是漏一条统计：记下来供排查，绝不往上抛。
+    console.warn(`[activation] invite 归因补记失败 userId=${target.userId} item=${target.itemType}:${target.itemKey}: ${(err as Error).message}`);
+    return 'failed';
+  }
 }
