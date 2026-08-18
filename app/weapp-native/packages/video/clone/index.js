@@ -77,6 +77,14 @@ Page({
     voiceId: '',
     /** 训练完成页的试听浮层开关（组件在 components/voice-preview）。 */
     voicePreviewOpen: false,
+    /**
+     * 训练完成时固化的样例音频。
+     *
+     * 说明白：轮询到 ready 就停了，而服务端固化要再等一会儿，所以**这一屏多半拿不到它**，
+     * 试听会走按需合成 —— 那是正确行为，不是缺陷。这里仍然接上，是为了用户稍后再进来时
+     * （比如从分身管理点进来）能享受到零等待，而不是留一个永远为空的绑定。
+     */
+    voiceDemoUrl: '',
     /** 克隆各档单价；null = 还没读到，界面据此不显示价格而不是显示 0。 */
     pricing: null,
     /** 本次提交的合计报价；null = 价格还没读到，此时不许提交（提交要带确认报价）。 */
@@ -745,6 +753,8 @@ Page({
   pollVoiceTraining() {
     return api.voiceById(this.data.voiceId).then((voice) => {
       const done = Boolean(voice && voice.status === 'ready');
+      const demoAudioUrl = (voice && voice.demoAudioUrl) || '';
+      if (demoAudioUrl && demoAudioUrl !== this.data.voiceDemoUrl) this.setData({ voiceDemoUrl: demoAudioUrl });
       const failed = Boolean(voice && voice.status === 'failed');
       const percent = done ? 100 : Math.max(0, Math.min(100, Number(voice && voice.progress) || 0));
       this.setData({

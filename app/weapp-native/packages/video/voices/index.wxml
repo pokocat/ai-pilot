@@ -88,6 +88,7 @@
     open="{{previewOpen}}"
     voice-id="{{previewVoiceId}}"
     voice-name="{{previewVoiceName}}"
+    demo-audio-url="{{previewDemoUrl}}"
     bindclose="closePreview"
   ></voice-preview>
 

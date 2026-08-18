@@ -111,7 +111,10 @@ const projects = new Map([[ONGOING.id, clone(ONGOING)]]);
 let assets = clone(ASSETS);
 let works = clone(WORKS);
 let avatars = [clone(AVATAR), Object.assign({}, clone(AVATAR), { id: 'av_mock_2', name: '工作室正装', linkedVoiceId: 'vo_mock', linkedVoiceName: '张姐原声' })];
-let voices = [{ id: 'vo_mock', name: '张姐原声', status: 'ready', source: 'dedicated', trainedText: '7 月 28 日', progress: 100 }];
+// demoAudioUrl / demoVideoUrl 在 mock 下**故意留空**：这两份产物由 AIStar 的 ClipDemoWorker
+// 真实调石榴生成，mock 里编一个地址只会让端上播一个 404，还会掩盖「没生成好时该回落到按需合成」
+// 这条真实分支 —— 而那才是端上最需要被验到的行为。
+let voices = [{ id: 'vo_mock', name: '张姐原声', status: 'ready', source: 'dedicated', trainedText: '7 月 28 日', progress: 100, demoAudioUrl: null }];
 const consentHistory = [{ id: 'cc_mock_1', status: 'verified', createdText: '8 月 10 日', scope: '本人形象与声音出片' }];
 const usageHistory = [{ id: 'cu_mock_1', createdText: '8 月 6 日', action: '生成《今天开门了 · 周三》', status: '完成' }];
 

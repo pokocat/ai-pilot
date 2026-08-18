@@ -466,6 +466,37 @@ Page({
      每段播多久严格按**那一段口播的秒数**来切，与合成端 `-t 口播时长` 一致；
      视频素材加 loop，短于本段时的循环行为也和成片一样。 */
   buildPlayList() {
+    return this.coverPlayItem().concat(this.shotPlayItems());
+  },
+
+  /**
+   * 封面在成片里只占 0.04 秒（约一帧），肉眼根本看不见 —— 它的用途是视频第一帧和平台缩略图。
+   * 所以连播里给它 2 秒并明说这件事：用户既能看清自己设的封面长什么样，
+   * 又不会误以为成片开头真会停这么久。
+   *
+   * 只有真开了封面才放；没开就不放，别让「没设置」看起来像「设置了但没生效」。
+   */
+  coverPlayItem() {
+    const cover = this.data.project && this.data.project.cover;
+    if (!cover || cover.enabled !== true) return [];
+    const background = cover.backgroundAssetId ? this.data.assetsById[cover.backgroundAssetId] : null;
+    const imageUrl = background ? (background.previewUrl || background.contentUrl || '') : '';
+    return [{
+      key: 'cover',
+      no: 0,
+      kind: imageUrl ? 'image' : 'blank',
+      rangeText: '封面',
+      roleLabel: '封面',
+      text: cover.keyword || '',
+      seconds: 2,
+      videoUrl: '',
+      imageUrl,
+      note: '成片里封面只占第一帧，用作平台缩略图，不占正片时长',
+      blankText: '封面底图会从成片里自动抽一帧',
+    }];
+  },
+
+  shotPlayItems() {
     const avatarUrl = this.data.avatarPreviewUrl || '';
     return (this.data.rows || []).map((row, index) => {
       const asset = row.assetId ? this.data.assetsById[row.assetId] : null;

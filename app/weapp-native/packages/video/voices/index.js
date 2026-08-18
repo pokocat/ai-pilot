@@ -56,7 +56,7 @@ Page({
        浮层本体是 components/voice-preview，这里只管开关和选中的是哪一条。 */
     previewOpen: false,
     previewVoiceId: '',
-    previewVoiceName: '',
+    previewVoiceName: '', previewDemoUrl: '',
     showLogin: false,
   }),
 
@@ -112,12 +112,18 @@ Page({
     if (!host.requireLogin(this, 'execute')) return;
     if (!voice || !voice.ready) { host.toast('这条声音还没训练好'); return; }
     host.setOverlay(true, 'video-voice-preview');
-    this.setData({ previewOpen: true, previewVoiceId: id, previewVoiceName: voice.name || '这条声音' });
+    this.setData({
+      previewOpen: true,
+      previewVoiceId: id,
+      previewVoiceName: voice.name || '这条声音',
+      // 固化样例跟着这条声音走：有就点开即响，没有就回落到按需合成。
+      previewDemoUrl: voice.demoAudioUrl || '',
+    });
   },
 
   closePreview() {
     host.setOverlay(false, 'video-voice-preview');
-    this.setData({ previewOpen: false, previewVoiceId: '' });
+    this.setData({ previewOpen: false, previewVoiceId: '', previewDemoUrl: '' });
   },
 
   /** 重录已有声音：带上 voiceId 才走「重训」档（更便宜，且供应商每条给 4 次免费重训）。 */
