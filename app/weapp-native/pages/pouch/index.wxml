@@ -3,6 +3,7 @@
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad pouch">
+      <view class="pouch-back" bindtap="back"><native-icon name="back" tone="neutral" size="18"></native-icon><text>返回执行</text></view>
       <tab-header title="锦囊" kicker="军师替你出的妙计" glyph="计"></tab-header>
 
       <!-- 游客态：锦囊装的是你自己的成品，游客本来只能看到一排空架子。
@@ -13,7 +14,6 @@
           <text class="pg-d">方案、海报、成片都是军师替你出的成品，属于你的账号私产。登录后这里会按时间列出你做过的每一件，随时翻出来分享或照着再来一件。</text>
           <view class="pg-go" bindtap="askLogin"><native-icon name="user" tone="white" size="16"></native-icon><text>登录后打开锦囊</text></view>
         </view>
-        <view class="tabbar-space"></view>
       </block>
 
       <block wx:else>
@@ -56,8 +56,8 @@
            取数失败时不出这张卡——上面已经有重试条，一边说「读不出来」一边说「还没有作品」是自相矛盾。 -->
       <view wx:elif="{{!loadFailed}}" class="pouch-empty card">
         <text class="pe-t serif">还没有作品</text>
-        <text class="pe-d">去战局领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
-        <view class="pe-go" bindtap="goBattle"><text>去战局领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
+        <text class="pe-d">去执行领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
+        <view class="pe-go" bindtap="goExecution"><text>去执行领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
       </view>
 
       <!-- ② 手艺：一门手艺一格。固定子应用三格 + 创意 agents 动态格（上新自动多一格）。 -->
@@ -81,14 +81,11 @@
         </view>
       </view>
 
-      <view class="tabbar-space"></view>
       </block>
     </view>
   </scroll-view>
-  <view class="native-bottom-fade"></view>
   <!-- 启用层：未启用的创意军师在这里付费启用（卡面不标价，价格只在这一刻出现），
        启用后直接进这位军师的对话。组件自己管 setOverlay。 -->
   <agent-unlock agent="{{unlockAgent}}" source="pouch" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
   <login-sheet open="{{showLogin}}" reason="purchase" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
-  <coach-marks></coach-marks>
 </view>

@@ -1,1 +1,1 @@
-{ "navigationStyle": "custom", "usingComponents": { "tab-header": "/components/tab-header/index", "coach-marks": "/components/coach-marks/index", "native-icon": "/components/native-icon/index", "login-sheet": "/components/login-sheet/index", "agent-unlock": "/components/agent-unlock/index" } }
+{ "navigationStyle": "custom", "usingComponents": { "tab-header": "/components/tab-header/index", "native-icon": "/components/native-icon/index", "login-sheet": "/components/login-sheet/index", "agent-unlock": "/components/agent-unlock/index" } }

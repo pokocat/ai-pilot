@@ -1,12 +1,13 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { gotoExecution } = require('../../../services/nav');
 
 Page({
   data: baseData({ loading: true, errorText: '', items: [], busy: '', showLogin: false }),
   onLoad() { this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); if (this._loaded) this.load(); },
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
+  back() { wx.navigateBack({ fail: () => gotoExecution('today') }); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); this.load(); },
   async load() {
     if (!store.isAuthed()) { this.setData({ loading: false, showLogin: true }); return; }

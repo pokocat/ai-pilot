@@ -44,6 +44,41 @@ const TERMINAL: ReadonlySet<GenerationStatus> = new Set([
 
 const DEFAULT_LEASE_MS = 15_000;
 const MAX_EFFECT_ERROR = 2_000;
+const MAX_PRIORITY = 9;
+const DEFAULT_PRIORITY_AGING_SECONDS = 30;
+
+/**
+ * 每读一次 env（不在模块加载期定住）：调度参数要能在测试/线上逃生时当场改。
+ * Number('') === 0 不是 NaN，空串/未设置必须先判掉，否则会被当成「显式配了 0」= 关掉老化，
+ * 免费用户在高峰期就再也排不到前面（这正是老化要杜绝的饥饿）。
+ */
+function priorityAgingSeconds(): number {
+  const raw = process.env.GENERATION_PRIORITY_AGING_SECONDS;
+  if (raw == null || raw.trim() === '') return DEFAULT_PRIORITY_AGING_SECONDS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_PRIORITY_AGING_SECONDS;
+  if (n === 0) return 0;
+  // 0<n<1 的小数若被 trunc 成 0，等于把「调小老化窗口」误读成「关掉老化恢复饥饿」——语义相反的两件事
+  // 绝不能只差一个小数点。非零正数至少算 1 秒。
+  return Math.max(1, Math.trunc(n));
+}
+
+/**
+ * 调度键（升序，越小越先领）：**虚拟到达时间** `createdAt - priority × agingSec`。
+ * 每一级优先级等价于「提前 agingSec 秒到达」，priority 封顶 9 → 高档最多比同刻到达的免费单
+ * 提前 9×30s=4.5 分钟，之后先来后到照旧 —— 防饥饿由此保证。
+ * 不用「等待时长 FLOOR 折算虚涨等级」的写法：FLOOR 的阶梯让两单的相对次序随时钟边界来回翻转
+ * （队列没有任何变化，排位数字却自己跳），虚拟到达时间是每行的静态值，次序稳定、可缓存可索引。
+ * agingSec=0 = 严格优先级：key 退化为 (-priority)，高档绝对优先，牺牲低档最坏等待。
+ * claim 与 countQueuedAhead **必须**共用本函数，改一处必须改另一处 ——
+ * 否则用户看到的「前面还有 N 位」和 worker 的实际取单顺序会互相打脸。
+ * alias 是本文件写死的字面量，不接受外部输入，Prisma.raw 在此不构成注入面。
+ */
+function schedulingKeySql(alias: 'j' | 'q' | 'me', agingSec: number): Prisma.Sql {
+  const t = Prisma.raw(`"${alias}"`);
+  if (agingSec <= 0) return Prisma.sql`(-${t}.priority)`;
+  return Prisma.sql`(${t}."createdAt" - ${t}.priority * ${agingSec} * interval '1 second')`;
+}
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -118,6 +153,8 @@ export interface CreateGenerationJobInput {
   deliveryStages?: DeliveryStage[];
   imageCount?: number;
   imageBatchCount?: number;
+  /** 调度优先级快照（0-9），由调用方从套餐 tierRank 折算；不入幂等指纹。 */
+  priority?: number;
 }
 
 export interface CreatedGenerationJob {
@@ -315,6 +352,10 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
           : undefined,
         imageCount: Math.max(0, input.imageCount ?? 0),
         imageBatchCount: Math.max(0, input.imageBatchCount ?? 0),
+        // 只落列、**不进 requestSnapshot/requestFingerprint**：priority 是服务端从套餐派生的调度参数，
+        // 不属于用户请求内容。若进了指纹，用户在网络重试之间恰好升/降档就会撞
+        // GENERATION_IDEMPOTENCY_MISMATCH——把一次运营侧的权益变更变成一条发不出去的消息。
+        priority: Number.isFinite(input.priority) ? Math.max(0, Math.min(MAX_PRIORITY, Math.trunc(input.priority!))) : 0,
         userMessageId: userMessage.id,
         requestJson: frozenSnapshot as Prisma.InputJsonValue,
       },
@@ -625,19 +666,28 @@ export async function requestGenerationCancel(
   return updated;
 }
 
+/**
+ * 领单：**带老化的优先级**调度（虚拟到达时间，见 schedulingKeySql），不是纯 FIFO。
+ * - priority 是入队时按套餐 tierRank 拍下的快照（0-9），付费档天然排在免费档前面；
+ *   档位映射归运营后台（Plan.tierRank），代码里不写死任何档位表。
+ * - 防饥饿：每级优先级只等于提前 GENERATION_PRIORITY_AGING_SECONDS（默认 30s）到达，
+ *   封顶 9 级 → 一单最多被后到的高优先级单插队 4.5 分钟，之后先来后到照旧。
+ *   设 0 = 严格优先级（无老化），只在需要临时让高档位绝对优先时用，会牺牲低档位的最坏等待。
+ * - 租约过期的恢复单不需要特殊照顾：它们 createdAt 早，虚拟到达时间自然靠前。
+ */
 export async function claimNextGenerationJob(
   workerId: string,
   leaseMs = DEFAULT_LEASE_MS,
 ): Promise<GenerationJob | null> {
   return prisma.$transaction(async (tx) => {
     const at = now();
-    const rows = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM generation_job
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "j".id FROM generation_job "j"
       WHERE (status = 'queued' AND "classificationStatus" IN ('not_required', 'completed', 'failed'))
          OR (status = 'running' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${at}))
-      ORDER BY "createdAt" ASC
+      ORDER BY ${schedulingKeySql('j', priorityAgingSeconds())} ASC, "j"."createdAt" ASC, "j".id ASC
       LIMIT 1
-      FOR UPDATE SKIP LOCKED`;
+      FOR UPDATE SKIP LOCKED`);
     const id = rows[0]?.id;
     if (!id) return null;
     const current = await tx.generationJob.findUniqueOrThrow({ where: { id } });
@@ -677,6 +727,31 @@ export async function claimNextGenerationJob(
       },
     });
   });
+}
+
+/**
+ * 本单前面还有几单在排队（用户可见的「前面还有 N 位」）。
+ * 排序表达式与 claimNextGenerationJob 的 ORDER BY 共用 schedulingKeySql —— **改一处必须改另一处**，
+ * 否则透出的位次和 worker 的真实取单顺序会背离。key 在 SQL 里现算（不在 JS 里复算），
+ * 避免两边取整/时钟差异造成 off-by-one。
+ * 口径刻意比 claim 的候选集宽/窄各一点，是「位次」不是「取单资格」：
+ * - 分类未完成的 queued 单仍计入——它下一拍就可领，对用户而言确实排在前面；
+ * - running 单（含租约过期待接管的）不计入——已经在跑/马上恢复跑，不占用户前方的等待位。
+ *   代价是 ahead=0 不严格等于「下一个就是你」，文案用「前面还有 N 位」而不是「即将开始」。
+ */
+export async function countQueuedAhead(job: GenerationJob): Promise<number> {
+  const agingSec = priorityAgingSeconds();
+  const rows = await prisma.$queryRaw<{ ahead: number }[]>(Prisma.sql`
+    WITH "me" AS (
+      SELECT ${schedulingKeySql('me', agingSec)} AS "key", "me"."createdAt" AS "createdAt", "me".id AS id
+      FROM generation_job "me" WHERE "me".id = ${job.id}
+    )
+    SELECT COUNT(*)::int AS ahead
+    FROM generation_job "q", "me"
+    WHERE "q".status = 'queued'
+      AND (${schedulingKeySql('q', agingSec)}, "q"."createdAt", "q".id)
+        < ("me"."key", "me"."createdAt", "me".id)`);
+  return Math.max(0, rows[0]?.ahead ?? 0);
 }
 
 export async function heartbeatGenerationLease(

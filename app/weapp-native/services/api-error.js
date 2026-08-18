@@ -23,6 +23,7 @@ const USER_MESSAGES = {
   CLIP_ENGINE_SPEECH_UNCLEAR: '没听清人声，换个安静的地方重录一段。',
   CLIP_ENGINE_VOICE_REJECTED: '这段声音没通过声纹安全检查，请确认是本人录制。',
   CLIP_ENGINE_VIDEO_UNREADABLE: '这段视频读不出来，请重新录一段。',
+  CLIP_CAPTURE_TOO_LARGE: '形象视频超过 100MB，请压缩或缩短后重新上传。',
   CLIP_ENGINE_SPEAKER_NOT_FOUND: '声音模型不存在了，请重新采集声音。',
   // 「这个形象用谁的声音」必须由用户决定 —— 曾经服务端会静默挑一条最近的，
   // 结果成片里男声女声错位而用户毫不知情。现在宁可拦住也不猜。
@@ -39,6 +40,7 @@ const USER_MESSAGES = {
   FORCES_RATE_LIMIT: '今天的刷新次数已用完，请稍后再试。',
   ORDER_RATE_LIMITED: '订单创建有点频繁，请稍后再试。',
   FILE_REQUIRED: '请先选择要上传的文件。',
+  KNOWLEDGE_FILE_TOO_LARGE: '文件超过 20MB，请压缩、拆分或导出较小文件后重新上传。',
   IMAGE_TOO_LARGE: '图片太大，请压缩后重新上传。',
   IMAGE_BAD_TYPE: '暂不支持这种图片格式，请更换后上传。',
   AVATAR_BAD_TYPE: '暂不支持这种头像格式，请更换后上传。',
@@ -125,6 +127,13 @@ function httpErrorInfo(statusCode, data, noun) {
   const technical = body.error || `HTTP ${statusCode}`;
   if (statusCode === 408 || statusCode === 504) return { message: USER_MESSAGES[code] || '响应超时，后台可能仍在处理，请不要重复提交。', code, technicalMessage: technical };
   if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code, technicalMessage: technical };
+  // 413 经常由 Nginx 在请求进入 Fastify 前返回。历史上它是 HTML 错误页，端上只能显示
+  // 「上传未能完成」；即使某套环境还没配置路由级 JSON，也必须告诉用户是文件大小问题。
+  if (statusCode === 413) return {
+    message: USER_MESSAGES[code] || '文件太大，超过当前上传上限，请压缩或拆分后重新上传。',
+    code,
+    technicalMessage: technical,
+  };
   if (statusCode >= 500) {
     // 5xx 默认不外露服务端原文（多半是堆栈/内部细节），但**服务端特意给了业务 code
     // 或可读中文原因时，那就是写给用户看的**，不该丢。

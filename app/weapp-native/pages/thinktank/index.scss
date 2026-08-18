@@ -16,6 +16,7 @@
 .think-native { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
 .uz-btn { gap: 5px; }
 .upload-status { display: block; margin-top: 7px; color: var(--green); font-size: 11px; }
+.upload-status.error { color: var(--danger); }
 .pile + .pile { margin-top: 10px; }
 .pile-actions button { border: 0; }
 .think-cta { margin-bottom: 6px; }

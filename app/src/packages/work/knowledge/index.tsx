@@ -19,7 +19,7 @@ const STAGE_BADGE: Record<string, { label: string; cls: string }> = {
   optimized: { label: '已优化', cls: 'kb-st-optimized' },
 };
 const isWeapp = process.env.TARO_ENV === 'weapp';
-const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
+const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
 // 解析中项退避轮询节奏（2s → 4s → 8s → …），累计约 30s 后停止并提示下拉刷新。
 const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
 const isSettled = (st: string) => st === 'ready' || st === 'failed';
@@ -44,7 +44,7 @@ function fmtWhen(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-// 我的资料库：上传业务资料（PDF/Word/Excel/MD/TXT），军师咨询时自动参考；展示解析状态。
+// 我的资料库：上传业务资料（PDF/Word/Excel/PPTX/MD/TXT），军师咨询时自动参考；展示解析状态。
 export default function Knowledge() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -105,7 +105,7 @@ export default function Knowledge() {
     if (!f) return;
     const ext = (f.name?.split('.').pop() || '').toLowerCase();
     if (!SUPPORTED_EXT.includes(ext)) {
-      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/PPTX/MD/TXT）`, icon: 'none' });
       return;
     }
     // 上传前置校验体积上限（与 server multipart 20MB 限制对齐），避免放行后被服务端 413 拒绝、
@@ -181,7 +181,7 @@ export default function Knowledge() {
           <View className="kb-up-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="upload" size={20} color={accent} /></View>
           <View className="kb-up-b">
             <Text className="kb-up-t">{busy ? `上传中… ${pct}%` : '上传资料'}</Text>
-            <Text className="kb-up-s">先发到微信聊天（如文件传输助手）再选 · PDF/Word/Excel/MD/TXT</Text>
+            <Text className="kb-up-s">先发到微信聊天（如文件传输助手）再选 · PDF/Word/Excel/PPTX/MD/TXT</Text>
             {busy ? <View className="kb-up-bar"><View className="kb-up-fill" style={{ width: `${Math.max(4, pct)}%`, background: accent }} /></View> : null}
           </View>
           {busy ? <Text className="kb-up-cancel" onClick={(e) => { e.stopPropagation(); cancelUpload(); }}>取消</Text> : null}

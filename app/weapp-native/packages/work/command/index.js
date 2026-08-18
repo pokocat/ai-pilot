@@ -1,6 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { navTo, gotoExecution } = require('../../../services/nav');
 
 const STEP_ROLES = ['准备', '处理', '回写'];
 const ACTION_LABEL = { upload: '去图籍上传', backfill: '回填面板', review: '发起复盘', topics: '锦囊手艺', none: '去执行' };
@@ -10,7 +11,7 @@ Page({
   data: baseData({ loading: true, failed: false, order: null, no: 1, steps: [], metrics: [], actionLabel: '', actionHint: '', showLogin: false }),
   onLoad(options) { this._id = options && options.id || ''; this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
+  back() { wx.navigateBack({ fail: () => gotoExecution('today') }); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); this.load(); },
   async load() {
     if (!this._id) { this.setData({ loading: false, failed: true }); return; }
@@ -26,5 +27,5 @@ Page({
   },
   retry() { this.load(); },
   runAction() { if (this._actionType === 'upload') wx.switchTab({ url: '/pages/thinktank/index' });
-    else if (this._actionType === 'topics') wx.switchTab({ url: '/pages/pouch/index' }); else wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
+    else if (this._actionType === 'topics') navTo('/pages/pouch/index'); else wx.navigateBack({ fail: () => gotoExecution('today') }); },
 });

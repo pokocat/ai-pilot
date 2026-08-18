@@ -2,6 +2,7 @@
   "pages": [
     "pages/sessions/index",
     "pages/home/index",
+    "pages/execution/index",
     "pages/pouch/index",
     "pages/thinktank/index",
     "pages/profile/index",
@@ -37,9 +38,9 @@
       "network": "wifi",
       "packages": ["packages/main"]
     },
-    "pages/home/index": {
+    "pages/execution/index": {
       "network": "wifi",
-      "packages": ["packages/main", "packages/video"]
+      "packages": ["packages/main", "packages/work", "packages/video"]
     },
     "pages/pouch/index": {
       "network": "wifi",
@@ -80,7 +81,7 @@
     "list": [
       { "pagePath": "pages/sessions/index", "text": "问策" },
       { "pagePath": "pages/home/index", "text": "战局" },
-      { "pagePath": "pages/pouch/index", "text": "锦囊" },
+      { "pagePath": "pages/execution/index", "text": "今日" },
       { "pagePath": "pages/thinktank/index", "text": "图籍" },
       { "pagePath": "pages/profile/index", "text": "主公" }
     ]

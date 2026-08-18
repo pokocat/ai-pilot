@@ -26,6 +26,8 @@
   background: var(--accent); color: #FBFAF6; font-size: 15px; font-weight: 600;
 }
 .pouch-guest .pg-go:active { opacity: .9; }
+.pouch-back { width:max-content; min-height:44px; margin:-6px 0 2px; display:flex; align-items:center; gap:5px; color:var(--ink-2); font-size:13px; font-weight:600; }
+.pad.pouch { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
 
 /* —— 失败重试条：三条通道全塌才出现，只塌一条时各格显示「—」不打扰 —— */
 .pch-retry {

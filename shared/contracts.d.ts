@@ -1139,7 +1139,9 @@ export type ProactiveResult =
 /** 客户端埋点事件名白名单（POST /events）。非白名单一律 400——防止字段爆炸和脏事件污染漏斗。 */
 export type ClientEventName =
   | 'wence_enter' | 'proactive_show' | 'chip_tap' | 'hint_tap'
-  | 'first_message_send' | 'drawer_open' | 'attach_open' | 'tab_switch';
+  | 'first_message_send' | 'drawer_open' | 'attach_open' | 'tab_switch'
+  | 'execution_enter' | 'order_complete' | 'backfill_save' | 'review_start'
+  | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click';
 /** POST /events 请求体：鉴权可选（游客也上报，userId 空）。props 序列化后限 2KB，超限截断。 */
 export interface ClientEventRequest { name: ClientEventName; props?: Record<string, unknown> }
 export interface ClientEventResult { ok: true }
@@ -1223,6 +1225,9 @@ export interface GenerationView extends GenerationSummary {
   completedAt?: string | null;
   refNotices?: string[];
   knowledgeUsed?: string[];
+  // 仅 status=queued 时出现；ahead=按调度顺序排在前面的排队任务数。
+  // 注意口径：不含在跑/待接管恢复的单，所以 ahead=0 ≠「下一个必然是你」，文案别承诺「即将开始」。
+  queue?: { ahead: number } | null;
 }
 export interface GenerationSnapshotEvent {
   generationId: string;

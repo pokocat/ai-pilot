@@ -67,7 +67,55 @@ server {
     root /var/www/junshi/h5;             # ← 改成你放 app/dist-h5 的路径
     index index.html;
 
-    client_max_body_size 10m;            # 预留文档上传
+    # 普通 API 保持保守上限；大文件只在下方两个白名单 location 放宽，不能全站开到 120MB。
+    client_max_body_size 10m;
+
+    # 知识资料的业务上限是 20MB，Nginx 额外预留 multipart 边界/字段开销。
+    location = /api/knowledge/upload {
+        client_max_body_size 25m;
+        error_page 413 = @knowledge_upload_too_large;
+        limit_req zone=junshi_api burst=60 nodelay;
+
+        proxy_pass http://junshi_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection         "";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    # 数字人形象视频的业务上限是 100MB；120MB 只用于容纳 multipart 开销。
+    # consent/assets 与 clone 共用同一媒体上传协议，三条路必须保持一致。
+    location ~ ^/api/video/(avatar/(consent|clone)|assets)$ {
+        client_max_body_size 120m;
+        error_page 413 = @video_upload_too_large;
+        limit_req zone=junshi_api burst=60 nodelay;
+
+        proxy_pass http://junshi_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection         "";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    location @knowledge_upload_too_large {
+        default_type application/json;
+        return 413 '{"error":"文件超过 20MB，请压缩、拆分或导出较小文件后重新上传","code":"KNOWLEDGE_FILE_TOO_LARGE"}';
+    }
+
+    location @video_upload_too_large {
+        default_type application/json;
+        return 413 '{"error":"形象视频超过 100MB，请压缩或缩短后重新上传","code":"CLIP_CAPTURE_TOO_LARGE"}';
+    }
 
     # —— 后端 API（反代到本机 Node :4000）——
     location /api/ {

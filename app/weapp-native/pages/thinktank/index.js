@@ -4,6 +4,7 @@ const { navTo } = require('../../services/nav');
 const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
+const { SUPPORTED_DOCUMENT_EXT, validateDocumentUpload } = require('../../utils/document-upload');
 
 const PROCESS_STEPS = ['识别资料来源和文件类型', '去重并标记敏感信息', '按案卷目标生成分类结构', '输出待确认资料和问题清单'];
 const CATEGORY_LABELS = { founder:'老板档案', company:'企业档案', finance:'财务经营', content:'内容IP', growth:'增长资料', customer:'客户问答', proof:'案例证明', unknown:'待识别' };
@@ -91,7 +92,7 @@ Page({
     stageTabs: [{key:'staging',label:'待整理',count:0},{key:'optimized',label:'已优化',count:0},{key:'confirmed',label:'知识库',count:0}],
     processSteps: PROCESS_STEPS,
     showLogin: false, loginReason: 'save', authed: false, loading: false, loadFailed: false, uploading: false, organizing: false, confirming: false, purchasing: '', refreshingForces: false,
-    uploadText: '', counts: { staging:0,optimized:0,confirmed:0 }, quotaText:'200/200MB', quotaDocs:'0 / 30',
+    uploadText: '', uploadError: false, counts: { staging:0,optimized:0,confirmed:0 }, quotaText:'200/200MB', quotaDocs:'0 / 30',
     batches:[], optimizedItems:[], folders:[], sources:[], sourceStats:{bound:0,needed:0,total:0},
     confirmButton:'确认 0 份并写入知识库'
   }),
@@ -153,8 +154,42 @@ Page({
       confirmButton:`确认 ${optimizedItems.length} 份并写入知识库`,loading:false
     });
   },
-  chooseFiles(){ if(!this.requireLogin('upload')||this.data.uploading||this.data.confirming)return; wx.chooseMessageFile({count:9,type:'file',success:(res)=>this.uploadFiles(res.tempFiles||[])}); },
-  async uploadFiles(files){ if(!files.length||this.data.confirming)return; this.setData({uploading:true,uploadText:`正在上传 0/${files.length}`}); let done=0;let batchId=''; for(const file of files){ try{const uploaded=await api.uploadKnowledge(file.path,{staged:true,batchId:batchId||undefined,originalName:file.name});batchId=uploaded.batchId||batchId;done+=1;this.setData({uploadText:`正在上传 ${done}/${files.length}`});}catch(error){wx.showToast({title:error.message||`${file.name} 上传失败`,icon:'none'});} } this.setData({uploading:false,uploadText:`已送达 ${done} 份，等待整理`}); await this.load(); },
+  chooseFiles(){ if(!this.requireLogin('upload')||this.data.uploading||this.data.confirming)return;
+    wx.chooseMessageFile({
+      count:9,type:'file',extension:SUPPORTED_DOCUMENT_EXT,
+      success:(res)=>this.uploadFiles(res.tempFiles||[]),
+      fail:(error)=>{if(!/cancel/i.test(String(error&&error.errMsg||'')))wx.showModal({title:'文件选择失败',content:'没能打开微信文件选择器，请稍后重试。',showCancel:false});}
+    });
+  },
+  async uploadFiles(files){ if(!files.length||this.data.confirming)return;
+    const accepted=[];const failures=[];
+    files.forEach((file)=>{const checked=validateDocumentUpload(file);if(checked.ok)accepted.push(file);else failures.push(`${checked.name}：${checked.message}`);});
+    if(!accepted.length){
+      const summary=failures.length===1?'上传失败：请按提示处理后重试':`${failures.length} 份资料未能上传`;
+      this.setData({uploading:false,uploadError:true,uploadText:summary});
+      wx.showModal({title:'资料上传失败',content:failures.slice(0,3).join('\n'),showCancel:false});
+      return;
+    }
+    this.setData({uploading:true,uploadError:false,uploadText:`正在上传 0/${accepted.length}`});
+    let done=0;let batchId='';
+    for(const file of accepted){
+      try{
+        const uploaded=await api.uploadKnowledge(file.path,{staged:true,batchId:batchId||undefined,originalName:file.name});
+        batchId=uploaded.batchId||batchId;done+=1;
+        this.setData({uploadText:`正在上传 ${done}/${accepted.length}`});
+      }catch(error){
+        failures.push(`${file.name||'这份资料'}：${error.message||'上传失败，请重试'}`);
+      }
+    }
+    const failed=failures.length;
+    this.setData({
+      uploading:false,
+      uploadError:failed>0,
+      uploadText:failed?`已送达 ${done} 份，${failed} 份上传失败`:`已送达 ${done} 份，等待整理`
+    });
+    if(done)await this.load();
+    if(failed)wx.showModal({title:done?'部分资料上传失败':'资料上传失败',content:failures.slice(0,3).join('\n'),showCancel:false});
+  },
   async organize(event){if(this.data.organizing)return;const batchId=event.currentTarget.dataset.id;if(!batchId)return;this.setData({organizing:true});try{await api.organizeBatch(batchId);await this.load();wx.showToast({title:'资料已整理，等待确认',icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'整理失败'});}finally{this.setData({organizing:false});}},
   async deepOrganize(event){if(this.data.organizing)return;const batchId=event.currentTarget.dataset.id;if(!batchId)return;this.setData({organizing:true});try{await api.deepOrganize(batchId);await this.load();wx.showToast({title:'深度整理已完成',icon:'none'});}catch(error){const code=error.code||(error.data&&error.data.code);if(code==='SKU_REQUIRED')this.openSkuPurchase('deep-organize','深度资料整理',()=>this.deepOrganize({currentTarget:{dataset:{id:batchId}}}));else store.handleApiError(error,{fallbackTitle:error.message||'深度整理失败'});}finally{this.setData({organizing:false});}},
   deepFirst(){if(!this.requireLogin('upload'))return;const batch=this.data.batches[0];if(batch)this.deepOrganize({currentTarget:{dataset:{id:batch.id}}});else wx.showToast({title:'先上传资料到待整理区',icon:'none'});},

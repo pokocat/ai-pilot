@@ -41,7 +41,7 @@
 
         <block wx:if="{{stage==='staging'}}">
           <view class="upload-zone card" bindtap="chooseFiles">
-            <view class="uz-b"><text class="uz-k">第一步 · 接住乱资料</text><text class="uz-t serif">上传资料</text><text class="uz-d">先把资料放进来，我过一遍。理清楚了你点个头，我再收进知识库，判断时用上。</text><text wx:if="{{uploadText}}" class="upload-status">{{uploadText}}</text></view>
+            <view class="uz-b"><text class="uz-k">第一步 · 接住乱资料</text><text class="uz-t serif">上传资料</text><text class="uz-d">先把资料放进来，我过一遍。支持 PDF、Word、Excel、PPTX、Markdown、TXT，单个不超过 20MB。</text><text wx:if="{{uploadText}}" class="upload-status {{uploadError?'error':''}}">{{uploadText}}</text></view>
             <view class="uz-btn"><native-icon name="upload" tone="white" size="15"></native-icon><text>{{uploading?'上传中…':'上传'}}</text></view>
           </view>
 

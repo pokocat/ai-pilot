@@ -133,7 +133,7 @@ Page({
     this.load();
   },
 
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/pouch/index' }) }); },
+  back() { wx.navigateBack({ fail: () => navTo('/pages/pouch/index') }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
   closeUnlock() { this.setData({ unlockAgent: null }); },
