@@ -143,7 +143,7 @@ export async function reviewBriefing(userId: string): Promise<string | null> {
     '【复盘账本（系统计数，引用时以此为准，禁止自行推算天数或比率）】',
     `连续复盘：${streak} 天`,
     `最近复盘：${last.date}（${last.layer}）· 军令 ${last.ordersDone}/${last.ordersTotal} 完成` +
-      `${last.alignRate !== null ? ` · 对齐率 ${last.alignRate}%` : ''} · 数据回填${last.hasBackfill ? '已完成' : '未完成'}`,
+      `${last.alignRate !== null ? ` · 对齐率 ${last.alignRate}%` : ''} · 经营结果${last.hasBackfill ? '已记录' : '未记录'}`,
   ];
   // WO-04：最近一次周/月报的期聚合（线索/咨询/成交），月复盘对账素材（系统求和，非 LLM 现编）。
   const period = await prisma.reviewLog.findFirst({ where: { userId, layer: { in: ['week', 'month'] } }, orderBy: { date: 'desc' }, select: { layer: true, date: true, metricsJson: true, ordersDone: true, ordersTotal: true } });

@@ -12,6 +12,8 @@ import { listHints, resolveGuestForm } from '../services/wence.js';
 const EVENT_NAMES = new Set([
   'wence_enter', 'proactive_show', 'chip_tap', 'hint_tap',
   'first_message_send', 'drawer_open', 'attach_open', 'tab_switch',
+  'execution_enter', 'order_complete', 'backfill_save', 'review_start',
+  'pouch_entry_view', 'pouch_entry_click', 'weapon_click',
 ]);
 
 /** props 序列化上限：2KB。超限只留截断标记 + 前 2KB 原文，绝不整条丢弃（漏斗分母不能因为脏 props 缺口）。 */

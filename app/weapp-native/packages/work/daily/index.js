@@ -1,6 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { gotoExecution } = require('../../../services/nav');
 
 function today() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function dateLabel(value) { const parts = String(value || today()).split('-'); return `${Number(parts[1]) || 1}月${Number(parts[2]) || 1}日`; }
@@ -15,7 +16,7 @@ Page({
   data: baseData({ loading: true, errorText: '', report: null, showLogin: false }),
   onLoad() { this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
-  back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
+  back() { wx.navigateBack({ fail: () => gotoExecution('today') }); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); this.load(); },
   async load() {
     if (!store.isAuthed()) { this.setData({ loading: false, showLogin: true }); return; }

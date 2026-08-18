@@ -1,16 +1,15 @@
 const { getToken } = require('./token');
 
-// v1→v2：2026-08 IA 重排（战局合并、锦囊改作品、图籍接家底）。键位升版 + coachPending 里的
-// legacyDone 兜底，让走完过 v1 引导的老用户自动补一轮 v2，认识换了位的三个 tab；只补一次。
-const KEY_PREFIX = 'junshi.coach.v2.';
-const LEGACY_DONE_PREFIX = 'junshi.coach.v1.';
+// v2→v3：战局与执行重新分开、锦囊降普通页。已完成 v2 的老用户补看一次 v3。
+const KEY_PREFIX = 'junshi.coach.v3.';
+const LEGACY_DONE_PREFIX = 'junshi.coach.v2.';
 const STEPS = [
   // 问策入口有两种形态（列表 / 对话即 tab），coach 数据是静态的，所以这句要两边都说得通：
   // 「直接说」在两种形态下都成立，「军师团 / 历史看右上」在终态是页头双入口、在列表态是搜索行右侧，
   // 都在右上方向，不误导。别写成只描述其中一种形态的话术。
   { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '有事直接说，总军师在这等你。换专业军师、翻旧对话都在右上角；结论会汇回主线判断。' },
-  { route: '/pages/home/index', title: '战局 · 判断与今日的事', text: '上半是判断：主要矛盾、三势、现在别做；下半是今日军令：做完打卡、回填战果，军师据此调明天。' },
-  { route: '/pages/pouch/index', title: '锦囊 · 军师替你出的成品', text: '方案、海报、成片都住在这里，随时翻出来分享或照着再来一件。' },
+  { route: '/pages/home/index', title: '战局 · 先看判断', text: '这里看主要矛盾、三势和现在不能做什么；判断定了，去今日把它变成动作。' },
+  { route: '/pages/execution/index', title: '今日 · 把判断做成结果', text: '军令在这打卡；军师配的兵器、出过的成品，从页底锦囊进。' },
   { route: '/pages/thinktank/index', title: '图籍 · 军师断事的依据', text: '资料和数据源都收在这。图籍越厚，军师断事越准。' },
   { route: '/pages/profile/index', title: '主公 · 你自己', text: '档案、算力、服务老师都在这里打理。往后有事，随时唤军师。' },
 ];

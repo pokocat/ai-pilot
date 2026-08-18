@@ -1,7 +1,11 @@
 const TAB_ROUTES = new Set([
-  '/pages/sessions/index', '/pages/home/index', '/pages/pouch/index',
+  '/pages/sessions/index', '/pages/home/index', '/pages/execution/index',
   '/pages/thinktank/index', '/pages/profile/index',
 ]);
+
+const EXECUTION_ROUTE = '/pages/execution/index';
+let executionIntent = null;
+let executionIntentTimer = null;
 
 const LOCK_MS = 800;
 let lockedUntil = 0;
@@ -31,4 +35,35 @@ function navTo(url) {
   return true;
 }
 
-module.exports = { navTo, TAB_ROUTES };
+/**
+ * tabBar 页不能带 query。把「今日 / 本周」做成一次性内存 intent：成功、失败或超时都会清，
+ * execution onShow 消费后同样立即清。无新 intent 时页面保留用户原来的段和滚动位置。
+ */
+function gotoExecution(segment) {
+  if (!acquire()) return false;
+  const value = segment === 'week' ? 'week' : 'today';
+  executionIntent = { segment: value, at: Date.now() };
+  if (executionIntentTimer) clearTimeout(executionIntentTimer);
+  executionIntentTimer = setTimeout(() => { executionIntent = null; executionIntentTimer = null; }, 1800);
+  wx.switchTab({
+    url: EXECUTION_ROUTE,
+    success: () => { success(); },
+    fail: (error) => {
+      executionIntent = null;
+      if (executionIntentTimer) clearTimeout(executionIntentTimer);
+      executionIntentTimer = null;
+      fail(error);
+    },
+  });
+  return true;
+}
+
+function consumeExecutionIntent() {
+  const intent = executionIntent;
+  executionIntent = null;
+  if (executionIntentTimer) clearTimeout(executionIntentTimer);
+  executionIntentTimer = null;
+  return intent && (intent.segment === 'today' || intent.segment === 'week') ? intent.segment : '';
+}
+
+module.exports = { navTo, gotoExecution, consumeExecutionIntent, TAB_ROUTES };

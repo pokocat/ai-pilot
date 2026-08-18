@@ -109,11 +109,11 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
     const hasDedicated = ['js', 'json', 'wxml', 'scss'].every((ext) => fs.existsSync(path.join(sourceRoot, `${route}.${ext}`)));
     assert.ok(hasDedicated, `路由缺少独立原生四件套：${route}`);
   }
-  // 2026-08-12 IA 重排：+1 = pages/pouch（锦囊作品页）。studio 降为过渡跳转页但仍注册（接老分享卡）。
+  // 2026-08-18 IA 回归：+1 = pages/execution（独立执行 tab）。pouch 降普通页，studio 继续接老分享卡。
   // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
   // 2026-08-13 成片封面：+1 = packages/video/cover（出片确认页的可选支线，填四个文本槽位）。
   // 2026-08-15 独立声音：+1 = packages/video/voices（我的声音列表页，声音可脱离形象单独存在）。
-  assert.equal(routes.length, 53, '路由数量变化时必须同步审计原生迁移覆盖');
+  assert.equal(routes.length, 54, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -465,6 +465,7 @@ test('mock 不得比真服务端「友好」：多给的字段会让端上写出
   const mock = read(sourceRoot, 'services/mock.js');
   const behavior = read(chatCoreRoot, 'behavior.js');
   const home = read(sourceRoot, 'pages/home/index.js');
+  const execution = read(sourceRoot, 'pages/execution/index.js');
   const credits = read(sourceRoot, 'packages/work/credits/index.js');
 
   // WorkbenchView 契约只有 completeness/sections/missing，服务端物理上不会给 title。
@@ -482,8 +483,8 @@ test('mock 不得比真服务端「友好」：多给的字段会让端上写出
   assert.doesNotMatch(behavior, /item\.summary \|\| item\.category/, '@引用资料行不得消费契约里没有的字段');
 
   // /casefile/orders 与 /casefile/backfill 都要求先有 active casefile，mock 却会当场捏一份。
-  // 执行区已随 IA 重排并入战局页（pages/home），门禁跟着搬家。
-  assert.equal((home.match(/if \(!this\.data\.hasDossier\) \{ wx\.showToast\(\{ title: '先和军师定下一份方案，生成案卷'/g) || []).length, 3, '加军令 / 回填数据 / 改目标三处门禁口径一致');
+  // 执行区已随 IA 重排进入独立执行 Tab，门禁跟着搬家。
+  assert.equal((execution.match(/if \(!this\.data\.hasDossier\) \{ wx\.showToast\(\{ title: '先和军师定下一份方案，生成案卷'/g) || []).length, 3, '加军令 / 回填数据 / 改目标三处门禁口径一致');
 });
 
 test('服务端下发给端上的页面路由必须真实存在（页面搬家要连服务端一起搬）', () => {
@@ -533,8 +534,8 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.safe-title-wrap\s*\{[^}]*text-align:\s*left;/s);
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
-  // 主包/既有分包 36 页 + 快出片分包 14 页（+templates 模板专区、+cover 成片封面、+voices 我的声音），全部复用同一套胶囊几何。
-  assert.equal(navRoots.length, 50);
+  // 独立执行页加入后全部复用同一套胶囊几何。
+  assert.equal(navRoots.length, 51);
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {
@@ -885,7 +886,7 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
     assert.ok(new RegExp(`setOverlay\\(false, '${key}'\\)`).test(js), `${key} 缺少成对的 setOverlay(false)`);
   }
   assert.match(js, /onHide\(\) \{[\s\S]*?setOverlay\(false, 'wence-isle'\)[\s\S]*?setOverlay\(false, 'wence-drawer'\)/, '离开 tab 必须放开底栏');
-  assert.match(js, /setOverlay\(false, 'wence-isle'\);\s*\n\s*wx\.switchTab/, '切走前先释放 overlay，别让下一个 tab 没有底栏');
+  assert.match(js, /setOverlay\(false, 'wence-isle'\);[\s\S]{0,120}(?:gotoExecution|wx\.switchTab)/, '切走前先释放 overlay，别让下一个 tab 没有底栏');
 
   // —— 未读三层引导链 ——
   assert.match(wxml, /index === 0 && unread > 0[\s\S]*?class="tab-badge"/, '① 浮岛问策角标 = 全会话聚合');
@@ -1098,10 +1099,10 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
   const tabTable = fs.readFileSync(path.join(sourceRoot, 'services/tabbar.js'), 'utf8');
   // 底栏五图标 2026-08-09 起为自绘新键（counsel/sandtable/muster/brocade/lord），
   // 不再经 LUCIDE 映射；其余 native-icon 名仍必须映射齐全（上面的循环）。
-  // 2026-08-12 IA 重排：战局沿用沙盘旗台字形；锦囊（作品页）拿回束口袋；图籍借点兵的名册字形（册=档案义）。
+  // 2026-08-18 IA 回归：战局沿用沙盘旗台，执行用打勾名册，锦囊降为普通页。
   assert.match(tabTable, /pages\/sessions\/index', icon: 'counsel'/);
   assert.match(tabTable, /icon: 'sandtable', text: '战局'/);
-  assert.match(tabTable, /pages\/pouch\/index', icon: 'brocade', text: '锦囊'/);
+  assert.match(tabTable, /pages\/execution\/index', icon: 'muster', text: '今日'/);
   assert.match(tabTable, /pages\/thinktank\/index', icon: 'codex', text: '图籍'/);
   assert.match(iconSource, /^  codex: '<rect /m, '图籍书册字形必须在 H5 Icon 的 PATHS 里（构建期抽取，抽不到即构建失败）');
   assert.ok(builder.includes("'lord', 'codex'"), 'codex 必须登记进 CUSTOM_TAB_ICONS，否则不发射主题态 SVG');
@@ -1241,10 +1242,10 @@ test('问策提示 pill 不在时不留空栏：预留高度与 pill 的显示�
   assert.match(scss, /\.wence-scroll\.pill-on \{[^}]*\+ 121px/s, 'pill 在时才补那一档');
 });
 
-test('战局/锦囊/图籍：底部渐隐遮罩必须存在且不吞点击', () => {
+test('一级 tab 页面底部渐隐遮罩必须存在且不吞点击', () => {
   const appStyle = fs.readFileSync(path.join(sourceRoot, 'app.scss'), 'utf8');
   assert.match(appStyle, /\.native-bottom-fade \{[^}]*pointer-events: none;/s, '渐隐层必须放行点击，否则吞掉底部卡片');
-  for (const page of ['pages/home', 'pages/pouch', 'pages/thinktank']) {
+  for (const page of ['pages/home', 'pages/execution', 'pages/thinktank']) {
     assert.match(read(sourceRoot, `${page}/index.wxml`), /<view class="native-bottom-fade"><\/view>/, `${page} 缺底部渐隐`);
   }
   // 开发环境角标在 mock 时仍是数据档案开关，必须可点（历史上 pointer-events:none 且钉在状态栏下，等于假按钮）。
@@ -1252,46 +1253,50 @@ test('战局/锦囊/图籍：底部渐隐遮罩必须存在且不吞点击', () 
   assert.match(appStyle, /\.native-env-badge \{[^}]*bottom: calc\(env\(safe-area-inset-bottom\) \+ 88px\)/s, '开发环境角标必须落在底栏上方的可点区');
 });
 
-test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，studio 只做过渡跳转', () => {
-  // 2026-08-12 五 tab 重排：原点兵页拆解——执行链路（军令/回填/复盘/处方）并入 pages/home（战局），
-  // 创意手艺与作品入口归 pages/pouch（锦囊）。studio 保留注册一个发布周期，接住老分享卡。
+test('IA 回归后：战局只判断，军令主链路在执行，锦囊降普通页', () => {
   const studio = fs.readFileSync(path.join(sourceRoot, 'pages/studio/index.js'), 'utf8');
   const home = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.js'), 'utf8');
   const homeWxml = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
-  const homeScss = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.scss'), 'utf8');
+  const execution = fs.readFileSync(path.join(sourceRoot, 'pages/execution/index.js'), 'utf8');
+  const executionWxml = fs.readFileSync(path.join(sourceRoot, 'pages/execution/index.wxml'), 'utf8');
+  const executionScss = fs.readFileSync(path.join(sourceRoot, 'pages/execution/index.scss'), 'utf8');
   const pouch = fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.js'), 'utf8');
   const pouchWxml = fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.wxml'), 'utf8');
   const api = fs.readFileSync(path.join(sourceRoot, 'services/api.js'), 'utf8');
   const mock = fs.readFileSync(path.join(sourceRoot, 'services/mock.js'), 'utf8');
 
-  // studio = 纯跳转壳：不得残留业务逻辑，跳转必须指战局。
-  assert.match(studio, /wx\.switchTab\(\{ url: '\/pages\/home\/index' \}\)/, 'studio 过渡页必须跳战局');
+  // studio = 纯跳转壳：不得残留业务逻辑，跳转必须指执行。
+  assert.match(studio, /gotoExecution\('today'\)/, 'studio 过渡页必须跳执行');
   assert.doesNotMatch(studio, /api\.|store\.loadAgents|prescriptions/, 'studio 过渡页不得残留业务逻辑');
 
-  // 兵器主链路在战局：处方过滤、点击上报、挂到军令、伏笔样式。
-  assert.match(home, /api\.prescriptions\(\)/);
-  assert.match(home, /item\.status !== 'dismissed' && item\.status !== 'activated'/);
-  assert.match(home, /api\.prescriptionAction\(id, 'clicked'\)\.catch/);
-  assert.match(home, /\/packages\/work\/market\/index\?from=prescription&pid=/);
-  assert.match(homeWxml, /item\.weapon/, '兵器条必须挂在军令卡内（主分发位）');
+  // 战局只做判断，核心读失败时桥接只给重试；有令优先于有判断。
+  assert.doesNotMatch(homeWxml, /item\.weapon|weekStrip|今日数据回填/, '战局不得再平铺执行区');
+  assert.match(homeWxml, /loadFailed[\s\S]{0,180}bindtap="retry"/);
+  assert.ok(homeWxml.indexOf('todayOrderCount>0') < homeWxml.indexOf('hasValidJudgment'), '桥接判据必须今日有令优先');
+  assert.doesNotMatch(home, /api\.prescriptions\(\)|api\.reviews\(\)|api\.bizMetricTemplate\(\)/, '战局 onShow 不得加载执行接口');
+
+  // 兵器主链路在执行：处方过滤、点击上报、挂到军令、伏笔样式。
+  assert.match(execution, /api\.prescriptions\(\)/);
+  assert.match(execution, /item\.status !== 'dismissed' && item\.status !== 'activated'/);
+  assert.match(execution, /api\.prescriptionAction\(id, 'clicked'\)\.catch/);
+  assert.match(execution, /\/packages\/work\/market\/index\?from=prescription&pid=/);
+  assert.match(executionWxml, /item\.weapon/, '兵器条必须挂在军令卡内（主分发位）');
   // 兵器绑定必须来自服务端 order.weapon（拆军令那一轮 LLM 选的 toolKey，1:1）。
   // 端上一度按位置拼（第 N 条处方贴第 N 条军令），处方讲的问题和军令可能毫不相干——不许回退。
-  assert.doesNotMatch(home, /weapon: weapons\[index\]/, '不得按位置把处方拼到军令上');
-  assert.match(home, /this\._pendingWithWeapons = pendingOrders;/, '军令的兵器只认服务端下发的字段');
-  assert.match(home, /weapon\.kind === 'external'/, 'external 兵器要走 navigateToMiniProgram');
-  assert.match(home, /onOrder\.has\(item\.toolKey\)/, '已作为军令兵器出现的工具不再重复列成独立兵器条');
-  assert.match(homeWxml, /wx:for="\{\{leftoverWeapons\}\}"/, '未挂上军令的处方以独立兵器条陈列');
-  assert.match(homeWxml, /native-icon name="bolt"/);
-  assert.match(homeScss, /\.rx-item\s*\{/);
-  assert.match(homeScss, /\.task-weapon\s*\{/);
+  assert.doesNotMatch(execution, /weapon: weapons\[index\]/, '不得按位置把处方拼到军令上');
+  assert.match(execution, /this\._pendingWithWeapons = pendingOrders;/, '军令的兵器只认服务端下发的字段');
+  assert.match(execution, /weapon\.kind === 'external'/, 'external 兵器要走 navigateToMiniProgram');
+  assert.match(execution, /onOrder\.has\(item\.toolKey\)/, '已作为军令兵器出现的工具不再重复列成独立兵器条');
+  assert.match(executionWxml, /wx:for="\{\{leftoverWeapons\}\}"/);
+  assert.match(executionScss, /\.rx-item\s*\{/);
+  assert.match(executionScss, /\.task-weapon\s*\{/);
 
-  // 执行链路在战局：军令回填、目标、复盘、案卷标题清洗与门禁话术。
-  assert.match(home, /function plainInline\(value\)/, '案卷标题进入深色卡前必须去 Markdown 标记');
-  assert.match(home, /api\.saveGoals\(/);
-  assert.match(home, /api\.setOrderResult\(/);
-  assert.match(home, /api\.reviewCasefile\('day'\)[\s\S]*?agentKey=general/);
-  assert.match(homeWxml, /做完了多少/);
-  assert.match(homeWxml, /bindtap="openReminders"/);
+  // 执行链路完整：军令回填、目标、复盘与提醒都在新页。
+  assert.match(execution, /api\.saveGoals\(/);
+  assert.match(execution, /api\.setOrderResult\(/);
+  assert.match(execution, /api\.reviewCasefile\('day'\)[\s\S]*?agentKey=general/);
+  assert.match(executionWxml, /做完了多少/);
+  assert.match(executionWxml, /bindtap="openReminders"/);
 
   // 手艺格在锦囊：创意 agents 动态格 + 已启用判定 + 置灰格能真正走到启用。
   assert.match(pouch, /text\(agent\.type\) === 'creative'/);
@@ -1349,13 +1354,13 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   assert.match(pouch, /Boolean\(agent && \(agent\.owned/, '查不到 agent 时按未启用处理');
 
   // 日 / 周两段是打卡机制的两半：日计划做今天，周计划看连续性。删掉任一半都会削弱「别断」。
-  assert.match(home, /segments: \['今日军令', '本周'\]/, '战局必须保留日/周两段');
-  assert.match(home, /function weekStrip\(orders\)/, '七日打卡条是连续性可视化的唯一载体');
-  assert.match(home, /for \(let offset = -6; offset <= 0; offset \+= 1\)/, '打卡条必须按日历连续七格，不能只列有记录的日子');
-  assert.match(home, /function recentOrderGroups\(orders\)/);
-  assert.match(homeWxml, /wx:for="\{\{weekStrip\}\}"/);
-  assert.match(homeWxml, /wx:for="\{\{weekGroups\}\}"/);
-  assert.match(homeWxml, /连续复盘 '\+streak\+' 天/, '连续天数要在周计划里露出');
+  assert.match(execution, /segments: \['今天', '近七日'\]/, '今日 tab 内必须保留同维度的今天/近七日两段，避免 tab 与段名重名');
+  assert.match(execution, /function weekStrip\(orders\)/);
+  assert.match(execution, /for \(let offset = -6; offset <= 0; offset \+= 1\)/);
+  assert.match(execution, /function recentOrderGroups\(orders\)/);
+  assert.match(executionWxml, /wx:for="\{\{weekStrip\}\}"/);
+  assert.match(executionWxml, /wx:for="\{\{weekGroups\}\}"/);
+  assert.match(executionWxml, /连续复盘 \{\{streak\}\} 天/, '复盘 streak 必须与近七日执行指标拆开');
 
   // 数据通道与 mock 契约不变。
   assert.match(api, /prescriptions:\s*\(\) => isMock\(\) \? mock\.prescriptions\(\)/);
@@ -1363,6 +1368,80 @@ test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，stud
   for (const key of ['ip', 'promo', 'poster', 'shortvideo', 'copy']) {
     assert.match(mock, new RegExp(`key: '${key}'[^\n]+type: 'creative'`), `mock 缺少创作军师 ${key}`);
   }
+});
+
+test('执行 tab 守住独立状态机、锦囊兼容与冷启动复盘红点', () => {
+  const execution = read(sourceRoot, 'pages/execution/index.js');
+  const executionWxml = read(sourceRoot, 'pages/execution/index.wxml');
+  const executionScss = read(sourceRoot, 'pages/execution/index.scss');
+  const pouch = read(sourceRoot, 'pages/pouch/index.js');
+  const pouchWxml = read(sourceRoot, 'pages/pouch/index.wxml');
+  const cache = read(sourceRoot, 'services/works-cache.js');
+  const nav = read(sourceRoot, 'services/nav.js');
+  const tabbar = read(sourceRoot, 'custom-tab-bar/index.wxml');
+  const sessions = read(sourceRoot, 'pages/sessions/index.js');
+  const sessionsWxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const coach = read(sourceRoot, 'services/coach.js');
+
+  assert.match(execution, /loadCore\(\)/, '执行核心有独立状态机');
+  assert.match(execution, /loadTodayWorks\(options\)/, '今日战果有独立状态机');
+  assert.doesNotMatch(execution, /api\.videoWorks\(/, '日频执行页严禁调用慢成片列表');
+  assert.match(execution, /worksCache\.loadPosters\(options\)/, '今日战果只复用海报缓存');
+  assert.match(executionWxml, /worksStatus==='error'[\s\S]{0,180}bindtap="retryWorks"/, '战果失败必须给局部重试');
+  assert.ok(executionWxml.indexOf("worksStatus==='error'") < executionWxml.indexOf('wx:else class="works-empty"'), '失败判据必须先于真空态');
+  assert.match(executionWxml, /reviewDue[\s\S]{0,180}今晚复盘还没做/, '21 点复盘提醒在今日段顶部可见');
+  assert.match(executionWxml, /pouchMovedHint[\s\S]{0,120}锦囊搬到这了/, '锦囊迁移提示只挂入口卡');
+
+  // 经营结果需要进入复盘真值，但不能在日频主流里常驻一张三栏报表。
+  const reviewSheetAt = executionWxml.indexOf('class="force-sheet-mask"');
+  const executionMain = executionWxml.slice(0, reviewSheetAt);
+  const reviewSheet = executionWxml.slice(reviewSheetAt);
+  assert.match(executionMain, /class="result-entry card" bindtap="openReview"[\s\S]{0,300}今日经营结果[\s\S]{0,180}有结果再记，不要求每天填满/, '主页面只保留轻量经营结果入口');
+  assert.doesNotMatch(executionMain, /class="df-row"|bindtap="saveBackfill"/, '三栏经营表单不得常驻今日主页面');
+  const reviewDailyEnd = reviewSheet.indexOf("reviewStatus==='loading'");
+  const reviewDailyForm = reviewSheet.slice(0, reviewDailyEnd);
+  assert.match(reviewDailyForm, /class="data-fill review-daily-fill"/, '每日结果表单收进复盘抽屉');
+  assert.match(reviewDailyForm, /bindtap="saveBackfill"/, '每日结果表单保留保存动作');
+  assert.ok(reviewSheet.indexOf('review-daily-fill') < reviewSheet.indexOf("reviewStatus==='loading'"), '每日结果填写不得被复盘详情接口的加载或失败阻断');
+  assert.match(reviewSheet, /本周关键指标[\s\S]{0,120}按你的行业模板汇总，每周记一次/, '周指标与每日结果必须明确区分频率和口径');
+
+  // fixed 底部抽屉不能再交给微信默认 adjust-position 二次顶页：所有经营输入统一由抽屉按键盘高度缩放。
+  const metricInputs = [...reviewSheet.matchAll(/<input[^>]*class="df-input"[^>]*>/g)].map((match) => match[0]);
+  assert.equal(metricInputs.length, 4, '每日三项 + 本周动态指标模板共四处 input 标记');
+  for (const input of metricInputs) {
+    assert.match(input, /always-embed="\{\{true\}\}"/);
+    assert.match(input, /adjust-position="\{\{false\}\}"/, '底部抽屉 input 禁止让系统整体顶页');
+    assert.match(input, /bindkeyboardheightchange="onReviewKeyboard"/);
+    assert.match(input, /bindfocus="focusReviewInput"/);
+  }
+  assert.match(executionWxml, /--review-keyboard:\{\{reviewKeyboardHeight\}\}px/);
+  assert.match(execution, /onReviewKeyboard\(event\)[\s\S]{0,260}reviewKeyboardHeight: height/);
+  assert.match(executionScss, /max-height:calc\(86vh - var\(--review-keyboard, 0px\)\)[\s\S]{0,120}margin-bottom:var\(--review-keyboard, 0px\)/, '键盘出现时抽屉应缩短并贴在键盘上沿，顶部位置保持稳定');
+
+  assert.match(cache, /if \(slot\.inFlight\) return slot\.inFlight;/, '作品缓存必须 single-flight');
+  assert.match(cache, /const TTL_MS = 90000/, '作品缓存统一 90 秒 TTL');
+  assert.match(cache, /const scope = String\(getToken\(\) \|\| 'guest'\)/, '模块缓存必须按当前登录身份隔离，切账号不得复用上一账号作品');
+  assert.match(cache, /slot\.scope !== scope \|\| slot\.inFlight !== request/, '旧账号慢请求回包不得覆盖新账号缓存槽');
+  assert.match(pouch, /worksCache\.loadPosters/);
+  assert.match(pouch, /worksCache\.loadClips/);
+  assert.match(pouch, /worksCache\.loadReports/);
+  assert.match(pouch, /mockProfile\.switchProfile\([\s\S]*?worksCache\.invalidate\(\)/, 'mock 档案切换必须清作品缓存，不能沿用同 token 的上一档案');
+  assert.doesNotMatch(pouch, /syncTabBar|this\._loadedAt/, '普通页锦囊不得保留 tab 身份或页面实例缓存');
+  assert.doesNotMatch(pouchWxml, /coach-marks|native-bottom-fade|tabbar-space/, '普通页锦囊不得保留 tab 专属 UI');
+  assert.match(pouchWxml, /class="pouch-back" bindtap="back"/);
+  assert.match(pouch, /getCurrentPages\(\)\.length > 1[\s\S]{0,180}gotoExecution\('today'\)/, '锦囊无返回栈时兜底执行 tab');
+
+  const allJs = walk(sourceRoot).filter((file) => file.endsWith('.js')).map((file) => read(file)).join('\n');
+  assert.doesNotMatch(allJs, /wx\.switchTab\(\{\s*url:\s*['"]\/pages\/pouch\/index/, 'pouch 降普通页后全仓不得 switchTab 到它');
+  assert.match(nav, /let executionIntent = null/);
+  assert.match(nav, /function consumeExecutionIntent\(\)/);
+  assert.match(nav, /executionIntent = null;[\s\S]{0,180}return intent/, 'execution intent 消费后立即清除');
+  assert.match(coach, /junshi\.coach\.v3\./);
+  assert.match(coach, /LEGACY_DONE_PREFIX = 'junshi\.coach\.v2\.'/);
+
+  assert.match(tabbar, /index === 2 && reviewDue/, '常规底栏复盘红点在执行位');
+  assert.match(sessionsWxml, /index === 2 && reviewDue/, '问策浮岛复盘红点在执行位');
+  assert.match(sessions, /store\.loadReviewBadge\(\)/, '冷启动问策页必须生产复盘红点');
 });
 
 test('智库确认入库期间锁定上传、阶段切换与重复确认', () => {
@@ -1809,7 +1888,7 @@ test('后端环境角标只在开发版显示，并按真实请求地址区分�
   assert.equal(environment.shouldShowBackendEnvironmentBadge('release'), false);
   assert.equal(environment.shouldShowBackendEnvironmentBadge(''), false, '微信版本身份不可用时必须安全隐藏');
 
-  for (const page of ['pages/home', 'pages/sessions', 'pages/pouch', 'pages/thinktank', 'pages/profile']) {
+  for (const page of ['pages/home', 'pages/sessions', 'pages/execution', 'pages/pouch', 'pages/thinktank', 'pages/profile']) {
     const markup = read(sourceRoot, `${page}/index.wxml`);
     assert.match(markup, /wx:if="\{\{showBackendEnvironmentBadge\}\}"[^>]*native-env-badge/, `${page} 必须消费统一开发环境角标`);
     assert.match(markup, /\{\{backendEnvironmentLabel\}\}/, `${page} 必须展示真实后端环境`);

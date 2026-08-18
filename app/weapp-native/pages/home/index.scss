@@ -1,5 +1,5 @@
 @use "../../../src/pages/home/index.scss" as home;
-@use "../../../src/pages/studio/index.scss" as studio;
+/* 战局只消费判断样式；执行样式已迁至 pages/execution。 */
 
 /* 战局 = 沙盘(home) + 点兵(studio) 合并页。两份 src scss 同时导入（选择器全局，H5 仍在消费，
    不动 src；wxss 体积代价已知）。下方补丁 = 原 home 补丁 + 原 studio 补丁中随执行区块搬来的部分。 */
@@ -21,6 +21,11 @@
 .force-sheet{width:100%;max-height:86vh;box-sizing:border-box;padding:10px 20px calc(18px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 -18px 52px rgba(15,31,25,.2);}
 .force-sheet-grip{width:40px;height:4px;margin:0 auto 14px;border-radius:2px;background:var(--line-strong);flex-shrink:0;}
 .force-sheet .fs-body{max-height:52vh;}
+.battle-bridge{display:flex;align-items:center;gap:12px;min-height:68px;padding:13px 15px;border-color:var(--accent-glow);}
+.battle-bridge .bb-copy{flex:1;min-width:0;}
+.battle-bridge .bb-main{display:block;font-size:15px;font-weight:600;color:var(--ink);}
+.battle-bridge .bb-sub{display:block;margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--ink-3);}
+.battle-bridge .bb-go{flex-shrink:0;color:var(--accent);font-size:13px;font-weight:600;}
 
 /* —— 原 studio 补丁（执行区块随迁） —— */
 /* 取数失败提示条（与锦囊/图籍同款，类名复用便于三处一起改） */
