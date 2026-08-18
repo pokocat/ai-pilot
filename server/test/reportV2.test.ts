@@ -2,7 +2,7 @@
 //   cd server && node --import tsx --test test/reportV2.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDeliverableSections, normalizeCover, healDeliverableSections } from '../src/llm/schema.js';
+import { normalizeDeliverableSections, normalizeDeliverableTitle, normalizeCover, healDeliverableSections } from '../src/llm/schema.js';
 import { renderReportHtml } from '../src/services/reportHtml.js';
 import type { Deliverable } from '../src/llm/schema.js';
 
@@ -179,6 +179,13 @@ describe('normalizeDeliverableSections · 类型化', () => {
     assert.equal(normalizeCover({ subtitle: 'x' }), undefined);
     assert.deepEqual(normalizeCover({ title: '三城布局方略', motto: '谋定而后动' }), { title: '三城布局方略', motto: '谋定而后动' });
   });
+});
+
+test('报告标题去掉悬空连接词并收住超长解释', () => {
+  assert.equal(normalizeDeliverableTitle('主要矛盾定锤 · 攻守决断与'), '主要矛盾定锤 · 攻守决断');
+  const long = normalizeDeliverableTitle('主要矛盾定锤：先守住现金流再重建产品结构与渠道增长节奏以及长期组织能力建设方案');
+  assert.equal(long, '主要矛盾定锤');
+  assert.equal(normalizeDeliverableTitle('  **三城布局方略**  '), '三城布局方略');
 });
 
 describe('renderReportHtml · 类型化渲染', () => {

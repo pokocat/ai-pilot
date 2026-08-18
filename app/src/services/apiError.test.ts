@@ -39,3 +39,12 @@ test('未知 4xx 保留自然中文业务原因，英文技术文本退回动作
   assert.equal(apiErrorPresentation({ statusCode: 422, message: '请补齐公司名称' }, '保存未完成').message, '请补齐公司名称');
   assert.equal(apiErrorPresentation({ statusCode: 422, message: 'validation failed at field company' }, '保存未完成').message, '保存未完成');
 });
+
+test('413 明确区分通用超限与路由级文件上限', () => {
+  assert.equal(httpErrorInfo(413, '<html>Request Entity Too Large</html>', '上传').message,
+    '文件太大，超过当前上传上限，请压缩或拆分后重新上传。');
+  assert.equal(httpErrorInfo(413, { code: 'CLIP_CAPTURE_TOO_LARGE' }, '上传').message,
+    '形象视频超过 100MB，请压缩或缩短后重新上传。');
+  assert.equal(httpErrorInfo(413, { code: 'KNOWLEDGE_FILE_TOO_LARGE' }, '上传').message,
+    '文件超过 20MB，请压缩、拆分或导出较小文件后重新上传。');
+});

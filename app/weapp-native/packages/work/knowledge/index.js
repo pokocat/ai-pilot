@@ -5,7 +5,7 @@ const { navTo } = require('../../../services/nav');
 const { getToken } = require('../../../services/token');
 const { getApiBaseUrl } = require('../../../services/runtime-mode');
 
-const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
+const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
 const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
 const STATUS = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
 const STAGES = { staging: { label: '待整理', cls: 'kb-st-staging' }, optimized: { label: '已优化', cls: 'kb-st-optimized' } };

@@ -60,6 +60,21 @@ test('超时与限流仍走各自的专属文案，不被上面的改动影响',
   assert.match(httpErrorInfo(429, {}, '提交').message, /有点频繁/);
 });
 
+test('Nginx 在应用前拦下 413 时也要明确说文件过大', () => {
+  assert.equal(
+    httpErrorInfo(413, '<html>Request Entity Too Large</html>', '上传').message,
+    '文件太大，超过当前上传上限，请压缩或拆分后重新上传。',
+  );
+  assert.equal(
+    httpErrorInfo(413, { code: 'CLIP_CAPTURE_TOO_LARGE' }, '上传').message,
+    '形象视频超过 100MB，请压缩或缩短后重新上传。',
+  );
+  assert.equal(
+    httpErrorInfo(413, { code: 'KNOWLEDGE_FILE_TOO_LARGE' }, '上传').message,
+    '文件超过 20MB，请压缩、拆分或导出较小文件后重新上传。',
+  );
+});
+
 test('4xx 行为不变：优先 code 表，其次服务端中文原因', () => {
   assert.equal(httpErrorInfo(409, { code: 'CLIP_ENGINE_SPEAKER_NOT_FOUND' }, '提交').message,
     '声音模型不存在了，请重新采集声音。');
