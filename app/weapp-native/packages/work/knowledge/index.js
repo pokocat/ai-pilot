@@ -149,4 +149,4 @@ Page(withShare({
     });
   },
   cancelUpload() { this._cancelled = true; if (this._uploadTask) this._uploadTask.abort(); this._uploadTask = null; this.setData({ busy: false, pct: 0 }); wx.showToast({ title: '已取消上传', icon: 'none' }); },
-}, { timeline: true }));
+}));

@@ -4,7 +4,7 @@
 // **归因失败绝不能阻断注册**，且失败必须留痕（否则推荐人无从解释「客户为什么没归到我」）。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from './helpers.ts';
+import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { bindOnRegister, isInviteCodeShape, referralConfig } from '../src/services/referral.ts';
 
@@ -75,10 +75,17 @@ test('微信一键通道：同一份归因参数在 /auth/wechat-phone 上同样
   // 且不会因为多带两个字段就把请求打成 400 参数错误」——绑定逻辑与短信通道是同一个函数。
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const r = await api('POST', '/api/auth/wechat-phone', {
+  // 断言「带码与不带码的响应状态完全一致」，而不是只断言 !== 400 ——
+  // 后者在接口 500 时也会绿，等于什么都没验到。这里要证明的是：多带两个归因字段
+  // 不改变这个入口的既有行为（该入口在测试环境走不到微信服务，两次都会失败在同一处）。
+  const withCode = await api('POST', '/api/auth/wechat-phone', {
     body: { phoneCode: 'test-phone-code', loginCode: 'test-login-code', inviteCode: code, inviteCodeAt: Date.now() },
   });
-  assert.notEqual(r.status, 400, `归因字段不得导致参数校验失败，实际 ${r.status} ${JSON.stringify(r.body)}`);
+  const without = await api('POST', '/api/auth/wechat-phone', {
+    body: { phoneCode: 'test-phone-code', loginCode: 'test-login-code' },
+  });
+  assert.equal(withCode.status, without.status, `带归因字段改变了响应：${withCode.status} vs ${without.status}`);
+  assert.notEqual(withCode.status, 400, '归因字段不得导致参数校验失败');
 });
 
 test('自邀拒绝：拿自己的码注册不可能发生，但拿自己的码再绑一次要被拒并留痕 self', async () => {
@@ -113,14 +120,36 @@ test('不存在的码：注册照常成功（绝不阻断），并留痕 unknown
   assert.deepEqual(await outcomesOf(invitee), ['unknown_code']);
 });
 
-test('脏码不打断登录：形状非法的 inviteCode 不得让 /auth/login 返回 400', async () => {
+test('脏码不打断登录，但带了码就必须留痕（形状非法 → unknown_code）', async () => {
   const r = await api<{ token: string }>('POST', '/api/auth/login', {
     body: { phone: uniquePhone(), name: '脏码用户', inviteCode: 'not-a-code' },
   });
   assert.equal(r.status, 200, '分享链路不能因为一个脏参数把登录拦下来');
-  // 形状不合法在路由层就被丢弃，视同没带码：不建边、也不该产生归因噪音
-  assert.equal(await prisma.referral.count({ where: { userId: r.body.token } }), 0);
-  assert.deepEqual(await outcomesOf(r.body.token), []);
+  assert.equal(await prisma.referral.count({ where: { userId: r.body.token } }), 0, '非法码不建边');
+  // 带了码就要留痕：用户说「我填了邀请码怎么没算给他」时，运营手上得有凭据可查。
+  assert.deepEqual(await outcomesOf(r.body.token), ['unknown_code']);
+});
+
+test('完全没带码：不产生任何归因行（绝大多数注册走这条，不该有噪音）', async () => {
+  const clean = await register();
+  assert.deepEqual(await outcomesOf(clean), []);
+});
+
+test('任何类型的脏归因参数都不得让登录 400（zod 兜住，不是靠调用方自律）', async () => {
+  const cases: Array<Record<string, unknown>> = [
+    { inviteCode: 123 },                              // 数字型码
+    { inviteCode: 'JS2K7P', inviteCodeAt: 'abc' },    // 字符串型时间戳
+    { inviteCode: 'JS2K7P', inviteCodeAt: -5 },       // 负数时间戳
+    { inviteCode: 'JS2K7P', inviteCodeAt: 1.5 },      // 非整数
+    { inviteCode: 'x'.repeat(500) },                  // 超长串
+    { inviteCode: null, inviteCodeAt: null },         // null
+  ];
+  for (const extra of cases) {
+    const r = await api<{ token: string }>('POST', '/api/auth/login', {
+      body: { phone: uniquePhone(), name: '脏参数用户', ...extra },
+    });
+    assert.equal(r.status, 200, `脏参数 ${JSON.stringify(extra)} 不得让登录失败，实际 ${r.status} ${JSON.stringify(r.body)}`);
+  }
 });
 
 test('超归因窗口：捕获时刻早于窗口（默认 30 天）→ expired，不建边但留痕', async () => {
@@ -186,28 +215,44 @@ test('深环拒绝：A→B→C→D 链上，A 拿 D 的码绑定必须被拒（�
   const dCode = await inviteCodeOf(d);
   const tenantA = (await prisma.user.findUniqueOrThrow({ where: { id: a } })).tenantId;
   const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: dCode });
-  assert.notEqual(outcome, 'bound', '成环必须被拒');
+  // 断言**具体** outcome：只写 `!== 'bound'` 的话，实现哪天错成 unknown_code 也照样绿，
+  // 那就掩盖了「环没被识别出来、只是恰好因为别的原因没建边」这种情况。
+  assert.equal(outcome, 'cycle', '成环必须被识别为 cycle（与自邀 self 分开，排查方向不同）');
   assert.equal(await prisma.referral.count({ where: { userId: a } }), 0, 'A 不得获得推荐人');
-  // 环拒绝也要留痕，便于排查人工补绑造成的脏数据
-  assert.ok((await outcomesOf(a)).length > 0, '拒绝也必须落归因日志');
+  assert.deepEqual(await outcomesOf(a), ['cycle'], '环拒绝也要留痕，便于排查人工补绑造成的脏数据');
 });
 
-test('/me.referral 读数：直邀数与已开通数分开算，上级姓名如实回填', async () => {
+test('/me.referral 读数：直邀数与已开通数分开算（过期套餐不计入），上级姓名如实回填', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const one = await register({ inviteCode: code, inviteCodeAt: Date.now() });
-  await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const active = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const expired = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+
+  // 不依赖「注册时会不会自动开通套餐」这种环境细节（它随 TEST_DEFAULT_PLAN_NAME 变化），
+  // 显式把两个直邀摆成一个有效、一个已过期，这样断言的是**口径**而不是环境。
+  const planId = await anyPlanId();
+  await prisma.user.update({
+    where: { id: active },
+    data: { planId, planActivatedAt: new Date(), planExpiresAt: new Date(Date.now() + 30 * 86_400_000) },
+  });
+  await prisma.user.update({
+    where: { id: expired },
+    data: { planId, planActivatedAt: new Date(Date.now() - 60 * 86_400_000), planExpiresAt: new Date(Date.now() - 86_400_000) },
+  });
 
   const me = await api<{ referral: { directCount: number; activatedCount: number; referrerName: string | null } | null }>(
     'GET', '/api/me', { token: inviter },
   );
   assert.equal(me.status, 200);
   assert.ok(me.body.referral, 'referral 读数不应为 null');
-  assert.equal(me.body.referral!.directCount, 2, '两个直邀');
+  assert.equal(me.body.referral!.directCount, 2, '两个直邀都要数进来');
+  // 关键：这两个数必须分开算。套餐已过期的人不是「已开通」——
+  // 与 planGate / getPlanStatus 同一口径（有 planId 且未过期）。
+  assert.equal(me.body.referral!.activatedCount, 1, '过期套餐不得计入 activatedCount');
 
-  // 被邀人视角：能看到自己的上级姓名
+  // 被邀人视角：能看到自己的上级姓名与绑定时间
   const mine = await api<{ referral: { referrerName: string | null; boundAt: string | null } | null }>(
-    'GET', '/api/me', { token: one },
+    'GET', '/api/me', { token: active },
   );
   assert.equal(mine.body.referral!.referrerName, '测试老板');
   assert.ok(mine.body.referral!.boundAt, '绑定时间应回填');
@@ -228,4 +273,22 @@ test('已注册用户登录不追认推荐人：老号再带码登录，不建�
   assert.equal(again.body.token, userId, '仍是同一个账号');
   assert.equal(await prisma.referral.count({ where: { userId } }), 0, '存量用户互相填码是最容易被薅的口子，必须不追认');
   assert.deepEqual(await outcomesOf(userId), []);
+});
+
+test('并发绑定：同一新号两次带码请求同时进来，一个 bound 一个 already_bound，绝不双写也不抛错', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const target = await register(); // 干净的新号，还没有推荐人
+  const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: target } })).tenantId;
+
+  const [a, b] = await Promise.all([
+    bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code }),
+    bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code }),
+  ]);
+  // 主键冲突（P2002）必须被翻译成 already_bound 如实留痕，而不是抛给上层当「绑定失败」——
+  // 那样归因日志会缺这一行，风控视图就有空洞。
+  assert.deepEqual([a, b].sort(), ['already_bound', 'bound'], `实际 ${a} / ${b}`);
+  assert.equal(await prisma.referral.count({ where: { userId: target } }), 1, '只能有一条边');
+  const outcomes = (await outcomesOf(target)).sort();
+  assert.deepEqual(outcomes, ['already_bound', 'bound'], '两次进线都要留痕');
 });

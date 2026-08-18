@@ -220,4 +220,4 @@ Page(withShare({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); },
-}, { timeline: true }));
+}));

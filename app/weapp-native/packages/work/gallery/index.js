@@ -108,4 +108,4 @@ Page(withShare({
    * 说的和按钮做的是两件事。现在直接进确认页（与锦囊海报格同一个落点）。
    */
   goPosterDesigner() { navTo('/packages/main/chat/index?agentKey=poster&continue=1'); },
-}, { timeline: true }));
+}));

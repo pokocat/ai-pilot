@@ -20,14 +20,18 @@ import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { smsLoginEnabled, wechatLoginEnabled } from '../services/authConfig.js';
 import { bindOnRegister, isInviteCodeShape, type ReferralSource } from '../services/referral.js';
+import { bindOnRegister, type ReferralSource } from '../services/referral.js';
 import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
 // 邀请归因入参（三条建号通道共用）：两个字段都可选，且**形状不对一律当没传**——
 // 分享链路不能因为一个脏参数把登录拦成 400。窗口判定在 services/referral.ts（天数归运营配置）。
+// 两个字段都用 `.catch(undefined)` 兜住**任何**脏值（数字型的 inviteCode、字符串型或负数的
+// inviteCodeAt……）。不加 catch 时 zod 会让整个请求 400 —— 那就是「分享链路里一个脏参数
+// 把用户的登录拦下来」，比丢掉这次归因严重得多。长度上限防有人拿超长串刷归因日志。
 const attributionShape = {
-  inviteCode: z.string().trim().optional(),
-  inviteCodeAt: z.number().int().positive().optional(),
+  inviteCode: z.string().trim().max(64).optional().catch(undefined),
+  inviteCodeAt: z.number().int().positive().optional().catch(undefined),
 };
 
 const loginSchema = z.object({
@@ -73,9 +77,14 @@ interface RegisterAttribution {
 }
 
 function attributionOf(req: FastifyRequest, data: { inviteCode?: string; inviteCodeAt?: number }): RegisterAttribution | undefined {
-  if (!isInviteCodeShape(data.inviteCode)) return undefined;
+  const raw = data.inviteCode;
+  // 压根没带码 → 不归因也不留痕（绝大多数注册走这条，不该产生任何归因行）。
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  // 带了码但形状非法 → **照样往下走**，由 bindOnRegister 落一条 unknown_code。
+  // 不留痕的话，用户说「我填了邀请码怎么没算给他」时运营手上没有任何凭据可查。
+  // 形状校验本身在 bindOnRegister 里做（isInviteCodeShape），这里只负责别把它丢了。
   return {
-    inviteCode: data.inviteCode,
+    inviteCode: raw,
     inviteCodeAt: data.inviteCodeAt,
     // 通道细分（朋友圈 / 海报扫码）目前客户端还没分开上报，统一记 share_friend；
     // 要分通道时让客户端把 source 一起带上来，不要在服务端猜。
@@ -241,8 +250,12 @@ async function loginOrRegisterByPhone(
 async function bindReferralAfterRegister(user: AuthUser, attribution?: RegisterAttribution): Promise<void> {
   if (!attribution) return;
   try {
-    await bindOnRegister({
-      db: prisma,
+    // 关系与归因两次写**必须同事务**：否则会出现「建了边但归因行写失败」——
+    // 关系在、留痕不在，运营查不出这条边是怎么来的。
+    // 这个事务**不含建号**（见上方注释：Postgres 事务一旦有语句失败即 aborted，
+    // 把建号裹进来就无法做到「绑定失败不影响注册」）。
+    await prisma.$transaction((tx) => bindOnRegister({
+      db: tx,
       userId: user.id,
       tenantId: user.tenantId,
       inviteCode: attribution.inviteCode,
@@ -250,7 +263,7 @@ async function bindReferralAfterRegister(user: AuthUser, attribution?: RegisterA
       source: attribution.source,
       clientIp: attribution.clientIp,
       userAgent: attribution.userAgent,
-    });
+    }));
   } catch (err) {
     console.error('[referral] 绑定推荐人失败（注册已成功，不回滚）:', (err as Error).message);
   }
