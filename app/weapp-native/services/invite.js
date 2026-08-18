@@ -58,10 +58,16 @@ function safeGet(key) {
  */
 function trackLanding(channel) {
   try {
-    require('./api').api.track('invite_landing', { channel });
-    return true;
+    // **必须用 api.track 的返回值**，不能硬编码 true：真实的 api.track 自己吞掉
+    // wx.request 的同步异常、永不抛，只以返回值告知「有没有交给 wx」。
+    // 早先这里 return true，于是「只有确实发出去才置冷启动抑制标记」永远成立，
+    // 修复形同虚设——一条没发出去的上报照样抵消掉紧随其后那条真发出去的，净结果零条
+    // （2026-08-18 第七轮复核抓到，它用真实模块链验证到 attempts=1 / successes=0）。
+    // 兼容旧签名：老版本 api.track 不回值（undefined），那时按「已投递」处理，
+    // 不因为拿不到布尔就把落地全判成没发出去。
+    return require('./api').api.track('invite_landing', { channel }) !== false;
   } catch (_) {
-    return false; /* 埋点不可用：捕获照常、启动照常 */
+    return false; /* 连模块都加载不起来：这一跳压根没发出去；捕获照常、启动照常 */
   }
 }
 
@@ -100,6 +106,9 @@ function trackLanding(channel) {
  *     （只发起、不等待）。真机上是毫秒级，就算低端机主线程被占满也到不了秒级。
  *   · 上界（必须够短，否则会吞真落地）：「用户真的又点了一张同一张卡」要走完
  *     「退出小程序 → 回到微信 → 翻到会话 → 点开卡片」这一串人手操作，现实里不可能 3s 内完成。
+ * **下界也要校验**（`d >= 0`）：设备校时可能把时钟往回拨，那时 `Date.now() - at` 为负数、
+ * 照样满足「≤ 3000」，于是未来某次真实同码落地会被这个陈旧标记误吞。
+ *
  * 窗口只是**兜底边界**：正常路径上标记早就被紧邻的下一次调用消费掉了（见上面第②条），
  * 它专门用来封住「那一次 onShow 压根没来」的长尾。
  */
@@ -150,7 +159,7 @@ function captureInvite(options, opts) {
   // 就是漏斗要看的数据（同一个人被同一张卡拉回来几次），去重交给取数侧，不在端上偷偷合并。
   // 唯一的例外是上面那次冷启动回响：同一份启动参数被微信投递了两次，不是两次落地。
   // 同码 + 在时效内 + 是紧邻的下一次（标记在函数开头已被取走），三者齐了才认作回响。
-  if (echo && echo.code === code && Date.now() - echo.at <= ECHO_WINDOW_MS) return code;
+  if (echo && echo.code === code && (() => { const d = Date.now() - echo.at; return d >= 0 && d <= ECHO_WINDOW_MS; })()) return code;
   // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
   const dispatched = trackLanding(channel);
   // onLaunch 那一路记下**已投递**的落地码与时刻，供紧随其后的首次 onShow 抵消。
