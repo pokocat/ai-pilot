@@ -474,6 +474,7 @@ Page({
       let kind = 'blank';
       if (isAvatar) kind = avatarUrl ? 'image' : 'blank';
       else if (asset && assetUrl) kind = asset.kind === 'image' ? 'image' : 'video';
+      const isTail = row.roleClass === 'tail';
       return {
         key: row.id,
         no: index + 1,
@@ -487,7 +488,13 @@ Page({
         // 静帧顶替的地方必须说清楚，不能让用户以为成片也是一张不动的图
         note: isAvatar
           ? '成片里这一段是数字人真人口播'
-          : (kind === 'blank' ? '这一段还没配画面' : ''),
+          : (isTail ? '模板自带的固定结尾' : (kind === 'blank' ? '这一段还没配画面' : '')),
+        /* 占位文案要按角色说各自的话。三种「这里没图」的原因完全不同：
+             出镜段  —— 数字人还没选好形象预览图，不是「没配画面」
+             固定尾段 —— 素材由模板提供，本来就不在用户素材库里
+             配画面段 —— 才是真的还没配 */
+        blankText: isAvatar ? '这个数字人还没有预览图'
+          : (isTail ? '结尾固定片段' : '这一段还没配画面'),
       };
     });
   },

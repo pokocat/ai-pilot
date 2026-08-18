@@ -127,7 +127,7 @@
           controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}"
           show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"></video>
         <image wx:elif="{{playItem.kind === 'image'}}" class="pb-media" src="{{playItem.imageUrl}}" mode="aspectFill"></image>
-        <view wx:else class="pb-media pb-blank vd-grain"><text>这一段还没配画面</text></view>
+        <view wx:else class="pb-media pb-blank vd-grain"><text>{{playItem.blankText}}</text></view>
       </view>
       <view class="pb-meta">
         <view class="pb-metarow"><text class="pb-role {{playItem.kind === 'blank' ? 'warn' : ''}}">{{playItem.roleLabel}}</text><text class="pb-range">{{playItem.rangeText}} · {{playItem.seconds}} 秒</text></view>
