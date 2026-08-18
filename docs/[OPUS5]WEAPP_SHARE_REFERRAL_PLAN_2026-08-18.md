@@ -199,7 +199,7 @@ model ReferralAttribution {
   source      String
   newUserId   String?
   referrerId  String?
-  outcome     String   // bound | self | unknown_code | expired | already_bound
+  outcome     String   // 实现后扩到 8 种：bound | self | cycle | unknown_code | expired | already_bound | config_unavailable | no_timestamp
   clientIp    String?  // 风控视图原料（auth.ts clientIp() 现成）
   userAgent   String?  // 同上（audit.ts 已在采）
   createdAt   DateTime @default(now())

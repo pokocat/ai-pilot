@@ -54,7 +54,7 @@
 
 **端点为什么单独成文件**：`routes/adminReferral.ts` 自挂**同一把** `requireAdmin`（口径与 `admin.ts` 一字不差，没有新发明）。理由是 `admin.ts` 已 2900+ 行，而三个投影各自要做一次成形；前端刚把 2841 行的 App.tsx 拆成 `views/`，没道理在服务端把同一笔债重开一次。
 
-**取数形状（避免 N+1 是硬要求）**：树接口用**物化路径一条 `OR`（`lv1/lv2/lv3` 各有索引）一次取全三级子树**，配合一次 `groupBy(lv1)`（给出任意深度都准的直邀数——第三级节点的下级不在本次结果里，但它的直邀数在这张表里，所以树末端**不会谎报成 0**，而是显式标「下级超出三级视野」）+ 一次 `findMany` 补名字/套餐，全程 4 条查询、没有逐层展开的回头请求。风控接口两步：`groupBy(clientIp)` 拿候选（**记录数 ≥ 阈值是去重新号数的安全超集**，Prisma 的 groupBy 不能 count distinct，所以先粗筛不会漏判）→ 只对候选拉明细在内存里按 `newUserId` 去重（同一个人反复点码只算一个新号）。
+**取数形状（避免 N+1 是硬要求）**：树接口用**物化路径一条 `OR`（`lv1/lv2/lv3` 各有索引）一次取全三级子树**，配合一次 `groupBy(lv1)`（给出任意深度都准的直邀数——第三级节点的下级不在本次结果里，但它的直邀数在这张表里，所以树末端**不会谎报成 0**，而是显式标「下级超出三级视野」）+ 一次 `findMany` 补名字/套餐，全程 4 条查询、没有逐层展开的回头请求。风控接口把聚集判定**整体下推到 SQL**：一条 `GROUP BY clientIp HAVING COUNT(DISTINCT newUserId) >= 阈值` 直接出组（同一条里带出 `group_total`），名单用 `DISTINCT ON (clientIp,newUserId)` 取每人最早那条、再 `ROW_NUMBER() OVER (PARTITION BY clientIp)` 按组限量。~~原先是「`groupBy(clientIp)` 拿候选 → 只对候选拉明细、在内存里按 `newUserId` 去重」~~——那个写法配着全局 `take: 5000` 会让某个 IP 的重复旧留痕把另一个真实聚集组**整组挤没**，页面显示「没有聚集」（第三轮复核判为阻断：风控视图唯一的价值就是看见聚集）。**行级上限已彻底删除**，截断只发生在组数上且如实透出 `groupTotal`。
 
 **阈值归运营，不写死**：聚集阈值是功能开关 `referral-risk` 的 `payload.ipMin`（默认 5，区间 2~200，单位「个新号/IP」），区间与默认值由 `routes/adminReferral.ts` 导出、`FEATURE_FLAG_CATALOG` 引用，「开关页能改的范围」与「视图判定用的范围」是同一份。**刻意另立一个 flag id 而不是复用 `referral` 的 payload**：`PATCH /admin/flags/:id` 的 number 分支是 `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，两个数值挤同一个 flag，运营改完归因窗口就会把阈值抹掉。读阈值走 `{ fresh: true }` 绕过 60s 缓存（运营改完当场要能验证，否则会以为改动没生效）。
 
