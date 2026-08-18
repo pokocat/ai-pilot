@@ -125,14 +125,16 @@
         <video wx:if="{{playItem.kind === 'video'}}" id="shots-playback" class="pb-media"
           src="{{playItem.videoUrl}}" object-fit="cover" muted loop autoplay
           controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}"
-          show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"></video>
+          show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
+          bindplay="onPlayStarted" binderror="onPlayError"></video>
         <image wx:elif="{{playItem.kind === 'image'}}" class="pb-media" src="{{playItem.imageUrl}}" mode="aspectFill"></image>
         <view wx:else class="pb-media pb-blank vd-grain"><text>{{playItem.blankText}}</text></view>
       </view>
       <view class="pb-meta">
         <view class="pb-metarow"><text class="pb-role {{playItem.kind === 'blank' ? 'warn' : ''}}">{{playItem.roleLabel}}</text><text class="pb-range">{{playItem.rangeText}} · {{playItem.seconds}} 秒</text></view>
         <text class="pb-text">{{playItem.text}}</text>
-        <text wx:if="{{playItem.note}}" class="pb-note">{{playItem.note}}</text>
+        <text wx:if="{{playStalled}}" class="pb-note">这段素材没能正常播放，已经跳过</text>
+        <text wx:elif="{{playItem.note}}" class="pb-note">{{playItem.note}}</text>
       </view>
       <view class="pb-dots"><view wx:for="{{playList}}" wx:key="key" class="pb-dot {{index === playIndex ? 'on' : (index < playIndex ? 'done' : '')}}"></view></view>
       <view class="pb-actions">

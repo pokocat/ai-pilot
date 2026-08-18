@@ -38,8 +38,8 @@
 
       <view wx:elif="{{!visible.length}}" class="vd-empty">
         <text class="t">还没有素材</text>
-        <text class="s">拍一段店里的画面，之后配画面就能直接用。</text>
-        <view class="vd-btn as-empty-btn" bindtap="upload">拍 / 上传</view>
+        <text class="s">拍一段店里的画面，或者传几张照片 —— 视频和图片都能用来配画面。</text>
+        <view class="vd-btn as-empty-btn" bindtap="upload">上传视频或图片</view>
       </view>
 
       <view wx:else class="as-grid">

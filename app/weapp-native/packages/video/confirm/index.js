@@ -101,9 +101,13 @@ Page({
    * 于是提交撞上网络抖动后再点，就永远撞在那句话上 —— 这一页再也出不了片，
    * 用户只能退出确认页重新进来。这正是 2026-08-18 用户反馈里「提示…又要重新来一次」的同一类问题。
    *
-   * 现在：拿到服务端的明确判决（有 statusCode）就换新标识，下次点就是干净的一单；
-   * 纯网络失败保留标识，让重试仍被认成同一次提交。
+   * 但**不是所有 HTTP 判决都是终态**：`CLIP_RENDER_CREATING`（409）说的是「原来那一单还在创建中」。
+   * 这种时候换号，下一次点击就会再建一笔 hold、再建一个上游 job —— 正好是幂等机制要防的事。
+   * 所以只有明确不可复用的状态才换号；仍在途的状态必须留着原标识。
    */
+  /** 收到这些错误码时**保留**请求标识：原来那一单还活着，换号 = 重复下单。 */
+  KEEP_REQUEST_ID_CODES: ['CLIP_RENDER_CREATING'],
+
   newRenderRequestId() {
     this.renderRequestId = `clip:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
     return this.renderRequestId;
@@ -169,10 +173,16 @@ Page({
       })
       .catch((error) => {
         this.setData({ submitting: false });
-        // 服务端给了明确判决 → 这一单作废，换新标识，让用户**再点一次就能重来**。
-        // 纯网络失败（没有 statusCode）保留标识：那一单可能已经建上了，重试要能被认出来。
-        if (error && error.statusCode) this.newRenderRequestId();
-        if (error && error.code === 'CLIP_RENDER_REQUEST_CLOSED') {
+        const code = (error && error.code) || '';
+        const stillAlive = this.KEEP_REQUEST_ID_CODES.indexOf(code) >= 0;
+        // 服务端给了明确判决、且这一单确实结束了 → 换新标识，用户再点一次就是干净的一单。
+        // 纯网络失败（没有 statusCode）同样保留标识：那一单可能已经建上了，重试要能被认出来。
+        if (error && error.statusCode && !stillAlive) this.newRenderRequestId();
+        if (stillAlive) {
+          host.toast('上一次提交还在处理，稍等一下再看「我的作品」');
+          return;
+        }
+        if (code === 'CLIP_RENDER_REQUEST_CLOSED') {
           host.toast('刚才那次提交没成功，再点一次「确认出片」就行');
           return;
         }

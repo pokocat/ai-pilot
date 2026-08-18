@@ -144,8 +144,11 @@ Page({
     // 从录音页训完一条声音回来时，它必须立刻出现在「关联声音」里，否则用户以为白录了。
     else if (this.data.step === 1 && this.voicesLoadedOnce) this.loadVoices();
   },
-  onHide() { this.stopTrainingPolling(); },
-  onUnload() { this.stopTrainingPolling(); this.stopRecordStartTimer(); this.stopRecordTimer(); this.stopRecorder(); },
+  onHide() { this.stopTrainingPolling(); if (this.data.voicePreviewOpen) this.closeVoicePreview(); },
+  onUnload() {
+    this.stopTrainingPolling(); this.stopRecordStartTimer(); this.stopRecordTimer(); this.stopRecorder();
+    if (this.data.voicePreviewOpen) host.setOverlay(false, 'video-voice-preview');
+  },
 
   loadRequirements() {
     api.avatarRequirements()
@@ -530,7 +533,11 @@ Page({
    */
   handleCloneError(error, fallbackMessage) {
     this.setData({ submitting: false, submitPhaseText: '', uploadProgress: 0 });
-    if (error && error.statusCode && error.code !== 'CLIP_CLONE_ACCEPTING') this.cloneRequestId = '';
+    // 这两个码都表示**原来那一单还活着**，换受理号 = 重复提交（还会让用户白传一遍文件）。
+    // 其余带 statusCode 的判决才算终态，可以换号重来。
+    const aliveCodes = ['CLIP_CLONE_ACCEPTING', 'CLIP_CLONE_CREATING'];
+    const stillAlive = aliveCodes.indexOf((error && error.code) || '') >= 0;
+    if (error && error.statusCode && !stillAlive) this.cloneRequestId = '';
 
     if (error && error.code === 'CLIP_CLONE_REQUEST_CLOSED') {
       // 上面那行已经把 cloneRequestId 清掉了，所以确认后直接重提就是干净的一单。
@@ -542,7 +549,7 @@ Page({
       return;
     }
 
-    if (error && error.code === 'CLIP_CLONE_CREATING') {
+    if (stillAlive) {
       // 上一个请求还在服务端跑着。这不是失败，别让用户以为白传了、更别让他再传一遍。
       host.toast('上一次提交还在受理中，稍等一下到分身管理里看');
       return;
@@ -702,7 +709,13 @@ Page({
       onProgress: (event) => this.updateUploadProgress(event),
     })
       .then((result) => {
-        if (result && result.avatarId) this.setData({ avatarId: result.avatarId });
+        const patch = {};
+        if (result && result.avatarId) patch.avatarId = result.avatarId;
+        // ★ 必须接住 voiceId：选「视频原声」时上游会顺带建一条声音，训练完成页的
+        //   「听听你的声音」正是靠它渲染（wxml 的 training.voiceDone && voiceId）。
+        //   漏了这一行，形象这条路径上的试听入口永远不出现。
+        if (result && result.voiceId) patch.voiceId = result.voiceId;
+        if (Object.keys(patch).length) this.setData(patch);
         this.enterTraining();
       })
       .catch((error) => this.handleCloneError(error, '形象提交失败'));

@@ -837,10 +837,14 @@ export async function videoRoutes(app: FastifyInstance) {
    *
    * 这条路由不扣钻石（同 preview-voice，纯透传、无 hold/settle），成本落在石榴的 validPoint 上，
    * 由我们承担。所以必须有限流：试听是免费的，但不能变成免费 TTS 接口。
+   *
+   * 首版额度按「够judge像不像、不够当工具用」来定：5 次 / 5 分钟 + 80 字。
+   * 判断一条声音像不像本人，一两句就够；给到 20 次 × 200 字等于每 5 分钟能薅走
+   * 十几分钟的合成音频，那是把接口当免费 TTS。
    */
   app.post<{ Params: { id: string }; Body: { text?: string } }>(
     '/video/voices/:id/preview',
-    { config: { rateLimit: { max: 20, timeWindow: '5 minutes' } } },
+    { config: { rateLimit: { max: 5, timeWindow: '5 minutes' } } },
     async (req, reply) => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       try {
@@ -849,7 +853,7 @@ export async function videoRoutes(app: FastifyInstance) {
         // 上限对齐石榴的 requiredText(text, 10_000)，但试听没有必要放那么长：
         // 一两句就够判断像不像，太长只会白烧供应商点数、也让用户等。
         if (!text) throw Object.assign(new Error('先写一句想听的话'), { statusCode: 422, code: 'CLIP_PREVIEW_TEXT_REQUIRED' });
-        if (text.length > 200) throw Object.assign(new Error('试听最多 200 字'), { statusCode: 422, code: 'CLIP_PREVIEW_TEXT_TOO_LONG' });
+        if (text.length > 80) throw Object.assign(new Error('试听最多 80 字'), { statusCode: 422, code: 'CLIP_PREVIEW_TEXT_TOO_LONG' });
         return await aidramaJson<ClipVoicePreview>(
           `/api/me/clip/voices/${enc(req.params.id)}/preview`,
           identityOf(user),

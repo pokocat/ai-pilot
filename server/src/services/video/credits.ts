@@ -46,6 +46,12 @@ export async function attachVideoJob(holdId: string, upstreamJobId: string) {
 export async function settleVideoJob(upstreamJobId: string, status: string) {
   const hold = await prisma.videoCreditHold.findUnique({ where: { upstreamJobId } });
   if (!hold) return null;
+  // refunded 是终点：钱已经退回用户账上了。以前这里只挡了 settled，于是
+  // 「取消/删除刚退完款」撞上「并发的一次 succeeded 查询」会把它反写成 settled ——
+  // 账面成了已结算，可退款流水已经发生。任何状态都不许从 refunded 迁出去。
+  if (hold.status === 'refunded') {
+    return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
+  }
   if (status === 'failed' || status === 'cancelled') return refundVideoHold(hold.id, status);
   if (status === 'succeeded' && hold.status !== 'settled') {
     return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { status: 'settled', lastJobStatus: status } });

@@ -6,6 +6,7 @@
 const host = require('../host');
 const api = require('../api');
 const { formatBytes, formatAssetDuration, formatResolution, mediaDimensions } = require('../model');
+const { ASSET_LIMITS } = require('../config');
 
 Page({
   data: host.hostBaseData({
@@ -243,6 +244,16 @@ Page({
       success: (res) => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
+        // 与配画面页同一道闸：超过 100MB 的文件不该先传完再被 BFF 用 413 打回。
+        if ((Number(file.size) || 0) > ASSET_LIMITS.maxBytes) {
+          host.confirm({
+            title: '这条素材太大了',
+            content: `它有 ${formatBytes(Number(file.size))}，超过了 ${formatBytes(ASSET_LIMITS.maxBytes)} 的上限。换一段短一点的，或者先在相册里裁剪压缩后再传。`,
+            confirmText: '知道了',
+            cancelText: '取消',
+          });
+          return;
+        }
         host.loading('上传中');
         // 宽高只在真读到时才带：拿不到就**不传这两个字段**，让服务端保持 null。
         // 传 0 会把「没测到」写成「0 像素」，素材卡从此显示 0×0。

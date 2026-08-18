@@ -35,7 +35,7 @@ Page({
     /* 素材连播（2026-08-18 用户反馈：想把已上传的视频直接拼出来看一遍）。
        纯端上按顺序播已配好的画面，不带配音也不带字幕 —— 没有音频就不存在音画同步问题，
        它只回答「我传的画面顺序对不对、接得顺不顺」。真实效果要看排练片。 */
-    playOpen: false, playList: [], playIndex: 0, playItem: null, playTotal: 0,
+    playOpen: false, playList: [], playIndex: 0, playItem: null, playTotal: 0, playStalled: false,
     showLogin: false,
   }),
 
@@ -504,37 +504,102 @@ Page({
     if (!playList.length) { host.toast('还没有可以播放的画面'); return; }
     this.closeStoryboard();
     host.setOverlay(true, 'video-playback');
-    this.setData({ playOpen: true, playList, playTotal: playList.length, playIndex: 0, playItem: playList[0] }, () => this.armPlayStep());
+    this.playToken = (this.playToken || 0) + 1;
+    this.setData({ playOpen: true, playList, playTotal: playList.length, playIndex: 0, playItem: playList[0] }, () => this.armPlayStep(this.playToken));
   },
 
   stopPlayback() {
-    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+    // 先作废代次再清 timer：在途的 setData 回调回来时会因为代次对不上而自动失效。
+    this.playToken = (this.playToken || 0) + 1;
+    this.clearPlayTimer();
+    if (this.data.playItem && this.data.playItem.kind === 'video') {
+      const ctx = wx.createVideoContext('shots-playback', this);
+      if (ctx && typeof ctx.stop === 'function') ctx.stop();
+    }
     if (this.data.playOpen) host.setOverlay(false, 'video-playback');
-    this.setData({ playOpen: false, playItem: null, playIndex: 0, playList: [], playTotal: 0 });
+    this.setData({ playOpen: false, playItem: null, playIndex: 0, playList: [], playTotal: 0, playStalled: false });
   },
 
-  /** 按当前段的口播秒数排下一次切换；视频段还要主动 play（换 src 后不一定自动起播）。 */
-  armPlayStep() {
+  clearPlayTimer() {
     if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+  },
+
+  /**
+   * 排下一次切换。
+   *
+   * 计时以**真正开始播放**为起点，不是以换 src 为起点：弱网下缓冲三秒、画面只放了两秒就切走，
+   * 用户看到的节奏和成片对不上，而这一屏存在的意义正是核对节奏。
+   * 所以视频段先不起表，等 `bindplay` 回调（onPlayStarted）再排；图片/占位段没有加载概念，当场排。
+   *
+   * `token` 是播放代次：快速连点上一段/下一段时，旧的 setData 回调可能晚于新的一次到达，
+   * 代次对不上就直接丢弃，避免多推进一段。
+   */
+  armPlayStep(token) {
+    if (token !== this.playToken) return;
+    this.clearPlayTimer();
     const item = this.data.playItem;
     if (!item) return;
     if (item.kind === 'video') {
       const ctx = wx.createVideoContext('shots-playback', this);
       if (ctx) { ctx.seek(0); ctx.play(); }
+      // 兜底：拿不到上下文、或 bindplay 因为素材损坏永远不来时，别把用户卡在这一段。
+      this.playTimer = setTimeout(() => {
+        this.playTimer = null;
+        if (token !== this.playToken) return;
+        this.setData({ playStalled: true });
+        this.advance(token);
+      }, (item.seconds + 8) * 1000);
+      return;
     }
-    this.playTimer = setTimeout(() => { this.playTimer = null; this.playNext(); }, item.seconds * 1000);
+    this.scheduleAdvance(token, item.seconds);
+  },
+
+  /** 视频真的开始播了才起表 —— 这样每段的停留时间才等于那一段口播的秒数。 */
+  onPlayStarted() {
+    const token = this.playToken;
+    const item = this.data.playItem;
+    if (!item || item.kind !== 'video') return;
+    this.setData({ playStalled: false });
+    this.scheduleAdvance(token, item.seconds);
+  },
+
+  /** 素材放不出来时说清楚，并接着往下走，别停在黑屏上。 */
+  onPlayError() {
+    const token = this.playToken;
+    if (token !== this.playToken) return;
+    this.setData({ playStalled: true });
+    this.scheduleAdvance(token, 2);
+  },
+
+  scheduleAdvance(token, seconds) {
+    if (token !== this.playToken) return;
+    this.clearPlayTimer();
+    this.playTimer = setTimeout(() => { this.playTimer = null; this.advance(token); }, Math.max(1, seconds) * 1000);
+  },
+
+  advance(token) {
+    if (token !== this.playToken) return;
+    this.playNext();
   },
 
   playNext() {
     const next = this.data.playIndex + 1;
     if (next >= this.data.playList.length) { this.stopPlayback(); host.toast('画面看完了', 'success'); return; }
-    this.setData({ playIndex: next, playItem: this.data.playList[next] }, () => this.armPlayStep());
+    this.goPlayIndex(next);
   },
 
   playPrev() {
     const prev = this.data.playIndex - 1;
     if (prev < 0) return;
-    this.setData({ playIndex: prev, playItem: this.data.playList[prev] }, () => this.armPlayStep());
+    this.goPlayIndex(prev);
+  },
+
+  /** 手动切段：先作废代次并同步清 timer，避免旧回调再推进一次造成跳段。 */
+  goPlayIndex(index) {
+    this.playToken = (this.playToken || 0) + 1;
+    this.clearPlayTimer();
+    const token = this.playToken;
+    this.setData({ playIndex: index, playItem: this.data.playList[index], playStalled: false }, () => this.armPlayStep(token));
   },
 
   playSkip() { this.playNext(); },

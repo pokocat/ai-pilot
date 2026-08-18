@@ -2488,9 +2488,75 @@ test('数字分身素材只直传一次，展示真实进度并按受理号恢�
   assert.match(api, /forbid-overwrite[\s\S]{0,180}不能换 ID 再传一份/);
   assert.match(request, /function directUpload\([\s\S]*wx\.uploadFile/);
   assert.match(clone, /onProgress:\s*\(event\) => this\.updateUploadProgress\(event\)/);
-  assert.match(clone, /error\.code !== 'CLIP_CLONE_ACCEPTING'/);
+  // 「原单还活着」的错误码一律不许换受理号 —— 换号 = 重复下单，还会让用户白传一遍文件。
+  // 这里锁的是意图，不是某一种写法：两个码都必须在保留名单里，且换号要以「不在名单里」为条件。
+  assert.match(clone, /aliveCodes\s*=\s*\[[^\]]*'CLIP_CLONE_ACCEPTING'[^\]]*\]/);
+  assert.match(clone, /aliveCodes\s*=\s*\[[^\]]*'CLIP_CLONE_CREATING'[^\]]*\]/);
+  assert.match(clone, /error\.statusCode && !stillAlive\) this\.cloneRequestId = ''/);
   assert.match(view, /上传后会自动受理，请不要重复提交/);
   assert.match(errors, /后台可能仍在处理，请不要重复提交/);
+});
+
+const readVideo = (rel) => fs.readFileSync(path.join(sourceRoot, 'packages/video/' + rel), 'utf8');
+
+test('出片提交撞上「原单还在创建」时不许换请求号 —— 换号就是第二笔扣费', () => {
+  const confirm = readVideo('confirm/index.js');
+  // 服务端用 409 CLIP_RENDER_CREATING 表示原来那一单还在建。这时换号，下一次点击
+  // 会再建一笔 hold、再建一个上游 job，正好是幂等机制要防的事。
+  assert.match(confirm, /KEEP_REQUEST_ID_CODES[\s\S]{0,120}'CLIP_RENDER_CREATING'/);
+  assert.match(confirm, /error\.statusCode && !stillAlive\) this\.newRenderRequestId\(\)/);
+  // 明确不可复用的那条才换号并提示用户再点一次
+  assert.match(confirm, /CLIP_RENDER_REQUEST_CLOSED[\s\S]{0,160}再点一次/);
+});
+
+test('出片进度页必须自己申请 clip 订阅：额度按 scene 存，avatar 的额度救不了 clip', () => {
+  const rendering = readVideo('rendering/index.js');
+  const view = readVideo('rendering/index.wxml');
+  assert.match(rendering, /wx\.requestSubscribeMessage/);
+  assert.match(rendering, /recordSubscribeChoice\(\{ scene: 'clip'/);
+  // 模板没配就整块不渲染 —— 摆一个点了没反应的按钮比没有更糟
+  assert.match(rendering, /scenes\.find\(\(item\) => item && item\.scene === 'clip'\)/);
+  assert.match(view, /wx:if="\{\{notifyTemplate/);
+});
+
+test('素材连播：计时以真正开始播放为起点，切段用代次作废旧回调', () => {
+  const shots = readVideo('shots/index.js');
+  const view = readVideo('shots/index.wxml');
+  // 以换 src 为起点计时的话，弱网缓冲三秒、画面只放两秒就切走，而这一屏正是用来核对节奏的
+  assert.match(view, /bindplay="onPlayStarted"/);
+  assert.match(view, /binderror="onPlayError"/);
+  assert.match(shots, /onPlayStarted\(\)[\s\S]{0,240}scheduleAdvance/);
+  // 快速连点上一段/下一段：旧的 setData 回调必须因为代次对不上被丢弃
+  assert.match(shots, /if \(token !== this\.playToken\) return;/);
+  assert.match(shots, /goPlayIndex\(index\)[\s\S]{0,200}this\.playToken = \(this\.playToken \|\| 0\) \+ 1;/);
+  // 素材放不出来不能把用户卡在黑屏上
+  assert.match(shots, /onPlayError\(\)/);
+});
+
+test('声音试听：关掉浮层或换一条声音后，在途请求回来不许再出声', () => {
+  const comp = readVideo('components/voice-preview/index.js');
+  assert.match(comp, /this\.gen = \(this\.gen \|\| 0\) \+ 1;/);
+  assert.match(comp, /if \(gen !== this\.gen\) return;/);
+  // innerAudioContext 必须销毁，否则多试听几次会攒下一串没释放的播放器
+  assert.match(comp, /destroyAudio\(\)[\s\S]{0,200}destroy\(\)/);
+});
+
+test('形象创建要接住上游回的 voiceId，否则训练完成页的试听入口永远不出现', () => {
+  const clone = readVideo('clone/index.js');
+  const view = readVideo('clone/index.wxml');
+  assert.match(clone, /if \(result && result\.voiceId\) patch\.voiceId = result\.voiceId;/);
+  assert.match(view, /wx:if="\{\{training\.voiceDone && voiceId\}\}"/);
+});
+
+test('两个上传入口用同一道体积闸：超限的文件不该先传完再被 413 打回', () => {
+  const shots = readVideo('shots/index.js');
+  const assets = readVideo('assets/index.js');
+  [shots, assets].forEach((source) => {
+    assert.match(source, /ASSET_LIMITS\.maxBytes/);
+  });
+  // 素材库满了要给出口，不是干报一句失败
+  assert.match(shots, /CLIP_ASSET_QUOTA_EXCEEDED/);
+  assert.match(assets, /CLIP_ASSET_QUOTA_EXCEEDED/);
 });
 
 test('保存成片走军师同源下载并检查下载状态、相册权限与真实进度', () => {

@@ -1,7 +1,7 @@
 import type { ClipJobView } from '../../../../shared/contracts';
 import { prisma } from '../../db.js';
 import { settleVideoJob } from './credits.js';
-import { notifyClipRendered } from '../wechatSubscribe.js';
+import { sendWechatSubscribeMessage } from '../wechatSubscribe.js';
 import { aidramaJson } from './aidramaGateway.js';
 
 /** 只看最近一天的在途单：更久以前还没终态的，属于要人工看的异常，不该由这个 job 无限重扫。 */
@@ -21,11 +21,28 @@ const BATCH = 100;
  * 2. **通知**。用户反馈「能不能看到大概什么时候完成」。准确的 ETA 要先攒够各 stage 的耗时样本，
  *    但「不用一直盯着」今天就能给：出好了微信推一条。
  *
- * 幂等锚点是 hold 自己的状态机：只挑 `submitted` 的单来扫，一旦 settle 成 `settled`/`refunded`
- * 就再也选不中，所以同一单不会推两次。小程序前台轮询若先把它结算掉，这里就不会再推——
- * 那种情况下用户本来就在看着页面，也不需要推送。
+ * 幂等靠 hold 状态机上的一次**原子认领**：`updateMany({where:{status:'submitted'}})`
+ * 只会有一方 count>0。认领完立刻结算，再去发推送 —— 钱的正确性优先于推送。
+ * 小程序前台轮询若先把这一单结算掉，这里就选不中，也就不推；那种情况下用户本来就在看着页面。
  */
+/**
+ * 进程内互斥。scheduler 用的是裸 setInterval（services/scheduler.ts 没有运行中判断），
+ * 一轮跑超过间隔时下一轮照样开跑，两轮同时选中同一个 submitted hold 就会重复推送。
+ * 跨进程仍需选主，那是 AGENTS §13 已在案的既有约束，不在这里解决。
+ */
+let scanning = false;
+
 export async function scanClipRenderNotifications(): Promise<{ scanned: number; settled: number; sent: number; failed: number }> {
+  if (scanning) return { scanned: 0, settled: 0, sent: 0, failed: 0 };
+  scanning = true;
+  try {
+    return await runScan();
+  } finally {
+    scanning = false;
+  }
+}
+
+async function runScan(): Promise<{ scanned: number; settled: number; sent: number; failed: number }> {
   const holds = await prisma.videoCreditHold.findMany({
     where: {
       status: 'submitted',
@@ -50,18 +67,37 @@ export async function scanClipRenderNotifications(): Promise<{ scanned: number; 
         `/api/me/clip/jobs/${encodeURIComponent(hold.upstreamJobId)}`,
         { userId: hold.userId, tenantId: hold.tenantId },
       );
+      if (job.status !== 'succeeded' && job.status !== 'failed') {
+        // 还在跑：只刷新 lastJobStatus，不认领、不推送。
+        await settleVideoJob(job.id, job.status);
+        continue;
+      }
+
+      // 原子认领。条件里带上 status: 'submitted'，所以并发的两轮扫描只有一方 count>0，
+      // 另一方直接跳过 —— 这是「同一单只推一次」的唯一保证。
+      // 认领后立刻结算：钱的正确性优先于推送，绝不能为了保住推送而让 hold 悬在中间态。
+      const claimed = await prisma.videoCreditHold.updateMany({
+        where: { id: hold.id, status: 'submitted' },
+        data: { status: 'notifying' },
+      });
+      if (claimed.count === 0) continue;
       await settleVideoJob(job.id, job.status);
-      if (job.status !== 'succeeded' && job.status !== 'failed') continue;
       settled += 1;
-      // 通知永不抛：推送失败不该影响结算。没订阅的用户在 sendWechatSubscribeMessage 里被静默跳过。
-      notifyClipRendered({
+
+      // 等发送结果，别 void 掉 —— 否则 sent 统计的是「调用过」而不是「发出去了」。
+      // 已知取舍：认领是单向的，所以推送失败**不会重投**。用户仍能在作品列表里看到结果，
+      // 而重投需要一张独立的通知状态表（(jobId, terminalStatus) 唯一 + CAS），
+      // 那要加迁移，留到下一批。真正常见的失败是 43101「用户没订阅」，本来就不该重投。
+      const outcome = await sendWechatSubscribeMessage({
         tenantId: hold.tenantId,
         userId: hold.userId,
+        scene: 'clip',
         title: '你的视频',
+        statusText: job.status === 'succeeded' ? '已出片' : '未出片',
+        note: job.status === 'succeeded' ? '视频已经生成好，点击查看' : '这次没出成，积分已退回',
         workId: job.workId ?? null,
-        ok: job.status === 'succeeded',
-      });
-      sent += 1;
+      }).catch(() => ({ sent: false }));
+      if (outcome.sent) sent += 1;
     } catch (error) {
       failed += 1;
       console.error('[clip-render-notification] poll failed:', hold.upstreamJobId, (error as Error).message);

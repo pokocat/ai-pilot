@@ -21,6 +21,11 @@ Page({
     etaText: '',
     failed: false,
     errorMessage: '',
+    /* 出片完成的微信订阅。没有这一步的话，服务端按 scene='clip' 查额度永远查不到，
+       通知一条也发不出去（额度是按 scene 存的，avatar 的额度不能被 clip 命中）。 */
+    notifyTemplate: null,
+    notifyRequesting: false,
+    notifySubscribed: false,
   }),
 
   onLoad(options) {
@@ -29,6 +34,45 @@ Page({
     this.setData({ jobId, projectId: String((options && options.projectId) || '') });
     this.poll();
     this.startPolling();
+    this.loadNotifyTemplate();
+  },
+
+  /** 模板没配就整块不显示 —— 摆一个点了没反应的按钮比没有更糟。 */
+  loadNotifyTemplate() {
+    api.subscribeTemplates()
+      .then((result) => {
+        const scenes = (result && result.scenes) || [];
+        const template = scenes.find((item) => item && item.scene === 'clip') || null;
+        this.setData({ notifyTemplate: template });
+      })
+      .catch(() => this.setData({ notifyTemplate: null }));
+  },
+
+  /**
+   * 「出好了通知我」。
+   *
+   * 用户原话是「能不能看到大概什么时候完成」。准确 ETA 要先攒够各 stage 的耗时样本才敢给，
+   * 但「不用一直盯着」这件事今天就能兑现：授权一次订阅，出好了微信推给他。
+   * requestSubscribeMessage 必须由点击直接触发，不能放在 then 里，否则微信会拒。
+   */
+  requestNotify() {
+    const template = this.data.notifyTemplate;
+    if (!template || !template.templateId || this.data.notifyRequesting) return;
+    this.setData({ notifyRequesting: true });
+    wx.requestSubscribeMessage({
+      tmplIds: [template.templateId],
+      success: (res) => {
+        const status = res && res[template.templateId] === 'accept' ? 'accept' : 'reject';
+        api.recordSubscribeChoice({ scene: 'clip', templateId: template.templateId, status })
+          .then(() => this.setData({ notifyRequesting: false, notifySubscribed: status === 'accept' }))
+          .catch(() => this.setData({ notifyRequesting: false }));
+        if (status !== 'accept') host.toast('没关系，留在这一页也能看到进度');
+      },
+      fail: () => {
+        this.setData({ notifyRequesting: false });
+        host.toast('这次没能开启通知，留在这一页也能看到进度');
+      },
+    });
   },
 
   onShow() { if (!this.timer && !this.data.failed && this.data.status !== 'succeeded') this.startPolling(); },
