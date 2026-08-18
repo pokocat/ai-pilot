@@ -52,6 +52,24 @@ interface ForcedDeliveryStage {
   parentGenerationId: string;
 }
 
+/** 调度优先级上限，与 GenerationJob.priority 的老化封顶保持一致（见 claimNextGenerationJob）。 */
+const MAX_SCHEDULING_PRIORITY = 9;
+
+/**
+ * 套餐档位 → 调度优先级。映射数据归运营后台（Plan.tierRank，随时可改），
+ * 代码里不写死档位表、也不 seed —— 这里只做「读到什么就折算什么」。
+ * 无套餐 / tierRank 为空一律 0（与免费档同权），并非报错场景：过期套餐已被上游 assertPlanActive 挡掉。
+ */
+async function resolveSchedulingPriority(userId: string): Promise<number> {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { plan: { select: { tierRank: true } } },
+  });
+  const rank = row?.plan?.tierRank;
+  if (typeof rank !== 'number' || !Number.isFinite(rank)) return 0;
+  return Math.max(0, Math.min(MAX_SCHEDULING_PRIORITY, Math.trunc(rank)));
+}
+
 async function resolveProjectId(tenantId: string, bodyProjectId?: string, sessionProjectId?: string | null): Promise<string | null> {
   if (sessionProjectId) return sessionProjectId;
   if (!bodyProjectId) return null;
@@ -122,6 +140,7 @@ export async function enqueueDurableGeneration(
   const stages = forcedStage?.stages ?? direct?.stages ?? [];
   const stage = forcedStage?.stage ?? stages[0] ?? null;
   const assessment = forcedStage?.assessment ?? direct?.assessment ?? null;
+  const priority = await resolveSchedulingPriority(user.id);
 
   let created = await createGenerationJob({
     tenantId: user.tenantId,
@@ -149,6 +168,7 @@ export async function enqueueDurableGeneration(
     stageNumber: stage?.number ?? 1,
     stageAttempt: forcedStage?.stageAttempt ?? 1,
     deliveryStages: stages,
+    priority,
     requestMeta: {
       effectiveVersionId: effective.versionId,
       effectiveVersionNumber: effective.versionNumber,

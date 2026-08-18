@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { GenerationView } from '../../../shared/contracts';
 import { resolveUser } from '../services/context.js';
 import {
+  countQueuedAhead,
   GenerationJobError,
   generationView,
   getGenerationForUser,
@@ -38,6 +39,10 @@ export async function pipeGenerationSSE(
 ): Promise<void> {
   let closed = false;
   let lastVersion = Math.max(-1, opts.after ?? -1);
+  let lastAhead: number | null = null;
+  let lastStatus = '';
+  let lastPhase = '';
+  let pollTick = 0;
   let previousText = '';
   let previousThought = '';
   reply.raw.on('close', () => { closed = true; });
@@ -47,9 +52,25 @@ export async function pipeGenerationSSE(
       send(reply, 'error', { code: 'GENERATION_NOT_FOUND', message: '生成任务不存在' });
       break;
     }
-    const view = generationView(row);
-    if (view.snapshotVersion > lastVersion || TERMINAL.has(view.status)) {
+    let view = generationView(row);
+    // 排队期间 worker 还没接手，snapshotVersion 一动不动；而位次前进是用户此刻唯一能看到的进展。
+    // 所以推送条件必须把「ahead 变了」也算上，否则「前面还有 N 位」会一直停在首帧的初值。
+    // 位次 COUNT 每 4 拍（约 1.4s）才刷一次：它以「位」为粒度前进，350ms 刷新只是给数据库加压，
+    // 排队订阅一多就是 O(队列长 × 订阅数) 的乘法。
+    let ahead: number | null = null;
+    if (row.status === 'queued') {
+      ahead = pollTick % 4 === 0 || lastAhead == null ? await countQueuedAhead(row) : lastAhead;
+      view = { ...view, queue: { ahead } };
+    }
+    pollTick++;
+    // status/phase 变化必须独立触发推送：claim 把 queued→running 时**不递增 snapshotVersion**，
+    // 只看版本的话「排队中·前面还有 N 位」会一直挂到首个 token 快照才消失。
+    const stateChanged = row.status !== lastStatus || row.phase !== lastPhase;
+    if (view.snapshotVersion > lastVersion || TERMINAL.has(view.status) || (ahead != null && ahead !== lastAhead) || stateChanged) {
       send(reply, 'snapshot', view);
+      lastAhead = ahead;
+      lastStatus = row.status;
+      lastPhase = row.phase;
       if (opts.compatibilityEvents) {
         // 增量 parser 会暂时保留标签内首尾换行，最终 ChatReply 会 trim；比较前统一规范化，
         // 否则终态快照会因空白差异被误判为整段替换，再把完整摘要重复发一次。
@@ -93,7 +114,11 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>('/generations/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
-      return generationView(await getGenerationForUser(req.params.id, user));
+      const job = await getGenerationForUser(req.params.id, user);
+      const view = generationView(job);
+      // 断连重连/冷启动恢复走的是这个 GET，排位必须在这里也能拿到，不能只靠 SSE 推。
+      if (job.status === 'queued') return { ...view, queue: { ahead: await countQueuedAhead(job) } };
+      return view;
     } catch (error) {
       const out = publicError(error);
       return reply.code(out.statusCode).send(out.body);

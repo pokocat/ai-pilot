@@ -330,7 +330,12 @@ function cleanRef(ref) { return { kind: ref.kind, id: ref.id, label: ref.label, 
 
 function uid(prefix) { return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`; }
 
-function generationProgressText(progress) {
+function generationProgressText(view) {
+  // 排队位次来自服务端快照（仅 status=queued 时下发）。ahead=0 时不提「排队」，回落通用文案——
+  // 服务端口径里 ahead=0 不保证「下一个就是你」（不含在跑/待恢复的单），所以这里也不承诺「即将开始」。
+  const ahead = view && view.status === 'queued' && view.queue ? Number(view.queue.ahead) : 0;
+  if (ahead > 0) return `排队中·前面还有 ${ahead} 位`;
+  const progress = view && view.imageProgress;
   if (!progress || !Number(progress.totalBatches)) return '正在梳理上下文';
   const total = Number(progress.totalBatches);
   const completed = Math.min(Number(progress.completedBatches) || 0, total);
@@ -1251,7 +1256,7 @@ const methods = {
           this._generationId = data.generationId || data.id || this._generationId;
           if (data.sessionId) this._sessionId = data.sessionId;
           this._runRefNotices = mergedStrings(this._runRefNotices, data.refNotices);
-          const thinkingText = generationProgressText(data.imageProgress);
+          const thinkingText = generationProgressText(data);
           const patch = { canStop: Boolean(this._generationId), thinkingText };
           if (this._streamIndex != null && this.data.messages[this._streamIndex]) patch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
           this.safeSetData(patch);
@@ -1674,7 +1679,7 @@ const methods = {
   applyGenerationSnapshot(result) {
     if (!result) return;
     this._runRefNotices = mergedStrings(this._runRefNotices, result.refNotices);
-    const thinkingText = generationProgressText(result.imageProgress);
+    const thinkingText = generationProgressText(result);
     const progressPatch = { thinkingText };
     if (this._streamIndex != null && this.data.messages[this._streamIndex]) progressPatch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
     this.safeSetData(progressPatch);

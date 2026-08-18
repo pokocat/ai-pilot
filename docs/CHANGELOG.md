@@ -65,6 +65,14 @@
 - **上传治本**：本人形象/声音/照片先向军师领取精确限制的 OSS V4 短票据，再由手机一次直传；AIStar 用持久化 uploadId HEAD 核验后异步深检/受理，军师按同一 clientRequestId 幂等预扣与结算。弱网超时、OSS 成功响应丢失及 180 秒仍在受理都保留原请求号，禁止重复上传或重复创建供应商任务；域名配置未生效时仅在文件确定未离开手机的错误上兼容回退旧链路。
 - **iPhone 编码兼容**：AIStar 对 HEVC/H.265 形象视频先转 H.264/AAC，再进入既有 ffprobe、预览帧和石榴训练，避免用户上传完成后才因编码被打回。
 - **保存相册**：新增鉴权同源 `/api/video/works/:id/file` 流式下载，刷新上游短签名并避开 OSS downloadFile 合法域名问题；端上检查 HTTP 状态、展示下载进度，并分别处理相册权限拒绝、视频格式与存储空间错误。
+
+### 2026-08-17 · 生成 worker 有界并发 + 套餐优先级调度 + 排队位次透出 · 影响面：server 生成链路/schema/契约/小程序对话
+
+- **worker 并发**：`generationWorker` 生产路径改为滚动 pump（`GENERATION_WORKER_CONCURRENCY` 默认 4，设 1 回退旧串行），槽位释放即补位；`tickGenerationWorker` 保留串行语义作测试驱动器；`stopGenerationWorker` 停止续领（stopped 标志挡三个入口，至多再领一单——进行中的 claim await 收不住，照常跑完）。单机对话吞吐从 1 并发解锁到默认 4。
+- **付费优先级**：`generation_job.priority`（0-9，入队按 `Plan.tierRank` 快照封顶，不进幂等指纹）；claim 按虚拟到达时间 `createdAt - priority × GENERATION_PRIORITY_AGING_SECONDS`（默认 30s/级，封顶 4.5 分钟插队上限防饥饿；0=严格优先级）排序，并列以 createdAt、id 稳定化。档位映射归运营后台，代码零档位表。
+- **排队可见**：`GenerationView.queue.ahead`（契约新增），GET `/generations/:id` 与 SSE 快照在 queued 期间透出排位；SSE 对 status/phase 变化独立推帧（claim 不递增 snapshotVersion，否则「排队中」会挂到首 token）；COUNT 按 ~1.4s 节流。小程序 `generationProgressText` 显示「排队中·前面还有 N 位」。
+- 新增回归：`test/generationPriority.test.ts`（8 例）、`test/generationWorkerConcurrency.test.ts`（6 例）。llmGate 不加优先级队列（worker 并发 ≤ 车道槽位时是死代码）；跨实例并发预算、档位→端点映射见 AGENTS.md §13 相关 TODO 语境。
+
 ### 2026-08-17 · 运营后台按产品完整性补齐交互与失败恢复 · 影响面：admin 登录/命令面板/账户菜单/弹层/开关/顾问与用户操作
 
 - **状态不再说谎**：登录状态探测失败不再猜成“已初始化”，初始化/账号/密钥登录与改密网络异常都能解除 busy 并展示原始错误；命令面板找人、技能目录、已学记忆失败与真空结果分开，保留明确重试。

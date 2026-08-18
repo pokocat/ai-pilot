@@ -40,6 +40,10 @@ import {
 } from '../routes/sessions.js';
 
 const WORKER_POLL_MS = 300;
+// 单进程同时在跑的生成任务上限（GENERATION_WORKER_CONCURRENCY 留空时生效）。
+// 选 4 的依据：llmGate 主车道 8 槽，而**同一个 job 内还会二次外呼**（多图观察分批、推荐项补生成、
+// 分阶段续写），只算主生成就把 8 槽占满，那些二次外呼就得去闸门里排队等自己的兄弟让位。
+const DEFAULT_WORKER_CONCURRENCY = 4;
 const HEARTBEAT_MS = 5_000;
 const SNAPSHOT_MS = 400;
 const SNAPSHOT_CHARS = 192;
@@ -70,6 +74,17 @@ type FrozenContext = {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let ticking = false;
+/** 生产 pump 路径当前在途的任务数。串行的 tickGenerationWorker 不计入（见 pump 上方注释）。 */
+let inFlight = 0;
+/** pump 重入保护：同一时刻只允许一轮 pump 在领单。 */
+let pumping = false;
+/** pump 期间又被唤醒（有槽位归还/新单入队）：本轮结束后立刻再跑一轮，别把唤醒丢掉。 */
+let pumpAgain = false;
+/**
+ * stopGenerationWorker 之后必须为 true。只清 interval 不够：每单收尾的 .finally 还会再 pump，
+ * 在途单一收口就继续领新单——「停止领新单」的承诺恰好在停机时失效。
+ */
+let stopped = false;
 const workerId = `${process.pid}-${randomUUID().slice(0, 8)}`;
 
 function requestOf(job: GenerationJob): RequestData {
@@ -708,6 +723,106 @@ async function processJob(job: GenerationJob): Promise<void> {
   }
 }
 
+/* ─────────── 生产路径：有界滚动并发（rolling pump） ───────────
+ *
+ * 为什么要改：旧实现每拍 `await processJob(job)`，一个进程同时只有 1 个生成在跑，而
+ * services/llmGate 主车道有 8 个并发槽 —— 上游预算长期吃不满，单机对话吞吐 ≈ 1/单次生成耗时
+ * （实测 8000 token 的一轮 130–145s），队列里的人只能干等。
+ *
+ * 为什么是「滚动」而不是 Promise.all 批处理：一单最长能跑 CHAT_JOB_MAX_RUNTIME_MS(300s)，
+ * 批处理必须等整批 settle 才领下一批 —— 先完成的槽位会陪着最慢那一单干等（队头阻塞），
+ * 有效并发被摊薄到「批内最慢者」的节奏。滚动 pump 是「谁腾出槽位谁立刻补一单」：
+ * `.finally` 里减计数并**立即**再 pump 一次，不等下一个 300ms interval。
+ *
+ * 为什么 tickGenerationWorker 保留串行语义：它是全仓约 10 个测试文件的精确驱动器
+ * （「领一单 → await 跑完 → 返回」）。一旦改成 fire-and-forget，那些用例就只能靠 sleep 猜时序。
+ * 它刻意不参与 inFlight 计数 —— 两条路径都只经 claimNextGenerationJob 拿单，而那是**数据库原子
+ * 操作**（FOR UPDATE SKIP LOCKED + 租约 + leaseVersion 递增），同一单不可能被领两次；并发安全
+ * 由数据库保证，不靠进程内计数器。多进程/多机部署同理，进程内的 inFlight 只用来限制本进程的负载。
+ *
+ * 并发上限每轮 pump 现读环境变量（不在模块加载期缓存死），与 llmGate 的 cfg() 同惯例。
+ */
+
+/** 本进程的生成并发上限；留空/非法值回落默认，最小 1（=旧串行行为）。 */
+function workerConcurrency(): number {
+  // 注意 Number('') === 0（不是 NaN）：未设置 / 空串必须先判掉，否则会被当成「显式配了 0」，
+  // 经 Math.max(1, 0) 变成 1 —— 等于悄悄退回串行。llmGate 的 num() 曾栽在这个坑上。
+  const raw = process.env.GENERATION_WORKER_CONCURRENCY;
+  if (raw == null || raw.trim() === '') return DEFAULT_WORKER_CONCURRENCY;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_WORKER_CONCURRENCY;
+  return Math.max(1, Math.floor(n));
+}
+
+/** 一轮领单：填满槽位就停，领不到单就停。不 await 任务本体。 */
+async function pumpOnce(): Promise<void> {
+  const limit = workerConcurrency();
+  // 分类是轻量前置步骤（与旧 tick 同序：先分类，再领单），但它在极端竞态下可能连续返回
+  // 「有活干」而实际没有推进（classifyGenerationJob 抢不到分类租约时也返回 job）。
+  // 给一轮 pump 一个分类预算，用尽后本轮只领单，避免死循环卡在前置步骤上。
+  let classifyBudget = limit + 2;
+  let claimedAny = false;
+  while (!stopped && inFlight < limit) {
+    if (classifyBudget > 0 && await classifyNextPendingGeneration()) {
+      classifyBudget--;
+      continue;
+    }
+    // stop 可能落在上面那个 await 里，claim 前必须再看一眼；claim 自身 await 期间的 stop 收不住
+    // ——那一单已经领到手（租约在我们身上），弃单只会让它干等 15s 租约过期，照常跑完是最小伤害。
+    if (stopped) break;
+    const job = await claimNextGenerationJob(workerId);
+    if (!job) break;
+    claimedAny = true;
+    inFlight++;
+    void processJob(job)
+      .catch((error) => console.error('[generation-worker] job crashed', { generationId: job.id, error: (error as Error).message }))
+      .finally(() => {
+        inFlight--;
+        // 每单跑完消费一次 outbox（与旧 tick 的 `await processJob` 后紧跟 effects tick 等价）。
+        void tickGenerationEffects().catch((error) => console.error('[generation-worker] effects tick failed', error));
+        if (!stopped) void pumpGenerationWorker();
+      });
+  }
+  // 空闲拍才消费 outbox：与旧实现「claim 不到单就 tickGenerationEffects」一致。
+  // 有单在途时不在这里跑，避免和上面每单跑完那次抢同一条 effect（runGenerationEffect 幂等，
+  // 但白抢一次是纯浪费）。
+  if (!claimedAny && inFlight === 0) {
+    await tickGenerationEffects().catch((error) => console.error('[generation-worker] idle effects tick failed', error));
+  }
+}
+
+/**
+ * 生产调度入口：由 startGenerationWorker 的 interval 与每单收尾时触发。永不 reject。
+ * 测试直接调用它来观察滚动并发（tickGenerationWorker 那条路径是串行的，观察不到）。
+ */
+export async function pumpGenerationWorker(): Promise<void> {
+  if (pumping) { pumpAgain = true; return; }
+  pumping = true;
+  try {
+    do {
+      pumpAgain = false;
+      // catch 放在循环体内：pumpOnce 抛错的瞬间若恰有任务收尾设了 pumpAgain，
+      // 循环外的 catch 会把这次唤醒直接吞掉——生产靠 300ms interval 自愈，测试/手动 pump 会停住。
+      try {
+        await pumpOnce();
+      } catch (error) {
+        console.error('[generation-worker] pump failed', error);
+      }
+    } while (pumpAgain);
+  } finally {
+    pumping = false;
+  }
+}
+
+/** 仅供测试：读当前在途任务数（pump 路径）。 */
+export function __generationWorkerInFlight(): number {
+  return inFlight;
+}
+
+/**
+ * 串行拍：领一单、await 跑完、返回。**测试专用驱动器，语义不许变**（约 10 个测试文件依赖
+ * 「返回即已跑完」来做断言，见上方 pump 注释）。生产调度走 pumpGenerationWorker。
+ */
 export async function tickGenerationWorker(): Promise<boolean> {
   if (ticking) return false;
   ticking = true;
@@ -725,12 +840,27 @@ export async function tickGenerationWorker(): Promise<boolean> {
 
 export function startGenerationWorker(): void {
   if (isAiTestMode() || timer) return;
-  timer = setInterval(() => { void tickGenerationWorker().catch((error) => console.error('[generation-worker] tick failed', error)); }, WORKER_POLL_MS);
+  stopped = false;
+  timer = setInterval(() => { void pumpGenerationWorker().catch((error) => console.error('[generation-worker] tick failed', error)); }, WORKER_POLL_MS);
   timer.unref?.();
-  void tickGenerationWorker().catch((error) => console.error('[generation-worker] initial tick failed', error));
+  void pumpGenerationWorker().catch((error) => console.error('[generation-worker] initial tick failed', error));
 }
 
+/**
+ * 只停调度，**不等在途任务收口**：进程退出本来也不等（旧串行实现同样如此），
+ * 未收口的单靠 claimNextGenerationJob 的租约过期被接管（接管时旧 attempt 会被保守封账、
+ * leaseVersion 递增把旧 worker 隔离在外）。所以这里要保证的只有一件事：停止领新单——
+ * stopped 标志挡住 interval、pump 循环和每单收尾的 .finally 再触发这三个入口。
+ * 保证的强度是「至多再领一单」：stop 恰好落在一次进行中的 claim await 里时，那一单已经带着
+ * 我们的租约回来了，照常跑完（弃单只会让它干等 15s 租约过期，谁都不受益）。
+ */
 export function stopGenerationWorker(): void {
+  stopped = true;
   if (timer) clearInterval(timer);
   timer = null;
+}
+
+/** 仅供测试：撤销 stop（stopGenerationWorker 是模块级标志，测试之间要能复位）。 */
+export function __resumeGenerationWorker(): void {
+  stopped = false;
 }
