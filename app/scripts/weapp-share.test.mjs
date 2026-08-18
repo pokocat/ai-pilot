@@ -213,20 +213,30 @@ function loadShare(me) {
  * 回调/函数体里**懒 require('./api')**（理由见两文件注释——api.js 顶层 `require('./invite')`，
  * 顶部引用会成环并拿到半初始化的 exports），load 完就还原的话根本拦不到。
  *
- * `mode` 三态，对应三种要守的现实：
- *   · 'ok'      正常上报，收集调用；
- *   · 'throw'   `api.track` 本身抛（比如 wx.request 在某基础库版本上抛）；
- *   · 'require' 连 `require('./api')` 都失败（模块加载链断了）。
- * 后两种都必须**完全不影响**分享回调与冷启动捕获。
+ * `mode` 四态，对应四种要守的现实：
+ *   · 'ok'         正常上报，收集调用；
+ *   · 'throw'      `api.track` 本身抛（比如 wx.request 在某基础库版本上抛）；
+ *   · 'require'    连 `require('./api')` 都失败（模块加载链断了）；
+ *   · 'throw-once' **只有第一跳抛**、之后恢复正常。这一态专门为「冷启动首条埋点没发出去」
+ *     那个场景：全程都抛的桩里永远不可能有成功的上报，也就分不出「被抑制吞掉」和「本来就发不出去」
+ *     ——必须让后一跳能成功，才能断言「总共要有一条落地」。
+ * 中间两种都必须**完全不影响**分享回调与冷启动捕获。
  */
 function stubApiTrack(mode = 'ok') {
   const Module = cjsRequire('node:module');
   const original = Module.prototype.require;
   const calls = [];
+  let threw = false;
   Module.prototype.require = function patched(id) {
     if (id === './api') {
       if (mode === 'require') throw new Error('桩：api 模块加载失败');
       if (mode === 'throw') return { api: { track() { throw new Error('桩：wx.request 抛了'); } } };
+      if (mode === 'throw-once') {
+        return { api: { track: (name, props) => {
+          if (!threw) { threw = true; throw new Error('桩：第一跳 wx.request 抛了'); }
+          calls.push({ name, props });
+        } } };
+      }
       return { api: { track: (name, props) => { calls.push({ name, props }); } } };
     }
     return original.apply(this, arguments);
@@ -554,6 +564,45 @@ test('冷启动那次 onShow 没带码时，抑制标记也必须被消费掉（
     app.onShow({ query: { ic: 'JS2K7P' } });     // 真的又点了一次同一张卡：必须照报
     assert.equal(stub.calls.length, 2, '标记不得跨过一次空 onShow 继续抑制');
   } finally { stub.restore(); }
+});
+
+test('冷启动首条埋点没发出去时，抑制标记不许置上：onLaunch → onShow 总共必须有一条落地', () => {
+  // codex 复审抓到的真 bug：旧实现在**确认埋点发出去之前**就把抑制标记置上，于是
+  // `api.track` 抛错（或 require 抛）那一跳根本没发出去，紧随的首次 onShow 又被同码标记吞掉，
+  // **净结果一条落地都没有**——少的不是一条重复，是一整次冷启动的漏斗分母，而且全程静默。
+  // 旧的异常测试只验了「码还能存下」、没跑 onLaunch → onShow 的完整时序，所以是假绿。
+  const stub = stubApiTrack('throw-once');
+  try {
+    const { app, store } = loadApp();
+    const launchOptions = { path: 'pages/sessions/index', scene: 1007, query: { ic: 'JS2K7P' } };
+    app.onLaunch(launchOptions);
+    assert.deepEqual(stub.calls, [], '本用例的前提：onLaunch 那一跳确实没发出去');
+    app.onShow({ ...launchOptions });
+    assert.deepEqual(
+      stub.calls.map((c) => c.name), ['invite_landing'],
+      '没发出去的一跳不得抵消掉紧随其后真发出去的这一跳（总数不能是 0）',
+    );
+    assert.equal(stub.calls[0].props.channel, 'query');
+    assert.equal(store['junshi.invite'], 'JS2K7P', '捕获与埋点无关，码照常落 storage');
+  } finally { stub.restore(); }
+});
+
+test('抑制标记有时效：onShow 压根没来时，标记不许留到未来某次真落地上把它吞掉', () => {
+  // 正常路径上标记会被紧邻的下一次调用消费掉（上面两条已覆盖）。这条守的是长尾：
+  // 万一某个基础库在 onLaunch 之后不发首次 onShow，标记就一直留着——下一次同码进来
+  // （可能是几小时后用户又点了同一张卡）会被白吞一条。时效窗口专门封这个口。
+  const stub = stubApiTrack();
+  const realNow = Date.now;
+  try {
+    let t = 1_760_000_000_000;
+    Date.now = () => t;
+    const { app } = loadApp();
+    app.onLaunch({ query: { ic: 'JS2K7P' } });
+    assert.equal(stub.calls.length, 1, '冷启动这一条照发');
+    t += 3_600_000;                               // 一小时后：那次 onShow 从未发生
+    app.onShow({ query: { ic: 'JS2K7P' } });      // 用户又从同一张卡进来 = 货真价实的第二次落地
+    assert.equal(stub.calls.length, 2, '过期的抑制标记不得再抑制任何落地');
+  } finally { Date.now = realNow; stub.restore(); }
 });
 
 test('落地埋点炸了不得影响冷启动：track 抛 / require 抛，captureInvite 照常返回码并写 storage', () => {

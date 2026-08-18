@@ -1180,7 +1180,7 @@ export type ClientEventName =
   | 'execution_enter' | 'order_complete' | 'backfill_save' | 'review_start'
   | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click'
   // 邀请漏斗前两段（2026-08-18）。后两段不占事件名：注册段从 `ReferralAttribution`（每次带码进线一行，
-  // outcome 六种）算，首开通段从 `ActivationEvent(source='invite')` 算——那两件事服务端本来就有账本，
+  // outcome **八种**：bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp）算，首开通段从 `ActivationEvent(source='invite')` 算——那两件事服务端本来就有账本，
   // 再补一份客户端埋点只会出现「端上报了、库里没有」的对不上账。
   // share_expose：用户点开「转发给朋友」/「分享到朋友圈」时由 services/share.js 上报（props: channel + 当日素材序号）。
   // invite_landing：带码落地时由 services/invite.js 在捕获成功处上报（props: channel=query|scene），游客态照发。

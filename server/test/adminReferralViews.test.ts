@@ -9,7 +9,8 @@
 //   ④ **读数为空 ≠ 读失败**：空作用域回 200 + 显式的零计数（还告诉你扫了多少 IP），
 //      查询真的挂了回 5xx，绝不伪装成「你还没有邀请数据」；
 //   ⑤ **真实规模下不许漏报**（2026-08-18 复核补）：单个 IP 的重复留痕再多也不能挤掉别的组，
-//      组数触顶要如实回总组数，树的红环只按「本次返回的那批组」着色；
+//      组数触顶要如实回总组数，树的红环只按「本次返回的那批组」着色、并且按**与风控页同一个
+//      天数窗口**（树接收 `?days=`；同时钉住「天数只管红环、不筛关系边」这另一半口径）；
 //   ⑥ **隐私不扩散**：风控/树响应里没有完整手机号（掩码走审计同一口径）、没有 userAgent。
 //
 // 另外钉一条公理 5：风控只预警不阻断 —— 这组端点里不存在任何处置/封禁写操作。
@@ -429,6 +430,66 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
     assert.equal(childOf(root!, flagged).risk, true, '二部图里报了的新号，树上必须也标出来');
     assert.equal(childOf(root!, alsoFlagged).risk, true);
     assert.equal(root!.risk, false, '邀请人自己没有落在聚集组里，不该被标');
+  });
+
+  test('树的红环窗口跟着风控页的 days 走：20 天前的聚集在 7 天窗口里不标红、30 天窗口里标红', async () => {
+    // 这是 2026-08-18 复审的阻断 2：树曾把窗口写死成 30 天，风控页却可切 7/30/90 天。
+    // 于是「20 天前的聚集在 7 天风控页里消失，树上仍标红」——运营点着红环去风控屏找那个 IP
+    // 却找不到，两屏各说一套。上一轮把树改成调同一个 riskGroups() 只解决了「哪批组」，
+    // 没解决「哪个窗口」；41 组那条用例两个请求都用默认 30 天，正好覆盖不到这个矛盾。
+    //
+    // 同时钉住另一半口径：**天数只管红环，不管画哪些边**。邀请关系是永久的，树始终是全量，
+    // 换窗口时树的形状不许变（否则切到 7 天就把整棵树清空了，那不叫筛选）。
+    const patch = await api('PATCH', `/api/admin/flags/${REFERRAL_RISK_FLAG}`, { body: { value: 2 } });
+    assert.equal(patch.status, 200, JSON.stringify(patch.body));
+
+    const inviter = await register();
+    const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
+    const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: invitee }, select: { tenantId: true } })).tenantId;
+
+    // 把这个新号的归因留痕挪到 20 天前的一个聚集 IP 上，再补一个同 IP 同期的新号凑够阈值 2。
+    const at20 = new Date(Date.now() - 20 * 86_400_000);
+    await prisma.referralAttribution.updateMany({
+      where: { newUserId: invitee }, data: { clientIp: IP_CLUSTER, createdAt: at20 },
+    });
+    await bulkAttributions(tenant, [{ ip: IP_CLUSTER, userId: 'syn-20d-ago', at: at20 }]);
+
+    const nodeOf = (body: AdminReferralTree) => {
+      const root = body.roots.find((n) => n.userId === inviter);
+      assert.ok(root, '邀请人应作为根出现（换窗口不影响树的形状）');
+      return childOf(root!, invitee);
+    };
+
+    // ── 30 天窗口：风控页报出这组 → 树上必须标红 ──
+    const risk30 = await api<RiskBody>('GET', '/api/admin/referral/risk?days=30');
+    assert.equal(risk30.status, 200, JSON.stringify(risk30.body));
+    assert.ok(risk30.body.groups.some((g) => g.clientIp === IP_CLUSTER), '前提：30 天窗口里这组在风控页上');
+    const tree30 = await api<AdminReferralTree>('GET', '/api/admin/referral/tree?days=30');
+    assert.equal(tree30.status, 200, JSON.stringify(tree30.body));
+    assert.equal(tree30.body.riskWindowDays, 30, '树必须如实回它实际用的窗口');
+    assert.equal(nodeOf(tree30.body).risk, true, '风控页在这个窗口里报了 → 树上标红');
+
+    // ── 7 天窗口：风控页里这组消失了 → 树上也必须跟着不标红 ──
+    const risk7 = await api<RiskBody>('GET', '/api/admin/referral/risk?days=7');
+    assert.equal(risk7.status, 200, JSON.stringify(risk7.body));
+    assert.ok(!risk7.body.groups.some((g) => g.clientIp === IP_CLUSTER), '前提：20 天前的聚集不在 7 天窗口里');
+    const tree7 = await api<AdminReferralTree>('GET', '/api/admin/referral/tree?days=7');
+    assert.equal(tree7.status, 200, JSON.stringify(tree7.body));
+    assert.equal(tree7.body.riskWindowDays, 7, '窗口跟着请求走，不能回一个写死的 30');
+    assert.equal(
+      nodeOf(tree7.body).risk, false,
+      '风控页在 7 天窗口里没报这组 → 树上就不能标红，否则运营顺着红环找不到 IP',
+    );
+
+    // ── 另一半：边不随窗口变（树是全量视图，天数只管红环）──
+    assert.equal(tree7.body.edgeTotal, tree30.body.edgeTotal, '换窗口不许让关系边消失');
+    assert.equal(tree7.body.inviterTotal, tree30.body.inviterTotal);
+    assert.equal(nodeOf(tree7.body).userId, nodeOf(tree30.body).userId, '树的形状与窗口无关');
+
+    // 不传 days 时与 30 天等价（默认值两端同一把 clampDays）
+    const treeDefault = await api<AdminReferralTree>('GET', '/api/admin/referral/tree');
+    assert.equal(treeDefault.body.riskWindowDays, 30, '默认窗口仍是 30 天（与 /risk 的默认一致）');
+    assert.equal(nodeOf(treeDefault.body).risk, true);
   });
 
   test('公理 5：只预警不阻断 —— 风控端点没有任何写方法', async () => {

@@ -47,34 +47,66 @@ function safeGet(key) {
  * `require('./invite')`（登录请求统一带邀请码），顶部引用直接成环——Node 的 CJS 环不报错，
  * 但先加载的那一侧会拿到**半初始化**的 exports，症状是静默变哑（`api` 是 undefined 而不是报错），
  * 正是最难查的一类。放在调用时点则两边都已加载完毕（onLaunch 时 store→api 这条链早就跑完了）。
+ *
+ * @returns {boolean} 这一跳**有没有被发出去**（调用没抛）。
+ *   **这不等于「上报成功」**：`api.track` 是 fire-and-forget（裸 wx.request、失败走空回调、
+ *   不回 Promise），端上能知道的只有「请求有没有在本地就断掉」——服务端到底收没收到，
+ *   这里查不到也不该等。返回 true = 已交给 wx；false = 模块没加载起来 / wx.request 当场抛了，
+ *   这条落地**根本没发出去**。
+ *   下面的冷启动抑制标记只在 true 时才置：用一条没发出去的上报去抵消紧随其后那条本该发出去的，
+ *   净结果是一条落地都不剩（见 launchEcho）。
  */
 function trackLanding(channel) {
   try {
     require('./api').api.track('invite_landing', { channel });
-  } catch (_) { /* 埋点不可用：捕获照常、启动照常 */ }
+    return true;
+  } catch (_) {
+    return false; /* 埋点不可用：捕获照常、启动照常 */
+  }
 }
 
 /**
- * 冷启动回响抑制（2026-08-18，codex 审出的阻断 1）。
+ * 冷启动回响抑制（2026-08-18，codex 审出的阻断 1；同日复审又收口两处，见下面第 ① ③ 条）。
  *
  * 小程序**已被销毁**时点分享卡进来，微信依次触发 `onLaunch(options)` 与紧随其后的第一次
  * `onShow(options)`，**两处拿到的是同一份启动参数**——同一次落地被投递了两次；而暖启动
  * （小程序还在后台）只触发 onShow 一次。捕获必须两处都做（游客可能从任一路径进来，见文件头），
  * 但落地埋点如果两处都报，`invite_landing` 的条数就随启动形态浮动，**漏斗分母按启动形态系统性失真**。
  *
- * 判断依据 = **只抵消这一次回响**，不是「整个生命周期只报一次」：
- *   · onLaunch 那一路上报后，把刚上报的码置成一次性标记；
- *   · 标记被**紧邻的下一次** captureInvite 消费掉，无论那次捕到什么码、捕不捕到——
- *     于是抑制窗口精确等于「onLaunch 之后的第一次投递」，也就是微信那次回响；
- *   · 只有那一次拿到**同一个码**时才抑制。换了码（用户运行期间点了另一张卡）照报。
- * 因此「小程序运行期间用户又点了一张分享卡」——换码、或同码再次进入——都算**新的一次落地**，
- * 照常上报：同一个人被同一张卡拉回来几次，本身就是漏斗要看的数据，去重仍然交给取数侧。
+ * 判断依据 = **只抵消这一次回响**，不是「整个生命周期只报一次」。三个条件缺一不可：
+ *   ① onLaunch 那一路的埋点**确实发出去了**（`trackLanding` 返回 true）才置标记。
+ *      这是复审抓到的真 bug：旧实现在确认之前就置标记，于是 `api.track` 抛错时 onLaunch 那条
+ *      根本没发出去、紧随的首次 onShow 又被同码标记吞掉，**净结果一条落地都没有**——
+ *      少的不是一条重复，是一整次冷启动的分母，而且全程静默。
+ *      （注意「发出去了」的边界：`api.track` 是 fire-and-forget，我们只知道调用没抛，
+ *      不知道服务端收到没有——见 trackLanding 的 @returns。抵消一条**已投递**的上报是对的，
+ *      抵消一条**压根没发**的上报是净丢数据，这两件事的区别就是这条修复。）
+ *   ② 标记被**紧邻的下一次** captureInvite 消费掉，无论那次捕到什么码、捕不捕到——
+ *      抑制窗口精确等于「onLaunch 之后的第一次投递」，也就是微信那次回响；
+ *   ③ 标记**有时效**（`ECHO_WINDOW_MS`）。②只保证「不跨过下一次调用」，但万一某个基础库在
+ *      onLaunch 之后压根不发 onShow，标记就会一直留着，去吞掉**未来某次**同码的真实落地。
+ * 三条同时满足才抑制。换了码（运行期间点了另一张卡）、超出时效、或已经隔过一次调用，
+ * 都算**新的一次落地**照常上报：同一个人被同一张卡拉回来几次，本身就是漏斗要看的数据，
+ * 去重仍然交给取数侧。
  *
  * 为什么不用 onHide 之类的「前台会话」边界来重置：那要另一个生命周期钩子配合，钩子漏挂 /
- * 某些基础库不发就会**长期静默少报**。一次性标记的最坏情况有界——万一哪个版本在 onLaunch 之后
- * 不发 onShow，也只是让紧接着那一次同码落地少一条，不会持续少报。
+ * 某些基础库不发就会**长期静默少报**。一次性标记 + 时效双重有界，最坏情况都只影响紧邻的一跳。
  */
-let launchEcho = '';
+
+/**
+ * 抑制标记的时效窗口。取 3s——两头各留了两个数量级的余量：
+ *   · 下界（必须够长，否则真回响吞不掉）：onShow 是微信在 onLaunch 返回之后紧接着发的，
+ *     中间只隔 `app.js` 里的 `store.bootstrap()`（几次同步 storage 读）和 `loadAppFont()`
+ *     （只发起、不等待）。真机上是毫秒级，就算低端机主线程被占满也到不了秒级。
+ *   · 上界（必须够短，否则会吞真落地）：「用户真的又点了一张同一张卡」要走完
+ *     「退出小程序 → 回到微信 → 翻到会话 → 点开卡片」这一串人手操作，现实里不可能 3s 内完成。
+ * 窗口只是**兜底边界**：正常路径上标记早就被紧邻的下一次调用消费掉了（见上面第②条），
+ * 它专门用来封住「那一次 onShow 压根没来」的长尾。
+ */
+const ECHO_WINDOW_MS = 3000;
+
+/** `{ code, at }`：onLaunch 已投递的落地码与投递时刻；null = 没有待抵消的回响。 */
+let launchEcho = null;
 
 /**
  * 从启动 / 页面参数里捕获邀请码。
@@ -93,7 +125,7 @@ function captureInvite(options, opts) {
   // 一次性标记在最前面消费掉：抑制窗口就是「onLaunch 之后紧邻的这一次调用」，
   // 与本次捕不捕到码无关——否则一次「onShow 没带码」就会把标记留到下一次真落地上，白吞一条。
   const echo = launchEcho;
-  launchEcho = '';
+  launchEcho = null;
   const source = options || {};
   const query = source.query || source || {};
   let code = isInviteCode(query.ic) ? query.ic : '';
@@ -114,14 +146,17 @@ function captureInvite(options, opts) {
     wx.setStorageSync(KEY, code);
     wx.setStorageSync(AT_KEY, Date.now());
   } catch (_) { /* 存不下就这一跳不计归因，不影响任何功能 */ }
-  // onLaunch 那一路记下刚上报的码，供紧随其后的首次 onShow 抵消（见 launchEcho 的注释）。
-  if (opts && opts.launch) launchEcho = code;
   // **每次真落地都报**，包括「小程序已在后台、又点了一张分享卡」那次 onShow——重复进入本身
   // 就是漏斗要看的数据（同一个人被同一张卡拉回来几次），去重交给取数侧，不在端上偷偷合并。
   // 唯一的例外是上面那次冷启动回响：同一份启动参数被微信投递了两次，不是两次落地。
-  if (code === echo) return code;
+  // 同码 + 在时效内 + 是紧邻的下一次（标记在函数开头已被取走），三者齐了才认作回响。
+  if (echo && echo.code === code && Date.now() - echo.at <= ECHO_WINDOW_MS) return code;
   // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
-  trackLanding(channel);
+  const dispatched = trackLanding(channel);
+  // onLaunch 那一路记下**已投递**的落地码与时刻，供紧随其后的首次 onShow 抵消。
+  // `dispatched` 是这里的闸：没发出去的一跳不置标记，否则紧随的那条真上报会被白吞掉，
+  // 一次冷启动净落地为零（见 launchEcho 第①条）。
+  if (dispatched && opts && opts.launch) launchEcho = { code, at: Date.now() };
   return code;
 }
 
