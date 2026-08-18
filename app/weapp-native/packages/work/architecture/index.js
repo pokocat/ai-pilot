@@ -1,5 +1,6 @@
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const triggers = [
   '多个公司与事业同时推进，创始人很难持续记住各主体的真实用途。',
@@ -19,7 +20,7 @@ const paths = [
   ['筹建新公司 / 新事业', '先确认战略必要性，再决定取名、注册和财税服务。', 'plus'],
 ].map(([title, desc, icon]) => ({ title, desc, icon }));
 
-Page({
+Page(withShare({
   data: baseData({ triggers, scopes, paths }),
   back() { wx.navigateBack(); },
   askAdvisor() {
@@ -29,4 +30,4 @@ Page({
     });
   },
   openEnterprise() { navTo('/packages/work/enterprise/index'); },
-});
+}));

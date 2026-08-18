@@ -7,6 +7,7 @@
 // 声音是可以脱离形象独立存在的资产（一条声音能被多个形象复用），所以它该有自己的列表。
 const host = require('../host');
 const api = require('../api');
+const { withShare } = require('../../../services/share');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -42,7 +43,7 @@ function decorate(voice) {
   });
 }
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     loading: true,
     /**
@@ -147,4 +148,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

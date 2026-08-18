@@ -1,6 +1,7 @@
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
+const { withShare } = require('../../../services/share');
 
 const sources = [
   { key: 'wechat', title: '个人微信记忆', desc: '导入你主动选中的微信资料，先生成一版待你校对的记忆。', values: [['人脉档案', '关系、角色、最近互动'], ['每日日志', '事实、承诺、风险'], ['朋友圈档案', '表达、项目、身份变化'], ['战略校准', '确认后回写战局']], scopes: [['好友与群聊', '联系人、组织、关系来源'], ['聊天记录', '决定、承诺、项目、问题'], ['朋友圈资料', '表达、项目动态、线索'], ['附件与链接', '只整理你选中的资料']] },
@@ -14,7 +15,7 @@ const sources = [
   scopes: source.scopes.map(([title, desc]) => ({ title, desc })),
 }));
 
-Page({
+Page(withShare({
   data: baseData({ sources: sources.map((item, index) => ({ ...item, open: index === 0 })), serviceReady: false, teacherName: '' }),
   onShow() {
     const snapshot = store.snapshot();
@@ -31,4 +32,4 @@ Page({
     if (this.data.serviceReady) navTo('/packages/work/community/index');
     else wx.showToast({ title: '服务老师分配后开放', icon: 'none' });
   },
-});
+}));

@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo, gotoExecution } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 const ICONS = new Set(['home', 'grid', 'agent', 'user', 'chat', 'insight', 'attach', 'trend', 'check', 'target', 'layers', 'doc', 'image', 'video', 'pen', 'spark', 'chart', 'clock', 'flow', 'bolt', 'shield', 'crown', 'flag', 'token', 'pouch', 'upload', 'lock', 'diamond']);
 
 function fmt(iso) { const date = new Date(iso); return date.getTime() ? `${date.getMonth() + 1}月${date.getDate()}日` : ''; }
@@ -15,7 +16,7 @@ function mapDetail(raw) {
   });
 }
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, failed: false, detail: null, tab: 'situation', knowledgeText: '', knowledgeBusy: false, showLogin: false }),
   onLoad(options) { this._id = options && options.id || ''; this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); if (this._loaded) this.load(); },
@@ -43,4 +44,4 @@ Page({
     catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '知识保存失败' }); }
     finally { this.setData({ knowledgeBusy: false }); }
   },
-});
+}));

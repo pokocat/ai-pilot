@@ -14,6 +14,7 @@
 const host = require('../host');
 const api = require('../api');
 const { ensureShots } = require('../model');
+const { withShare } = require('../../../services/share');
 
 /**
  * 三步流程说明。落地页只讲流程，不讲参数。
@@ -26,7 +27,7 @@ const STEPS = [
   { key: 'render', name: '出片', desc: '数字人开口' },
 ];
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     steps: STEPS,
     bannerFailed: false,
@@ -154,4 +155,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

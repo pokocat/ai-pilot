@@ -7,6 +7,7 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { withShare, pathWithCode } = require('../../../services/share');
 
 const PLATFORMS = [
   { key: 'douyin', label: '抖音' },
@@ -28,7 +29,7 @@ const PLATFORMS = [
  */
 const PUBLISH_READY = false;
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     workId: '',
     loading: true,
@@ -55,7 +56,7 @@ Page({
     const title = String((this.data.work && this.data.work.title) || '').trim();
     return {
       title: title ? `${title} · 军师快拍` : '一分钟出一条能发的短视频 · 军师快拍',
-      path: '/packages/video/home/index',
+      path: pathWithCode('/packages/video/home/index'),
     };
   },
 
@@ -217,4 +218,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); },
-});
+}, { timeline: true }));

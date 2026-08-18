@@ -3,6 +3,7 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const { normalizeStatus, absoluteCreativeUrl, progressText, formatTime, isInFlight } = require('../poster/creative');
+const { withShare } = require('../../../services/share');
 
 const PAGE_SIZE = 20;
 const POLL_MS = 6000;
@@ -20,7 +21,7 @@ function normalizeItems(items) {
   })).filter((item) => item.jobId);
 }
 
-Page({
+Page(withShare({
   data: baseData({
     items: [], cursor: '', loading: true, failed: false, more: false,
     canCreate: false, showLogin: false,
@@ -107,4 +108,4 @@ Page({
    * 说的和按钮做的是两件事。现在直接进确认页（与锦囊海报格同一个落点）。
    */
   goPosterDesigner() { navTo('/packages/main/chat/index?agentKey=poster&continue=1'); },
-});
+}, { timeline: true }));

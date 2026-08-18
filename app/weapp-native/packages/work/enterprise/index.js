@@ -1,6 +1,7 @@
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
+const { withShare } = require('../../../services/share');
 
 const services = [
   { key: 'register', title: '注册公司', desc: '确认主体用途后，补齐股东、注册地址、经营范围和负责人资料。', trigger: '战略报告识别到需要独立主体承接新事业或新收入。', steps: ['诊断触发', '资料待补', '服务商报价', '办理回写'], materials: ['股东与出资比例', '注册地址证明', '经营范围草案', '法定代表人信息'], handoff: '服务老师整理资料后对接工商服务商，实际办理结果以主管机关审核为准。', archive: '营业执照、章程、登记信息和服务合同写入资料库的企业资产目录。' },
@@ -11,7 +12,7 @@ const services = [
   { key: 'qualification', title: '行业资质', desc: '涉及健康、教育、食品、电商和本地生活时，先列出可能需要的资质。', trigger: '经营范围或销售渠道进入受监管行业。', steps: ['行业识别', '资质提示', '专业咨询', '证照归档'], materials: ['行业与产品说明', '销售渠道', '经营范围', '线下门店情况'], handoff: '具体资质办理和合规意见以主管机关、律师或专业服务方意见为准。', archive: '许可证、备案、资质提醒和有效期记录写入企业资产目录。' },
 ].map((item) => ({ ...item, steps: item.steps.map((text, index) => ({ text, last: index === item.steps.length - 1 })), materials: item.materials.map((text, index) => ({ text, no: index + 1 })), open: false }));
 
-Page({
+Page(withShare({
   data: baseData({ services, teacherName: '' }),
   onShow() {
     const snapshot = store.snapshot();
@@ -27,4 +28,4 @@ Page({
   askAdvisor() { wx.switchTab({ url: '/pages/sessions/index' }); },
   openCommunity() { navTo('/packages/work/community/index'); },
   reserve() { wx.showToast({ title: '已记录企业版意向', icon: 'none' }); },
-});
+}));

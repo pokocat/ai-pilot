@@ -5,11 +5,12 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { withShare } = require('../../../services/share');
 const { ROLE } = model;
 
 const SAVE_DEBOUNCE_MS = 1200;
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     projectId: '',
     loading: true,
@@ -404,4 +405,4 @@ Page({
   swallow() {},
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); },
-});
+}));

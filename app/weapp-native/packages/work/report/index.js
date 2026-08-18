@@ -3,6 +3,7 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { fitCanvasText } = require('../../../utils/canvas-text');
 const { gotoExecution } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const FALLBACK_ORDERS = [
@@ -203,7 +204,7 @@ function wxAsync(name, options) {
   });
 }
 
-Page({
+Page(withShare({
   data: baseData({
     id: '', title: '方案', loading: true, failed: false, detail: null,
     versions: [], selectedVersion: 0, mode: 'content',
@@ -366,4 +367,4 @@ Page({
     try { await wxAsync('saveImageToPhotosAlbum', { filePath: path }); this.closeShare(); wx.showToast({ title: '已保存到相册', icon: 'success' }); }
     catch (_) { wx.showToast({ title: '保存失败，请检查相册权限', icon: 'none' }); }
   },
-});
+}));

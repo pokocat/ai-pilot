@@ -7,6 +7,7 @@
 // 合规（方案 §9.4）：「可删除权」必须在 UI 上明示，且删除要连带要求上游（石榴）删除。
 const host = require('../host');
 const api = require('../api');
+const { withShare } = require('../../../services/share');
 
 function formatCompletedAt(value) {
   if (!value) return '';
@@ -56,7 +57,7 @@ function decorateAvatar(avatar) {
   });
 }
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     loading: true,
     /**
@@ -244,4 +245,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

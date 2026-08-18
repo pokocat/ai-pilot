@@ -5,6 +5,7 @@ const { baseData, backendEnvironmentData, syncTabBar } = require('../../services
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 const { SUPPORTED_DOCUMENT_EXT, validateDocumentUpload } = require('../../utils/document-upload');
+const { withShare } = require('../../services/share');
 
 const PROCESS_STEPS = ['识别资料来源和文件类型', '去重并标记敏感信息', '按案卷目标生成分类结构', '输出待确认资料和问题清单'];
 const CATEGORY_LABELS = { founder:'老板档案', company:'企业档案', finance:'财务经营', content:'内容IP', growth:'增长资料', customer:'客户问答', proof:'案例证明', unknown:'待识别' };
@@ -84,7 +85,7 @@ function previewHeight(text) {
   return Math.min(220, Math.max(96, lines * 24 + 24));
 }
 
-Page({
+Page(withShare({
   data: baseData({
     segment: 0,
     segments: ['家底','数据源'],
@@ -241,4 +242,4 @@ Page({
     }
     return'pending';
   },
-});
+}));

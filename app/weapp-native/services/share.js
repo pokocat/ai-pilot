@@ -1,0 +1,177 @@
+/**
+ * 全站分享（转发给朋友 + 分享到朋友圈）。
+ *
+ * 改动前：54 个页面里只有 4 个实现了 onShareAppMessage（天时日历 / 命盘 / 速诊 / 快拍成片），
+ * 5 个 tab 页一个都没有——微信的规则是页面不实现该回调，右上角 ··· 里的「转发给朋友」就是**置灰**的，
+ * 于是用户在主界面看到的转发永远点不动，观感就是「这小程序不能转发」。朋友圈（onShareTimeline）
+ * 更是全站零实现，菜单项根本不出现。
+ *
+ * ## 为什么分享内容与页面解耦
+ *
+ * 本次定的口径是**任何页面都可以分享，但分享出去的是固定的内置海报素材（图 + 文案）轮动**，
+ * 落地页统一指向一个对陌生游客友好的公开页。这样做同时解决三件事：
+ *   ① 私密页（账本 / 档案 / 绑定 / 算力 / 支付）转发出去不会暴露当前页，收到的人不会撞上
+ *      别人的空态或登录门；
+ *   ② 素材由运营统一精修，不必为 54 个页面各写一套标题；
+ *   ③ 分享卡的样子可预期，出问题好排查。
+ * 已经有自定义分享的那 4 个页面**保留自己的成果型分享**（分享「我的命盘 / 我的天时日历」
+ * 比通用海报有效得多），只把 path 补上邀请码。
+ *
+ * ## 为什么用 Object.assign 而不是 Behavior
+ *
+ * 页面级 `behaviors` 对生命周期函数的合并语义随基础库版本有差异，而分享回调漏挂是**静默失效**
+ * ——按钮变灰但不报错，代码 review 看不出来，只有真机点开 ··· 菜单才发现。`Object.assign`
+ * 是确定的 JS 语义，不依赖框架实现。（同一理由见 ai-society `behaviors/share.js` 的文件头。）
+ *
+ * ## 归因
+ *
+ * 分享路径统一带自己的邀请码（`?ic=`），好友点开即由 `app.js` 捕获（见 services/invite.js）。
+ * 码从 store 里 `/me` 已经返回的 `inviteCode` 取——**零新增请求**，不为一个分享参数在每页多打一次接口。
+ * **拿不到码就退回无参路径**：分享照常可用，只是这一跳不计归因；绝不能因为缺一个参数把分享按钮变哑。
+ */
+
+const store = require('./store');
+
+/**
+ * 分享落地页：问策 tab。
+ *
+ * 不用速诊页（`packages/work/quickscan/index`）——它 onLoad 里就 `setData({ showLogin: true })`，
+ * 陌生访客点开分享卡看到的第一屏会是登录弹层，这既伤转化，也踩 2026-08-05 微信审核整改的口径
+ * （驳回原因正是「未浏览体验服务即要求授权登录」）。问策 tab 的登录弹层只在用户主动动作或 401 时出现，
+ * 游客进来渲染的是真实公开内容（读 GET /wence/hints 的 guestForm）。
+ */
+const LANDING = '/pages/sessions/index';
+
+/**
+ * 内置海报素材池（运营出图前的兜底，也是服务端下发失败时的降级）。
+ *
+ * 文案口径：**切真实经营痛点**（获客贵 / 现金流紧 / 方向不定），不用「宜攻宜守」这类盘面语——
+ * 对真实经商、开企业的人没有代入感。军师的语感留在称谓与语气里（「过一遍」「摆给军师看看」），
+ * 不体现在痛点表述本身。
+ *
+ * 图片刻意用**网络 URL**而不是打进包里：主包体积有上限，ai-society 那边就踩过一张 256 色 PNG
+ * 369KB 顶穿主包上限的坑。`image` 为空时整个字段不下发，微信会自动截当前页做封面——
+ * 宁可退化成截图，也不给一张裂开的图。
+ *
+ * `timelineTitle` 单列：朋友圈是「广而告之」的语气，而转发给朋友是「递给你看」的语气。
+ * 两张图也不能共用——转发按 5:4 原样显示，朋友圈按 1:1 居中裁剪，5:4 的图会被裁掉两侧字标。
+ */
+const BUILTIN_POSTERS = [
+  {
+    title: '生意上最头疼的那件事，先让军师给你过一遍',
+    timelineTitle: '经营卡在哪一环？让军师陪你拆一遍',
+    image: '',
+    timelineImage: '',
+  },
+  {
+    title: '客户越来越贵、账上越来越紧——先看清卡在哪一环',
+    timelineTitle: '获客贵、现金流紧，问题往往不在你以为的地方',
+    image: '',
+    timelineImage: '',
+  },
+  {
+    title: '下一步该押哪里？把你的局摆给军师看看',
+    timelineTitle: '下一步押哪里，值得先想清楚再投钱',
+    image: '',
+    timelineImage: '',
+  },
+];
+
+/**
+ * 服务端下发的素材池（预留）。运营后台维护图与文案后由 `/me` 带下来，
+ * 拿不到就用内置兜底——这条读取点先留好，服务端下发是后一期的事。
+ */
+function posterPool() {
+  try {
+    const me = store.snapshot().me;
+    const pool = me && me.sharePosters;
+    if (Array.isArray(pool) && pool.length && pool.every((p) => p && p.title)) return pool;
+  } catch (_) { /* store 未就绪：用内置 */ }
+  return BUILTIN_POSTERS;
+}
+
+/**
+ * 按**本地自然日**取素材序号：同一天任何页面、任何次分享都是同一套素材，便于排查
+ * 「用户说他看到的图不对」这类问题。刻意不用 Math.random()——随机会让同一次会话里
+ * 前后两次分享不一致，且线上无法复现。
+ *
+ * 用 年*372 + 月*31 + 日 而不是 Date.now()/86400000：后者按 UTC 切日，在东八区会变成
+ * 每天早上 8 点换素材，跨零点前后同一个「今天」拿到两套图。
+ */
+function dayIndex(now) {
+  const d = now || new Date();
+  return d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate();
+}
+
+function currentPoster(now) {
+  const pool = posterPool();
+  return pool[dayIndex(now) % pool.length];
+}
+
+/** 当前用户的邀请码（未登录 / `/me` 未回来时为空串，此时退回无参路径）。 */
+function currentCode() {
+  try {
+    const me = store.snapshot().me;
+    return (me && me.inviteCode) || '';
+  } catch (_) { return ''; }
+}
+
+/** 给任意页面路径接上邀请码；无码返回原路径。 */
+function pathWithCode(base) {
+  const path = base || LANDING;
+  const code = currentCode();
+  if (!code) return path;
+  return `${path}${path.indexOf('?') >= 0 ? '&' : '?'}ic=${encodeURIComponent(code)}`;
+}
+
+/** 朋友圈只能给 query（落地页被微信固定为当前页，改不了 path），所以这里只回参数串。 */
+function timelineQuery() {
+  const code = currentCode();
+  return code ? `ic=${encodeURIComponent(code)}` : '';
+}
+
+const friendMixin = {
+  onShareAppMessage() {
+    const poster = currentPoster();
+    const payload = { title: poster.title, path: pathWithCode(LANDING) };
+    if (poster.image) payload.imageUrl = poster.image; // 空图不下发，让微信截图兜底
+    return payload;
+  },
+};
+
+const timelineMixin = {
+  onShareTimeline() {
+    const poster = currentPoster();
+    const payload = { title: poster.timelineTitle || poster.title, query: timelineQuery() };
+    if (poster.timelineImage) payload.imageUrl = poster.timelineImage;
+    return payload;
+  },
+};
+
+/**
+ * 把分享能力合并进页面定义。**页面自己定义的同名方法优先**（那 4 个成果型分享页靠这条保留自己的实现）。
+ *
+ * @param {object} page  页面定义对象
+ * @param {object} [opts] `{ timeline: true }` 才挂朋友圈。
+ *   默认不挂的原因：朋友圈的落地页被微信强制为**当前页**、只能带 query 改不了 path，
+ *   所以私密页开朋友圈就等于把陌生访客直接丢在账本 / 档案的空态或登录门上。
+ *   只有本身就适合被陌生人看到的公开内容页才显式开。
+ */
+function withShare(page, opts) {
+  const wantTimeline = Boolean(opts && opts.timeline);
+  const base = wantTimeline ? Object.assign({}, friendMixin, timelineMixin) : Object.assign({}, friendMixin);
+  return Object.assign(base, page);
+}
+
+module.exports = {
+  withShare,
+  friendMixin,
+  timelineMixin,
+  pathWithCode,
+  timelineQuery,
+  currentPoster,
+  dayIndex,
+  posterPool,
+  BUILTIN_POSTERS,
+  LANDING,
+};

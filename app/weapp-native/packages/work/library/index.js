@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 const ICONS = new Set(['home', 'grid', 'agent', 'user', 'chat', 'insight', 'mic', 'attach', 'send', 'arrow', 'up', 'plus', 'chevron', 'alert', 'trend', 'check', 'target', 'layers', 'doc', 'image', 'video', 'pen', 'spark', 'chart', 'clock', 'flow', 'bolt', 'shield', 'crown', 'flag', 'token', 'pouch', 'upload', 'lock', 'diamond', 'phone', 'wechat']);
 
 function fmt(iso) {
@@ -10,7 +11,7 @@ function fmt(iso) {
   return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, errorText: '', items: [], showLogin: false }),
   onLoad() { this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); if (this._loaded) this.load(); },
@@ -42,4 +43,4 @@ Page({
     else navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(item.agentKey || 'general')}&continue=1`);
   },
   goChat() { wx.switchTab({ url: '/pages/sessions/index' }); },
-});
+}));

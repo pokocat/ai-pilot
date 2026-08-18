@@ -4,6 +4,7 @@ const { setAuthLostHandler } = require('./request');
 const { DEFAULT_AGENTS } = require('./mock');
 const { isColorKey } = require('./colors');
 const { apiErrorPresentation } = require('./api-error');
+const { clearInvite } = require('./invite');
 
 const COLOR_KEY = 'junshi.color';
 const ONBOARDED_KEY = 'junshi.onboarded';
@@ -135,6 +136,9 @@ async function loadMe() {
 
 async function afterLogin(result) {
   setToken(result.token);
+  // 邀请码是一次性归因凭证，登录成功即弃：不清的话每次登录都重复上报同一个码，
+  // 服务端每次落一条 already_bound 归因日志，把风控视图（按 IP 看聚集）弄脏。
+  clearInvite();
   state.onboarded = Boolean(result.onboarded);
   state.onboardingKnown = true;
   wx.setStorageSync(ONBOARDED_KEY, state.onboarded ? '1' : '');

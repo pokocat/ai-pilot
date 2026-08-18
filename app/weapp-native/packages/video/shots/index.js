@@ -4,6 +4,7 @@ const host = require('../host');
 const api = require('../api');
 const model = require('../model');
 const { ASSET_LIMITS } = require('../config');
+const { withShare } = require('../../../services/share');
 const { formatBytes } = model;
 const { ROLE } = model;
 
@@ -21,7 +22,7 @@ function rangeSelectionState(rows) {
   };
 }
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     projectId: '', loading: true, project: null, rows: [],
     totalText: '0:00', avatarSec: 0, credits: 0,
@@ -636,4 +637,4 @@ Page({
   playSkip() { this.playNext(); },
   swallow() {}, back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); },
-});
+}));

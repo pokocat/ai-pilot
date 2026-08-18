@@ -2004,6 +2004,53 @@ model ActivationEvent {
   @@map("activation_event")
 }
 
+/// 邀请关系（一人一行 = 单推荐人公理）。
+///
+/// 三条公理：① **单推荐人**——`userId` 主键即保证，且绑定后不可变更；② **无环**——绑定前沿
+/// `referrerId` 递归上溯，途中撞见本人即拒绝（物化路径只存三级，靠它查环会漏更深的环，
+/// 所以判环必须递归而不是只比一层）；③ **深度**——物化路径 lv1/lv2/lv3 **从第一天就写全**，
+/// 因为运营侧的邀请关系树要能看到完整链路；但对用户的呈现与将来的激励口径**只看一级**
+/// （多级 + 利益是微信审核最敏感的形状）。lv2/lv3 由邀请人自己那行平移得到，不递归。
+model Referral {
+  userId     String   @id // 被邀人；主键 = 一人只有一个推荐人
+  tenantId   String
+  referrerId String // 直接邀请人 = lv1
+  lv1        String // = referrerId（物化路径冗余一份，查询免 join/递归）
+  lv2        String? // 邀请人的邀请人
+  lv3        String? // 再上一级
+  inviteCode String // 建边时用的那个码（码是永久码，留档便于对账）
+  source     String // 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual'
+  boundAt    DateTime @default(now())
+
+  @@index([lv1])
+  @@index([lv2])
+  @@index([lv3])
+  @@index([tenantId])
+  @@map("referral")
+}
+
+/// 邀请归因日志：**每次带码进线都落一行，成功与失败都留痕**。
+///
+/// 为什么失败也要落：码过期/被轮换/码主异常时如果静默丢弃，推荐人就无从解释
+/// 「我的客户为什么没归到我」，运营也没有任何可查的凭据（ai-society 在这件事上补过一次）。
+/// clientIp / userAgent 是风控视图（按 IP 看新号聚集）的原料——注册侧本来就在采集这两样。
+model ReferralAttribution {
+  id         String   @id @default(cuid())
+  inviteCode String
+  source     String
+  newUserId  String? // 进线的新用户；建号失败时可能为空
+  referrerId String? // 解析出的码主；unknown_code 时为空
+  outcome    String // 'bound' | 'self' | 'unknown_code' | 'expired' | 'already_bound'
+  clientIp   String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([referrerId, createdAt])
+  @@index([clientIp])
+  @@index([outcome, createdAt])
+  @@map("referral_attribution")
+}
+
 /// D-3-7：生态工具注册表（数字人代播/短剧等外部小程序跳转位）。id = toolKey，可开方白名单 = enabled agents ∪ enabled EcoTool。
 /// 种子不预置任何行——由运营录入 appId 后 enabled 才可开方。目标小程序须与本小程序同一微信开放平台主体关联方可跳转（见 §13）。
 model EcoTool {
@@ -2148,7 +2195,7 @@ model VideoCreditHold {
 /// 为什么不复用 VideoCreditHold：① 克隆没有 projectId（那里是必填）；② 出片的锚点 upstreamJobId
 /// 是唯一的，而重训声音**复用同一个 voiceId**，加唯一约束会让第二次重训直接建不出 hold。
 model VideoCloneHold {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
   userId          String
   /// voiceCreate | voiceRetrain | avatarVideo | avatarImage —— 与 services/video/pricing.ts 的档位一一对应
@@ -2159,12 +2206,12 @@ model VideoCloneHold {
   targetKind      String
   /// 上游返回的 avatarId / voiceId；建单成功后回填。为空 = 还没提交成功，归超时清扫器处理
   targetId        String?
-  status          String   @default("submitting") // submitting | submitted | settled | refunded
+  status          String    @default("submitting") // submitting | submitted | settled | refunded
   lastTrainStatus String?
-  chargedAt       DateTime @default(now())
+  chargedAt       DateTime  @default(now())
   refundedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([userId, clientRequestId])
   @@index([userId, createdAt])

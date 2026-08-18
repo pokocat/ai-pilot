@@ -349,6 +349,8 @@ export interface Me {
   ai: AiInfo;
   understanding?: ClientUnderstanding;
   inviteCode?: string;             // V7-13：邀请码（惰性生成）
+  /** 我的邀请读数；`null` = 本次没读到（与「读到了但是 0」区分开），字段缺失 = 旧服务端。 */
+  referral?: ReferralSummary | null;
   service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
   features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
   capabilities?: { attachments: AttachmentCapabilities }; // 运行时权威上限；旧服务端缺失时客户端保守兜底
@@ -409,6 +411,36 @@ export interface LoginResult {
   user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
   /** 仅手机号快捷登录需要；旧客户端忽略即可。wechat_relinked 是登录成功后的非阻断提醒。 */
   phoneBinding?: LoginPhoneBinding;
+}
+
+/**
+ * 登录请求可带的邀请归因入参（三条建号通道通用：`/auth/login`、`/auth/wechat-phone`、`/auth/carrier-onetap`）。
+ *
+ * 两个字段都**可选**：老客户端不带、用户不是从分享进来也不带。
+ * `inviteCodeAt` = 客户端捕获到该码的时刻（ms epoch），**归因窗口的判定权在服务端**
+ * （窗口天数归运营后台配置），客户端只如实上报「码」和「什么时候拿到的」，不写死业务天数。
+ * 形状不合法的 `inviteCode` 一律当没传处理——分享链路不能因为一个脏参数把登录拦下来。
+ */
+export interface LoginAttribution {
+  inviteCode?: string;
+  inviteCodeAt?: number;
+}
+
+/**
+ * 「我的邀请」读数（挂 `/me.referral`）。
+ *
+ * `directCount` 只数**直接邀请**（关系链虽然物化存了三级，但对用户呈现与激励口径只看一级）。
+ * `activatedCount` = 直邀里已开通且未过期套餐的人数，口径与 `services/planGate.ts` 同源。
+ * `boundAt` / `referrerName` 描述「我是谁邀来的」，没有上级时为 null。
+ * 整个字段可能为 `null`：表示**这次没读到**（接口异常），与「读到了但是 0」必须能区分开——
+ * 把读失败画成 0 会让人以为奖励没到账（本仓 allSettled 静默兜底踩过这个坑）。
+ */
+export interface ReferralSummary {
+  inviteCode: string;
+  directCount: number;
+  activatedCount: number;
+  boundAt: string | null;
+  referrerName: string | null;
 }
 
 /* ────────────── 建档 ────────────── */

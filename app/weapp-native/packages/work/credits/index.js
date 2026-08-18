@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const ORDER_LABEL = { created: '待支付', paid: '已支付 · 权益发放中', applied: '已完成', failed: '支付失败', closed: '已关闭', refunded: '已退款' };
 const REFUND_LABEL = { refund_requested: '退款已申请', refund_processing: '退款处理中', refund_closed: '退款已关闭', refund_abnormal: '退款异常', refunded: '已退款' };
@@ -30,7 +31,7 @@ function mapOrder(order) {
   return Object.assign({}, order, { statusText: `${label}${mockText} · ${timeText} · 单号 …${String(order.outTradeNo || '').slice(-6)}${payableText}`, amountText: `¥${(Number(order.amount || 0) / 100).toFixed(2)}`, bad: order.status === 'refunded' || order.status === 'failed', actionText: order.mock ? '模拟支付' : '继续支付' });
 }
 
-Page({
+Page(withShare({
   // packState：loading / ready / failed —— 增购目录是公开数据、与个人流水成败无关，
   // 拉失败必须显式说「没取到 + 重试」，不能退化成「暂无增购包」（那是运营没配的意思）。
   data: baseData({ loading: true, creditBalance: '—', usageText: '—', usagePercent: 0, usageUnlimited: false, packRemainingText: '', items: [], orders: [], packs: [], packState: 'loading', packHint: '算力包永久有效，用完为止 · 钻石包到账即可启用顾问', purchasing: '', repaying: '', errorText: '', showLogin: false }),
@@ -165,4 +166,4 @@ Page({
     }
     return 'pending';
   },
-});
+}));
