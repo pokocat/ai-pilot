@@ -222,22 +222,34 @@ function loadShare(me) {
  *     ——必须让后一跳能成功，才能断言「总共要有一条落地」。
  * 中间两种都必须**完全不影响**分享回调与冷启动捕获。
  */
+/**
+ * 埋点桩。**桩的是 `api.track` 的真实契约，而不是「让它抛错」**（2026-08-18 第七轮复核）。
+ *
+ * 真实契约（见 services/api.js）：`api.track` 自己把 `wx.request` 的同步异常吞掉，
+ * **永不抛**，只以返回值如实告知「有没有交给 wx」——true = 已投递，false = 压根没发出去。
+ * 早先的桩让 `api.track` 直接 `throw`，与这个契约不符，于是「只有确实发出去才置抑制标记」
+ * 那条修复看着通过、真机上完全没生效（真实的永不抛 → 外层永远拿到 true）。桩与契约不符时，绿灯是假的。
+ *
+ * 模式：
+ *   · `ok`        —— 都投递成功（返回 true）；
+ *   · `nosend`    —— 一律没发出去（返回 false，**不抛**）；
+ *   · `nosend-once` —— 第一跳没发出去、之后正常，用来验「首跳没发出去不许抵消次跳」；
+ *   · `require`   —— 连 `require('./api')` 都失败（模块级异常，这条仍然是真的抛）。
+ */
 function stubApiTrack(mode = 'ok') {
   const Module = cjsRequire('node:module');
   const original = Module.prototype.require;
   const calls = [];
-  let threw = false;
+  let failedOnce = false;
   Module.prototype.require = function patched(id) {
     if (id === './api') {
       if (mode === 'require') throw new Error('桩：api 模块加载失败');
-      if (mode === 'throw') return { api: { track() { throw new Error('桩：wx.request 抛了'); } } };
-      if (mode === 'throw-once') {
-        return { api: { track: (name, props) => {
-          if (!threw) { threw = true; throw new Error('桩：第一跳 wx.request 抛了'); }
-          calls.push({ name, props });
-        } } };
-      }
-      return { api: { track: (name, props) => { calls.push({ name, props }); } } };
+      return { api: { track: (name, props) => {
+        if (mode === 'nosend') return false;              // 契约：不抛，只回 false
+        if (mode === 'nosend-once' && !failedOnce) { failedOnce = true; return false; }
+        calls.push({ name, props });
+        return true;
+      } } };
     }
     return original.apply(this, arguments);
   };
@@ -571,7 +583,7 @@ test('冷启动首条埋点没发出去时，抑制标记不许置上：onLaunch
   // `api.track` 抛错（或 require 抛）那一跳根本没发出去，紧随的首次 onShow 又被同码标记吞掉，
   // **净结果一条落地都没有**——少的不是一条重复，是一整次冷启动的漏斗分母，而且全程静默。
   // 旧的异常测试只验了「码还能存下」、没跑 onLaunch → onShow 的完整时序，所以是假绿。
-  const stub = stubApiTrack('throw-once');
+  const stub = stubApiTrack('nosend-once');
   try {
     const { app, store } = loadApp();
     const launchOptions = { path: 'pages/sessions/index', scene: 1007, query: { ic: 'JS2K7P' } };
@@ -585,6 +597,24 @@ test('冷启动首条埋点没发出去时，抑制标记不许置上：onLaunch
     assert.equal(stub.calls[0].props.channel, 'query');
     assert.equal(store['junshi.invite'], 'JS2K7P', '捕获与埋点无关，码照常落 storage');
   } finally { stub.restore(); }
+});
+
+test('抑制标记的时效要校验下界：设备把时钟往回拨，陈旧标记也不许吞掉真落地', () => {
+  // 只判上界（`<= 3000`）是不够的：设备校时可能把时钟往回调，
+  // 那时 `Date.now() - echo.at` 是**负数**，照样满足「≤ 3000」——
+  // 于是一个几小时前留下的陈旧标记会把这次真落地吞掉。所以判定必须是 `0 <= d <= 窗口`。
+  const stub = stubApiTrack();
+  const realNow = Date.now;
+  try {
+    let t = 1_760_000_000_000;
+    Date.now = () => t;
+    const { app } = loadApp();
+    app.onLaunch({ query: { ic: 'JS2K7P' } });
+    assert.equal(stub.calls.length, 1, '冷启动这一条照发');
+    t -= 3_600_000;                               // 时钟被往回拨一小时（NTP 校时 / 用户手动改）
+    app.onShow({ query: { ic: 'JS2K7P' } });      // 用户又从同一张卡进来 = 真实的第二次落地
+    assert.equal(stub.calls.length, 2, '负时差不得命中抑制窗口（陈旧标记必须失效）');
+  } finally { Date.now = realNow; stub.restore(); }
 });
 
 test('抑制标记有时效：onShow 压根没来时，标记不许留到未来某次真落地上把它吞掉', () => {

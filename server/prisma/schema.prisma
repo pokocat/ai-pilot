@@ -2060,6 +2060,10 @@ model ReferralAttribution {
   @@index([clientIp])
   @@index([outcome, createdAt])
   @@index([tenantId, createdAt])
+  /// 后台风控默认查「全部租户」，那条 `GROUP BY clientIp` 只按窗口过滤，
+  /// 用不上 `(tenantId, createdAt)`（前导列不匹配）。归因表是事件流、只增不减，
+  /// 放量后没有这条索引就得全表扫。复合 `(createdAt, clientIp)` 让窗口过滤与分组键都走索引。
+  @@index([createdAt, clientIp])
   @@map("referral_attribution")
 }
 
