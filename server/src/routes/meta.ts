@@ -227,6 +227,12 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.session.deleteMany({ where: { tenantId } });
         await tx.memory.deleteMany({ where: { tenantId } });
         await tx.project.deleteMany({ where: { tenantId } });
+        // 邀请关系与归因：凡涉及本人的行全部删掉——不只是「我的上级」，也包括
+        // 「我作为别人上级」的那些边（它们的 referrerId / lv1~lv3 里写着我的 userId）。
+        // 留着会有两个后果：① 带 IP·UA 的归因记录在注销后仍永久留库，违反注销口径；
+        // ② 别人的 directCount 会继续把已注销账号数进去，读数与事实不符。
+        await tx.referral.deleteMany({ where: { OR: [{ userId: user.id }, { referrerId: user.id }, { lv1: user.id }, { lv2: user.id }, { lv3: user.id }] } });
+        await tx.referralAttribution.deleteMany({ where: { OR: [{ newUserId: user.id }, { referrerId: user.id }] } });
         await tx.creditLedger.deleteMany({ where: { tenantId } });
         await tx.tokenUsage.deleteMany({ where: { tenantId } });
         await tx.tokenWallet.deleteMany({ where: { tenantId } });

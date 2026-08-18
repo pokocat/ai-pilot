@@ -27,7 +27,31 @@ export function isInviteCodeShape(value: unknown): value is string {
  * `cycle` 与 `self` 刻意分开：都拒绝建边，但运营看到 `self` 会以为用户在拿自己的码，
  * 而 `cycle` 说明对方在自己的下级链上（多半是脏数据或人工补绑造成），两者的排查方向完全不同。
  */
-export type ReferralOutcome = 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired' | 'already_bound';
+export type ReferralOutcome =
+  | 'bound'
+  | 'self'
+  | 'cycle'
+  | 'unknown_code'
+  | 'expired'
+  | 'already_bound'
+  /**
+   * 运营配置读取失败，本次**不建边**。
+   *
+   * 为什么不回落默认值硬绑：关系一旦建立就不可变更。配置是 7 天、而故障时按 30 天算，
+   * 就会建出一条本不该存在的永久关系，事后告警也改不回来（反向同理：配置 60 天却按 30 天判过期）。
+   * 「这次不绑」是可恢复的——用户再点一次分享、或运营按这条留痕人工补绑都行。
+   */
+  | 'config_unavailable'
+  /**
+   * 带了码但**没有可信的捕获时间**（客户端没带、或带了个脏值被拒），本次不建边。
+   *
+   * 不能像早先那样「没时间戳就按不过期处理」——那条路径会让
+   * `inviteCode=合法 + inviteCodeAt="abc"` 绕过归因窗口，直接建出一条不可变更的永久关系。
+   * 正常客户端一定会带（services/invite.js 的 inviteParams 有码必带时间），
+   * 所以走到这里说明请求本身不可信；用户重新点一次分享即可恢复。
+   * 运营人工补绑（source='manual'）不受此限。
+   */
+  | 'no_timestamp';
 
 /** 建边来源。前端分享通道 + 海报扫码 + 运营人工补绑。 */
 export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual';
@@ -62,14 +86,28 @@ export interface ReferralConfig {
  * **最多 60 秒收敛**，这是有意的取舍，不是 bug。要立刻读到最新值（运营改完想当场验证、
  * 或测试里刚写完就读）传 `{ fresh: true }` 绕过缓存。
  */
+/**
+ * 并发下主键冲突时抛出：事务已失败，留痕必须由调用方在事务外补。
+ * 带上 referrerId，让事务外那条 attribution 仍然记得是谁。
+ */
+export class ReferralAlreadyBound extends Error {
+  constructor(public readonly referrerId: string) { super('referral already bound'); }
+}
+
+/** 读配置时抛出：调用方据此落 `config_unavailable` 并跳过本次绑定。 */
+export class ReferralConfigUnavailable extends Error {}
+
 export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<ReferralConfig> {
-  // 读失败**不静默**：仍然回落代码默认值（把归因链路的可用性绑死在配置读取上代价更大——
-  // 配置一抖动就全站归因失效），但必须留一行 warn，否则「运营改了没生效」和「压根没读到」
-  // 在线上长得一模一样。缺行（从未配置过）是正常态，不算失败、不打日志。
-  const raw = (await featureFlagPayload(FLAG_KEY, opts).catch((err: Error) => {
-    console.warn(`[referral] 运营配置读取失败，本次回落默认值: ${err.message}`);
-    return null;
-  })) as Record<string, unknown> | null;
+  // **读失败不再伪装成默认值**：缺行（从未配置过）是正常态，走代码默认；
+  // 但查询真的失败（DB 抖动、权限异常）时必须抛出去，由调用方把这次绑定挂起并留痕——
+  // 用未知配置去算一个**不可变更**的永久关系，是不可逆的错误。
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = (await featureFlagPayload(FLAG_KEY, opts)) as Record<string, unknown> | null;
+  } catch (err) {
+    console.warn(`[referral] 运营配置读取失败，本次不建边: ${(err as Error).message}`);
+    throw new ReferralConfigUnavailable((err as Error).message);
+  }
   const days = Number(raw?.window);
   return {
     // 越界/脏值回落默认，不让一个错配把归因窗口带到沟里（沿用告警阈值配置化的处理方式）。
@@ -111,10 +149,13 @@ async function wouldFormCycle(db: Db, userId: string, candidate: string): Promis
     });
     cursor = row?.referrerId ?? null;
   }
-  // **fail-closed**：跑满上限还没到链顶，说明这条链要么异常长、要么本身已经有环
-  // （脏数据或人工补绑造成）。此时**保守拒绝**，绝不能返回 false 放行——
-  // 那就是在已知可疑的情况下亲手建出一个环，而环会让上溯查询和运营侧的邀请树永久打转。
-  return true;
+  // 跑满上限后再看一次游标：
+  //   · cursor 已经是 null → 恰好在最后一跳走到了链顶，这条链是**干净**的，放行；
+  //     （只写 `return true` 会把「链长正好等于上限」的合法用户误记成成环，
+  //      他不但绑不上，还会在归因日志里留下一条假的 cycle 告警。）
+  //   · cursor 非 null → 还没到顶就用完了预算，这条链要么异常长、要么本身有环
+  //     （脏数据或人工补绑造成）→ **fail-closed 保守拒绝**，绝不放行去亲手建一个环。
+  return cursor !== null;
 }
 
 export interface BindArgs {
@@ -135,8 +176,11 @@ export interface BindArgs {
  * 调用约定：**只在新注册（isNew=true）时调**。已注册用户登录不追认——存量用户互相填码
  * 是最容易被薅的口子。
  *
- * 事务约定：调用方把建号事务的 tx 传进来（关系与账号同生共死），但**绑定失败绝不能拖垮注册**
- * ——所以调用方要用 catch 兜住这个函数的异常，注册永远优先。
+ * 事务约定（注意与直觉相反）：`db` 传进来的是一个**独立于建号的**事务客户端，不是建号那个 tx。
+ * 建号提交之后才另开一个只包「建边 + 留痕」的小事务，原因写在 `auth.ts` 的
+ * `bindReferralAfterRegister` 上：Postgres 事务里任一语句失败即整体 aborted，
+ * 把建号裹进来就做不到「绑定失败不影响注册」。调用方必须 catch 住本函数的异常，注册永远优先；
+ * 并发主键冲突会抛 `ReferralAlreadyBound`，那条留痕只能由调用方在事务外补。
  */
 export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
   const { db, userId, tenantId, inviteCode, inviteCodeAt, clientIp, userAgent } = args;
@@ -172,11 +216,18 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
   if (referrer.id === userId) return trace('self', referrer.id);
 
   // 归因窗口：客户端上报捕获时刻，窗口天数归运营配置。
-  // inviteCodeAt 缺失时按「不过期」处理——带码但不带时间戳只可能来自非小程序调用，
-  // 拿不到时间就无法判断新鲜度，此时宁可归因（仍然如实留痕），也不要凭空判死。
-  if (typeof inviteCodeAt === 'number' && Number.isFinite(inviteCodeAt) && inviteCodeAt > 0) {
-    const { windowDays } = await referralConfig();
-    const deadline = new Date(inviteCodeAt + windowDays * 86_400_000);
+  const hasTrustedAt = typeof inviteCodeAt === 'number' && Number.isInteger(inviteCodeAt) && inviteCodeAt > 0;
+  // 没有可信时间戳就不建边（运营人工补绑除外）：判不了新鲜度就不要建一条改不回来的关系。
+  if (!hasTrustedAt && source !== 'manual') return trace('no_timestamp', referrer.id);
+  if (hasTrustedAt) {
+    let windowDays: number;
+    try {
+      ({ windowDays } = await referralConfig());
+    } catch (err) {
+      if (err instanceof ReferralConfigUnavailable) return trace('config_unavailable', referrer.id);
+      throw err;
+    }
+    const deadline = new Date(inviteCodeAt + windowDays * 86_400_000);  // eslint-disable-line
     // 用 clock.now() 而不是 new Date()：沙箱靠 x-test-now 头快进时间做离线验证，
     // 直接 new Date() 会让这条判定与 planGate / getPlanStatus 用的时钟不一致。
     if (isExpired(deadline, now())) return trace('expired', referrer.id);
@@ -208,9 +259,15 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
     });
   } catch (err) {
     // 并发：同一个新号的两次带码请求同时走到这里，主键冲突（P2002）。
-    // 这不是错误而是单推荐人公理生效了——按 already_bound 如实留痕，
-    // 不要把它抛给上层当「绑定失败」记日志（那样归因日志里会缺这一行，风控视图就有空洞）。
-    if ((err as { code?: string }).code === 'P2002') return trace('already_bound', referrer.id);
+    // 这不是错误，是单推荐人公理生效了。
+    //
+    // **但绝不能在这里 trace()**：Postgres 里唯一约束一失败，整个事务就进入失败态，
+    // 之后的 attribution insert 同样会失败、并把这个事务整体回滚——留痕反而丢了。
+    // 所以把它包成一个可识别的异常抛出去，由调用方在**事务外**补这条 already_bound 留痕。
+    // （此前这里直接 trace()，测试因为传的是裸 prisma 而不是生产用的 tx，才显得通过。）
+    if ((err as { code?: string }).code === 'P2002') {
+      throw new ReferralAlreadyBound(referrer.id);
+    }
     throw err;
   }
   return trace('bound', referrer.id);
@@ -255,4 +312,38 @@ export async function referralSummary(userId: string, inviteCode: string): Promi
     boundAt: mine ? mine.boundAt.toISOString() : null,
     referrerName,
   };
+}
+
+/**
+ * 在**事务外**补一条归因留痕。给两种场景用：
+ *   · 并发 P2002（事务已失败，事务内写不进去）；
+ *   · 绑定整体抛错后，至少让「有人带着这个码进来过」这件事留下痕迹。
+ * 自身失败只记日志——留痕的兜底不该再把调用链带崩。
+ */
+export async function traceOutsideTransaction(args: {
+  tenantId: string;
+  userId: string;
+  inviteCode: string;
+  source: ReferralSource;
+  outcome: ReferralOutcome;
+  referrerId?: string | null;
+  clientIp?: string | null;
+  userAgent?: string | null;
+}): Promise<void> {
+  try {
+    await prisma.referralAttribution.create({
+      data: {
+        tenantId: args.tenantId,
+        inviteCode: args.inviteCode,
+        source: args.source,
+        newUserId: args.userId,
+        referrerId: args.referrerId ?? null,
+        outcome: args.outcome,
+        clientIp: args.clientIp ?? null,
+        userAgent: args.userAgent ? args.userAgent.slice(0, 500) : null,
+      },
+    });
+  } catch (err) {
+    console.error(`[referral] 事务外补留痕失败（${args.outcome}）: ${(err as Error).message}`);
+  }
 }
