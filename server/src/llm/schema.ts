@@ -564,11 +564,33 @@ export function scrubSectionJson(text: string): string {
 export function normalizeCover(input: unknown): DeliverableCover | undefined {
   if (!input || typeof input !== 'object') return undefined;
   const o = input as Record<string, unknown>;
-  const title = textOf(o.title ?? o.h);
+  const title = normalizeDeliverableTitle(o.title ?? o.h, '');
   if (!title) return undefined;
   const subtitle = textOf(o.subtitle ?? o.sub);
   const motto = textOf(o.motto);
   return { title, ...(subtitle ? { subtitle } : {}), ...(motto ? { motto } : {}) };
+}
+
+const REPORT_TITLE_MAX_CHARS = 36;
+const REPORT_TITLE_DANGLING_TAIL = /(?:[·、:：/（(【\[]|以及|还有|并且|并|暨|和|与|及|或)+$/;
+
+/**
+ * 报告标题是方案库、封面、分享图共用的资产名：必须是一句完整短语，不能把模型的
+ * 悬空连词或超长解释原样存进去。超长时优先在语义分隔处收口，再兜底硬上限。
+ */
+export function normalizeDeliverableTitle(input: unknown, fallback = '咨询成果'): string {
+  let title = textOf(input)
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[#*_`「」『』《》\s]+|[#*_`「」『』《》\s]+$/g, '')
+    .trim();
+  if (Array.from(title).length > REPORT_TITLE_MAX_CHARS) {
+    const clipped = Array.from(title).slice(0, REPORT_TITLE_MAX_CHARS).join('');
+    const breakAt = Math.max(clipped.lastIndexOf('：'), clipped.lastIndexOf(':'), clipped.lastIndexOf('·'), clipped.lastIndexOf('—'));
+    title = breakAt >= 6 ? clipped.slice(0, breakAt) : clipped;
+  }
+  title = title.replace(REPORT_TITLE_DANGLING_TAIL, '').trim();
+  return title || fallback;
 }
 
 /** WO-12：从 emit_deliverable 的 prescriptions 参数归一化处方（问题/打法/工具 key，最多 3 条）。白名单过滤在落库时做。 */
@@ -595,12 +617,12 @@ export const DELIVERABLE_TOOL = {
   input_schema: {
     type: 'object' as const,
     properties: {
-      title: { type: 'string', description: '成果标题，如「三城布局方略」' },
+      title: { type: 'string', description: '成果标题，10–24 个汉字为宜，必须是完整短语，不以“与/和/及/或/·”等连接词或分隔符结尾，如「三城布局方略」' },
       cover: {
         type: 'object',
         description: '（可选）封面文案。badge/印章/落款由模板固定，你只给这三项。',
         properties: {
-          title: { type: 'string', description: '封面主标题（可与 title 不同、更凝练）' },
+          title: { type: 'string', description: '封面主标题（可与 title 不同、更凝练；必须语义完整，不以连接词结尾）' },
           subtitle: { type: 'string', description: '副标题，如「拾叶山房 · 创始人 沈青梧」（可选）' },
           motto: { type: 'string', description: '一句古典格言/定场诗，仅此处可用古典味（可选）' },
         },

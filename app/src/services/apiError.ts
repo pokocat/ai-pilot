@@ -31,6 +31,8 @@ const USER_MESSAGES: Record<string, string> = {
   FORCES_RATE_LIMIT: '今天的刷新次数已用完，请稍后再试。',
   ORDER_RATE_LIMITED: '订单创建有点频繁，请稍后再试。',
   FILE_REQUIRED: '请先选择要上传的文件。',
+  KNOWLEDGE_FILE_TOO_LARGE: '文件超过 20MB，请压缩、拆分或导出较小文件后重新上传。',
+  CLIP_CAPTURE_TOO_LARGE: '形象视频超过 100MB，请压缩或缩短后重新上传。',
   IMAGE_TOO_LARGE: '图片太大，请压缩后重新上传。',
   IMAGE_BAD_TYPE: '暂不支持这种图片格式，请更换后上传。',
   AVATAR_BAD_TYPE: '暂不支持这种头像格式，请更换后上传。',
@@ -112,6 +114,11 @@ export function httpErrorInfo(statusCode: number, data: unknown, noun = '请求'
   const technical = body.error || `HTTP ${statusCode}`;
   if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code: body.code, technicalMessage: technical };
   if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code: body.code, technicalMessage: technical };
+  if (statusCode === 413) return {
+    message: USER_MESSAGES[body.code || ''] || '文件太大，超过当前上传上限，请压缩或拆分后重新上传。',
+    code: body.code,
+    technicalMessage: technical,
+  };
   if (statusCode >= 500) return { message: '军师服务暂时不可用，请稍后重试。', code: body.code, technicalMessage: technical };
   const readable = readableBusinessMessage(body.error);
   return {

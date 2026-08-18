@@ -17,6 +17,29 @@ function walk(root) {
   });
 }
 
+test('分享图长标题完整换行，资料上传超限与旧 PPT 都给明确失败原因', () => {
+  const canvasText = cjsRequire(path.join(sourceRoot, 'utils/canvas-text.js'));
+  const uploadGuard = cjsRequire(path.join(sourceRoot, 'utils/document-upload.js'));
+  const ctx = {
+    fontSize: 36,
+    setFontSize(value) { this.fontSize = value; },
+    measureText(value) { return { width: Array.from(value).length * this.fontSize }; },
+  };
+  const title = '主要矛盾定锤 · 攻守决断与三阶段落子方案';
+  const layout = canvasText.fitCanvasText(ctx, title, { maxWidth: 240, maxLines: 4, maxFontSize: 36, minFontSize: 18 });
+  assert.equal(layout.lines.join(''), title, '分享图标题不得 slice 截断');
+  assert.ok(layout.lines.length > 1, '长标题应自动换行');
+  assert.match(uploadGuard.validateDocumentUpload({ name: '经营复盘.ppt', size: 1024 }).message, /另存为 \.pptx/);
+  assert.match(uploadGuard.validateDocumentUpload({ name: '经营复盘.pptx', size: 21 * 1024 * 1024 }).message, /21\.0MB.*上限 20MB/);
+  assert.equal(uploadGuard.validateDocumentUpload({ name: '经营复盘.pptx', size: 2 * 1024 * 1024 }).ok, true);
+  const reportPage = fs.readFileSync(path.join(sourceRoot, 'packages/work/report/index.js'), 'utf8');
+  const thinktankPage = fs.readFileSync(path.join(sourceRoot, 'pages/thinktank/index.js'), 'utf8');
+  assert.match(reportPage, /fitCanvasText\(ctx, maskSensitive\(content\.title\)/, '报告页必须实际使用自适应标题布局');
+  assert.doesNotMatch(reportPage, /content\.title\)\.slice\(0,\s*14\)/, '不得恢复固定 14 字截断');
+  assert.match(thinktankPage, /uploadError:failed>0/);
+  assert.match(thinktankPage, /部分资料上传失败/);
+});
+
 // 对话核心已抽到主包 weapp-native/chat-core/，chat 分包页只剩页头与模板引用。
 // 断言的目标从「chat 页四件套」挪到「chat-core + chat 页」的并集，条数与语义一条不减；
 // chat-core 文件本身是否存在由下方「对话核心抽到主包」一测硬保。

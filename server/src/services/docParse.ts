@@ -1,8 +1,8 @@
-// 文档解析：把上传的 PDF / Word(docx) / Excel(xlsx) / CSV / Markdown / 纯文本 提取成可入库的纯文本。
+// 文档解析：把上传的 PDF / Word(docx) / Excel(xlsx) / PowerPoint(pptx) / CSV / Markdown / 纯文本提取成可入库的纯文本。
 // 重型库（pdfjs/mammoth/xlsx）一律「按需动态 import」——避免拖慢服务启动、也不影响测试加载。
 // 解析失败由调用方写入 KnowledgeItem.status=failed + error，不致命。
 
-export type DocType = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'md' | 'html' | 'txt';
+export type DocType = 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'csv' | 'md' | 'html' | 'txt';
 
 // 扩展名 → 类型。.doc/.xls 尽力而为（多为旧二进制格式，可能解析失败 → 走 failed 兜底）。
 const EXT_MAP: Record<string, DocType> = {
@@ -11,6 +11,7 @@ const EXT_MAP: Record<string, DocType> = {
   doc: 'docx',
   xlsx: 'xlsx',
   xls: 'xlsx',
+  pptx: 'pptx',
   csv: 'csv',
   md: 'md',
   markdown: 'md',
@@ -35,6 +36,7 @@ export function detectDocType(fileName: string, mime?: string): DocType | null {
   if (m.includes('pdf')) return 'pdf';
   if (m.includes('wordprocessingml') || m.includes('msword')) return 'docx';
   if (m.includes('spreadsheetml') || m.includes('ms-excel')) return 'xlsx';
+  if (m.includes('presentationml')) return 'pptx';
   if (m.includes('csv')) return 'csv';
   if (m.includes('markdown')) return 'md';
   if (m.includes('html')) return 'html';
@@ -136,6 +138,30 @@ async function parseXlsx(buf: Buffer): Promise<string> {
   return parts.join('\n\n');
 }
 
+async function parsePptx(buf: Buffer): Promise<string> {
+  // pptx 是 OOXML ZIP。复用现有 xlsx 依赖暴露的 CFB ZIP 读取器，避免再引入一套重型解析库；
+  // 这里只取每页 slide*.xml 的 <a:t> 文本，图片、动画和备注不冒充正文。
+  const mod = (await import('xlsx')) as unknown as { default?: unknown };
+  const XLSX = (mod.default ?? mod) as typeof import('xlsx');
+  const archive = XLSX.CFB.read(buf, { type: 'buffer' }) as unknown as {
+    FullPaths: string[];
+    FileIndex: Array<{ content?: Buffer }>;
+  };
+  const slides = archive.FullPaths
+    .map((path, index) => ({ path: path.replace(/^Root Entry\//, ''), index }))
+    .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.path))
+    .sort((a, b) => Number(a.path.match(/slide(\d+)/i)?.[1] || 0) - Number(b.path.match(/slide(\d+)/i)?.[1] || 0));
+  const parts: string[] = [];
+  for (const [slideIndex, slide] of slides.entries()) {
+    const xml = archive.FileIndex[slide.index]?.content?.toString('utf8') ?? '';
+    const lines = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi)]
+      .map((match) => decodeHtmlEntities(match[1].replace(/<[^>]+>/g, '')).trim())
+      .filter(Boolean);
+    if (lines.length) parts.push(`第 ${slideIndex + 1} 页\n${lines.join('\n')}`);
+  }
+  return parts.join('\n\n');
+}
+
 /**
  * 解析文档为纯文本。返回 { type, text }；不支持的类型或提取不到文本时抛出（调用方落 failed）。
  */
@@ -152,6 +178,9 @@ export async function parseDocument(buf: Buffer, fileName: string, mime?: string
       break;
     case 'xlsx':
       text = await parseXlsx(buf);
+      break;
+    case 'pptx':
+      text = await parsePptx(buf);
       break;
     case 'csv':
     case 'md':

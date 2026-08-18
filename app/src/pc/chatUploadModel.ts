@@ -1,6 +1,6 @@
 import { checkUpload } from '../services/uploadGuard';
 
-export const CHAT_UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'] as const;
+export const CHAT_UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'] as const;
 export const CHAT_UPLOAD_MAX_COUNT = 9;
 export const CHAT_UPLOAD_MAX_BATCH_BYTES = 60 * 1024 * 1024;
 
@@ -15,7 +15,7 @@ export function chatUploadIssue(files: UploadCandidate[], currentCount: number):
     const name = String(file.name || '未命名资料');
     const ext = (name.split('.').pop() || '').toLowerCase();
     if (!(CHAT_UPLOAD_EXT as readonly string[]).includes(ext)) {
-      return `「${name}」格式暂不支持。可上传 PDF、Word、Excel、CSV、MD 或 TXT。`;
+      return `「${name}」格式暂不支持。可上传 PDF、Word、Excel、PPTX、CSV、MD 或 TXT。`;
     }
     const checked = checkUpload(file);
     if (!checked.ok) return checked.desc || checked.title || `「${name}」无法上传。`;

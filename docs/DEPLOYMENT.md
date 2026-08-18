@@ -236,6 +236,13 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 ```
 
+上传体积必须同时对齐端上、Fastify 与 Nginx，不能只改应用层：普通 `/api/` 继续保持 10MB；
+`/api/knowledge/upload` 路由单独设 `client_max_body_size 25m`，承接业务 20MB 文件及 multipart 开销；
+`/api/video/(avatar/(consent|clone)|assets)` 单独设 `120m`，承接业务 100MB 形象视频。两类路由都要将
+Nginx 前置 413 转为 JSON 业务码（`KNOWLEDGE_FILE_TOO_LARGE` / `CLIP_CAPTURE_TOO_LARGE`），否则请求还没进入
+Fastify，客户端只能拿到 HTML 错误页并退化成「上传未完成」。完整配置见 `deploy/nginx.conf.example`；修改线上后必须
+先 `nginx -t`，再 `systemctl reload nginx`，不得为此重启 API。
+
 ### PC 独立域名 `copilot.aibuzz.cn`
 
 PC 默认仍按 `/pc/` 构建；独立域名必须使用根基址、同源 API，并明确把窄屏送回移动站：

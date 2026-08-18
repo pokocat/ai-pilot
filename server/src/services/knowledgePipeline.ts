@@ -48,12 +48,13 @@ function monthStart(): Date {
   return monthStartOf();
 }
 
-// fileType（pdf/docx/xlsx/csv/md/txt/…）→ 展示用类型标签（批次 typeStats 用）。
+// fileType（pdf/docx/xlsx/pptx/csv/md/txt/…）→ 展示用类型标签（批次 typeStats 用）。
 function fileTypeLabel(fileType: string | null | undefined): string {
   switch ((fileType || '').toLowerCase()) {
     case 'pdf': return 'PDF';
     case 'docx': case 'doc': return '文档';
     case 'xlsx': case 'xls': case 'csv': return '表格';
+    case 'pptx': return '演示文稿';
     case 'md': case 'markdown': return 'Markdown';
     case 'txt': case 'text': return '文本';
     case '': return '其他';

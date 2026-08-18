@@ -2,7 +2,7 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { CHAT_TAIL_DIRECTIVE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { CHAT_TAIL_DIRECTIVE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizeDeliverableTitle, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
@@ -168,7 +168,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     if (sections.length) {
       return {
         result: {
-          title: input.title || tpl?.title || '咨询成果',
+          title: normalizeDeliverableTitle(input.title, tpl?.title || '咨询成果'),
           icon: tpl?.icon ?? 'spark',
           meta: metaOf(ctx),
           cover: normalizeCover(input.cover),
@@ -187,7 +187,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   if (textSections.length) {
     return {
       result: {
-        title: tpl?.title || '咨询成果',
+        title: normalizeDeliverableTitle(tpl?.title, '咨询成果'),
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
         sections: textSections,
@@ -713,7 +713,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
   if (sections.length) {
     return {
       result: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: normalizeDeliverableTitle(input.title, tpl?.title || '咨询成果'),
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
         cover: normalizeCover(input.cover),
@@ -729,7 +729,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
   if (textSections.length) {
     return {
       result: {
-        title: tpl?.title || '咨询成果',
+        title: normalizeDeliverableTitle(tpl?.title, '咨询成果'),
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
         sections: textSections,
@@ -766,7 +766,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
     return {
       kind: 'report',
       deliverable: {
-        title: input?.title || tpl?.title || '咨询成果',
+        title: normalizeDeliverableTitle(input?.title, tpl?.title || '咨询成果'),
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
         cover: normalizeCover(input?.cover),

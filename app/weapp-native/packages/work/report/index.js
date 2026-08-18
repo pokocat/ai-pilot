@@ -1,6 +1,7 @@
 const { api, isMock } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { fitCanvasText } = require('../../../utils/canvas-text');
 
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const FALLBACK_ORDERS = [
@@ -320,8 +321,12 @@ Page({
       ctx.setFillStyle('#FBFAF6'); ctx.fillRect(0, 0, 600, 900);
       ctx.setFillStyle('#1E5A43'); ctx.fillRect(0, 0, 600, 250);
       ctx.setTextAlign('center'); ctx.setFillStyle('#D9C48A'); ctx.setFontSize(21); ctx.fillText('军师参谋部 · 军师献策', 300, 58);
-      ctx.setFillStyle('#FFFFFF'); ctx.setFontSize(36); ctx.fillText(maskSensitive(content.title).slice(0, 14), 300, 132);
-      ctx.setFillStyle('rgba(255,255,255,.72)'); ctx.setFontSize(18); ctx.fillText('锦囊概要 · 机密已隐去', 300, 188);
+      ctx.setFillStyle('#FFFFFF');
+      const titleLayout = fitCanvasText(ctx, maskSensitive(content.title), { maxWidth: 504, maxLines: 4, maxFontSize: 36, minFontSize: 18 });
+      const titleTop = 132 - Math.max(0, titleLayout.lines.length - 1) * titleLayout.lineHeight / 2;
+      titleLayout.lines.forEach((line, index) => ctx.fillText(line, 300, titleTop + index * titleLayout.lineHeight));
+      const titleBottom = titleTop + Math.max(0, titleLayout.lines.length - 1) * titleLayout.lineHeight;
+      ctx.setFillStyle('rgba(255,255,255,.72)'); ctx.setFontSize(18); ctx.fillText('锦囊概要 · 机密已隐去', 300, Math.max(188, Math.min(218, titleBottom + 38)));
       ctx.setTextAlign('left');
       let y = 320;
       content.sections.slice(0, 3).forEach((section, index) => {
