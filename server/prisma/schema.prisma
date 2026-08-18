@@ -2127,7 +2127,10 @@ model VideoCreditHold {
   clientRequestId String
   upstreamJobId   String?   @unique
   credits         Int
-  status          String    @default("submitting") // submitting | submitted | settled | refunded
+  status          String    @default("submitting") // submitting | submitted | notifying | settled | refunded
+  // notifying 是出片完成通知的**原子认领态**：clip-render-notification 把 submitted 抢成 notifying，
+  // 并发的另一轮扫描就抢不到，同一单只推一次。认领后立刻结算，所以它只是个短暂中间态。
+  // refunded 是终点，任何路径都不许把它写回 settled（见 services/video/credits.ts）。
   lastJobStatus   String?
   chargedAt       DateTime  @default(now())
   refundedAt      DateTime?
