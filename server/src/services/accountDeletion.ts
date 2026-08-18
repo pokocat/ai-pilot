@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
+import { scrubUserReferralPii } from './referral.js';
 import { env } from '../env.js';
 import { ossDelete } from './ossUpload.js';
 import { aidramaDeleteOwnerData } from './video/aidramaGateway.js';
@@ -98,6 +99,12 @@ async function redactRetained(tx: Tx, userId: string, tenantId: string, deleteTe
     },
   });
   await tx.clientEvent.updateMany({ where: { userId }, data: { userId: null, propsJson: Prisma.DbNull, ...(deleteTenant ? { tenantId: null } : {}) } });
+  // 邀请关系与归因：**关系链整体保留、只抹个人可识别字段**（2026-08-19 口径）。
+  // 邀请关系是**邀请人的**账本——下级注销不该让上级的直邀数/已开通数缩水，也不该截断三级路径；
+  // 而 Referral 表里只有内部 cuid / 邀请码 / 时间戳，user 一删它天然就是去标识化的。
+  // 真正属个人数据的只有归因留痕里的 clientIp / userAgent（网络与设备标识），置 null 但不删行
+  // ——与上面 clientEvent / auditLog 同一套「账本去标识保留」的口径。
+  await scrubUserReferralPii(tx, userId);
   await tx.auditLog.updateMany({
     where: { userId },
     data: { userId: null, payloadJson: { retainedFor: 'security_audit', subjectHash: hash }, ...(deleteTenant ? { tenantId: null } : {}) },

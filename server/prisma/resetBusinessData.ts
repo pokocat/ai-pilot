@@ -69,6 +69,8 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.wechatSubscription.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.smsCode.deleteMany();
+  await prisma.referralAttribution.deleteMany();
+  await prisma.referral.deleteMany();
   await prisma.profile.deleteMany();
   await prisma.user.deleteMany();
   await prisma.tenant.deleteMany();

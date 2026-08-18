@@ -108,6 +108,9 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
   // 展示与分桶共用它——开关拨开了就必须真的在分流，静默零分流最难发现）。
   // 服务端在 /me.features.wenceForm 下发分组；主动消息注入也受本开关管（关 → reason='disabled'）。
   { id: WENCE_FLAG, label: '问策入口改版 A/B', desc: '关闭即全量走现状军师列表；开启后按权重分组 control（现状）/ dock（列表页+输入坞）/ chat（对话即 tab），未配权重时三臂均分', compliance: false, kind: 'toggle', arms: ['control', 'dock', 'chat'] },
+  // 邀请归因窗口：捕获到邀请码距注册超过这么多天就不再归因（services/referral.ts 读它）。
+  // 登记在这里才算真的「归运营配置」——只写在代码默认值里、要改得连数据库，等于没有入口。
+  { id: 'referral', label: '邀请归因窗口', desc: '用户点开分享后多少天内注册仍算这次邀请（超过即不建立关系，只留归因记录）', compliance: false, kind: 'number', payloadKey: 'window', def: 30, min: 1, max: 365, unit: '天' },
   // 监控告警阈值（监控大盘二期）：注册表在 services/alertConfig.ts，默认值=压测方案 §7 口径。
   // 值经 /api/metrics 的 junshi_alert_config 指标喂给 Prometheus 告警规则，改动 ≤75s 生效（60s 缓存 + 一个抓取周期）。
   ...ALERT_CONFIG_DEFS.map((d): FlagDef => ({
