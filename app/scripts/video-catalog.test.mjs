@@ -303,12 +303,20 @@ test('封面配置规整：形状稳定、标语最多两行、关掉不丢文�
   assert.equal(off.signature, '集体为实体发声');
 });
 
-test('封面三种状态在确认页各说各的话，「开了但没填」不能伪装成已设置', () => {
+test('封面四种状态在确认页各说各的话，「开了但没填」「填了但没开」都不能伪装成已设置', () => {
   assert.equal(model.coverHasText({ enabled: true }), false);
   assert.equal(model.coverHasText({ enabled: true, sloganLines: ['', '  '] }), false, '全空白 = 没填');
   assert.equal(model.coverHasText({ enabled: true, keyword: '团结' }), true);
 
-  assert.deepEqual(model.coverSummary({ enabled: false, keyword: '团结' }), { state: 'off', text: '不加封面' });
+  assert.deepEqual(model.coverSummary({ enabled: false }), { state: 'off', text: '不加封面' });
+
+  // 填了字却没打开开关：最容易白忙一场的状态。只说「不加封面」会让用户以为内容也丢了、
+  // 于是回去重填一遍；必须同时说清「你填的还在」和「它现在不生效」。
+  const drafted = model.coverSummary({ enabled: false, keyword: '团结' });
+  assert.equal(drafted.state, 'drafted');
+  assert.match(drafted.text, /开关/, '要指出问题出在开关上');
+  assert.match(drafted.text, /不会加封面/, '要说清出片时不会有封面');
+  assert.notEqual(drafted.state, 'on', '没开启就不能显示成已设置');
 
   const blank = model.coverSummary({ enabled: true });
   assert.equal(blank.state, 'blank');
@@ -336,8 +344,10 @@ test('封面页已注册、从确认页可达，且不填就不加封面', async
   // 入口在出片确认页，且是可选支线：不挡出片按钮
   assert.match(confirmSource, /host\.go\(`\/cover\/index\?projectId=/);
   assert.match(confirmSource, /model\.coverSummary\(project\.cover\)/);
-  assert.match(confirmView, /class="cf-cover vd-card" bindtap="goCover"/);
+  assert.match(confirmView, /class="cf-cover vd-card[^"]*" bindtap="goCover"/);
   assert.doesNotMatch(confirmSource, /coverSummary[\s\S]{0,80}problems\.push/, '封面没设置不能变成出片的前置阻断');
+  // 「填了字但开关没打开」必须被单独说破：只说「不加封面」的话，用户以为设好了，出片才发现没有。
+  assert.match(confirmView, /coverSummary\.state === 'drafted'/, '确认页要能区分「没设置」和「设了没开启」');
 
   // 保存走整份 cover 对象；四个槽位齐全
   assert.match(coverSource, /api\.saveProject\(this\.data\.projectId, \{ cover \}\)/);

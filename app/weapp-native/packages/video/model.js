@@ -352,16 +352,15 @@ function estimateCredits(segments, shots) {
   const sum = summarize(segments, shots);
   const tts = Math.ceil((sum.chars / 1000) * PRICING.creditPerKChar);
   const avatar = Math.ceil(sum.avatarSec * PRICING.creditPerAvatarSecond);
-  const broll = sum.brollCount * PRICING.creditPerBrollSegment;
   const assemble = PRICING.creditAssemble;
   return {
     items: [
       { key: 'tts', label: `口播配音 ${formatDuration(sum.totalSec - sum.tailSec)}`, credits: tts },
       { key: 'avatar', label: `分身出镜 ${sum.avatarSec} 秒`, credits: avatar },
-      { key: 'broll', label: `画面合成 ${sum.brollCount} 段`, credits: broll },
+      { key: 'broll', label: `画面合成 ${sum.brollCount} 段`, credits: 0, freeText: '免费' },
       { key: 'tail', label: '结尾固定段', credits: 0, freeText: '免费' },
     ].concat(assemble > 0 ? [{ key: 'assemble', label: '总装', credits: assemble }] : []),
-    total: tts + avatar + broll + assemble,
+    total: tts + avatar + assemble,
     summary: sum,
   };
 }
@@ -471,8 +470,17 @@ function regroupShotSelection(segments, shots, id, selectedNos) {
   };
 }
 
-/** 把当前镜头和紧邻的下一镜头合并；固定尾段不参与，素材不一致时要求重新选。 */
-function mergeAdjacentShots(segments, shots, id) {
+/**
+ * 把当前镜头和紧邻的下一镜头合并；固定尾段不参与。
+ *
+ * `keepAssetFrom` 决定合并后留谁的画面（2026-08-18 用户反馈：合并后素材被清空，
+ * 用户以为要重传，其实只是没给选择）：
+ *   'current'   留上面那段的
+ *   'following' 留下面那段的
+ *   null/其它   两段素材不同就清空，合并后重新选（保持旧行为）
+ * 两段本来就是同一个素材时无需选择，直接留着。
+ */
+function mergeAdjacentShots(segments, shots, id, keepAssetFrom) {
   const source = Array.isArray(segments) ? segments : [];
   const current = ensureShots(source, shots);
   const index = current.findIndex((shot) => shot.id === id);
@@ -484,14 +492,22 @@ function mergeAdjacentShots(segments, shots, id) {
 
   const role = target.role === following.role ? target.role : ROLE.BROLL;
   const sameAsset = role === ROLE.BROLL && target.assetId && target.assetId === following.assetId;
+  // 合并成分身出镜段时不带画面 —— 出镜段本来就没有 b-roll 素材。
+  const keeper = role !== ROLE.BROLL ? null
+    : (sameAsset ? target
+      : (keepAssetFrom === 'current' ? target
+        : (keepAssetFrom === 'following' ? following : null)));
   const merged = {
     id: shotId(target.startNo, following.endNo),
     startNo: target.startNo,
     endNo: following.endNo,
     role,
-    assetId: sameAsset ? target.assetId : null,
-    assetLabel: sameAsset ? target.assetLabel || following.assetLabel || null : null,
-    brollSource: role === ROLE.BROLL && target.brollSource && target.brollSource === following.brollSource ? target.brollSource : null,
+    assetId: keeper && keeper.assetId ? keeper.assetId : null,
+    assetLabel: keeper && keeper.assetId ? keeper.assetLabel || null : null,
+    // brollSource 跟着素材走：留了谁的画面就留谁的来源标记，否则只有两边一致时才保留。
+    brollSource: role !== ROLE.BROLL ? null
+      : (keeper ? keeper.brollSource || null
+        : (target.brollSource && target.brollSource === following.brollSource ? target.brollSource : null)),
     hint: [target.hint, following.hint].filter(Boolean).join(' · ') || null,
   };
   if (role === ROLE.AVATAR && segmentSeconds(materializeShots(source, [merged])[0]) > MAX_AVATAR_SEGMENT_SEC) {
@@ -827,7 +843,13 @@ function coverHasText(cover) {
  */
 function coverSummary(cover) {
   const value = normalizeCover(cover);
-  if (!value.enabled) return { state: 'off', text: '不加封面' };
+  if (!value.enabled) {
+    // 填了字却没打开开关是最容易白忙一场的状态：用户以为设好了，出片才发现没有。
+    // 「不加封面」这四个字在这种情况下不够——必须把「你填的还在，但没生效」说破。
+    return coverHasText(value)
+      ? { state: 'drafted', text: '内容已填好，但开关没打开 · 出片不会加封面' }
+      : { state: 'off', text: '不加封面' };
+  }
   if (!coverHasText(value)) return { state: 'blank', text: '还没填内容，出片时不会加封面' };
   const parts = [value.keyword, value.signature || value.sloganLines[0] || value.handle].filter(Boolean);
   return { state: 'on', text: parts.join(' · ') };

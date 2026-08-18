@@ -42,6 +42,12 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
     //   以后新增异步任务（视频出片、批量导出…）照抄这一行即可，**不要**再加新的 env。
     env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
   },
+  clip: {
+    title: '视频出片',
+    description: '快出片生成完成或失败后提醒查看',
+    // 照上面 poster 那一行抄的：同一个「服务进度通知」模板，不申请新模板、不加新 env。
+    env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
+  },
 };
 
 function envFirst(keys: string[]): string {
@@ -131,8 +137,11 @@ function miniprogramState(): 'developer' | 'trial' | 'formal' {
   return v === 'developer' || v === 'trial' ? v : 'formal';
 }
 
-function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null; jobId?: string | null } = {}): string {
+function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null; jobId?: string | null; workId?: string | null } = {}): string {
   if (scene === 'avatar') return 'packages/video/clone/index?step=2';
+  // 出片：成了就直接落到那条成片，没成（或没带 workId）落作品列表，别把人扔回首页从头找。
+  if (scene === 'clip' && opts.workId) return `packages/video/work/index?workId=${encodeURIComponent(opts.workId)}`;
+  if (scene === 'clip') return 'packages/video/works/index';
   // 海报：直接落到那一单的详情页；没带 jobId（理论上不该发生）退到作品库，别把人扔到首页。
   if (scene === 'poster' && opts.jobId) return `packages/work/posterJob/index?jobId=${encodeURIComponent(opts.jobId)}`;
   if (scene === 'poster') return 'packages/work/gallery/index';
@@ -163,12 +172,12 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
 function dataForScene(scene: WechatSubscribeScene, opts: {
   title: string; note?: string; category?: string; userName?: string; amountFen?: number; orderNo?: string; statusText?: string;
 }) {
-  // poster 与 avatar 同构（都用「服务进度通知」那类模板）：业务标题 + 状态 + 提示 + 完成时间。
-  if (scene === 'poster') {
+  // poster / clip / avatar 三者同构（都用「服务进度通知」那类模板）：业务标题 + 状态 + 提示 + 完成时间。
+  if (scene === 'poster' || scene === 'clip') {
     return {
       thing13: { value: clip(opts.title || '成品图', 20) },
       phrase16: { value: clip(opts.statusText || '已完成', 5) },
-      thing5: { value: clip(opts.note || '海报已出好，点击查看', 20) },
+      thing5: { value: clip(opts.note || '已经好了，点击查看', 20) },
       time12: { value: timeValue() },
     };
   }
@@ -265,6 +274,8 @@ export async function sendWechatSubscribeMessage(args: {
   reportId?: string | null;
   /** 海报出图：落地页要带上这一单的 id，用户点通知直接进那张图的详情页。 */
   jobId?: string | null;
+  /** 快出片：同理，带上成片 id 才能直接落到那条片子。 */
+  workId?: string | null;
   logSkipped?: boolean;
 }): Promise<{ sent: boolean; reason?: string; retryable?: boolean }> {
   const templateId = templateIdForScene(args.scene);
@@ -306,7 +317,7 @@ export async function sendWechatSubscribeMessage(args: {
   const payload = {
     touser: user.wechatOpenId,
     template_id: templateId,
-    page: pageForScene(args.scene, { reportId: args.reportId, jobId: args.jobId }),
+    page: pageForScene(args.scene, { reportId: args.reportId, jobId: args.jobId, workId: args.workId }),
     miniprogram_state: miniprogramState(),
     lang: 'zh_CN',
     data: dataForScene(args.scene, {
@@ -361,6 +372,30 @@ export function notifyPosterReady(args: {
     statusText: args.ok ? '已出图' : '未出图',
     note: args.ok ? '海报已出好，点击查看' : '这次没出成，钻石已退回',
     jobId: args.jobId,
+  });
+}
+
+/**
+ * 出片完成/失败通知。**永不抛**，理由同 notifyPosterReady。
+ *
+ * 用户原话：「这个能不能设计成看到大概什么时候完成？」——ETA 需要先攒够耗时样本才能给准，
+ * 但「不用一直盯着」这件事今天就能解决：出好了微信推给他。
+ */
+export function notifyClipRendered(args: {
+  tenantId: string;
+  userId: string;
+  title: string;
+  workId?: string | null;
+  ok: boolean;
+}): void {
+  void sendWechatSubscribeMessage({
+    tenantId: args.tenantId,
+    userId: args.userId,
+    scene: 'clip',
+    title: args.title || '你的视频',
+    statusText: args.ok ? '已出片' : '未出片',
+    note: args.ok ? '视频已经生成好，点击查看' : '这次没出成，积分已退回',
+    workId: args.workId,
   });
 }
 

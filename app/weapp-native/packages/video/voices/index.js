@@ -10,6 +10,7 @@ const api = require('../api');
 
 const POLL_INTERVAL_MS = 5000;
 
+
 function formatCompletedAt(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -51,13 +52,21 @@ Page({
     loadFailed: false,
     voices: [],
     loggedIn: false,
+    /* 试听（V01）：训练完当场就要能听，不必先去建一个项目。
+       浮层本体是 components/voice-preview，这里只管开关和选中的是哪一条。 */
+    previewOpen: false,
+    previewVoiceId: '',
+    previewVoiceName: '',
     showLogin: false,
   }),
 
   onLoad() { this.load(); },
   onShow() { if (!this.data.loading) this.load(); },
   onHide() { this.stopPolling(); },
-  onUnload() { this.stopPolling(); },
+  onUnload() {
+    this.stopPolling();
+    if (this.data.previewOpen) host.setOverlay(false, 'video-voice-preview');
+  },
 
   load() {
     this.stopPolling();
@@ -93,6 +102,22 @@ Page({
     if (!this._pollTimer) return;
     clearTimeout(this._pollTimer);
     this._pollTimer = null;
+  },
+
+  /* ── 试听 ────────────────────────────────────────────────────────── */
+
+  openPreview(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const voice = this.data.voices.find((item) => item.id === id);
+    if (!host.requireLogin(this, 'execute')) return;
+    if (!voice || !voice.ready) { host.toast('这条声音还没训练好'); return; }
+    host.setOverlay(true, 'video-voice-preview');
+    this.setData({ previewOpen: true, previewVoiceId: id, previewVoiceName: voice.name || '这条声音' });
+  },
+
+  closePreview() {
+    host.setOverlay(false, 'video-voice-preview');
+    this.setData({ previewOpen: false, previewVoiceId: '' });
   },
 
   /** 重录已有声音：带上 voiceId 才走「重训」档（更便宜，且供应商每条给 4 次免费重训）。 */

@@ -1,0 +1,29 @@
+<view wx:if="{{open && voiceId}}" class="vp-mask" catchtap="close">
+  <view class="vp-sheet" catchtap="swallow">
+    <view class="vp-head">
+      <view class="vp-headcopy">
+        <text class="vp-title">试听{{voiceName ? ' · ' + voiceName : ''}}</text>
+        <text class="vp-sub">写一句想听的话，用你的声音念出来。不扣钻石，想听几次都行。</text>
+      </view>
+      <view class="vp-close" bindtap="close"><native-icon name="close" tone="neutral" size="18"></native-icon></view>
+    </view>
+    <textarea
+      class="vp-input"
+      value="{{text}}"
+      maxlength="{{max}}"
+      placeholder="想听它念什么？"
+      placeholder-class="vp-ph"
+      bindinput="inputText"
+      auto-height
+    ></textarea>
+    <view class="vp-tools">
+      <text class="vp-sample" bindtap="useSample">用示例句</text>
+      <text class="vp-count">{{text.length}}/{{max}}</text>
+    </view>
+    <text wx:if="{{error}}" class="vp-error">{{error}}</text>
+    <view class="vp-actions">
+      <view class="vd-btn ghost" bindtap="close">关闭</view>
+      <view class="vd-btn {{busy ? 'disabled' : ''}}" style="flex:1" bindtap="play">{{busy ? '正在合成…' : (played ? '再听一次' : '听听看')}}</view>
+    </view>
+  </view>
+</view>

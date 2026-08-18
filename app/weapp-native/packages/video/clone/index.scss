@@ -195,3 +195,11 @@
   border: 1px solid rgba(155, 62, 52, .28); color: #9B3E34;
   font-size: 12px; text-align: center;
 }
+
+/* 「你的声音已经好了」：训练页里唯一的好消息卡，用暖色区别于下面的失败提示。 */
+.cl-hear {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 14px;
+  border: 1px solid var(--vd-avatar-line); background: var(--vd-avatar-soft);
+}
+.ch-copy { flex: 1; min-width: 0; }
+.cl-hear-btn { flex: none; width: 92px; min-height: 40px; border-color: var(--vd-avatar); color: var(--vd-avatar-deep); background: var(--vd-surface); }

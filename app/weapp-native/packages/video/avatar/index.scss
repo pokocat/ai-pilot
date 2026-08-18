@@ -78,3 +78,6 @@
 
 .av-danger { margin-top: 20px; text-align: center; padding: 14px 0; font-size: 14px; color: #9E2B25; }
 .av-empty-btn { margin: 20px auto 0; width: 220px; }
+
+/* 试听：分身卡里的主动作。排在「更换形象」前面 —— 先确认像不像，再决定要不要换。 */
+.avc-act.primary { border-color: var(--vd-avatar-line); background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }

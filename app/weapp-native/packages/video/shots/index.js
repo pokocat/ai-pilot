@@ -3,6 +3,8 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { ASSET_LIMITS } = require('../config');
+const { formatBytes } = model;
 const { ROLE } = model;
 
 const SAVE_DEBOUNCE_MS = 1200;
@@ -23,11 +25,17 @@ Page({
   data: host.hostBaseData({
     projectId: '', loading: true, project: null, rows: [],
     totalText: '0:00', avatarSec: 0, credits: 0,
-    flash: null, previewOpen: false, rangeOpen: false,
+    flash: null, storyboardOpen: false, rangeOpen: false,
     groupCount: 0, rangeShotId: '', rangeTitle: '', rangeRows: [],
     rangeSelectedCount: 0, rangeInvalid: false, rangeText: '',
     assetsById: {}, avatars: [], selectedAvatar: null, avatarPreviewUrl: '', avatarPickerOpen: false,
     assetPreviewOpen: false, previewAsset: null,
+    /** 素材库里已有几个素材 —— 决定「配画面」入口把哪个选项排第一。 */
+    assetCount: 0,
+    /* 素材连播（2026-08-18 用户反馈：想把已上传的视频直接拼出来看一遍）。
+       纯端上按顺序播已配好的画面，不带配音也不带字幕 —— 没有音频就不存在音画同步问题，
+       它只回答「我传的画面顺序对不对、接得顺不顺」。真实效果要看排练片。 */
+    playOpen: false, playList: [], playIndex: 0, playItem: null, playTotal: 0,
     showLogin: false,
   }),
 
@@ -41,11 +49,15 @@ Page({
   onUnload() {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; this.flush(); }
     if (this.flashTimer) clearTimeout(this.flashTimer);
-    if (this.data.previewOpen) host.setOverlay(false, 'video-preview');
+    if (this.data.storyboardOpen) host.setOverlay(false, 'video-storyboard');
     if (this.data.rangeOpen) host.setOverlay(false, 'video-shot-range');
     if (this.data.assetPreviewOpen) host.setOverlay(false, 'video-asset-preview');
     if (this.data.avatarPickerOpen) host.setOverlay(false, 'video-avatar-picker');
+    this.stopPlayback();
   },
+
+  // 页面切走时连播必须停：原生 video 在后台继续跑会既费电又触发后台 setData 报警。
+  onHide() { if (this.data.playOpen) this.stopPlayback(); },
 
   load() {
     Promise.all([
@@ -68,6 +80,7 @@ Page({
           loading: false,
           project: normalized,
           assetsById,
+          assetCount: Object.keys(assetsById).length,
           avatars: avatarList,
           selectedAvatar,
           avatarPreviewUrl: selectedAvatar && selectedAvatar.imagePreviewUrl ? selectedAvatar.imagePreviewUrl : '',
@@ -126,6 +139,12 @@ Page({
           : (shot.assetId ? `${seconds} 秒 · 画面已选` : (shot.hint || '还没配画面'))),
       assetDisplayLabel,
       assetTypeText: assetKind === 'image' ? '图片素材' : '视频素材',
+      // 用户反复问「每一个对应的视频限多少秒」。真实规则是：素材本身没有时长上限，
+      // 每段画面播多久由**那一段口播**决定（合成端 -stream_loop -1 + -t 口播时长），
+      // 短了循环补满、长了截断。以前只有配完之后才提示「短了会重复播放」，
+      // 选之前什么都不说 —— 现在把它变成事前预算，空态和已配态都显示。
+      needText: isTail ? `固定 ${shot.durationSec} 秒` : `这段要念 ${seconds} 秒`,
+      pickHint: '视频或图片都行 · 短了画面会重复播放',
       // 素材短于本段口播时，合成端会用 -stream_loop 正向循环把它铺满 —— 播到底跳回开头，
       // 硬跳在横摇/推镜素材上很像倒带。与其让用户出片后才发现，不如在这里就说清。
       // 图片没有时长概念，不参与判定。
@@ -133,6 +152,11 @@ Page({
       assetTooShort: assetKind !== 'image'
         && Number(asset && asset.durationSec) > 0
         && Math.round(Number(asset.durationSec)) < seconds,
+      // 比本段长的素材会被截断到口播时长（同一段 -t 参数）。用户按「限多少秒」的思路提问，
+      // 说明他不知道多出来的部分去哪了 —— 明说只用前 N 秒，比让他自己猜好。
+      assetTooLong: assetKind !== 'image'
+        && Number(asset && asset.durationSec) > 0
+        && Math.round(Number(asset.durationSec)) > seconds + 1,
       assetPreviewUrl: asset && asset.previewUrl ? asset.previewUrl : '',
       framePreviewUrl: isAvatar ? this.data.avatarPreviewUrl : (asset && asset.previewUrl ? asset.previewUrl : ''),
       previewMeta: isTail ? '固定片段' : (isAvatar ? '分身出镜' : (assetKind === 'image' ? '已选图片素材' : '已选视频素材')),
@@ -211,24 +235,49 @@ Page({
     host.toast('这段已拆成单句', 'success');
   },
 
+  /**
+   * 与下一段合并。
+   *
+   * 用户原话：「与下一段合并的时候，能不能有个选择，选上面还是下面的视频素材保留」。
+   * 以前两段画面不同时只给「确定 / 取消」，确定就把画面清空 —— 用户读成「素材要重新传」，
+   * 而其实素材一直都在库里。现在改成三选一，并把素材名念出来，让他知道选的是哪一个。
+   */
   mergeNext(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const project = this.data.project;
     const index = project.shots.findIndex((shot) => shot.id === id);
     const current = project.shots[index];
     const following = project.shots[index + 1];
-    const apply = () => {
-      const result = model.mergeAdjacentShots(project.segments, project.shots, id);
+    const apply = (keepAssetFrom) => {
+      const result = model.mergeAdjacentShots(project.segments, project.shots, id, keepAssetFrom);
       if (result.error) { host.toast(result.error); return; }
       this.setData({ project: Object.assign({}, project, { shots: result.shots }) });
       this.recompute(); this.scheduleSave();
-      host.toast('已和下一段合并', 'success');
+      const kept = result.shots.find((shot) => shot.startNo === current.startNo && shot.endNo === following.endNo);
+      host.toast(kept && kept.assetId ? '已合并，画面保留' : '已和下一段合并', 'success');
     };
-    const needsNewAsset = current && following && (current.assetId || following.assetId)
+    const needsChoice = current && following
+      && current.role !== ROLE.TAIL && following.role !== ROLE.TAIL
+      // 合并成分身出镜段不需要画面，没什么可选的
+      && !(current.role === ROLE.AVATAR && following.role === ROLE.AVATAR)
+      && (current.assetId || following.assetId)
       && String(current.assetId || '') !== String(following.assetId || '');
-    if (!needsNewAsset) { apply(); return; }
-    host.confirm({ title: '合并并重新选画面？', content: '这两段当前画面不同，合并后需要为整段重新选择一个画面。' })
-      .then((ok) => { if (ok) apply(); });
+    if (!needsChoice) { apply(null); return; }
+
+    const labelOf = (shot) => {
+      if (!shot || !shot.assetId) return '（这段还没配画面）';
+      const asset = this.data.assetsById[shot.assetId];
+      return model.assetDisplayLabel(asset && asset.label ? asset.label : shot.assetLabel, asset && asset.kind);
+    };
+    const options = [
+      { label: `保留上面那段的画面 · ${labelOf(current)}`, keep: 'current', enabled: Boolean(current.assetId) },
+      { label: `保留下面那段的画面 · ${labelOf(following)}`, keep: 'following', enabled: Boolean(following.assetId) },
+      { label: '合并后重新选一个画面', keep: null, enabled: true },
+    ].filter((option) => option.enabled);
+    wx.showActionSheet({
+      itemList: options.map((option) => option.label),
+      success: (res) => { const option = options[res.tapIndex]; if (option) apply(option.keep); },
+    });
   },
 
   splitShot(event) {
@@ -267,17 +316,32 @@ Page({
     host.toast(selectedAvatar.linkedVoiceId ? '已切换数字人，关联声音也已带入' : '已切换数字人，请先为它关联声音', 'success');
   },
 
+  /**
+   * 选画面。两处用户反馈直接改了这个入口：
+   *   · 「只能上传视频吗？能不能换成图片」—— 能力一直都有，是这三行文案没说。
+   *   · 「合并了素材就好像要重新传」—— 其实原素材还在库里，但「我的素材库」排在第三位，
+   *     前两项是「拍一段/从相册选」，用户第一反应就是又要拍一遍。
+   * 所以：库里有东西时把它排第一并带上数量，另外两项的文案写明图片也行。
+   */
   pickAsset(event) {
     const shotId = String(event.currentTarget.dataset.id || '');
     if (!host.requireLogin(this, 'execute')) return;
+    const count = Number(this.data.assetCount) || 0;
+    const fromLibrary = () => host.go(`assets/index?pick=1&projectId=${encodeURIComponent(this.data.projectId)}&shotId=${encodeURIComponent(shotId)}`);
+    const actions = count > 0
+      ? [
+        { label: `我的素材库（${count} 个）`, run: fromLibrary },
+        { label: '从相册选视频或图片', run: () => this.chooseMedia(shotId, 'album') },
+        { label: '现拍一段', run: () => this.chooseMedia(shotId, 'camera') },
+      ]
+      : [
+        { label: '从相册选视频或图片', run: () => this.chooseMedia(shotId, 'album') },
+        { label: '现拍一段', run: () => this.chooseMedia(shotId, 'camera') },
+        { label: '我的素材库', run: fromLibrary },
+      ];
     wx.showActionSheet({
-      itemList: ['拍一段', '从相册选', '我的素材库'],
-      success: (res) => {
-        if (res.tapIndex === 2) {
-          host.go(`assets/index?pick=1&projectId=${encodeURIComponent(this.data.projectId)}&shotId=${encodeURIComponent(shotId)}`); return;
-        }
-        this.chooseMedia(shotId, res.tapIndex === 0 ? 'camera' : 'album');
-      },
+      itemList: actions.map((action) => action.label),
+      success: (res) => { const action = actions[res.tapIndex]; if (action) action.run(); },
     });
   },
 
@@ -298,17 +362,56 @@ Page({
 
   chooseMedia(shotId, sourceType) {
     host.chooseMedia({
-      count: 1, mediaType: ['video', 'image'], sourceType: [sourceType], maxDuration: 30, camera: 'back',
+      count: 1,
+      mediaType: ['video', 'image'],
+      sourceType: [sourceType],
+      // ★ 不写 sizeType 时微信默认取**压缩版**，画面合进成片就再也补不回来。
+      //   素材库页（assets/index.js）早就加了这一行，这里之前漏了，两个入口传出来的
+      //   是不同画质的素材。依据见 clone/index.js 里那段详细注释。
+      sizeType: ['original'],
+      // 注意：maxDuration 只约束**现拍**，从相册选不受它限制。
+      maxDuration: 30,
+      camera: 'back',
       success: (res) => { const file = res.tempFiles && res.tempFiles[0]; if (file) this.uploadAsset(shotId, file); },
       fail: (error) => { if (String(error && error.errMsg || '').indexOf('cancel') < 0) host.toast('打开相机/相册失败'); },
     });
   },
 
+  /**
+   * 上传选好的素材。
+   *
+   * 两条闸都是用户反馈换来的（「上传会提示失败，又要重新传一次」）：
+   *   1. 体积预检 —— 服务端 100MB 上限（BFF 413 CLIP_ASSET_TOO_LARGE），
+   *      以前端上不查，用户要等整条传完才被告知超限。相册里一条 4K 长视频很容易过线。
+   *   2. 容量满了要给出口 —— 素材库页早就把 CLIP_ASSET_QUOTA_EXCEEDED 单独接住了，
+   *      这里之前只 toast 一句「上传失败」，两个入口行为不一致。
+   */
   uploadAsset(shotId, file) {
+    const size = Number(file && file.size) || 0;
+    if (size > ASSET_LIMITS.maxBytes) {
+      host.confirm({
+        title: '这条素材太大了',
+        content: `它有 ${formatBytes(size)}，超过了 ${formatBytes(ASSET_LIMITS.maxBytes)} 的上限。换一段短一点的，或者先在相册里裁剪压缩后再传。`,
+        confirmText: '知道了',
+        cancelText: '取消',
+      });
+      return;
+    }
     host.loading('上传中');
     api.uploadAsset(file.tempFilePath, { shotId, kind: file.fileType || 'video' })
       .then((asset) => { host.hideLoading(); this.assignAsset(shotId, asset); })
-      .catch((error) => { host.hideLoading(); host.toast(error && error.message ? error.message : '上传失败'); });
+      .catch((error) => {
+        host.hideLoading();
+        if (error && error.code === 'CLIP_ASSET_QUOTA_EXCEEDED') {
+          host.confirm({
+            title: '素材库满了',
+            content: '空间不够放这条素材了。去素材库删掉一些用不上的旧素材就能继续传。',
+            confirmText: '去素材库',
+          }).then((ok) => { if (ok) host.go('assets/index'); });
+          return;
+        }
+        host.toast(error && error.message ? error.message : '上传失败');
+      });
   },
 
   assignAsset(shotId, asset) {
@@ -317,7 +420,7 @@ Page({
     const shots = project.shots.map((shot) => (shot.id === shotId
       ? Object.assign({}, shot, { assetId: asset.id, assetLabel: displayLabel }) : shot));
     const assetsById = Object.assign({}, this.data.assetsById, { [asset.id]: Object.assign({}, asset, { label: displayLabel }) });
-    this.setData({ project: Object.assign({}, project, { shots }), assetsById }, () => {
+    this.setData({ project: Object.assign({}, project, { shots }), assetsById, assetCount: Object.keys(assetsById).length }, () => {
       this.recompute(); this.scheduleSave();
     });
   },
@@ -339,8 +442,95 @@ Page({
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.flush(); host.go(`confirm/index?projectId=${encodeURIComponent(this.data.projectId)}`);
   },
-  preview() { if (!this.data.rows.length) return; host.setOverlay(true, 'video-preview'); this.setData({ previewOpen: true }); },
-  closePreview() { host.setOverlay(false, 'video-preview'); this.setData({ previewOpen: false }); },
+  /* ── 分镜清单 ──────────────────────────────────────────────────────
+     这一屏以前叫「出片前预览」，但它只是一列静帧 + 角色标签：没有声音、没有字幕、
+     没有转场，也没有真实时长感。用户因此以为自己已经预览过了，出片才发现效果对不上
+     （原话：「合成前那个预览可以浏览整体流线，但没法预览成片效果」）。
+     所以正名为「分镜清单」——「预览」这两个字留给真正能看效果的排练片。 */
+  openStoryboard() {
+    if (!this.data.rows.length) return;
+    host.setOverlay(true, 'video-storyboard');
+    this.setData({ storyboardOpen: true });
+  },
+  closeStoryboard() {
+    host.setOverlay(false, 'video-storyboard');
+    this.setData({ storyboardOpen: false });
+  },
+
+  /* ── 素材连播 ──────────────────────────────────────────────────────
+     用户自己提的思路：「打算把已上传视频做预览」。
+     纯端上按顺序播已配好的画面，**不带配音、不带字幕** —— 没有音频就不存在
+     音画同步问题，也就不会给出「字幕就长这样」的错误预期。
+     它只回答一件事：我传的画面顺序对不对、接得顺不顺。
+
+     每段播多久严格按**那一段口播的秒数**来切，与合成端 `-t 口播时长` 一致；
+     视频素材加 loop，短于本段时的循环行为也和成片一样。 */
+  buildPlayList() {
+    const avatarUrl = this.data.avatarPreviewUrl || '';
+    return (this.data.rows || []).map((row, index) => {
+      const asset = row.assetId ? this.data.assetsById[row.assetId] : null;
+      const assetUrl = asset ? (asset.contentUrl || asset.previewUrl || '') : '';
+      const isAvatar = row.roleClass === 'avatar';
+      let kind = 'blank';
+      if (isAvatar) kind = avatarUrl ? 'image' : 'blank';
+      else if (asset && assetUrl) kind = asset.kind === 'image' ? 'image' : 'video';
+      return {
+        key: row.id,
+        no: index + 1,
+        kind,
+        rangeText: row.rangeText,
+        roleLabel: row.roleLabel,
+        text: row.text,
+        seconds: Math.max(1, Number(row.seconds) || 1),
+        videoUrl: kind === 'video' ? assetUrl : '',
+        imageUrl: kind === 'image' ? (isAvatar ? avatarUrl : assetUrl) : '',
+        // 静帧顶替的地方必须说清楚，不能让用户以为成片也是一张不动的图
+        note: isAvatar
+          ? '成片里这一段是数字人真人口播'
+          : (kind === 'blank' ? '这一段还没配画面' : ''),
+      };
+    });
+  },
+
+  startPlayback() {
+    const playList = this.buildPlayList();
+    if (!playList.length) { host.toast('还没有可以播放的画面'); return; }
+    this.closeStoryboard();
+    host.setOverlay(true, 'video-playback');
+    this.setData({ playOpen: true, playList, playTotal: playList.length, playIndex: 0, playItem: playList[0] }, () => this.armPlayStep());
+  },
+
+  stopPlayback() {
+    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+    if (this.data.playOpen) host.setOverlay(false, 'video-playback');
+    this.setData({ playOpen: false, playItem: null, playIndex: 0, playList: [], playTotal: 0 });
+  },
+
+  /** 按当前段的口播秒数排下一次切换；视频段还要主动 play（换 src 后不一定自动起播）。 */
+  armPlayStep() {
+    if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+    const item = this.data.playItem;
+    if (!item) return;
+    if (item.kind === 'video') {
+      const ctx = wx.createVideoContext('shots-playback', this);
+      if (ctx) { ctx.seek(0); ctx.play(); }
+    }
+    this.playTimer = setTimeout(() => { this.playTimer = null; this.playNext(); }, item.seconds * 1000);
+  },
+
+  playNext() {
+    const next = this.data.playIndex + 1;
+    if (next >= this.data.playList.length) { this.stopPlayback(); host.toast('画面看完了', 'success'); return; }
+    this.setData({ playIndex: next, playItem: this.data.playList[next] }, () => this.armPlayStep());
+  },
+
+  playPrev() {
+    const prev = this.data.playIndex - 1;
+    if (prev < 0) return;
+    this.setData({ playIndex: prev, playItem: this.data.playList[prev] }, () => this.armPlayStep());
+  },
+
+  playSkip() { this.playNext(); },
   swallow() {}, back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); },
 });

@@ -17,7 +17,7 @@ import { clonePricing, clonePricingView } from '../services/video/pricing.js';
 import { buyStoragePack, purchasedPackCount, purchasedStorageBytes, storagePlan } from '../services/video/storagePlan.js';
 import type {
   ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
-  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
+  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 import { assertSafeUrl } from '../llm/tools/httpTool.js';
 
@@ -826,6 +826,39 @@ export async function videoRoutes(app: FastifyInstance) {
       return await aidramaJson(`/api/me/clip/voices/${enc(req.params.id)}/retrain-quota`, identityOf(user));
     } catch (e) { return sendErr(reply, e, 404); }
   });
+  /**
+   * 声音试听：给一段文字，让这条声音念出来。
+   *
+   * 石榴官方就有这个能力（POST /speaker/tts，同步返回音频），军师也早就在用 ——
+   * 但此前唯一的入口是 `/video/projects/:id/preview-voice`，**必须先有一个 project**，
+   * 声音是从 project 的 payload 里解析出来的。结果是用户想听刚训好的声音，得先挑模板、
+   * 建项目、进文案页、点开某一句才听得到，而且听到的还是那个项目绑定的声音。
+   * 用户原话：「训练出来的数字人声音效果不确定…先听一下，免得做成片效果不好，浪费钻石。」
+   *
+   * 这条路由不扣钻石（同 preview-voice，纯透传、无 hold/settle），成本落在石榴的 validPoint 上，
+   * 由我们承担。所以必须有限流：试听是免费的，但不能变成免费 TTS 接口。
+   */
+  app.post<{ Params: { id: string }; Body: { text?: string } }>(
+    '/video/voices/:id/preview',
+    { config: { rateLimit: { max: 20, timeWindow: '5 minutes' } } },
+    async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        assertId(req.params.id);
+        const text = String(req.body?.text ?? '').trim();
+        // 上限对齐石榴的 requiredText(text, 10_000)，但试听没有必要放那么长：
+        // 一两句就够判断像不像，太长只会白烧供应商点数、也让用户等。
+        if (!text) throw Object.assign(new Error('先写一句想听的话'), { statusCode: 422, code: 'CLIP_PREVIEW_TEXT_REQUIRED' });
+        if (text.length > 200) throw Object.assign(new Error('试听最多 200 字'), { statusCode: 422, code: 'CLIP_PREVIEW_TEXT_TOO_LONG' });
+        return await aidramaJson<ClipVoicePreview>(
+          `/api/me/clip/voices/${enc(req.params.id)}/preview`,
+          identityOf(user),
+          { method: 'POST', body: { text }, timeoutCapMs: 60000 },
+        );
+      } catch (e) { return sendErr(reply, e, 422); }
+    },
+  );
+
   app.patch<{ Params: { id: string }; Body: { name?: string } }>('/video/voices/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {

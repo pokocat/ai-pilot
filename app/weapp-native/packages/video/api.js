@@ -131,6 +131,15 @@ const api = {
    * 拿形象轮声音会永远停在「训练中」（2026-08-15 事故即此）。
    */
   voiceById: (id) => (useMock() ? mock.voiceById(id) : call(`/voices/${q(id)}`)),
+  /**
+   * 试听某一条声音。**不需要 project** —— 训练完当场就要能听。
+   *
+   * 与 previewVoice 的区别：那条要先有项目、声音是从项目 payload 里解析的；这条直接按 voiceId 走。
+   * 两条底下都是石榴的 POST /speaker/tts，都不扣用户钻石。
+   */
+  previewVoiceById: (id, text) => (useMock()
+    ? mock.previewVoiceById(id, text)
+    : call(`/voices/${q(id)}/preview`, { method: 'POST', data: { text }, timeout: 60000 })),
   renameVoice: (id, name) => (useMock()
     ? Promise.resolve({ id, name })
     : call(`/voices/${q(id)}`, { method: 'PATCH', data: { name } })),

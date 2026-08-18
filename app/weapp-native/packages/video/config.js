@@ -28,10 +28,12 @@ const PRICING = {
   creditPerAvatarSecond: 1,
   /** TTS：按千字符计价。 */
   creditPerKChar: 5,
-  /** 画面合成：按段计价。 */
-  creditPerBrollSegment: 1,
   /** 总装固定费。 */
   creditAssemble: 0,
+  /* 注意：**没有 b-roll 这一项**。服务端权威报价（ClipEstimateService）的 total 只有
+     tts + avatar + assemble，ClipProperties 里连 b-roll 的价键都不存在。端上以前多算一档，
+     确认页首屏会先显示一个偏高的价、拿到服务端报价后当着用户面跳一下。
+     真要对配画面收费，走运营后台新增价格，不在端上补常量。 */
 };
 
 /** 单个出镜段的产品保护上限（秒）。超过要提示用户拆句 —— 对应错误码 CLIP_SEGMENT_TOO_LONG。

@@ -1,0 +1,32 @@
+/* 试听浮层。整块是「写一句 → 听」，不放播放器控件 ——
+   音频用 innerAudioContext 播，页面上只需要一个能反复点的按钮。
+   styleIsolation 用 apply-shared，好让 .vd-btn 这类页面级令牌样式能作用进来。 */
+.vp-mask { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: flex-end; background: rgba(24, 21, 18, .52); }
+.vp-sheet {
+  width: 100%; box-sizing: border-box;
+  padding: 20px 20px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0; background: var(--vd-bg, #F7F6F2);
+}
+.vp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.vp-headcopy { flex: 1; min-width: 0; }
+.vp-title {
+  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-family: var(--vd-serif); font-size: 20px; font-weight: 600; color: var(--vd-ink, #191A1C);
+}
+.vp-sub { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--vd-muted, #81838A); }
+.vp-close { width: 44px; height: 44px; flex: none; margin: -8px -8px 0 0; display: flex; align-items: center; justify-content: center; }
+.vp-input {
+  width: 100%; box-sizing: border-box; min-height: 76px;
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px solid var(--vd-line, rgba(25, 26, 28, .12)); border-radius: 14px;
+  background: var(--vd-surface, #FFFFFF);
+  font-size: 14px; line-height: 1.6; color: var(--vd-ink, #191A1C);
+}
+.vp-ph { color: var(--vd-faint, #AAA9A6); }
+.vp-tools { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+/* 负 margin 是为了让 44px 点击区不把「用示例句」在视觉上顶得离输入框太远 */
+.vp-sample { min-height: 36px; padding: 8px 10px; margin-left: -10px; font-size: 12px; font-weight: 600; color: var(--vd-broll, #326B86); }
+.vp-count { font-size: 11px; color: var(--vd-faint, #AAA9A6); font-variant-numeric: tabular-nums; }
+.vp-error { display: block; margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--vd-avatar-deep, #C74920); }
+.vp-actions { display: flex; gap: 10px; margin-top: 14px; }
+.vp-actions .vd-btn.ghost { flex: none; width: 96px; }

@@ -39,3 +39,16 @@
 .wa-t { font-size: 15px; font-weight: 600; }
 .wa-s { font-size: 12px; color: var(--vd-muted); }
 .wa-arrow { font-size: 20px; color: var(--vd-faint); }
+
+/* 封面卡：图在左、说明在右。图故意做小 —— 它是一张要存下来的素材，不是第二个播放器。 */
+.wd-cover { display: flex; gap: 14px; margin-top: 16px; padding: 14px; }
+.wd-cover-img { width: 72px; height: 128px; flex: none; border-radius: 12px; background: var(--vd-sunken); }
+.wd-cover-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.wd-cover-title { font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.wd-cover-sub { margin-top: 6px; font-size: 11px; line-height: 1.55; color: var(--vd-muted); }
+.wd-cover-act {
+  min-height: 36px; margin-top: 10px; padding: 0 14px;
+  display: flex; align-items: center;
+  border: 1px solid var(--vd-line); border-radius: var(--vd-r-chip);
+  font-size: 12px; font-weight: 600; color: var(--vd-ink-2);
+}

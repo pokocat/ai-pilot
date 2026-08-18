@@ -205,6 +205,13 @@ module.exports = {
     projects.set(id, Object.assign({}, project, { segments, shots, updatedAt: Date.now() }));
     return delay({ segments: clone(segments), shots: clone(shots) });
   },
+  previewVoiceById: (id, text) => delay({
+    voiceId: id,
+    audioUrl: '',
+    durationSec: Math.max(1, Math.round(String(text || '').length / 4)),
+    text: String(text || ''),
+    mock: true,
+  }),
   previewVoice: (_id, no, text) => delay({
     no, audioUrl: '', actualDurationSec: Math.max(2, Math.round(String(text || '').length / 4)),
   }, 700),
