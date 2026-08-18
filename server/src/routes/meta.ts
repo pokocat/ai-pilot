@@ -10,6 +10,7 @@ import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
+import { referralSummary } from '../services/referral.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
@@ -74,6 +75,15 @@ export async function metaRoutes(app: FastifyInstance) {
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
     const inviteCode = await ensureInviteCode(user.id).catch(() => undefined); // V7-13：邀请码（惰性生成）
+    // 我的邀请读数（直邀数 / 已开通数 / 我的上级）。
+    // 读失败一律回 null 而不是零值对象：前端据此显示「—」，与「真的还没邀到人（0）」区分开——
+    // 把读失败画成 0 会让人以为自己邀的人没被记上（allSettled 静默兜底踩过这个坑）。
+    const referral = inviteCode
+      ? await referralSummary(user.id, inviteCode).catch((err) => {
+          req.log?.warn?.(`[referral] summary 读取失败: ${(err as Error).message}`);
+          return null;
+        })
+      : null;
     const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     // P0-2：命理总开关下发前端（合规开关直读 DB，不吃 60s 缓存窗口）——前端据此隐藏全部命理入口
     const fortune = await isFeatureEnabled('fortune');
@@ -111,6 +121,7 @@ export async function metaRoutes(app: FastifyInstance) {
       ai: await providerInfo(),
       understanding,
       inviteCode,
+      referral,
       service,
       features: { fortune, wenceForm, conversationContinuity },
       capabilities: { attachments: ATTACHMENT_CAPABILITIES },

@@ -1,4 +1,5 @@
 const { baseData } = require('../../../services/page');
+const { withShare } = require('../../../services/share');
 
 const ENTITY = '【填写：经营主体全称】';
 const ADDRESS = '【填写：注册 / 办公地址】';
@@ -43,8 +44,8 @@ const DOCS = {
   ] },
 };
 
-Page({
+Page(withShare({
   data: baseData({ title: '', updated: EFFECTIVE, intro: '', sections: [] }),
   onLoad(options) { const doc = DOCS[options.doc] || DOCS.agreement; this.setData({ title: doc.title, intro: doc.intro, sections: doc.sections.map(([title, paragraphs]) => ({ title, paragraphs })) }); },
   back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/profile/index' }) }); },
-});
+}));

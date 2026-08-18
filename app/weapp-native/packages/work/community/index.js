@@ -1,6 +1,7 @@
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
+const { withShare } = require('../../../services/share');
 
 const steps = [
   ['添加服务老师', '分班完成后这里会出现服务老师微信与班级二维码。'],
@@ -8,7 +9,7 @@ const steps = [
   ['进入班级群', '入群后接收班级任务、军师提醒和复盘通知。'],
 ].map(([title, desc], index) => ({ title, desc, no: index + 1, active: index === 0 }));
 
-Page({
+Page(withShare({
   data: baseData({ steps, classTitle: '登录后分配班级' }),
   onShow() {
     const snapshot = store.snapshot();
@@ -18,4 +19,4 @@ Page({
   back() { wx.navigateBack(); },
   openBrief() { navTo('/packages/main/brief/index'); },
   openCouncil() { wx.switchTab({ url: '/pages/sessions/index' }); },
-});
+}));

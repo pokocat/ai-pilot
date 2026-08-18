@@ -4,6 +4,7 @@ const store = require('../../../services/store');
 const { navTo } = require('../../../services/nav');
 const { baseData } = require('../../../services/page');
 const { COLORS, colorByKey, colorIndex, isColorKey } = require('../../../services/colors');
+const { withShare } = require('../../../services/share');
 
 function colorState(key) {
   const color = colorByKey(key);
@@ -16,7 +17,7 @@ function colorState(key) {
   };
 }
 
-Page({
+Page(withShare({
   data: baseData({
     name: '',
     company: '',
@@ -288,4 +289,4 @@ Page({
       },
     });
   },
-});
+}));

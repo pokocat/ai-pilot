@@ -1,6 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { withShare } = require('../../../services/share');
 
 function rows(view) {
   if (!view) return [];
@@ -13,7 +14,7 @@ function rows(view) {
   ];
 }
 
-Page({
+Page(withShare({
   data: baseData({ brandKit: null, sections: [], busy: '', loading: true, showLogin: false }),
   onLoad() { if (!store.isAuthed()) this.setData({ loading: false, showLogin: true }); else this.load(); },
   back() { wx.navigateBack(); },
@@ -38,4 +39,4 @@ Page({
     catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '确认失败' }); }
     finally { this.setData({ busy: '' }); }
   },
-});
+}));

@@ -39,6 +39,22 @@
 - 已用正式发布闸门先 dry-run、再上传开发版 `0.2.47`：构建身份 `native-weapp / server / https://wxapi.aibuzz.cn/api / e9c5edd`，AppID `wx810ebe6dfef8e75f`，DevTools 上传成功，包体 2,413,152 B。
 - 本次仅替换微信后台开发版，尚未转体验版、提交审核或正式发布；包含同一失效 token 并发 401 只执行一次退出/跳转的客户端修复。
 
+### 2026-08-18 · 全站可转发 + 邀请关系链（只记关系不发奖）· 影响面：原生小程序全部页面、server 注册链路、Prisma 新增两表、契约、AGENTS §5/§7/§10
+
+**为什么以前不能转发**：不是被谁禁掉的，是微信规则——页面不实现 `onShareAppMessage`，右上角 ··· 里的「转发给朋友」就置灰。改动前 54 个原生页面只有 4 个实现了（天时日历 / 命盘 / 速诊 / 快拍成片），5 个主 Tab 一个都没有，所以用户在主界面看到的转发永远点不动；`onShareTimeline` 全站为零，「分享到朋友圈」菜单项根本不出现。另外 `app/src/**/index.config.ts` 里那三处 `enableShareAppMessage: true` 是 **Taro 的注册开关、对原生产物无效**，看到它以为已经开了是个真实误判点。而且原来那 4 处返回的是裸 path、`app.js` 的 `onLaunch()` 连 `options` 都没接，所以即便转发出去也记不下谁带来了谁。
+
+**这次的产品口径（用户拍板，见 `docs/[OPUS5]WEAPP_SHARE_REFERRAL_PLAN_2026-08-18.md` v2 §7）**：① 全站可分享，但分享内容与页面**解耦**——固定内置海报素材（图 + 文案）按日轮动，落地页统一；② 关系链**数据存满三级**，激励与呈现口径**只看一级**；③ **奖励机制后定**，本期只记关系 + 预留运营配置栏位；④ 文案切**真实经营痛点**，不用「宜攻宜守」这类盘面黑话（对真实经商的人没有代入感）。
+
+**前端**：新增 `weapp-native/services/share.js`（`withShare` 用 `Object.assign` 而非 `Behavior`——页面级 behaviors 的生命周期合并语义随基础库版本漂移，而分享回调漏挂是**静默失效**：按钮变灰但不报错，review 看不出来）与 `services/invite.js`（捕获 + 形状校验 + 末次触点覆盖）。54 页全挂，三种 require 深度逐个核对（写错是运行时才炸）。落地页定为 `/pages/sessions/index`，**刻意不用速诊页**：它 `onLoad` 就 `setData({ showLogin: true })`，陌生访客点开分享卡第一屏会是登录弹层，既伤转化也踩 2026-08-05 整改口径。朋友圈按 9 页白名单开（其余只开转发），因为 `onShareTimeline` 的落地页被微信强制为当前页、只能带 query 改不了 path，私密页开朋友圈就是把陌生人丢在账本或登录门上。素材按**本地自然日**确定性轮动（禁随机；不用 `Date.now()/86400000`，那个按 UTC 切日会在东八区早上 8 点换素材）。原有 4 个成果型分享页保留自己的实现，只把 path 包上 `pathWithCode()`。
+
+**后端**：新增 `Referral`（`userId` 主键 = 单推荐人公理）+ `ReferralAttribution`（**五种 outcome 全留痕**：`bound|self|unknown_code|expired|already_bound`，带 IP/UA 作风控原料）。判环**沿 `referrerId` 递归上溯**而不是只比物化的三级——A→B→C→D 链上 A 拿 D 的码时，只比 lv1/lv2/lv3 会漏判并建出环（测试里专门造了这条深链）。归因窗口读运营配置（`FeatureFlag.referral.window`，缺省 30 天，越界/脏值回落默认），奖励类栏位（`rewardInviter`/`rewardInvitee`/`rewardOnPaid`/`dailyCap`/`ladder`）**只占位不生效**，代码里不留任何业务数值。`ActivationEvent.source` 加 `invite`（服务 D-1 漏斗，与发奖无关）。`/me.referral` 读失败回 `null` 而不是零值对象，前端据此显示「—」，与「真的还没邀到人」区分开。
+
+**两个必须记下的技术取舍**：① **绑定放在建号事务之外**——方案原本写「与建号同事务但绑定失败不回滚注册」，这两件事在 Postgres 下**互斥**：事务里任何一条语句失败就把整个事务置为 aborted，`try/catch` 只抓到 JS 异常、租户与用户仍会一起回滚。所以关系绑定放在注册成功之后单独跑，失败只落一行日志（账号一定建成，关系可按 attribution 留痕人工补绑），**别为了「原子」把它挪回事务里**。② **已注册用户登录不追认推荐人**（存量用户互相填码是最容易被薅的口子），只有 `isNew === true` 才绑。
+
+**顺带修了 3 处过期断言**（`app/scripts/native-weapp.test.mjs`，都是本次改动的必然结果、不是实现 bug）：全站页面包进 `Page(withShare({...}))` 后收尾由 `});` 变 `}));`（credits 页文件尾断言）、`onLaunch()` 变 `onLaunch(options)` 且体内多了注释（字体断言的形参与窗口）、成片页 path 经 `pathWithCode()` 包装（成片转发落地页断言）。三条断言的**意图都没变**，只更新匹配式并写清原因。
+
+**验证**：server `npm test` **1851/1851 全绿**（含新增 `test/referral.test.ts` 12 例：五种 outcome、深环、窗口配置回落、物化路径平移、脏码不打断登录、老用户不追认、`/me` 读数），app 侧 `scripts/*.test.mjs` 201 例 + `src/**` 97 例全绿（含新增 `weapp-share.test.mjs` 11 例，最值钱的一条是**从 `app.json` 遍历**断言 54 页零漏挂，新增页面忘挂会红），原生构建通过。**已知**：`app` 的 `tsc` 有 1 个既有错误（`src/services/wechatSubscribe.ts` 缺 `clip` 场景），来自主仓一处未提交 WIP，与本次无关、未动。
+
 ### 2026-08-18 · 修复「今日」Tab 并发 401 导致连续闪退式跳转 · 影响面：原生小程序、H5 登录态失效处理
 
 - 预发日志确认服务保持 `active/running`、`NRestarts=0`，用户点中间「今日」Tab 时业务 GET 均正常返回；异常来自客户端同屏并发请求共享一个失效 token，每条 401 都各自执行清登录态、提示与 `reLaunch`，一次点击会连续跳转多次。

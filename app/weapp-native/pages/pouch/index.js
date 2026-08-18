@@ -22,6 +22,7 @@ const { baseData, backendEnvironmentData } = require('../../services/page');
 const worksCache = require('../../services/works-cache');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
+const { withShare } = require('../../services/share');
 
 /** 分类型复出动词（文案铁律，不得改写）：海报「再来一张」、成片「再出一条」、方案「改一版」。 */
 const TYPES = {
@@ -186,7 +187,7 @@ function craftFromAgent(agent) {
   };
 }
 
-Page({
+Page(withShare({
   data: baseData({
     authed: false, loading: false, loadFailed: false, showLogin: false,
     recent: [], crafts: [], unlockAgent: null,
@@ -372,4 +373,4 @@ Page({
     gotoExecution('today');
   },
   goExecution() { gotoExecution('today'); },
-});
+}));

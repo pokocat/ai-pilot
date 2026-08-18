@@ -3,6 +3,7 @@ const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const canvas = require('../gift/canvas');
+const { withShare, pathWithCode } = require('../../../services/share');
 
 const shichen = [
   ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
@@ -36,14 +37,14 @@ function paint(context, width, height, chart) {
   context.setFillStyle('#F1F7F3'); context.fillRect(pad, height - 176, width - pad * 2, 96); context.setTextAlign('center'); context.setFillStyle('#969BA1'); context.setFontSize(21); context.fillText('想要完整的天势 × 战略诊断？', width / 2, height - 136); context.setFillStyle('#1E5A43'); context.setFontSize(28); context.fillText('找军师参谋部', width / 2, height - 102); context.setFillStyle('#B4B8BE'); context.setFontSize(19); context.fillText('命理为文化视角的经营参考，不构成决策依据', width / 2, height - 38);
 }
 
-Page({
+Page(withShare({
   data: baseData({ authed: false, chart: null, loaded: false, disabled: false, shichen, calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', valid: false, busy: false, imgPath: '', showLogin: false }),
   onShow() {
     const authed = store.isAuthed(); this.setData({ authed });
     if (!authed) { this.setData({ loaded: true }); return; }
     store.loadMe().then(() => { const me = store.snapshot().me; const disabled = Boolean(me && me.features && me.features.fortune === false); this.setData({ disabled }); if (!disabled) this.loadChart(); });
   },
-  onShareAppMessage() { const chart = this.data.chart; return { title: chart ? `我的 ${chart.monthlyOutlook.year} 年天时日历——看看你全年该攻还是守` : '看看你全年哪几个月该攻、哪几个月该守', path: '/packages/work/calendar/index' }; },
+  onShareAppMessage() { const chart = this.data.chart; return { title: chart ? `我的 ${chart.monthlyOutlook.year} 年天时日历——看看你全年该攻还是守` : '看看你全年哪几个月该攻、哪几个月该守', path: pathWithCode('/packages/work/calendar/index') }; },
   back() { if (getCurrentPages().length > 1) wx.navigateBack(); else wx.switchTab({ url: '/pages/home/index', fail: () => wx.reLaunch({ url: '/pages/home/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadChart(); },
@@ -73,4 +74,4 @@ Page({
     finally { wx.hideLoading(); this.setData({ busy: false }); }
   },
   shareImage() { canvas.share(this.data.imgPath); }, saveImage() { canvas.save(this.data.imgPath); },
-});
+}, { timeline: true }));

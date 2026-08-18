@@ -2,6 +2,7 @@ const { api } = require('../../../../services/api');
 const store = require('../../../../services/store');
 const { baseData } = require('../../../../services/page');
 const { navTo } = require('../../../../services/nav');
+const { withShare } = require('../../../../services/share');
 
 const STATUS = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
 const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
@@ -9,7 +10,7 @@ const isSettled = (status) => status === 'ready' || status === 'failed';
 function fmtSize(bytes) { const value = Number(bytes) || 0; if (!value) return ''; if (value < 1024) return `${value}B`; if (value < 1048576) return `${Math.round(value / 1024)}KB`; return `${(value / 1048576).toFixed(1)}MB`; }
 function cleanName(value) { const name = String(value || '').trim(); if (!name || /^(tmp_|wxfile:|file:|blob:|undefined$|null$)/i.test(name) || /^(上传资料(?:\s*\d+)?|未命名(?:文件|资料)?|待识别资料)$/i.test(name) || /^(founder|company|finance|content|growth|customer|proof|unknown)资料$/i.test(name)) return ''; return name; }
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, failed: false, showLogin: false, detail: null, preview: '', expanded: false, longPreview: false, busy: false, pollHint: false }),
   onLoad(options) { this._id = options && options.id || ''; this._attempt = 0; this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
@@ -87,4 +88,4 @@ Page({
     }
     return 'pending';
   },
-});
+}, { timeline: true }));

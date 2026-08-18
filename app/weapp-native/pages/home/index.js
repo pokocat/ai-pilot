@@ -8,6 +8,7 @@ const { commitBattle: commitBattleShared } = require('../../services/battle-comm
 const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
+const { withShare } = require('../../services/share');
 
 const PHASE_WORD = { 进攻: '攻', 防守: '守', 平稳: '稳中蓄力' };
 
@@ -78,7 +79,7 @@ function plainInline(value) {
   return text;
 }
 
-Page({
+Page(withShare({
   data: baseData({
     authed: false, onboarded: false, onboardingKnown: false, showLogin: false, loading: false, loadFailed: false, heroExpanded: false, committing: false, todayOrderCount: 0, hasValidJudgment: false,
     fortuneOn: false, chart: null, cited: [],
@@ -243,4 +244,4 @@ Page({
     if (ok) gotoExecution('today');
   },
   goExecution() { gotoExecution('today'); },
-});
+}));

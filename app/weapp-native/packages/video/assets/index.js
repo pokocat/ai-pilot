@@ -7,8 +7,9 @@ const host = require('../host');
 const api = require('../api');
 const { formatBytes, formatAssetDuration, formatResolution, mediaDimensions } = require('../model');
 const { ASSET_LIMITS } = require('../config');
+const { withShare } = require('../../../services/share');
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     loading: true,
     assets: [],
@@ -293,4 +294,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

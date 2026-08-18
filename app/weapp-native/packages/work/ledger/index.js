@@ -1,6 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { withShare } = require('../../../services/share');
 
 function badge(status) {
   if (status === 'correct') return { badgeText: '正确', badgeClass: 'b-ok' };
@@ -37,7 +38,7 @@ function statLine(kind, ledger) {
   return `共 ${stats.total || 0} 条 · 还没有已验证的预言`;
 }
 
-Page({
+Page(withShare({
   data: baseData({ tab: 'decision', decisions: [], prophecies: [], currentItems: [], statLine: '加载中…', loading: true, error: false, busy: '', showLogin: false }),
   onLoad() { if (!store.isAuthed()) this.setData({ loading: false, showLogin: true }); else this.load(); },
   back() { wx.navigateBack(); },
@@ -97,4 +98,4 @@ Page({
       this.updateItem(id, { sending: false, disputed: true, disputeOpen: false, disputeDraft: '' });
     } catch (error) { this.updateItem(id, { sending: false }); store.handleApiError(error, { fallbackTitle: '提交失败，请重试' }); }
   },
-});
+}));

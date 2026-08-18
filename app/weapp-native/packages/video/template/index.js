@@ -5,6 +5,7 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { withShare } = require('../../../services/share');
 
 function decorateTemplate(template) {
   if (!template) return null;
@@ -21,7 +22,7 @@ function decorateTemplate(template) {
   });
 }
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     templateId: '',
     loading: true,
@@ -120,4 +121,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.loadAvatar(); },
-});
+}));
