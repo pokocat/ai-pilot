@@ -18,18 +18,22 @@ import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
-import { bindOnRegister, type ReferralSource } from '../services/referral.js';
+import { bindOnRegister, ReferralAlreadyBound, traceOutsideTransaction, type ReferralSource } from '../services/referral.js';
 import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
 // 邀请归因入参（三条建号通道共用）：两个字段都可选，且**形状不对一律当没传**——
 // 分享链路不能因为一个脏参数把登录拦成 400。窗口判定在 services/referral.ts（天数归运营配置）。
-// 两个字段都用 `.catch(undefined)` 兜住**任何**脏值（数字型的 inviteCode、字符串型或负数的
-// inviteCodeAt……）。不加 catch 时 zod 会让整个请求 400 —— 那就是「分享链路里一个脏参数
-// 把用户的登录拦下来」，比丢掉这次归因严重得多。长度上限防有人拿超长串刷归因日志。
+// 两个字段都用 `z.unknown()` **原样收下**，把判断留给 attributionOf。
+//
+// 为什么不用 `.catch(undefined)` 抹掉脏值：那样会把两种完全不同的情况混成「没传」——
+//   · `inviteCode: 123` 被抹掉 → 连 unknown_code 都不留痕，用户问「我填了码怎么没算」时无从查；
+//   · 合法码配 `inviteCodeAt: "abc"` 被抹掉 → 走进「没有时间戳」的分支，
+//     早先那条分支还按「不过期」放行，等于**绕过归因窗口**建出一条不可变更的永久关系。
+// 也不能让 zod 直接报错：那就是一个脏参数把用户的登录打成 400。
 const attributionShape = {
-  inviteCode: z.string().trim().max(64).optional().catch(undefined),
-  inviteCodeAt: z.number().int().positive().optional().catch(undefined),
+  inviteCode: z.unknown().optional(),
+  inviteCodeAt: z.unknown().optional(),
 };
 
 const loginSchema = z.object({
@@ -68,22 +72,27 @@ function clientIp(req: FastifyRequest): string {
 /** 邀请归因入参 + 风控原料（IP / UA）。形状不合法的码直接丢掉，返回 undefined = 本次不归因。 */
 interface RegisterAttribution {
   inviteCode: string;
+  /** 只在客户端给出可信正整数时有值；缺失会让 bindOnRegister 落 no_timestamp 并拒绝建边。 */
   inviteCodeAt?: number;
   source: ReferralSource;
   clientIp: string;
   userAgent: string;
 }
 
-function attributionOf(req: FastifyRequest, data: { inviteCode?: string; inviteCodeAt?: number }): RegisterAttribution | undefined {
-  const raw = data.inviteCode;
-  // 压根没带码 → 不归因也不留痕（绝大多数注册走这条，不该产生任何归因行）。
-  if (typeof raw !== 'string' || raw.length === 0) return undefined;
-  // 带了码但形状非法 → **照样往下走**，由 bindOnRegister 落一条 unknown_code。
-  // 不留痕的话，用户说「我填了邀请码怎么没算给他」时运营手上没有任何凭据可查。
-  // 形状校验本身在 bindOnRegister 里做（isInviteCodeShape），这里只负责别把它丢了。
+function attributionOf(req: FastifyRequest, data: { inviteCode?: unknown; inviteCodeAt?: unknown }): RegisterAttribution | undefined {
+  const rawCode = data.inviteCode;
+  // ① 压根没带 → 不归因也不留痕（绝大多数注册走这条，不该产生任何归因行）。
+  if (rawCode === undefined || rawCode === null || rawCode === '') return undefined;
+  // ② 带了但不是字符串（例如 inviteCode: 123）→ 也要往下走留一条 unknown_code，
+  //    不能悄悄当成没带。转成字符串并截断，防止超长串把归因表撑大。
+  const inviteCode = (typeof rawCode === 'string' ? rawCode.trim() : String(rawCode)).slice(0, 64);
+  // ③ 时间戳只认正整数；脏值一律**不当成「没传」**——由 bindOnRegister 落 no_timestamp
+  //    并拒绝建边，否则脏时间戳就成了绕过归因窗口的后门。
+  const rawAt = data.inviteCodeAt;
+  const inviteCodeAt = typeof rawAt === 'number' && Number.isInteger(rawAt) && rawAt > 0 ? rawAt : undefined;
   return {
-    inviteCode: raw,
-    inviteCodeAt: data.inviteCodeAt,
+    inviteCode,
+    inviteCodeAt,
     // 通道细分（朋友圈 / 海报扫码）目前客户端还没分开上报，统一记 share_friend；
     // 要分通道时让客户端把 source 一起带上来，不要在服务端猜。
     source: 'share_friend',
@@ -251,7 +260,32 @@ async function bindReferralAfterRegister(user: AuthUser, attribution?: RegisterA
       userAgent: attribution.userAgent,
     }));
   } catch (err) {
+    // 并发主键冲突：事务已失败，留痕只能在事务外补（见 referral.ts 的注释）。
+    if (err instanceof ReferralAlreadyBound) {
+      await traceOutsideTransaction({
+        tenantId: user.tenantId,
+        userId: user.id,
+        inviteCode: attribution.inviteCode,
+        source: attribution.source,
+        outcome: 'already_bound',
+        referrerId: err.referrerId,
+        clientIp: attribution.clientIp,
+        userAgent: attribution.userAgent,
+      });
+      return;
+    }
     console.error('[referral] 绑定推荐人失败（注册已成功，不回滚）:', (err as Error).message);
+    // 绑定整体失败时也补一条留痕：至少让「有人带着这个码进来过」这件事可查，
+    // 否则账号建成了、关系没有、日志只在服务器上，运营侧完全是个黑洞。
+    await traceOutsideTransaction({
+      tenantId: user.tenantId,
+      userId: user.id,
+      inviteCode: attribution.inviteCode,
+      source: attribution.source,
+      outcome: 'config_unavailable',
+      clientIp: attribution.clientIp,
+      userAgent: attribution.userAgent,
+    });
   }
 }
 

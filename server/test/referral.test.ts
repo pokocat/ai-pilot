@@ -6,7 +6,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { bindOnRegister, isInviteCodeShape, referralConfig } from '../src/services/referral.ts';
+import { bindOnRegister, isInviteCodeShape, referralConfig, ReferralAlreadyBound, traceOutsideTransaction } from '../src/services/referral.ts';
 
 before(async () => {
   await getApp();
@@ -92,7 +92,7 @@ test('自邀拒绝：拿自己的码注册不可能发生，但拿自己的码�
   const user = await register();
   const code = await inviteCodeOf(user);
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: user } })).tenantId;
-  const outcome = await bindOnRegister({ db: prisma, userId: user, tenantId: tenant, inviteCode: code });
+  const outcome = await bindOnRegister({ db: prisma, userId: user, tenantId: tenant, inviteCode: code, inviteCodeAt: Date.now() });
   assert.equal(outcome, 'self');
   assert.equal(await prisma.referral.count({ where: { userId: user } }), 0, '自邀不得建边');
   assert.ok((await outcomesOf(user)).includes('self'), 'self 必须留痕');
@@ -106,7 +106,7 @@ test('重复绑定拒绝：已有推荐人的用户再带别人的码，返回 a
   const invitee = await register({ inviteCode: firstCode, inviteCodeAt: Date.now() });
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: invitee } })).tenantId;
 
-  const outcome = await bindOnRegister({ db: prisma, userId: invitee, tenantId: tenant, inviteCode: secondCode });
+  const outcome = await bindOnRegister({ db: prisma, userId: invitee, tenantId: tenant, inviteCode: secondCode, inviteCodeAt: Date.now() });
   assert.equal(outcome, 'already_bound');
   const edge = await prisma.referral.findUniqueOrThrow({ where: { userId: invitee } });
   assert.equal(edge.referrerId, first, '单推荐人公理：绑定后不可变更');
@@ -214,7 +214,7 @@ test('深环拒绝：A→B→C→D 链上，A 拿 D 的码绑定必须被拒（�
   // A 此时没有推荐人。若判环只比 lv1/lv2/lv3，A 会成功绑到 D 上，形成 A→D→C→B→A 的环。
   const dCode = await inviteCodeOf(d);
   const tenantA = (await prisma.user.findUniqueOrThrow({ where: { id: a } })).tenantId;
-  const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: dCode });
+  const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: dCode, inviteCodeAt: Date.now() });
   // 断言**具体** outcome：只写 `!== 'bound'` 的话，实现哪天错成 unknown_code 也照样绿，
   // 那就掩盖了「环没被识别出来、只是恰好因为别的原因没建边」这种情况。
   assert.equal(outcome, 'cycle', '成环必须被识别为 cycle（与自邀 self 分开，排查方向不同）');
@@ -275,20 +275,96 @@ test('已注册用户登录不追认推荐人：老号再带码登录，不建�
   assert.deepEqual(await outcomesOf(userId), []);
 });
 
-test('并发绑定：同一新号两次带码请求同时进来，一个 bound 一个 already_bound，绝不双写也不抛错', async () => {
+test('并发绑定走生产形态（事务内）：只建一条边，且两条路径都有留痕', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const target = await register(); // 干净的新号，还没有推荐人
+  const target = await register();
+  const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: target } })).tenantId;
+  const args = { userId: target, tenantId: tenant, inviteCode: code, inviteCodeAt: Date.now() };
+
+  // **用 prisma.$transaction 包**——生产里 bindReferralAfterRegister 就是这么调的。
+  // 之前这条用例传裸 prisma，压根没覆盖「事务内主键冲突」这条真实分支。
+  const results = await Promise.allSettled([
+    prisma.$transaction((tx) => bindOnRegister({ db: tx, ...args })),
+    prisma.$transaction((tx) => bindOnRegister({ db: tx, ...args })),
+  ]);
+
+  // 并发时序有两种合法结果，都要接受（断言写死一种就是在赌调度）：
+  //   · 后到的那次读到了 existing → 返回 already_bound；
+  //   · 两次都越过 existing 检查 → 后写的撞主键，抛 ReferralAlreadyBound（事务已失败，
+  //     留痕只能由调用方在事务外补，见 auth.ts 的 catch）。
+  const bound = results.filter((r) => r.status === 'fulfilled' && r.value === 'bound');
+  const dupOk = results.filter((r) => r.status === 'fulfilled' && r.value === 'already_bound');
+  const dupThrown = results.filter((r) => r.status === 'rejected' && r.reason instanceof ReferralAlreadyBound);
+  assert.equal(bound.length, 1, `应恰好一次 bound，实际 ${JSON.stringify(results.map((r) => r.status === 'fulfilled' ? r.value : String(r.reason)))}`);
+  assert.equal(dupOk.length + dupThrown.length, 1, '另一次必须是 already_bound 或抛 ReferralAlreadyBound');
+  assert.equal(await prisma.referral.count({ where: { userId: target } }), 1, '绝不能双写');
+
+  // 抛异常那条路径的留痕由调用方在事务外补——这里直接验证那个函数真的会落行
+  if (dupThrown.length === 1) {
+    const before = await prisma.referralAttribution.count({ where: { newUserId: target, outcome: 'already_bound' } });
+    await traceOutsideTransaction({
+      tenantId: tenant, userId: target, inviteCode: code, source: 'share_friend',
+      outcome: 'already_bound', referrerId: (dupThrown[0].reason as ReferralAlreadyBound).referrerId,
+    });
+    const after = await prisma.referralAttribution.count({ where: { newUserId: target, outcome: 'already_bound' } });
+    assert.equal(after, before + 1, '事务外补留痕必须真的落库（否则风控视图有空洞）');
+  }
+  assert.ok((await outcomesOf(target)).includes('bound'), '成功那次必须有 bound 留痕');
+});
+
+test('缺可信时间戳不建边（no_timestamp）：判不了新鲜度就不能建一条改不回来的关系', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const target = await register();
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: target } })).tenantId;
 
-  const [a, b] = await Promise.all([
-    bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code }),
-    bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code }),
-  ]);
-  // 主键冲突（P2002）必须被翻译成 already_bound 如实留痕，而不是抛给上层当「绑定失败」——
-  // 那样归因日志会缺这一行，风控视图就有空洞。
-  assert.deepEqual([a, b].sort(), ['already_bound', 'bound'], `实际 ${a} / ${b}`);
-  assert.equal(await prisma.referral.count({ where: { userId: target } }), 1, '只能有一条边');
-  const outcomes = (await outcomesOf(target)).sort();
-  assert.deepEqual(outcomes, ['already_bound', 'bound'], '两次进线都要留痕');
+  // 不传 inviteCodeAt —— 早先这里按「没时间戳就当不过期」放行，等于绕过归因窗口
+  const outcome = await bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code });
+  assert.equal(outcome, 'no_timestamp');
+  assert.equal(await prisma.referral.count({ where: { userId: target } }), 0, '没有可信时间戳不得建边');
+
+  // 运营人工补绑不受此限（source='manual'）
+  const manual = await bindOnRegister({ db: prisma, userId: target, tenantId: tenant, inviteCode: code, source: 'manual' });
+  assert.equal(manual, 'bound', '人工补绑应放行');
+});
+
+test('脏时间戳不得成为绕过归因窗口的后门（合法码 + inviteCodeAt:"abc" → 不建边但留痕）', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  for (const badAt of ['abc', -5, 1.5, null, {}]) {
+    const r = await api<{ token: string }>('POST', '/api/auth/login', {
+      body: { phone: uniquePhone(), name: '脏时间戳', inviteCode: code, inviteCodeAt: badAt },
+    });
+    assert.equal(r.status, 200, `脏时间戳 ${JSON.stringify(badAt)} 不得打断登录`);
+    assert.equal(
+      await prisma.referral.count({ where: { userId: r.body.token } }), 0,
+      `脏时间戳 ${JSON.stringify(badAt)} 竟然建出了关系——这就是绕过归因窗口的后门`,
+    );
+    assert.deepEqual(await outcomesOf(r.body.token), ['no_timestamp'], '仍要留痕');
+  }
+});
+
+test('非字符串邀请码也要留痕（inviteCode:123 不能被悄悄当成没传）', async () => {
+  const r = await api<{ token: string }>('POST', '/api/auth/login', {
+    body: { phone: uniquePhone(), name: '数字码', inviteCode: 123, inviteCodeAt: Date.now() },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await outcomesOf(r.body.token), ['unknown_code'], '带了码就要能查到，哪怕类型不对');
+});
+
+test('注销账号连带清掉关系链与归因（含「我作为别人上级」的那些边）', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  assert.equal(await prisma.referral.count({ where: { lv1: inviter } }), 1);
+
+  const del = await api('DELETE', '/api/me', { token: inviter });
+  assert.equal(del.status, 200, `注销应成功，实际 ${del.status} ${JSON.stringify(del.body)}`);
+
+  // 上级注销后：指向他的边必须消失，否则被邀人的 lv1 会指向一个不存在的账号，
+  // 而带 IP·UA 的归因记录也不该在注销后继续留库。
+  assert.equal(await prisma.referral.count({ where: { lv1: inviter } }), 0, '以注销者为上级的边必须删掉');
+  assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0);
+  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: inviter } }), 0, '归因记录不得留存');
 });
