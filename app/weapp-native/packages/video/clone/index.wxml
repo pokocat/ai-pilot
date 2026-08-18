@@ -194,6 +194,15 @@
           </view>
         </view>
 
+        <!-- 声音训练好的第一时间就给试听。放在失败提示之前：这是好消息，不该被埋在下面。 -->
+        <view wx:if="{{training.voiceDone && voiceId}}" class="cl-hear vd-card">
+          <view class="ch-copy">
+            <text class="ci-title">你的声音已经好了</text>
+            <text class="ci-row">先听一句，确认像不像你本人。听着不对可以重录，不用等做完片子才发现。</text>
+          </view>
+          <view class="vd-btn ghost cl-hear-btn" bindtap="openVoicePreview">听听看</view>
+        </view>
+
         <view wx:if="{{training.hasFailure}}" class="cl-retry vd-card">
           <text class="ci-title">有一项需要重新采集</text>
           <text class="ci-row">按上面的提示重录即可，已经完成的另一项不用重做。</text>
@@ -215,6 +224,13 @@
       <view class="vd-footer-space"></view>
     </view>
   </scroll-view>
+
+  <voice-preview
+    open="{{voicePreviewOpen}}"
+    voice-id="{{voiceId}}"
+    voice-name="{{avatarName}}"
+    bindclose="closeVoicePreview"
+  ></voice-preview>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

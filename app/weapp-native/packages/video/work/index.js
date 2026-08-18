@@ -37,6 +37,7 @@ Page({
     platforms: PLATFORMS,
     publishReady: PUBLISH_READY,
     saving: false,
+    savingCover: false,
     saveProgress: 0,
     publishing: '',
     showLogin: false,
@@ -97,6 +98,45 @@ Page({
         this.downloadAndSave();
       },
       fail: () => this.downloadAndSave(),
+    });
+  },
+
+  /**
+   * 单独保存封面图。
+   *
+   * 封面在成片里只有 0.04 秒（合成端 COVER_DURATION_SEC，约 1.2 帧）——它是**故意**这么设计的，
+   * 用途是当视频第一帧和平台缩略图，不占正片时长。但抖音/视频号取不取第一帧当封面是平台说了算，
+   * 用户手上必须有这张图才能在发布时手动设置。以前这一屏只把它当 poster 用，用户拿不到它，
+   * 于是「我设了封面，发出去却没有」（2026-08-18 反馈）。
+   */
+  saveCover() {
+    if (!host.requireLogin(this, 'execute')) return;
+    const work = this.data.work;
+    if (!work || !work.thumbnailUrl) { host.toast('这条片子没有封面图'); return; }
+    if (this.data.savingCover) return;
+    this.setData({ savingCover: true });
+    host.loading('下载封面');
+    host.downloadFile(work.thumbnailUrl, {
+      success: (res) => {
+        if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
+          host.hideLoading(); this.setData({ savingCover: false });
+          host.toast('封面下载没有完成，请稍后重试');
+          return;
+        }
+        wx.saveImageToPhotosAlbum({
+          filePath: res.tempFilePath,
+          success: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面已存到相册', 'success'); },
+          fail: (error) => {
+            host.hideLoading(); this.setData({ savingCover: false });
+            const message = String(error && error.errMsg || '');
+            // 与 saveToAlbum 同一套：拒过权限只能引导去设置页，不能只 toast 一句失败
+            if (/auth|deny|denied|permission|writePhotosAlbum/i.test(message)) { this.openAlbumSetting(); return; }
+            if (/cancel/i.test(message)) return;
+            host.toast('封面写入相册失败，请检查手机存储空间');
+          },
+        });
+      },
+      fail: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面下载失败，请检查网络后重试'); },
     });
   },
 

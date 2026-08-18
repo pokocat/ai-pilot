@@ -17,6 +17,7 @@ import {
   notifyReviewReminder,
   sendWechatSubscribeMessage,
 } from './wechatSubscribe.js';
+import { scanClipRenderNotifications } from './video/renderNotification.js';
 import { scanAvatarTrainingNotifications } from './video/avatarNotification.js';
 
 export interface ScheduledJob {
@@ -323,6 +324,15 @@ registerJob({ name: 'avatar-training-notification', intervalMs: 60_000, run: asy
   const result = await scanAvatarTrainingNotifications();
   if (result.scanned || result.failed) {
     console.log(`[scheduler] avatar training notifications: sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
+  }
+} });
+// 出片同样是云端异步任务：用户退出小程序后由服务端继续推进。
+// 这个 job 还兼着一件更要紧的事 —— settleVideoJob 此前只在小程序轮询 GET /video/jobs/:id 时触发，
+// 用户中途退出的话，出片失败的积分永远退不回来。详见 services/video/renderNotification.ts。
+registerJob({ name: 'clip-render-notification', intervalMs: 60_000, run: async () => {
+  const result = await scanClipRenderNotifications();
+  if (result.settled || result.failed) {
+    console.log(`[scheduler] clip render: settled=${result.settled} sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
   }
 } });
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。

@@ -4,7 +4,7 @@
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
       <text class="vd-title">按段落配画面</text>
-      <text class="vd-headact" bindtap="preview">预览</text>
+      <text class="vd-headact" bindtap="openStoryboard">分镜清单</text>
     </view>
     <view class="vd-steps">
       <view class="vd-step done"><view class="dot"><native-icon name="check" tone="white" size="11"></native-icon></view><text>改文案</text></view>
@@ -55,12 +55,12 @@
           </view>
           <view wx:if="{{item.roleClass === 'broll' && !item.hasAsset}}" class="row-pick" data-id="{{item.id}}" bindtap="pickAsset">
             <native-icon class="rp-plus" name="plus" tone="neutral" size="23"></native-icon>
-            <view class="rp-copy"><text class="rp-text">为这 {{item.sentenceCount}} 句选一个画面</text><text class="rp-need">这段要念 {{item.seconds}} 秒，素材最好不短于它</text></view>
+            <view class="rp-copy"><text class="rp-text">为这 {{item.sentenceCount}} 句选一个画面</text><text class="rp-need">{{item.needText}} · {{item.pickHint}}</text></view>
           </view>
           <view wx:elif="{{item.roleClass === 'broll' && item.hasAsset}}" class="row-asset">
             <view class="ra-open" data-asset-id="{{item.assetId}}" bindtap="previewSelectedAsset">
               <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">{{item.assetTypeText === '视频素材' ? '播放' : '预览'}}</text></view>
-              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · 点开预览</text><text wx:if="{{item.assetTooShort}}" class="ra-short">素材 {{item.assetSeconds}} 秒，短于本段 {{item.seconds}} 秒，画面会重复播放</text></view>
+              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · {{item.needText}} · 点开预览</text><text wx:if="{{item.assetTooShort}}" class="ra-short">素材只有 {{item.assetSeconds}} 秒，短于本段 {{item.seconds}} 秒，画面会重复播放</text><text wx:elif="{{item.assetTooLong}}" class="ra-note">素材 {{item.assetSeconds}} 秒，成片只会用前 {{item.seconds}} 秒</text></view>
             </view>
             <text class="ra-change" data-id="{{item.id}}" bindtap="pickAsset">更换</text>
           </view>
@@ -90,9 +90,9 @@
     </view>
   </view>
 
-  <view wx:if="{{previewOpen}}" class="pv-mask" catchtap="closePreview">
+  <view wx:if="{{storyboardOpen}}" class="pv-mask" catchtap="closeStoryboard">
     <view class="pv-sheet" catchtap="swallow">
-      <view class="pv-head"><view><text class="pv-title">出片前预览</text><text class="pv-sub">按画面段核对，不再逐句切镜头</text></view><view class="pv-close" bindtap="closePreview"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="pv-head"><view><text class="pv-title">分镜清单</text><text class="pv-sub">这里只核对顺序和画面，成片效果以出片为准</text></view><view class="pv-close" bindtap="closeStoryboard"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
       <scroll-view class="pv-scroll" scroll-y enable-flex>
         <view class="pv-list">
           <view wx:for="{{rows}}" wx:key="id" class="pv-row {{item.roleClass}}">
@@ -101,9 +101,48 @@
           </view>
         </view>
       </scroll-view>
-      <view class="pv-actions"><view class="pv-total"><text>预计 {{totalText}}</text><text>分身 {{avatarSec}} 秒</text><text>{{credits}} 积分</text></view><view class="vd-btn" bindtap="closePreview">确认画面安排</view></view>
+      <view class="pv-actions">
+        <view class="pv-total"><text>预计 {{totalText}}</text><text>分身 {{avatarSec}} 秒</text><text>{{credits}} 积分</text></view>
+        <view class="pv-btns">
+          <view class="vd-btn ghost" bindtap="startPlayback">连着看一遍</view>
+          <view class="vd-btn" style="flex:1" bindtap="closeStoryboard">确认画面安排</view>
+        </view>
+      </view>
     </view>
   </view>
+  <view wx:if="{{playOpen}}" class="pb-mask">
+    <view class="pb-sheet">
+      <view class="pb-head">
+        <view class="pb-headcopy">
+          <text class="pb-title">连着看一遍 · 第 {{playIndex + 1}}/{{playTotal}} 段</text>
+          <text class="pb-sub">只看画面顺序，没有配音和字幕</text>
+        </view>
+        <view class="pb-close" bindtap="stopPlayback"><native-icon name="close" tone="white" size="18"></native-icon></view>
+      </view>
+      <view class="pb-stage">
+        <!-- muted 是必需的：成片里 b-roll 的原声会被口播音频顶掉（合成端 -map 1:a:0），
+             这里放原声等于给用户一个成片里根本不存在的声音。 -->
+        <video wx:if="{{playItem.kind === 'video'}}" id="shots-playback" class="pb-media"
+          src="{{playItem.videoUrl}}" object-fit="cover" muted loop autoplay
+          controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}"
+          show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"></video>
+        <image wx:elif="{{playItem.kind === 'image'}}" class="pb-media" src="{{playItem.imageUrl}}" mode="aspectFill"></image>
+        <view wx:else class="pb-media pb-blank vd-grain"><text>这一段还没配画面</text></view>
+      </view>
+      <view class="pb-meta">
+        <view class="pb-metarow"><text class="pb-role {{playItem.kind === 'blank' ? 'warn' : ''}}">{{playItem.roleLabel}}</text><text class="pb-range">{{playItem.rangeText}} · {{playItem.seconds}} 秒</text></view>
+        <text class="pb-text">{{playItem.text}}</text>
+        <text wx:if="{{playItem.note}}" class="pb-note">{{playItem.note}}</text>
+      </view>
+      <view class="pb-dots"><view wx:for="{{playList}}" wx:key="key" class="pb-dot {{index === playIndex ? 'on' : (index < playIndex ? 'done' : '')}}"></view></view>
+      <view class="pb-actions">
+        <view class="vd-btn ghost {{playIndex === 0 ? 'disabled' : ''}}" bindtap="playPrev">上一段</view>
+        <view class="vd-btn ghost" style="flex:1" bindtap="playSkip">下一段</view>
+        <view class="vd-btn ghost" bindtap="stopPlayback">退出</view>
+      </view>
+    </view>
+  </view>
+
   <view wx:if="{{assetPreviewOpen && previewAsset}}" class="amp-mask" catchtap="closeAssetPreview">
     <view class="amp-sheet" catchtap="swallow">
       <view class="amp-head"><view><text class="amp-title">{{previewAsset.label}}</text><text class="amp-sub">{{previewAsset.kind === 'video' ? '视频素材' : '图片素材'}}</text></view><view class="amp-close" bindtap="closeAssetPreview"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>

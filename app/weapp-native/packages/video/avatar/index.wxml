@@ -61,7 +61,7 @@
             </view>
           </view>
           <text wx:if="{{item.imageMessage}}" class="avc-message">{{item.imageMessage}}</text>
-          <view class="av-item-actions"><view class="avc-act" data-id="{{item.id}}" data-kind="image" bindtap="recapture">更换形象</view><view class="avc-act voice" data-id="{{item.id}}" data-kind="voice" bindtap="recapture">{{item.voiceActionText}}</view><view class="av-delete-one" data-id="{{item.id}}" bindtap="removeAvatar">删除</view></view>
+          <view class="av-item-actions"><view wx:if="{{item.linkedVoiceId && item.voiceStatus === 'ready'}}" class="avc-act primary" data-id="{{item.id}}" bindtap="openVoicePreview">试听声音</view><view class="avc-act" data-id="{{item.id}}" data-kind="image" bindtap="recapture">更换形象</view><view class="avc-act voice" data-id="{{item.id}}" data-kind="voice" bindtap="recapture">{{item.voiceActionText}}</view><view class="av-delete-one" data-id="{{item.id}}" bindtap="removeAvatar">删除</view></view>
           <view wx:if="{{item.voiceStatus === 'training'}}" class="avv-progress"><view class="avv-progress-fill" style="width:{{item.voiceProgress}}%"></view></view>
           <view wx:if="{{item.voiceMessage}}" class="avv-message">{{item.voiceMessage}}</view>
         </view>
@@ -88,6 +88,13 @@
       <view class="vd-footer-space"></view>
     </view>
   </scroll-view>
+
+  <voice-preview
+    open="{{voicePreviewOpen}}"
+    voice-id="{{voicePreviewId}}"
+    voice-name="{{voicePreviewName}}"
+    bindclose="closeVoicePreview"
+  ></voice-preview>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

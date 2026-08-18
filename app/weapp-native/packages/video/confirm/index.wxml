@@ -45,6 +45,18 @@
           </view>
         </view>
 
+        <!-- 成片封面：排在水印前面 —— 封面决定别人在信息流里点不点开，比水印重要得多。 -->
+        <view class="cf-cover vd-card {{coverSummary.state === 'drafted' ? 'is-drafted' : ''}}" bindtap="goCover">
+          <view class="cf-cover-copy">
+            <text class="cf-cover-title">成片封面</text>
+            <text class="cf-cover-sub cf-cover-{{coverSummary.state}}">{{coverSummary.text}}</text>
+          </view>
+          <view class="cf-cover-go">
+            <text class="cf-cover-action">{{coverSummary.state === 'on' ? '修改' : (coverSummary.state === 'drafted' ? '去开启' : '去设置')}}</text>
+            <native-icon name="arrow" tone="ink" size="16"></native-icon>
+          </view>
+        </view>
+
         <view class="cf-watermark vd-card">
           <view class="cf-watermark-copy">
             <text class="cf-watermark-title">AI 生成水印</text>
@@ -53,18 +65,6 @@
           <view class="cf-watermark-control">
             <text class="cf-watermark-state">{{watermarkSaving ? '保存中' : (aiWatermark ? '已开启' : '已关闭')}}</text>
             <switch checked="{{aiWatermark}}" disabled="{{watermarkSaving}}" color="#C65232" bindchange="toggleAiWatermark"></switch>
-          </view>
-        </view>
-
-        <!-- 成片封面：可选支线，不填就不加 -->
-        <view class="cf-cover vd-card" bindtap="goCover">
-          <view class="cf-cover-copy">
-            <text class="cf-cover-title">成片封面</text>
-            <text class="cf-cover-sub cf-cover-{{coverSummary.state}}">{{coverSummary.text}}</text>
-          </view>
-          <view class="cf-cover-go">
-            <text class="cf-cover-action">{{coverSummary.state === 'on' ? '修改' : '去设置'}}</text>
-            <native-icon name="arrow" tone="ink" size="16"></native-icon>
           </view>
         </view>
 

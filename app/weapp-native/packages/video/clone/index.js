@@ -75,6 +75,8 @@ Page({
      * 不必绕道形象接口 —— 独立声音在形象接口里根本不存在。
      */
     voiceId: '',
+    /** 训练完成页的试听浮层开关（组件在 components/voice-preview）。 */
+    voicePreviewOpen: false,
     /** 克隆各档单价；null = 还没读到，界面据此不显示价格而不是显示 0。 */
     pricing: null,
     /** 本次提交的合计报价；null = 价格还没读到，此时不许提交（提交要带确认报价）。 */
@@ -472,6 +474,32 @@ Page({
     return this.cloneRequestId;
   },
 
+  /* ── 训练好了立刻能听 ──────────────────────────────────────────────
+     用户原话：「训练出来的数字人声音效果不确定…先听一下这个训练出来的数字人的声音效果，
+     以免去做成片，做出来以后效果不好，浪费钻石。」
+     训练完成那一刻是心理峰值，也是他最想确认「像不像我」的时刻 —— 入口就该在这里，
+     而不是让他先去挑模板、建项目、进文案页才能听到一句。 */
+  openVoicePreview() {
+    if (!this.data.voiceId) { host.toast('这条声音还没就绪'); return; }
+    if (!host.requireLogin(this, 'execute')) return;
+    host.setOverlay(true, 'video-voice-preview');
+    this.setData({ voicePreviewOpen: true });
+  },
+
+  closeVoicePreview() {
+    host.setOverlay(false, 'video-voice-preview');
+    this.setData({ voicePreviewOpen: false });
+  },
+
+  /**
+   * 重新提交当前这一步。
+   * mode 决定这一屏在做什么：'voice' 是单独训声音，其余都是走形象那条（含照片模式）。
+   */
+  resubmitCurrentStep() {
+    if (this.data.mode === 'voice') this.submitVoice();
+    else this.submitAvatar();
+  },
+
   /** 价格没读到就不许提交 —— 服务端要求带确认报价，硬编个 0 上去只会换来一个看不懂的 409。 */
   assertQuoteReady() {
     // 服务端没有计费这一版：它不收钱、也不要求确认报价，不该拦。
@@ -489,10 +517,37 @@ Page({
    * - 余额不足（402）：直接引到充值，而不是甩一句「提交失败」。
    * - 服务端给了明确判决（有 statusCode）：这个请求标识作废，下次点是新的一单。
    * - 纯网络失败（没有 statusCode）：保留标识，重试才能被服务端识别为同一次提交、不重复扣费。
+   *
+   * CLIP_CLONE_REQUEST_CLOSED（2026-08-18 用户反馈）：
+   *   服务端在 complete 阶段发现这个受理号的预扣**已经退过款**，就判这一单结束
+   *   （video.ts「这次训练已经结束，请重新提交」）。典型触发是首次提交在弱网里断了、
+   *   服务端已建单又退款，用户在原页面再点一次。
+   *   以前端上只把这句原样 toast 出来，用户读成「要重新上传」，于是退回去重选一遍视频 ——
+   *   这就是反馈里那句「军师会提示…又重新上传」。
+   *   现在明确告诉他发生了什么、要付出什么（受理号换新 = 素材得再传一次），
+   *   一次确认就接着走，不必退回去重选文件。
+   *   **不做静默自动重传**：直传是真的会再上行一遍整个文件，用户的流量不该被我们悄悄花掉。
    */
   handleCloneError(error, fallbackMessage) {
     this.setData({ submitting: false, submitPhaseText: '', uploadProgress: 0 });
     if (error && error.statusCode && error.code !== 'CLIP_CLONE_ACCEPTING') this.cloneRequestId = '';
+
+    if (error && error.code === 'CLIP_CLONE_REQUEST_CLOSED') {
+      // 上面那行已经把 cloneRequestId 清掉了，所以确认后直接重提就是干净的一单。
+      host.confirm({
+        title: '刚才那次没提交成功',
+        content: '素材还在，钻石也没扣。重试要把素材再上传一次，现在重试吗？',
+        confirmText: '重试',
+      }).then((ok) => { if (ok) this.resubmitCurrentStep(); });
+      return;
+    }
+
+    if (error && error.code === 'CLIP_CLONE_CREATING') {
+      // 上一个请求还在服务端跑着。这不是失败，别让用户以为白传了、更别让他再传一遍。
+      host.toast('上一次提交还在受理中，稍等一下到分身管理里看');
+      return;
+    }
+
     if (error && error.code === 'INSUFFICIENT_CREDITS') {
       host.confirm({
         title: '钻石不够',

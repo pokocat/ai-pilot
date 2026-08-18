@@ -1853,7 +1853,7 @@ export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayPa
  *  多为幂等重复调用（already_applied），端上仍应按成功处理并轮询订单状态。 */
 export interface PayMockPayResult { ok: boolean; applied: boolean; reason?: string; status: string }
 
-export type WechatSubscribeScene = 'review' | 'report' | 'payment' | 'avatar' | 'poster';
+export type WechatSubscribeScene = 'review' | 'report' | 'payment' | 'avatar' | 'poster' | 'clip';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
 export interface WechatSubscribeTemplate {
   scene: WechatSubscribeScene;
@@ -2759,6 +2759,15 @@ export interface ClipAvatarView {
   engine?: string | null; presetAvailable?: boolean;
   linkedVoiceId?: string | null; linkedVoiceName?: string | null;
 }
+/** 声音试听。不依赖任何 project —— 训练完当场就要能听，见 docs/[OPUS5]VIDEO_PREVIEW_FEEDBACK_PLAN_2026-08-18.md V01。 */
+export interface ClipVoicePreview {
+  voiceId: string;
+  audioUrl: string;
+  durationSec: number;
+  text: string;
+  mock?: boolean;
+}
+
 export interface ClipVoiceView {
   id: string; name: string; status: 'none' | 'training' | 'ready' | 'failed';
   source?: 'video' | 'dedicated' | null; trainedText?: string | null; progress: number;

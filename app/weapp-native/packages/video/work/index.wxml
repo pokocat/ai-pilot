@@ -37,6 +37,17 @@
         <text class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
         <text wx:if="{{work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
 
+        <!-- 封面：单独给出来，并说清它到底管什么。
+             不这么做的话，用户设了封面、发到平台却看不到，只会以为封面没生效。 -->
+        <view wx:if="{{work.thumbnailUrl}}" class="wd-cover vd-card">
+          <image class="wd-cover-img" src="{{work.thumbnailUrl}}" mode="aspectFill"></image>
+          <view class="wd-cover-copy">
+            <text class="wd-cover-title">这条片子的封面</text>
+            <text class="wd-cover-sub">它是视频的第一帧，也是平台缩略图，不占正片时长。有的平台不会自动取，存下来就能在发布时手动设。</text>
+            <view class="wd-cover-act" catchtap="saveCover">{{savingCover ? '保存中…' : '保存封面图'}}</view>
+          </view>
+        </view>
+
         <!-- 代发 -->
         <view class="wd-section">
           <text class="wd-sec-kicker">下一步</text>

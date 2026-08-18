@@ -3,6 +3,7 @@
   "disableScroll": false,
   "usingComponents": {
     "native-icon": "/components/native-icon/index",
-    "login-sheet": "/components/login-sheet/index"
+    "login-sheet": "/components/login-sheet/index",
+    "voice-preview": "/packages/video/components/voice-preview/index"
   }
 }

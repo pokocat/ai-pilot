@@ -68,6 +68,11 @@ Page({
     avatars: [],
     loggedIn: false,
     me: null,
+    /* 试听（V01）：每个分身都能当场听它关联的那条声音，
+       不必先去建项目 —— 「像不像我」要在出片扣钻石之前回答。 */
+    voicePreviewOpen: false,
+    voicePreviewId: '',
+    voicePreviewName: '',
     showLogin: false,
   }),
 
@@ -182,6 +187,24 @@ Page({
           host.toast(error && error.message ? error.message : '删除失败');
         });
     });
+  },
+
+  openVoicePreview(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const avatar = (this.data.avatars || []).find((item) => item.id === id);
+    if (!host.requireLogin(this, 'execute')) return;
+    if (!avatar || !avatar.linkedVoiceId) { host.toast('这个分身还没关联声音'); return; }
+    host.setOverlay(true, 'video-voice-preview');
+    this.setData({
+      voicePreviewOpen: true,
+      voicePreviewId: avatar.linkedVoiceId,
+      voicePreviewName: avatar.linkedVoiceName || avatar.name || '这条声音',
+    });
+  },
+
+  closeVoicePreview() {
+    host.setOverlay(false, 'video-voice-preview');
+    this.setData({ voicePreviewOpen: false, voicePreviewId: '' });
   },
 
   back() { host.back(); },

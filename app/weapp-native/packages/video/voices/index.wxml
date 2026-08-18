@@ -67,6 +67,8 @@
           <text wx:elif="{{item.failed}}" class="vc-hint failed">这次训练没成功，重新录一段就行，失败不扣钻石。</text>
 
           <view class="vc-actions">
+            <!-- 试听排在重录前面：先听一下再决定要不要重录，才是正常顺序 -->
+            <view wx:if="{{item.ready}}" class="vc-act primary" data-id="{{item.id}}" bindtap="openPreview">试听</view>
             <view class="vc-act {{item.training ? 'disabled' : ''}}" data-id="{{item.id}}" bindtap="retrain">{{item.actionText}}</view>
           </view>
         </view>
@@ -81,6 +83,13 @@
       <view class="vd-footer-space"></view>
     </view>
   </scroll-view>
+
+  <voice-preview
+    open="{{previewOpen}}"
+    voice-id="{{previewVoiceId}}"
+    voice-name="{{previewVoiceName}}"
+    bindclose="closePreview"
+  ></voice-preview>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

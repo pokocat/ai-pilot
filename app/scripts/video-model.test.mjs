@@ -125,6 +125,69 @@ test('相邻画面段可直接合并，素材不同则清空后重新选择', ()
   assert.deepEqual(model.materializeShots(segments, result.shots)[0].sourceNos, [1, 2, 3, 4]);
 });
 
+test('合并时可以指定保留上一段或下一段的画面', () => {
+  const segments = Array.from({ length: 4 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = [
+    { id: 'shot_1_2', startNo: 1, endNo: 2, role: 'broll', assetId: 'a', assetLabel: '门头', brollSource: 'album' },
+    { id: 'shot_3_4', startNo: 3, endNo: 4, role: 'broll', assetId: 'b', assetLabel: '后厨', brollSource: 'camera' },
+  ];
+  const keepCurrent = model.mergeAdjacentShots(segments, shots, shots[0].id, 'current');
+  assert.equal(keepCurrent.error, null);
+  assert.equal(keepCurrent.shots[0].assetId, 'a');
+  assert.equal(keepCurrent.shots[0].assetLabel, '门头');
+  assert.equal(keepCurrent.shots[0].brollSource, 'album', '来源标记要跟着素材走');
+
+  const keepFollowing = model.mergeAdjacentShots(segments, shots, shots[0].id, 'following');
+  assert.equal(keepFollowing.shots[0].assetId, 'b');
+  assert.equal(keepFollowing.shots[0].assetLabel, '后厨');
+  assert.equal(keepFollowing.shots[0].brollSource, 'camera');
+});
+
+test('合并成分身出镜段时不带画面，且不受 keepAssetFrom 影响', () => {
+  const segments = Array.from({ length: 2 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = [
+    { id: 'shot_1_1', startNo: 1, endNo: 1, role: 'avatar', assetId: null, assetLabel: null },
+    { id: 'shot_2_2', startNo: 2, endNo: 2, role: 'avatar', assetId: null, assetLabel: null },
+  ];
+  const merged = model.mergeAdjacentShots(segments, shots, shots[0].id, 'current');
+  assert.equal(merged.error, null);
+  assert.equal(merged.shots[0].role, model.ROLE.AVATAR);
+  assert.equal(merged.shots[0].assetId, null);
+});
+
+test('两段本来就是同一个素材时，不给选择也要留住它', () => {
+  const segments = Array.from({ length: 4 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = [
+    { id: 'shot_1_2', startNo: 1, endNo: 2, role: 'broll', assetId: 'a', assetLabel: '门头' },
+    { id: 'shot_3_4', startNo: 3, endNo: 4, role: 'broll', assetId: 'a', assetLabel: '门头' },
+  ];
+  const merged = model.mergeAdjacentShots(segments, shots, shots[0].id);
+  assert.equal(merged.shots[0].assetId, 'a');
+});
+
+test('端上报价不含配画面这一档 —— 服务端权威报价里根本没有 b-roll 价键', () => {
+  const segments = [
+    { no: 1, text: '甲', role: 'avatar' },
+    { no: 2, text: '乙', role: 'broll' },
+    { no: 3, text: '丙', role: 'broll' },
+  ];
+  const one = model.estimateCredits(segments, [
+    { id: 'shot_1_1', startNo: 1, endNo: 1, role: 'avatar' },
+    { id: 'shot_2_3', startNo: 2, endNo: 3, role: 'broll' },
+  ]);
+  const two = model.estimateCredits(segments, [
+    { id: 'shot_1_1', startNo: 1, endNo: 1, role: 'avatar' },
+    { id: 'shot_2_2', startNo: 2, endNo: 2, role: 'broll' },
+    { id: 'shot_3_3', startNo: 3, endNo: 3, role: 'broll' },
+  ]);
+  assert.equal(one.summary.brollCount, 1);
+  assert.equal(two.summary.brollCount, 2);
+  assert.equal(one.total, two.total, '多切一段画面不该多收钱');
+  const brollRow = two.items.find((item) => item.key === 'broll');
+  assert.equal(brollRow.credits, 0);
+  assert.equal(brollRow.freeText, '免费');
+});
+
 test('多句镜头按镜头计画面段数，并按合计时长限制分身出镜', () => {
   const segments = [
     { no: 1, text: '甲'.repeat(70), role: 'broll' },

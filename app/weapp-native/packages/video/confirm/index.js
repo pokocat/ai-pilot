@@ -31,7 +31,7 @@ Page({
     const projectId = String((options && options.projectId) || '');
     if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
     this.setData({ projectId });
-    this.renderRequestId = `clip:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    this.newRenderRequestId();
     this.load();
   },
 
@@ -90,6 +90,23 @@ Page({
       this.setData({ loading: false });
       host.toast(error && error.message ? error.message : '打开失败');
     });
+  },
+
+  /**
+   * 出片请求标识。
+   *
+   * 它的作用是幂等：同一次提交重试时服务端要认得出「这是同一单」，不能扣两次费。
+   * 但**服务端对已退款的 hold 是拒绝复用的**（video.ts 的 CLIP_RENDER_REQUEST_CLOSED
+   * 「该出片请求已经结束，请重新提交」）。以前这个 id 只在 onLoad 生成一次、失败后从不更新，
+   * 于是提交撞上网络抖动后再点，就永远撞在那句话上 —— 这一页再也出不了片，
+   * 用户只能退出确认页重新进来。这正是 2026-08-18 用户反馈里「提示…又要重新来一次」的同一类问题。
+   *
+   * 现在：拿到服务端的明确判决（有 statusCode）就换新标识，下次点就是干净的一单；
+   * 纯网络失败保留标识，让重试仍被认成同一次提交。
+   */
+  newRenderRequestId() {
+    this.renderRequestId = `clip:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+    return this.renderRequestId;
   },
 
   toggleAiWatermark(event) {
@@ -152,6 +169,13 @@ Page({
       })
       .catch((error) => {
         this.setData({ submitting: false });
+        // 服务端给了明确判决 → 这一单作废，换新标识，让用户**再点一次就能重来**。
+        // 纯网络失败（没有 statusCode）保留标识：那一单可能已经建上了，重试要能被认出来。
+        if (error && error.statusCode) this.newRenderRequestId();
+        if (error && error.code === 'CLIP_RENDER_REQUEST_CLOSED') {
+          host.toast('刚才那次提交没成功，再点一次「确认出片」就行');
+          return;
+        }
         host.toast(error && error.message ? error.message : '提交失败');
       });
   },
