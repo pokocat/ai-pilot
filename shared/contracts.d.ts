@@ -371,7 +371,7 @@ export interface FeatureFlags {
   conversationContinuity?: boolean; // 总军师跨 24h 仍续接同一 Session；false 时回退为新 Session + 交接包
 }
 
-export interface LoginRequest { phone: string; name?: string; code?: string; }
+export interface LoginRequest extends LoginAttribution { phone: string; name?: string; code?: string; }
 export interface AliasSuggestionResult { name: string; source: string; }
 /** 更新身份（称呼 + 公司/品牌名 + 头像）：首登建档 / 完善资料 / 设置页 */
 export interface UpdateIdentityRequest { name?: string; company?: string; avatarUrl?: string; }
@@ -388,7 +388,7 @@ export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devC
  *  （/auth/wechat-phone 会把这次 openid 绑到手机号账号上），之后才能用它快捷复登。 */
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 /** 本机号一键登录（POST /auth/wechat-phone）：phoneCode=getPhoneNumber 的 code；loginCode=wx.login 的 code（可选，用于关联 openid）。 */
-export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
+export interface WechatPhoneLoginRequest extends LoginAttribution { phoneCode: string; loginCode?: string; name?: string; }
 /**
  * 手机号快捷登录的身份解析结果。
  *

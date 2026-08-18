@@ -43,37 +43,52 @@ const store = require('./store');
 const LANDING = '/pages/sessions/index';
 
 /**
+ * 分享卡底图。**绝不能留空**。
+ *
+ * 一开始把 image 留空、想让微信「自动截当前页」兜底，那是个隐私事故：从账本、档案、订单这些
+ * 私密页转发时，缩略图会把个人经营数据直接带进分享卡，"分享内容与页面解耦"也就成了空话。
+ * 现在固定用这两张品牌底图（`app/src/assets/share/`，构建时整目录拷进 `dist-native/assets/`）。
+ *
+ * 两张分开是因为微信的裁切规则不同：转发给朋友按 5:4 原样显示，朋友圈按 1:1 **居中裁剪**，
+ * 拿 5:4 的图去发朋友圈会被裁掉两侧。图上刻意不写字——文案由 title 承载，
+ * 免得出现「图上写的和标题不一样」，也不引入字体依赖。
+ */
+const CARD_FRIEND = '/assets/share/card-friend.png';
+const CARD_TIMELINE = '/assets/share/card-timeline.png';
+
+/**
  * 内置海报素材池（运营出图前的兜底，也是服务端下发失败时的降级）。
  *
- * 文案口径：**切真实经营痛点**（获客贵 / 现金流紧 / 方向不定），不用「宜攻宜守」这类盘面语——
- * 对真实经商、开企业的人没有代入感。军师的语感留在称谓与语气里（「过一遍」「摆给军师看看」），
- * 不体现在痛点表述本身。
+ * 文案口径：**切真实经营痛点**（获客贵 / 现金流紧 / 招人难 / 方向不定），不用「宜攻宜守」
+ * 这类盘面语——对真实经商、开企业的人没有代入感。军师的语感留在称谓与语气里
+ * （「过一遍」「摆给军师看看」），不体现在痛点表述本身。
  *
- * 图片刻意用**网络 URL**而不是打进包里：主包体积有上限，ai-society 那边就踩过一张 256 色 PNG
- * 369KB 顶穿主包上限的坑。`image` 为空时整个字段不下发，微信会自动截当前页做封面——
- * 宁可退化成截图，也不给一张裂开的图。
- *
- * `timelineTitle` 单列：朋友圈是「广而告之」的语气，而转发给朋友是「递给你看」的语气。
- * 两张图也不能共用——转发按 5:4 原样显示，朋友圈按 1:1 居中裁剪，5:4 的图会被裁掉两侧字标。
+ * `timelineTitle` 单列：朋友圈是「广而告之」的语气，转发给朋友是「递给你看」的语气。
  */
 const BUILTIN_POSTERS = [
   {
     title: '生意上最头疼的那件事，先让军师给你过一遍',
     timelineTitle: '经营卡在哪一环？让军师陪你拆一遍',
-    image: '',
-    timelineImage: '',
+    image: CARD_FRIEND,
+    timelineImage: CARD_TIMELINE,
   },
   {
     title: '客户越来越贵、账上越来越紧——先看清卡在哪一环',
     timelineTitle: '获客贵、现金流紧，问题往往不在你以为的地方',
-    image: '',
-    timelineImage: '',
+    image: CARD_FRIEND,
+    timelineImage: CARD_TIMELINE,
+  },
+  {
+    title: '招人难、留人更难，先把用人这件事想清楚',
+    timelineTitle: '招人留人这件事，值得先想清楚再动手',
+    image: CARD_FRIEND,
+    timelineImage: CARD_TIMELINE,
   },
   {
     title: '下一步该押哪里？把你的局摆给军师看看',
     timelineTitle: '下一步押哪里，值得先想清楚再投钱',
-    image: '',
-    timelineImage: '',
+    image: CARD_FRIEND,
+    timelineImage: CARD_TIMELINE,
   },
 ];
 
@@ -95,12 +110,16 @@ function posterPool() {
  * 「用户说他看到的图不对」这类问题。刻意不用 Math.random()——随机会让同一次会话里
  * 前后两次分享不一致，且线上无法复现。
  *
- * 用 年*372 + 月*31 + 日 而不是 Date.now()/86400000：后者按 UTC 切日，在东八区会变成
- * 每天早上 8 点换素材，跨零点前后同一个「今天」拿到两套图。
+ * 用**本地**年月日去构造 UTC 零点再换算天数：
+ *   · 不用 `Date.now() / 86400000`——那是按 UTC 切日，东八区会在每天早上 8 点换素材，
+ *     同一个「今天」跨零点前后拿到两套图；
+ *   · 也不用 `年*372 + 月*31 + 日` 这种手算式——它在月末月初不连续（2/29 与 3/1 差 3，
+ *     对 4 套素材取模会撞成同一套，30 天的月份还会跳过一套）。
+ * 这个写法严格逐日 +1，且只看设备本地日期。
  */
 function dayIndex(now) {
   const d = now || new Date();
-  return d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate();
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
 }
 
 function currentPoster(now) {
@@ -133,18 +152,24 @@ function timelineQuery() {
 const friendMixin = {
   onShareAppMessage() {
     const poster = currentPoster();
-    const payload = { title: poster.title, path: pathWithCode(LANDING) };
-    if (poster.image) payload.imageUrl = poster.image; // 空图不下发，让微信截图兜底
-    return payload;
+    // imageUrl 一定要给：不给的话微信会截当前页当封面，从账本 / 档案页转发就把个人数据带出去了。
+    return {
+      title: poster.title,
+      path: pathWithCode(LANDING),
+      imageUrl: poster.image || CARD_FRIEND,
+    };
   },
 };
 
 const timelineMixin = {
   onShareTimeline() {
     const poster = currentPoster();
-    const payload = { title: poster.timelineTitle || poster.title, query: timelineQuery() };
-    if (poster.timelineImage) payload.imageUrl = poster.timelineImage;
-    return payload;
+    // 同上：朋友圈也必须给图，且必须是 1:1 那张（5:4 会被居中裁掉两侧）。
+    return {
+      title: poster.timelineTitle || poster.title,
+      query: timelineQuery(),
+      imageUrl: poster.timelineImage || CARD_TIMELINE,
+    };
   },
 };
 
@@ -174,4 +199,6 @@ module.exports = {
   posterPool,
   BUILTIN_POSTERS,
   LANDING,
+  CARD_FRIEND,
+  CARD_TIMELINE,
 };

@@ -2036,11 +2036,15 @@ model Referral {
 /// clientIp / userAgent 是风控视图（按 IP 看新号聚集）的原料——注册侧本来就在采集这两样。
 model ReferralAttribution {
   id         String   @id @default(cuid())
+  /// 进线新号所属租户。**必须有**：运营查询 / 导出 / 清理这批含 IP·UA 的归因记录时
+  /// 要能按租户限定范围，否则只能全表扫（与本仓多租户行级隔离铁律冲突）。
+  /// 码主的租户不记在这里——一条归因描述的是「谁进来了」，归属跟着新号走。
+  tenantId   String
   inviteCode String
   source     String
   newUserId  String? // 进线的新用户；建号失败时可能为空
   referrerId String? // 解析出的码主；unknown_code 时为空
-  outcome    String // 'bound' | 'self' | 'unknown_code' | 'expired' | 'already_bound'
+  outcome    String // 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired' | 'already_bound'
   clientIp   String?
   userAgent  String?
   createdAt  DateTime @default(now())
@@ -2048,6 +2052,7 @@ model ReferralAttribution {
   @@index([referrerId, createdAt])
   @@index([clientIp])
   @@index([outcome, createdAt])
+  @@index([tenantId, createdAt])
   @@map("referral_attribution")
 }
 

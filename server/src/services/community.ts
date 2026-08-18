@@ -12,7 +12,9 @@ import type {
 
 // ── 邀请码 ──────────────────────────────────────────────────────────────
 // "JS" + 4 位 base32（Crockford：去掉易混的 I/L/O/U），如 JS2K7P。
-const INVITE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+// 导出给 services/referral.ts 的识别正则复用：生成与识别共用一份字母表，
+// 否则只改一处会造出「合法但系统永远归不了因」的码。
+export const INVITE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 function randomInviteCode(): string {
   let s = 'JS';

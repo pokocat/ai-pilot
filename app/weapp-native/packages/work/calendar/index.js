@@ -44,7 +44,7 @@ Page(withShare({
     if (!authed) { this.setData({ loaded: true }); return; }
     store.loadMe().then(() => { const me = store.snapshot().me; const disabled = Boolean(me && me.features && me.features.fortune === false); this.setData({ disabled }); if (!disabled) this.loadChart(); });
   },
-  onShareAppMessage() { const chart = this.data.chart; return { title: chart ? `我的 ${chart.monthlyOutlook.year} 年天时日历——看看你全年该攻还是守` : '看看你全年哪几个月该攻、哪几个月该守', path: pathWithCode('/packages/work/calendar/index') }; },
+  onShareAppMessage() { const chart = this.data.chart; return { title: chart ? `我的 ${chart.monthlyOutlook.year} 年经营节奏表——哪几个月该加力、哪几个月该收着做` : '看看你全年哪几个月适合加力、哪几个月适合收着做', path: pathWithCode('/packages/work/calendar/index') }; },
   back() { if (getCurrentPages().length > 1) wx.navigateBack(); else wx.switchTab({ url: '/pages/home/index', fail: () => wx.reLaunch({ url: '/pages/home/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadChart(); },
