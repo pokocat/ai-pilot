@@ -1223,6 +1223,9 @@ export interface GenerationView extends GenerationSummary {
   completedAt?: string | null;
   refNotices?: string[];
   knowledgeUsed?: string[];
+  // 仅 status=queued 时出现；ahead=按调度顺序排在前面的排队任务数。
+  // 注意口径：不含在跑/待接管恢复的单，所以 ahead=0 ≠「下一个必然是你」，文案别承诺「即将开始」。
+  queue?: { ahead: number } | null;
 }
 export interface GenerationSnapshotEvent {
   generationId: string;
