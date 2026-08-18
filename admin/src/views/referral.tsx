@@ -56,8 +56,31 @@ const SOURCE_LABEL: Record<string, string> = {
 
 function outcomeText(k: string): string { return OUTCOME_LABEL[k] ?? k; }
 function sourceText(k: string): string { return SOURCE_LABEL[k] ?? k; }
+
+/**
+ * 短 id：取 id 的**尾部** 6 位，不是别处那种头部 8 位。
+ *
+ * 本仓的 id 是 cuid（`c` + 8 位 base36 毫秒时间戳 + 计数 + 指纹 + 8 位随机）。`slice(0, 8)`
+ * 等于「c + 时间戳的前 7 位」——同一个 ~36ms 窗口里建出来的号，头部完全相同。而这块屏要消歧的
+ * 恰恰是「同一批被刷出来的新号」，用头部就等于在最需要区分的场景里失效。尾部落在随机块上，
+ * 6 位 base36 ≈ 22 亿种，一组最多 40 人时足够。别处的 `slice(0, 8)` 是给人工对一眼用的，
+ * 这里不跟随那个惯例。
+ */
+function shortId(userId: string): string {
+  return userId.length > 6 ? userId.slice(-6) : userId;
+}
+
+/**
+ * 一个人在界面上的标签。**永远带短 id**（2026-08-18 复审的应改项）。
+ *
+ * 上一轮把手机号收成掩码（阻断修复，不能退回完整号码），代价是识人信息随之变少：两个还没补姓名、
+ * 号段又同前三后四的新号，在同一个风险组里显示得**完全一样**——而「连号批量注册」正是刷号的典型
+ * 形状，也就是说最需要区分的时候一定区分不出来。响应里本来就有 `userId`，把它的短形接在标签后面
+ * 即可消歧；完整 id 放在 title / tooltip 里（悬停或长按可见），需要拿去查库时不用另找入口。
+ */
 function personText(name: string | null, phone: string | null, userId: string): string {
-  return name?.trim() || phone || userId.slice(0, 8);
+  const label = name?.trim() || phone || '';
+  return label ? `${label} · ${shortId(userId)}` : `#${shortId(userId)}`;
 }
 
 /* ══════════════ 外壳：tab + 租户筛选 + 天数窗口 ══════════════ */
@@ -83,7 +106,9 @@ export function ReferralView() {
   /* 按需加载：每个 tab 一个组件、各自持有自己的 useResource，**切到哪个 tab 才挂载哪份取数**。
      旧写法把三份 useResource 都挂在外壳上，于是只看一张静态 UML 说明图，也会连带触发全量关系
      聚合 + 一次完整风控扫描（树内部当时还会再扫一遍）——四屏的账全记在第一屏头上。 */
-  if (tab === 'tree') return <TreeSection tenantId={tenantId}>{bar}</TreeSection>;
+  // 树也吃 days：它不筛边（关系永久、树始终全量），只决定**红环**用哪个聚集窗口——
+  // 必须与风控屏当下选的窗口是同一个，否则两屏各说一套（见 TreeSection 注释）。
+  if (tab === 'tree') return <TreeSection tenantId={tenantId} days={days}>{bar}</TreeSection>;
   if (tab === 'risk') return <RiskSection tenantId={tenantId} days={days}>{bar}</RiskSection>;
   if (tab === 'funnel') {
     return (
@@ -111,10 +136,16 @@ function SchemaSection({ tenantId, days, children }: { tenantId: string; days: n
   );
 }
 
-function TreeSection({ tenantId, children }: { tenantId: string; children: ReactNode }) {
+/**
+ * 树。`days` 传下去**只影响红环**（同 IP 聚集的判定窗口），不影响画哪些边：
+ * 邀请关系是永久的，树始终是全量视图。传它是为了让红环与「风控关联」屏此刻的窗口逐字同源
+ * ——否则会出现「20 天前的聚集在 7 天风控页里消失，树上还标着红」，运营顺着红环去那屏
+ * 找 IP 却找不到。服务端把用到的天数原样回来（`riskWindowDays`），图例照它说话。
+ */
+function TreeSection({ tenantId, days, children }: { tenantId: string; days: number; children: ReactNode }) {
   const tree = useResource(
-    useCallback(() => api.referralTree({ tenantId: tenantId || undefined }), [tenantId]),
-    [tenantId],
+    useCallback(() => api.referralTree({ days, tenantId: tenantId || undefined }), [days, tenantId]),
+    [days, tenantId],
   );
   return (
     <>
@@ -172,14 +203,19 @@ function FilterBar({ tab, onTab, tenantId, onTenant, days, onDays, tenants }: {
           ))}
         </div>
       </div>
-      {/* 树是全量视图（关系是永久的，没有时间窗），所以它不出现天数筛选——摆一个不生效的筛选
-          比没有筛选更糟。风控与归因分布才有窗口语义。 */}
-      {tab !== 'tree' && tab !== 'funnel' && (
+      {/* 天数窗口。**在树那一屏它只管红环、不管画哪些边**：邀请关系是永久的，树始终是全量视图，
+          让天数去筛边等于切到「7 天」就把整棵树清空。但红环的判定天生有窗口，而且必须与风控屏
+          此刻的窗口同源——所以这个筛选在树上照样要露出来，旁边写清它作用在哪。
+          （藏起来才是真正的「不生效的筛选」：树会按一个运营看不见、也改不了的窗口去标红。） */}
+      {tab !== 'funnel' && (
         <div className="filter-bar">
           <div className="chip-row">
             {[7, 30, 90].map((d) => (
               <button key={d} type="button" className={`chip ${days === d ? 'on' : ''}`} onClick={() => onDays(d)}>{d} 天</button>
             ))}
+            {tab === 'tree' && (
+              <span className="tag off">只作用于红环（同 IP 聚集窗口）；关系边始终是全量</span>
+            )}
           </div>
         </div>
       )}
@@ -537,7 +573,9 @@ function TreeTab({ data }: { data: AdminReferralTree }) {
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(r.node.userId); }
                     } : undefined}
                   >
-                    <title>{`${label} · 直邀 ${r.node.directCount} · ${r.node.status === 'activated' ? '已开通付费' : '仅注册'}${r.node.risk ? ' · 有风控标记' : ''}${r.node.boundAt ? ` · 建边 ${fmtTime(r.node.boundAt)}` : ''}${hasKids ? (r.open ? ' · 已展开' : ' · 可展开') : ''}`}</title>
+                    {/* tooltip 里给**完整 userId**：标签上只带短形（省宽），要拿去查库时
+                        悬停即可，不必再开一屏。 */}
+                    <title>{`${label} · 直邀 ${r.node.directCount} · ${r.node.status === 'activated' ? '已开通付费' : '仅注册'}${r.node.risk ? ' · 有风控标记' : ''}${r.node.boundAt ? ` · 建边 ${fmtTime(r.node.boundAt)}` : ''}${hasKids ? (r.open ? ' · 已展开' : ' · 可展开') : ''} · userId ${r.node.userId}`}</title>
                     <circle
                       className={`rf-n-c ${r.node.status === 'activated' ? 'act' : 'reg'} ${r.node.risk ? 'risk' : ''}`}
                       cx={cx} cy={r.y} r={rr}
@@ -557,9 +595,13 @@ function TreeTab({ data }: { data: AdminReferralTree }) {
       <div className="ai-note">
         树只画到三级：Referral 的物化路径就存三级（lv1 / lv2 / lv3），这也是运营侧能看到的全部链路。
         展示的是「直邀人数最多的前 {data.rootLimit} 个邀请人」及其子树，是投影不是全景；这些邀请人自己
-        也可能是别人的下级。风控标记与「风控关联」那一屏同源：着色依据的就是那一屏本次返回的那批
-        超阈值 IP 组（同一个窗口、同一个阈值、同一处截断），所以树上标红的人一定能在那一屏的清单里
-        找到对应的 IP，两屏不会各说一套。
+        也可能是别人的下级。
+        <br />
+        两个窗口是两回事：<b>关系边不受天数影响</b>（邀请关系是永久的，这棵树始终是全量），
+        天数只决定<b>红环</b>用哪个聚集窗口。红环与「风控关联」那一屏同源：着色依据的就是那一屏
+        在<b>同一个天数（近 {data.riskWindowDays} 天）</b>下本次返回的那批超阈值 IP 组
+        （同一个窗口、同一个阈值、同一处截断），所以树上标红的人一定能在那一屏的清单里找到
+        对应的 IP。换天数时红环会跟着变、树的形状不变，这是刻意的。
       </div>
     </div>
   );
@@ -657,6 +699,8 @@ function RiskTab({ data }: { data: AdminReferralRiskView }) {
                     const uy = ipY + (i - (members.length - 1) / 2) * B_ROW_H;
                     return (
                       <g key={m.userId}>
+                        {/* 完整 userId 只在 tooltip 里（图上那行要留给码与归因结果） */}
+                        <title>{`${personText(m.name, m.phone, m.userId)} · ${m.inviteCode} · ${outcomeText(m.outcome)} · userId ${m.userId}`}</title>
                         <line className="rf-b-edge" x1={B_IP_X + 96} y1={ipY + 7} x2={B_USER_X - 6} y2={uy + 7} />
                         <circle className="rf-b-u" cx={B_USER_X} cy={uy + 7} r={5} />
                         <text className="rf-b-u-t" x={B_USER_X + 12} y={uy + 11}>
@@ -707,7 +751,9 @@ function RiskGroupCard({ group }: { group: AdminReferralRiskGroupView }) {
       {open && (
         <div className="kv-grid">
           {group.members.map((m) => (
-            <div key={m.userId} className="kv">
+            // title 给完整 userId：清单里两个没补姓名、掩码号又相同的新号，短 id 已经能分开，
+            // 但真要去库里查那个人时得拿到完整 id。
+            <div key={m.userId} className="kv" title={`userId ${m.userId}`}>
               <span>{m.inviteCode} · {outcomeText(m.outcome)}</span>
               <b>{personText(m.name, m.phone, m.userId)}</b>
               <span>{fmtTime(m.createdAt)}</span>
