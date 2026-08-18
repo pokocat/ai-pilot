@@ -44,7 +44,16 @@ export async function activationSourceCounts(days: number): Promise<{ source: st
     .sort((a, b) => b.count - a.count);
 }
 
-/** 落一条开通事件（fire-safe：绝不阻断购买主链路）。可传事务客户端与购买同事务。 */
+/**
+ * 落一条开通事件。可传事务客户端与购买同事务。
+ *
+ * ⚠️ **它不是 fire-safe 的**（旧注释这么写，与实现不符，2026-08-18 订正）：写失败会**抛出**，
+ * 靠每个调用方自己 `.catch(() => {})`。更要紧的是——**在事务内 catch 并不安全**：
+ * Postgres 里任一语句失败会把整个事务置为 aborted，`.catch` 只吞掉 JS 异常，
+ * 事务本身已经废了，后续语句连带失败，最终**整笔购买回滚**。
+ * `services/wechatPay.ts` 那两处正是「传 tx + catch」的形状，风险已记入 AGENTS §13。
+ * 新写的调用请参考 `recordInviteActivation`：**跑在事务提交之后**、自带小事务、内部吞掉全部异常。
+ */
 export async function recordActivation(
   args: { tenantId: string; userId: string; itemType: 'agent' | 'sku' | 'plan'; itemKey: string; source: ActivationSource; refId?: string | null },
   db?: Prisma.TransactionClient,
