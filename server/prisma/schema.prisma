@@ -2075,7 +2075,7 @@ model ReferralAttribution {
   source     String
   newUserId  String? // 进线的新用户；建号失败时可能为空
   referrerId String? // 解析出的码主；unknown_code 时为空
-  outcome    String // 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired' | 'already_bound'
+  outcome    String // 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired' | 'already_bound' | 'config_unavailable' | 'no_timestamp'
   clientIp   String?
   userAgent  String?
   createdAt  DateTime @default(now())

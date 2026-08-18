@@ -70,15 +70,6 @@ const RISK_GROUP_CAP = 40;
 const RISK_MEMBER_CAP = 40;
 /** 树一次取的边数上限：超出即截断并如实告知（截断后不可达的节点直接不渲染，不会拼出错树）。 */
 export const TREE_ROW_CAP = 3000;
-/**
- * 树上「风控标记」着色所依据的 IP 聚集窗口。
- *
- * 树本身是**全量**的（关系是永久的，没有时间窗），但风控是有窗口语义的事——「同一 IP 在窗口期内
- * 注册 ≥N 个带码新号」。两者窗口不同，所以窗口天数必须显式回给前端（`riskWindowDays`），
- * 否则运营会以为红点代表「这人历史上任何时候被标过」。
- */
-const TREE_RISK_WINDOW_DAYS = 30;
-
 const DAY_MS = 86_400_000;
 
 function clampDays(raw: unknown): number {
@@ -319,17 +310,30 @@ export async function adminReferralRoutes(app: FastifyInstance) {
   /* ── 视图② 邀请关系树：一次给全三级，不做逐层展开的 N+1 ────────────────────
      物化路径就是为这个查询写全的：`lv1/lv2/lv3` 各有索引，一条 `OR` 就把所选根的整棵
      三级子树捞出来（lv1 命中=直邀、lv2 命中=二级、lv3 命中=三级），前端只做分层与折叠，
-     不再按节点回头请求。逐层展开那种写法在这里等于每展开一个节点一次查询。 */
-  app.get<{ Querystring: { tenantId?: string; roots?: string } }>('/admin/referral/tree', async (req): Promise<AdminReferralTree> => {
+     不再按节点回头请求。逐层展开那种写法在这里等于每展开一个节点一次查询。
+
+     ── `?days=` 在这个端点上**只管红环、不管画哪些边**（两个窗口刻意不是同一个 days）──
+     · 取数窗口（画哪些边）= **全量、无时间窗**。邀请关系是永久的（`Referral.boundAt` 只是
+       建边时刻，关系本身不过期），这棵树回答的是「谁带来了谁」。若让 days 也筛边，运营切到
+       「7 天」时整棵树几乎清空——那不叫筛选，那叫把这块屏关掉。
+     · 红环判定窗口（标哪些人）= **必须有窗口**，因为风控命题本身带窗口（「同一 IP 在窗口期内
+       注册 ≥N 个带码新号」），而且必须与风控页**此刻显示的那个窗口**同源。
+     所以前端把风控页当前选中的天数原样传下来，这里只喂给 riskGroups()，并把它原样回给前端
+     （`riskWindowDays`）供图例说明。2026-08-18 复审的阻断 2 正是这里写死了 30 天：
+     20 天前的聚集在「7 天」风控页里消失，树却仍标红；60 天前的在「90 天」风控页里出现，
+     树却不标红——运营点着红环去风控屏找那个 IP，两屏各说一套。 */
+  app.get<{ Querystring: { days?: string; tenantId?: string; roots?: string } }>('/admin/referral/tree', async (req): Promise<AdminReferralTree> => {
     const tenantId = tenantOf(req.query.tenantId);
     const rootLimit = Math.min(60, Math.max(1, Number(req.query.roots) || 12));
+    // 与 /risk 同一把 clampDays（同一个默认值 30、同一个 1~365 夹取），两端不会各写一遍后漂移。
+    const riskDays = clampDays(req.query.days);
     const edgeScope: Prisma.ReferralWhereInput = tenantId ? { tenantId } : {};
     const at = now();
 
     // 一次 groupBy 同时拿到三样东西：邀请人总数、每人的直邀数（= 节点大小编码，任意深度都准）、
     // 以及排序用的权重。深度 3 的节点自己的下级不在本次 OR 的结果里，但它的直邀数在这张表里，
     // 所以树末端不会谎报成 0（前端据此提示「下级已超出三级视野」）。
-    const riskAt = riskWindow(TREE_RISK_WINDOW_DAYS, tenantId);
+    const riskAt = riskWindow(riskDays, tenantId);
     const [byInviter, { threshold }] = await Promise.all([
       prisma.referral.groupBy({ by: ['lv1'], where: edgeScope, _count: { _all: true } }),
       riskThreshold(),
@@ -348,7 +352,7 @@ export async function adminReferralRoutes(app: FastifyInstance) {
     if (rootIds.length === 0) {
       return {
         tenantId, rootLimit, inviterTotal, edgeTotal,
-        riskWindowDays: TREE_RISK_WINDOW_DAYS, truncated: false, roots: [],
+        riskWindowDays: riskDays, truncated: false, roots: [],
       };
     }
 
@@ -364,9 +368,10 @@ export async function adminReferralRoutes(app: FastifyInstance) {
         orderBy: { boundAt: 'asc' },
         take: TREE_ROW_CAP + 1,
       }),
-      // 风控标记与二部图同源：着色依据的就是 /risk **本次会返回的那批组**（同一个函数、同一个
-      // 窗口、同一个阈值、同一份截断）。两边各算一遍就会出现「树上标红、二部图里查不到那个 IP」
-      // 的鬼故事——旧代码正是拿全量组着色、只返回前 40 组。
+      // 风控标记与二部图同源：着色依据的就是 /risk **本次会返回的那批组**——同一个函数、
+      // 同一个阈值、同一份截断，且**同一个 days**（由请求带下来，不再各自写死）。
+      // 少任何一项都会出现「树上标红、二部图里查不到那个 IP」的鬼故事：
+      // 旧代码先是拿全量组着色只返回前 40 组，改完之后又剩下窗口写死 30 天这一项。
       riskGroups(riskAt.sql, threshold),
     ]);
     const truncated = fetched.length > TREE_ROW_CAP;
@@ -418,7 +423,7 @@ export async function adminReferralRoutes(app: FastifyInstance) {
 
     return {
       tenantId, rootLimit, inviterTotal, edgeTotal, truncated,
-      riskWindowDays: TREE_RISK_WINDOW_DAYS,
+      riskWindowDays: riskDays,
       roots: rootIds.map((id) => node(id, 0, null)),
     };
   });

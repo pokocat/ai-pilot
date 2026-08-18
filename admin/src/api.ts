@@ -356,7 +356,9 @@ export const api = {
   // 阈值不在前端算：风控聚集阈值归运营配置（FeatureFlag），服务端读出来一并回传。
   referralOverview: (q: { days?: number; tenantId?: string } = {}) =>
     req<AdminReferralOverview>(`/admin/referral/overview${referralQs(q)}`),
-  referralTree: (q: { tenantId?: string; roots?: number } = {}) =>
+  // `days` 在树上只作用于**红环**（同 IP 聚集窗口），不筛边——关系是永久的，树始终是全量。
+  // 传它的唯一理由是让红环与「风控关联」屏此刻的窗口同源（见 server/src/routes/adminReferral.ts）。
+  referralTree: (q: { days?: number; tenantId?: string; roots?: number } = {}) =>
     req<AdminReferralTree>(`/admin/referral/tree${referralQs(q)}`),
   referralRisk: (q: { days?: number; tenantId?: string } = {}) =>
     req<AdminReferralRiskView>(`/admin/referral/risk${referralQs(q)}`),

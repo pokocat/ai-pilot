@@ -221,7 +221,7 @@ model ReferralAttribution {
 1. **运营后台配置栏位**（`FeatureFlag.payload`，与告警阈值同套路）：预留 key ——
    `referral.rewardInviter`（邀请人奖励，形态+数值）、`referral.rewardInvitee`（被邀人）、
    `referral.rewardOnPaid`（好友首付费）、`referral.dailyCap`（每日封顶）、
-   `referral.window`（归因窗口天数）、`referral.ladder`（阶梯规则，见 §6 公理 4 的说明）。
+   `referral.ladder`（阶梯规则，见 §6 公理 4 的说明）；**归因窗口天数已独立成 `referral-window.window`**（`PATCH /admin/flags/:id` 是整块覆盖写 payload，与奖励键共用一个 flag 会互相抹掉；读取时新键优先、回退旧 `referral.window` 兼容搬迁前的存量配置）。
    全部后台可改，代码不留常量、不 seed。
 2. **幂等挂点**：奖励将来走 `idempotencyKey`（`credits.ts` 的 `appendCreditDelta` 已支持），
    key 形如 `referral:{referrerId}:{newUserId}:{stage}`；开通侧挂已经幂等的 `markPaidAndApply`
