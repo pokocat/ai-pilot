@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { bindOnRegister, isInviteCodeShape, referralConfig, ReferralAlreadyBound, traceOutsideTransaction } from '../src/services/referral.ts';
-import { markPaidAndApply } from '../src/services/wechatPay.ts';
+import { markPaidAndApply, settleInviteActivations, pendingInviteActivations } from '../src/services/wechatPay.ts';
 import { applyPlanPurchase } from '../src/services/purchase.ts';
 import { parseAttribution } from '../src/services/activation.ts';
 
@@ -386,7 +386,14 @@ async function activationSources(userId: string): Promise<Record<string, number>
   return rows.reduce<Record<string, number>>((acc, r) => { acc[r.source] = (acc[r.source] ?? 0) + 1; return acc; }, {});
 }
 
-/** 造一笔套餐订单并走**真实的** markPaidAndApply 入账（与线上回调同一条路径）。 */
+/**
+ * 造一笔套餐订单并走**真实的** markPaidAndApply 入账（与线上回调同一条路径）。
+ *
+ * ⚠️ 返回时 invite 归因补记**很可能还在飞**：它是入账事务提交后派发出去的后台动作，
+ * 生产路径刻意不 await（绝不阻断支付主链路，见 wechatPay.markPaidAndApply 的注释）。
+ * 所以凡是要读 ActivationEvent 的断言，前面都必须 `await settleInviteActivations()`
+ * ——那是专为可测性导出的等待句柄；不等就是竞态，绿也是碰巧。
+ */
 async function payPlanOrder(userId: string, outTradeNo: string, attrSource = 'prescription'): Promise<{ applied: boolean; reason?: string }> {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: await anyPlanId() } });
@@ -408,6 +415,7 @@ test('有推荐人的用户付费开通：落一条 source=invite，且原本的
 
   const r = await payPlanOrder(invitee, 'ot_invite_funnel_1', 'prescription');
   assert.equal(r.applied, true, `应入账，实际 ${JSON.stringify(r)}`);
+  await settleInviteActivations(); // 补记是不 await 的后台派发，读库前必须等它落地
 
   // 两条并存：位子归因（从哪儿成交）+ 邀请归因（被谁带来）。这是两个维度，覆盖任何一条都是错。
   assert.deepEqual(await activationSources(invitee), { prescription: 1, invite: 1 });
@@ -421,6 +429,7 @@ test('没有推荐人的用户付费开通：只有位子归因，绝不落 invi
   const solo = await register();
   const r = await payPlanOrder(solo, 'ot_invite_funnel_2', 'catalog');
   assert.equal(r.applied, true);
+  await settleInviteActivations(); // 等它真的跑完再断言「没有」，否则这条是空断言
   assert.deepEqual(await activationSources(solo), { catalog: 1 }, '没关系链就不该出现 invite（否则漏斗分子灌水）');
 });
 
@@ -446,12 +455,75 @@ test('invite 归因按人去重：重复回调、第二笔订单、并发两笔�
   assert.equal(a.applied, true);
   assert.equal(b.applied, true);
 
+  // 四笔派发出去的补记全部落地后再点数（含并发那两笔——等待句柄等的是「目前派发出去的全部」）。
+  await settleInviteActivations();
   assert.equal(
     await prisma.activationEvent.count({ where: { userId: invitee, source: 'invite' } }), 1,
     'invite 行必须恰好一条（首次付费开通），四笔入账不许出现第二条',
   );
   // 位子归因反过来必须**每笔都有**（它记的是订单事实，不去重）。
   assert.equal(await prisma.activationEvent.count({ where: { userId: invitee, source: { not: 'invite' } } }), 4);
+});
+
+test('补记绝不挡在支付响应前面：markPaidAndApply 返回的那一刻它还在飞', async () => {
+  // codex 审出的阻断 2：旧写法 `await recordInviteActivation(...)` 把统计补记挡在回调返回 200 之前。
+  // 主支付事务此刻已经提交、真钱已入账，但连接池拥塞或 advisory lock 排队时这几条 SQL 照样能卡住，
+  // routes/pay.ts 来不及应答，微信超时后就重投——为一条统计换一次重复回调。
+  //
+  // 这条断言的确定性从哪来：派发是**同步**发生的（markPaidAndApply 里 dispatch 完就 return），
+  // 而补记的第一步就是一次 DB 往返；从 `await payPlanOrder(...)` 恢复到下一行之间只跑微任务，
+  // 事件循环没机会把那次 I/O 的完成回调插进来。所以「返回时计数为 1」是必然，不是碰巧。
+  // 谁把 await 加回去，计数就会是 0，这条当场变红。
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+
+  await settleInviteActivations(); // 先把前面用例派发的补记排空，计数才是干净的
+  assert.equal(pendingInviteActivations(), 0, '前置：此刻不该有在飞的补记');
+
+  const r = await payPlanOrder(invitee, 'ot_invite_async_1', 'catalog');
+  assert.equal(r.applied, true);
+  assert.equal(pendingInviteActivations(), 1, '支付主链路不得 await 统计补记（阻断 2）');
+
+  await settleInviteActivations();
+  assert.equal(pendingInviteActivations(), 0, '等待句柄必须真的等到补记落地，否则它没有可测性价值');
+  assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 }, '不 await 不等于不做');
+});
+
+test('重投要能补上首次漏掉的 invite 行：already_applied 分支也派发补记', async () => {
+  // codex 审出的阻断 3：首次回调已设 appliedAt，随后那次补记里「查 Referral / insert」短暂失败被
+  // 吞成 'failed'，本次仍回成功；旧写法后续重投只拿到 already_applied 就返回、**再也不调补记**，
+  // 该用户永远缺 source='invite'，漏斗持续少算。
+  //
+  // 不去打桩注入一次 DB 失败（要 mock prisma，脆且不像线上），而是**照那个终态造局**：
+  // 订单已入账（appliedAt 已设）+ 该用户有 Referral + 但没有 invite 行 —— 与「首次补记失败」
+  // 之后的库状态一模一样。然后重投同一笔回调，看它能不能补上。
+  const invitee = await register();
+  await payPlanOrder(invitee, 'ot_invite_retry_1', 'catalog');
+  await settleInviteActivations();
+  assert.deepEqual(await activationSources(invitee), { catalog: 1 }, '前置：入账时还没有推荐人，本不该有 invite 行');
+
+  // 造出「关系已存在、invite 行缺失」的那一刻（= 首次补记失败后的库状态）
+  const inviter = await register();
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: invitee } });
+  await prisma.referral.create({
+    data: {
+      userId: invitee, tenantId: user.tenantId, referrerId: inviter, lv1: inviter,
+      inviteCode: await inviteCodeOf(inviter), source: 'share_friend',
+    },
+  });
+
+  const again = await markPaidAndApply({ outTradeNo: 'ot_invite_retry_1', tradeState: 'SUCCESS', rawJson: {} });
+  assert.equal(again.applied, false, '权益一步都不许再发（appliedAt 仍是唯一的终态锚点）');
+  assert.equal(again.reason, 'already_applied');
+  await settleInviteActivations();
+  assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 }, '重投必须把漏掉的 invite 行补上');
+
+  // 再重投也只有一条：补记自己幂等（advisory lock + 查重），重投多少次都只回 'already_recorded'。
+  // 这也是「重投补记不会把 already_applied 拖慢」的另一半——它做的是同一段有界的小事务，且不被 await。
+  await markPaidAndApply({ outTradeNo: 'ot_invite_retry_1', tradeState: 'SUCCESS', rawJson: {} });
+  await settleInviteActivations();
+  assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 }, '重投再多也不许出现第二条 invite');
 });
 
 test('非付费开通不进邀请漏斗：applyPlanPurchase（注册自动开通 / 演示 / 运营手工）不落 invite', async () => {
@@ -475,6 +547,7 @@ test('端上不许自称 invite：请求体里的 source=invite 一律回落 cat
   const code = await inviteCodeOf(inviter);
   const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
   await payPlanOrder(invitee, 'ot_invite_forge_1', 'invite');
+  await settleInviteActivations();
   // 伪造的那条被打回 catalog；invite 行仍由服务端按 Referral 判定后另落一条。
   assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 });
 });
@@ -497,6 +570,30 @@ test('归因窗口与奖励配置分属两个 flag：改窗口不得抹掉奖励
     const cfg = await referralConfig({ fresh: true });
     assert.equal(cfg.windowDays, 45, '窗口应读到新值');
     assert.deepEqual(cfg.rewardInviter, { kind: 'credits', amount: 5 }, '奖励配置不得被改窗口抹掉');
+  } finally {
+    await prisma.featureFlag.delete({ where: { id: 'referral' } }).catch(() => {});
+    await prisma.featureFlag.delete({ where: { id: 'referral-window' } }).catch(() => {});
+  }
+});
+
+test('配置键搬迁的存量兼容：只有旧键 referral.window 时也要生效，不得静默回落默认', async () => {
+  // 窗口原本与奖励键同住 `referral` payload，后来为躲「整块覆盖写」搬到 `referral-window`。
+  // 若升级后只读新键，运营早先设的 7 天会静默变成默认 30 天——20 天前的码就从「过期」
+  // 变成建立一条不可变更的关系，事后改不回来。这条用例钉住回退。
+  await prisma.featureFlag.upsert({
+    where: { id: 'referral' },
+    update: { payload: { window: 7 } as never },
+    create: { id: 'referral', enabled: true, payload: { window: 7 } as never },
+  });
+  try {
+    assert.equal((await referralConfig({ fresh: true })).windowDays, 7, '只有旧键时必须按旧值生效');
+    // 新键一旦设置就以新键为准（搬迁完成后旧值不再干扰）
+    await prisma.featureFlag.upsert({
+      where: { id: 'referral-window' },
+      update: { payload: { window: 21 } as never },
+      create: { id: 'referral-window', enabled: true, payload: { window: 21 } as never },
+    });
+    assert.equal((await referralConfig({ fresh: true })).windowDays, 21, '新键优先');
   } finally {
     await prisma.featureFlag.delete({ where: { id: 'referral' } }).catch(() => {});
     await prisma.featureFlag.delete({ where: { id: 'referral-window' } }).catch(() => {});

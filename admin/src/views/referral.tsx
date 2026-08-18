@@ -16,14 +16,14 @@
 //
 // 零第三方图表库（admin 的 dependencies 只有 react/react-dom）：三张图都是手写 SVG，
 // **颜色全部在 admin.css 的 `.rf-*` 组件类里用 token 定义，这里只算几何**（x/y/r/width）。
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import {
   api,
-  type AdminReferralOverview, type AdminReferralRisk, type AdminReferralRiskGroup,
+  type AdminReferralOverview, type AdminReferralRiskView, type AdminReferralRiskGroupView,
   type AdminReferralTenantOption, type AdminReferralTree, type AdminReferralTreeNode,
 } from '../api';
-import { PageHead, ViewState } from '../components';
-import { useResource } from '../useResource';
+import { ErrorState, PageHead, SearchBox, ViewState } from '../components';
+import { useResource, type Resource } from '../useResource';
 import { fmtTime } from '../format';
 
 type Tab = 'schema' | 'tree' | 'risk' | 'funnel';
@@ -67,51 +67,24 @@ export function ReferralView() {
   const [tenantId, setTenantId] = useState('');
   const [days, setDays] = useState(30);
 
-  // overview 在所有 tab 都取：它既是「本体 Schema」那屏的数据，也是**租户筛选项的唯一来源**
-  // （树/风控两个端点不重复回一份租户列表）。代价是切到别的 tab 时多一次很轻的计数查询。
-  const ov = useResource(
-    useCallback(() => api.referralOverview({ days, tenantId: tenantId || undefined }), [days, tenantId]),
-    [days, tenantId],
-  );
-  const tree = useResource(
-    useCallback(() => api.referralTree({ tenantId: tenantId || undefined }), [tenantId]),
-    [tenantId],
-  );
-  const risk = useResource(
-    useCallback(() => api.referralRisk({ days, tenantId: tenantId || undefined }), [days, tenantId]),
-    [days, tenantId],
-  );
-
+  // 租户筛选项：四个 tab 共用一份，且**不随 tab / 天数窗口 / 当前租户重取**（它的内容与三者
+  // 都无关）。它自己就是一个 Resource，所以「筛选项没加载出来」能显示成可重试的错误，
+  // 而不是伪装成「暂无带邀请关系的租户」——那句话是业务空态，两者不许混。
+  const tenants = useResource(useCallback(() => api.referralTenants(), []), []);
   const bar = (
     <FilterBar
       tab={tab} onTab={setTab}
       tenantId={tenantId} onTenant={setTenantId}
       days={days} onDays={setDays}
-      tenants={ov.data?.tenants ?? []}
-      tenantsLoading={ov.initial}
+      tenants={tenants}
     />
   );
 
-  if (tab === 'tree') {
-    return (
-      <>
-        <PageHead k="referral" res={tree} badge={tree.data ? `${tree.data.edgeTotal} 条关系` : undefined} />
-        {bar}
-        {/* key=租户：换租户就是换一棵树，展开状态必须跟着重置——否则 expanded 里全是上一棵树的
-            节点 id，新树会整棵折叠、看着像「这个租户没有下级」。 */}
-        <ViewState res={tree} skeleton="rows">{(d: AdminReferralTree) => <TreeTab key={tenantId} data={d} />}</ViewState>
-      </>
-    );
-  }
-  if (tab === 'risk') {
-    return (
-      <>
-        <PageHead k="referral" res={risk} badge={risk.data ? `${risk.data.groups.length} 组聚集` : undefined} />
-        {bar}
-        <ViewState res={risk} skeleton="rows">{(d: AdminReferralRisk) => <RiskTab data={d} />}</ViewState>
-      </>
-    );
-  }
+  /* 按需加载：每个 tab 一个组件、各自持有自己的 useResource，**切到哪个 tab 才挂载哪份取数**。
+     旧写法把三份 useResource 都挂在外壳上，于是只看一张静态 UML 说明图，也会连带触发全量关系
+     聚合 + 一次完整风控扫描（树内部当时还会再扫一遍）——四屏的账全记在第一屏头上。 */
+  if (tab === 'tree') return <TreeSection tenantId={tenantId}>{bar}</TreeSection>;
+  if (tab === 'risk') return <RiskSection tenantId={tenantId} days={days}>{bar}</RiskSection>;
   if (tab === 'funnel') {
     return (
       <>
@@ -121,22 +94,73 @@ export function ReferralView() {
       </>
     );
   }
+  return <SchemaSection tenantId={tenantId} days={days}>{bar}</SchemaSection>;
+}
+
+function SchemaSection({ tenantId, days, children }: { tenantId: string; days: number; children: ReactNode }) {
+  const ov = useResource(
+    useCallback(() => api.referralOverview({ days, tenantId: tenantId || undefined }), [days, tenantId]),
+    [days, tenantId],
+  );
   return (
     <>
       <PageHead k="referral" res={ov} badge={ov.data ? `${ov.data.edgesTotal} 条关系` : undefined} />
-      {bar}
+      {children}
       <ViewState res={ov} skeleton="stats">{(d: AdminReferralOverview) => <SchemaTab data={d} />}</ViewState>
     </>
   );
 }
 
-function FilterBar({ tab, onTab, tenantId, onTenant, days, onDays, tenants, tenantsLoading }: {
+function TreeSection({ tenantId, children }: { tenantId: string; children: ReactNode }) {
+  const tree = useResource(
+    useCallback(() => api.referralTree({ tenantId: tenantId || undefined }), [tenantId]),
+    [tenantId],
+  );
+  return (
+    <>
+      <PageHead k="referral" res={tree} badge={tree.data ? `${tree.data.edgeTotal} 条关系` : undefined} />
+      {children}
+      {/* key=租户：换租户就是换一棵树，展开状态必须跟着重置——否则 expanded 里全是上一棵树的
+          节点 id，新树会整棵折叠、看着像「这个租户没有下级」。 */}
+      <ViewState res={tree} skeleton="rows">{(d: AdminReferralTree) => <TreeTab key={tenantId} data={d} />}</ViewState>
+    </>
+  );
+}
+
+function RiskSection({ tenantId, days, children }: { tenantId: string; days: number; children: ReactNode }) {
+  const risk = useResource(
+    useCallback(() => api.referralRisk({ days, tenantId: tenantId || undefined }), [days, tenantId]),
+    [days, tenantId],
+  );
+  return (
+    <>
+      {/* 徽标给**总组数**而不是本页返回的组数：截断时后者会让人以为一共就这么多组。 */}
+      <PageHead k="referral" res={risk} badge={risk.data ? `${risk.data.groupTotal} 组聚集` : undefined} />
+      {children}
+      <ViewState res={risk} skeleton="rows">{(d: AdminReferralRiskView) => <RiskTab data={d} />}</ViewState>
+    </>
+  );
+}
+
+/** 超过这个数量就给筛选条配一个搜索框（几十个租户时逐个滚太慢）。 */
+const TENANT_SEARCH_AT = 8;
+
+function FilterBar({ tab, onTab, tenantId, onTenant, days, onDays, tenants }: {
   tab: Tab; onTab: (t: Tab) => void;
   tenantId: string; onTenant: (v: string) => void;
   days: number; onDays: (v: number) => void;
-  tenants: AdminReferralTenantOption[];
-  tenantsLoading: boolean;
+  tenants: Resource<AdminReferralTenantOption[]>;
 }) {
+  const [kw, setKw] = useState('');
+  const list = tenants.data ?? [];
+  const q = kw.trim().toLowerCase();
+  const matched = q
+    ? list.filter((t) => t.name.toLowerCase().includes(q) || t.tenantId.toLowerCase().includes(q))
+    : list;
+  // 选中的租户永远要在列表里露出来，否则搜索一过滤，运营就看不出当前限定在哪个租户上。
+  const selected = list.find((t) => t.tenantId === tenantId);
+  const shown = selected && !matched.some((t) => t.tenantId === tenantId) ? [selected, ...matched] : matched;
+
   return (
     <div className="pad">
       <div className="filter-bar">
@@ -159,19 +183,36 @@ function FilterBar({ tab, onTab, tenantId, onTenant, days, onDays, tenants, tena
           </div>
         </div>
       )}
-      {/* 租户维度：两张表都有 tenantId（多租户行级隔离），运营查/导/清都要能限定范围。 */}
+      {/* 租户维度：两张表都有 tenantId（多租户行级隔离），运营查/导/清都要能限定范围。
+          **每个租户都可选**：旧版只渲染前 8 个并写一句「另有 N 个未列出」，第 9 个租户出事时
+          运营根本切不过去。数量多了给搜索框 + 可滚动容器，而不是把人拒在门外。 */}
+      {list.length > TENANT_SEARCH_AT && (
+        <div className="filter-bar">
+          <SearchBox value={kw} onChange={setKw} placeholder={`搜索租户（共 ${list.length} 个，名称或 id）`} />
+        </div>
+      )}
       <div className="filter-bar">
-        <div className="chip-row">
+        <div className="chip-row rf-tenants">
           <button type="button" className={`chip ${tenantId === '' ? 'on' : ''}`} onClick={() => onTenant('')}>全部租户</button>
-          {tenants.slice(0, 8).map((t) => (
+          {shown.map((t) => (
             <button key={t.tenantId} type="button" className={`chip ${tenantId === t.tenantId ? 'on' : ''}`} onClick={() => onTenant(t.tenantId)} title={t.tenantId}>
               {t.name?.trim() || t.tenantId.slice(0, 8)} · {t.edges}
             </button>
           ))}
-          {tenants.length > 8 && <span className="tag off">另有 {tenants.length - 8} 个租户未列出</span>}
-          {!tenantsLoading && tenants.length === 0 && <span className="tag off">暂无带邀请关系的租户</span>}
+          {tenants.initial && <span className="tag off">租户筛选项加载中…</span>}
+          {q && matched.length === 0 && <span className="tag off">没有匹配「{kw.trim()}」的租户</span>}
+          {/* 三态第三态：**确实没有**带邀请关系的租户（data 到手且为空），与上面的读失败分开说。 */}
+          {!tenants.loading && !tenants.error && list.length === 0 && <span className="tag off">暂无带邀请关系的租户</span>}
         </div>
       </div>
+      {tenants.error && (
+        <ErrorState
+          msg={`租户筛选项：${tenants.error}`}
+          onRetry={tenants.reload}
+          forbidden={tenants.forbidden}
+          stale={tenants.data !== null}
+        />
+      )}
     </div>
   );
 }
@@ -516,7 +557,9 @@ function TreeTab({ data }: { data: AdminReferralTree }) {
       <div className="ai-note">
         树只画到三级：Referral 的物化路径就存三级（lv1 / lv2 / lv3），这也是运营侧能看到的全部链路。
         展示的是「直邀人数最多的前 {data.rootLimit} 个邀请人」及其子树，是投影不是全景；这些邀请人自己
-        也可能是别人的下级。风控标记与「风控关联」那一屏同源（同一批超阈值 IP 组），两屏不会各说一套。
+        也可能是别人的下级。风控标记与「风控关联」那一屏同源：着色依据的就是那一屏本次返回的那批
+        超阈值 IP 组（同一个窗口、同一个阈值、同一处截断），所以树上标红的人一定能在那一屏的清单里
+        找到对应的 IP，两屏不会各说一套。
       </div>
     </div>
   );
@@ -536,7 +579,9 @@ const B_GROUP_GAP = 16;
 const B_FIG_GROUPS = 8;
 const B_FIG_MEMBERS = 12;
 
-function RiskTab({ data }: { data: AdminReferralRisk }) {
+function RiskTab({ data }: { data: AdminReferralRiskView }) {
+  // 组数触顶：服务端如实回了总组数，页面就必须说清「本页只是其中一部分」。
+  const hiddenGroups = Math.max(0, data.groupTotal - data.groups.length);
   // 逐组竖向排开：一组 = 一个 IP 节点 + 它连出去的新号扇形。组间留空，扇形宽窄一眼可比。
   // 依赖取 data 而不是切出来的数组：后者每次渲染都是新引用，useMemo 会白算。
   const laid = useMemo(() => {
@@ -555,11 +600,21 @@ function RiskTab({ data }: { data: AdminReferralRisk }) {
   return (
     <div className="pad">
       <div className="usage-summary">
-        <div><b>{data.groups.length}</b><span>超阈值的 IP 组</span></div>
-        <div><b>{data.flaggedUsers}</b><span>被标记的新号</span></div>
+        <div><b>{data.groupTotal}</b><span>超阈值的 IP 组{hiddenGroups > 0 ? `（本页返回 ${data.groups.length} 组）` : ''}</span></div>
+        <div><b>{data.flaggedUsers}</b><span>被标记的新号{hiddenGroups > 0 ? '（本页这些组内）' : ''}</span></div>
         <div><b>{data.scannedIps}</b><span>近 {data.days} 天出现过的 IP</span></div>
         <div><b>≥ {data.threshold}</b><span>聚集阈值（同 IP 去重新号数）</span></div>
       </div>
+
+      {hiddenGroups > 0 && (
+        <div className="usage-meta">
+          共 <b>{data.groupTotal}</b> 组超过阈值，本页按聚集度从高到低只返回前 {data.groups.length} 组，
+          另有 <b>{hiddenGroups}</b> 组没有返回。下方清单、上方「被标记的新号」计数、以及「邀请关系树」
+          上的红环，<b>都只覆盖本页返回的这 {data.groups.length} 组</b>（三处口径同源，不会出现树上
+          标红却在这里找不到对应 IP）。要看全部：用租户筛选或天数窗口缩小范围，或先把阈值调高、
+          处理完最严重的再往下看。
+        </div>
+      )}
 
       <div className="usage-meta">
         阈值来自运营配置「功能开关 · 邀请风控聚集阈值」（<span className="tag off">{data.flagKey}</span>）
@@ -587,7 +642,10 @@ function RiskTab({ data }: { data: AdminReferralRisk }) {
             <span className="rf-legend-i"><i className="rf-sw risk" />带码进线的新号</span>
             <span className="rf-legend-i">一个 IP 连出的扇形越宽 = 聚集越严重</span>
             {(data.groups.length > B_FIG_GROUPS || data.groups.some((g) => g.members.length > B_FIG_MEMBERS)) && (
-              <span className="rf-legend-i">图中最多画 {B_FIG_GROUPS} 组 × 每组 {B_FIG_MEMBERS} 个，完整名单见下方清单</span>
+              <span className="rf-legend-i">
+                图中最多画 {B_FIG_GROUPS} 组 × 每组 {B_FIG_MEMBERS} 个；下方清单是本页返回的这 {data.groups.length} 组
+                {hiddenGroups > 0 ? `（不是全部 ${data.groupTotal} 组）` : '的名单'}
+              </span>
             )}
           </div>
           <div className="rf-scroll">
@@ -622,7 +680,7 @@ function RiskTab({ data }: { data: AdminReferralRisk }) {
   );
 }
 
-function RiskGroupCard({ group }: { group: AdminReferralRiskGroup }) {
+function RiskGroupCard({ group }: { group: AdminReferralRiskGroupView }) {
   const [open, setOpen] = useState(false);
   const hidden = group.userCount - group.members.length;
   return (
