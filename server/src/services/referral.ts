@@ -65,7 +65,18 @@ export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | '
 //   `referral:{referrerId}:{newUserId}:{stage}`   stage ∈ register | paid
 // 发放走 credits.ts 的 appendCreditDelta（它已支持 idempotencyKey，见 refundCreditsOnce 的用法），
 // 并发下用邀请人行锁串行化「同一码多个新号同时进线」的发奖判定，避免各事务都读到未达上限而超发。
-const FLAG_KEY = 'referral';
+/**
+ * 归因窗口与奖励配置**刻意分两个 flag id**。
+ *
+ * 原因：`PATCH /admin/flags/:id` 走 `setFeatureFlagPayload(id, { [payloadKey]: v })`，
+ * 而那个函数是 `update: { payload }` —— **整块覆盖**，不是合并。
+ * 两个数值挤在同一个 payload 里时，运营在后台改「邀请归因窗口」就会把奖励配置整片抹掉。
+ * 今天所有奖励键都还是 null，看不出问题；等奖励机制真上线，那就是一次静默的配置丢失。
+ * （同一条约束也是 routes/adminReferral.ts 的风控阈值单独用 `referral-risk` 的原因。）
+ */
+export const REFERRAL_WINDOW_FLAG = 'referral-window';
+/** 奖励配置（本期全部占位不生效，键见 ReferralConfig）。 */
+export const REFERRAL_REWARD_FLAG = 'referral';
 const DEFAULT_WINDOW_DAYS = 30;
 
 export interface ReferralConfig {
@@ -102,8 +113,11 @@ export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<Re
   // 但查询真的失败（DB 抖动、权限异常）时必须抛出去，由调用方把这次绑定挂起并留痕——
   // 用未知配置去算一个**不可变更**的永久关系，是不可逆的错误。
   let raw: Record<string, unknown> | null;
+  let rewards: Record<string, unknown> | null;
   try {
-    raw = (await featureFlagPayload(FLAG_KEY, opts)) as Record<string, unknown> | null;
+    // 两个 flag 各读一次（见上方 REFERRAL_WINDOW_FLAG 的注释：payload 是整块覆盖写的）。
+    raw = (await featureFlagPayload(REFERRAL_WINDOW_FLAG, opts)) as Record<string, unknown> | null;
+    rewards = (await featureFlagPayload(REFERRAL_REWARD_FLAG, opts)) as Record<string, unknown> | null;
   } catch (err) {
     console.warn(`[referral] 运营配置读取失败，本次不建边: ${(err as Error).message}`);
     throw new ReferralConfigUnavailable((err as Error).message);
@@ -112,11 +126,11 @@ export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<Re
   return {
     // 越界/脏值回落默认，不让一个错配把归因窗口带到沟里（沿用告警阈值配置化的处理方式）。
     windowDays: Number.isFinite(days) && days > 0 && days <= 3650 ? days : DEFAULT_WINDOW_DAYS,
-    rewardInviter: raw?.rewardInviter ?? null,
-    rewardInvitee: raw?.rewardInvitee ?? null,
-    rewardOnPaid: raw?.rewardOnPaid ?? null,
-    dailyCap: raw?.dailyCap ?? null,
-    ladder: raw?.ladder ?? null,
+    rewardInviter: rewards?.rewardInviter ?? null,
+    rewardInvitee: rewards?.rewardInvitee ?? null,
+    rewardOnPaid: rewards?.rewardOnPaid ?? null,
+    dailyCap: rewards?.dailyCap ?? null,
+    ladder: rewards?.ladder ?? null,
   };
 }
 

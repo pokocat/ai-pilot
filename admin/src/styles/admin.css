@@ -584,3 +584,65 @@ select.ai-input { appearance: none; }
   background: var(--surface-2);
   font-size: 12px;
 }
+
+/* ══════════════ 邀请增长三视图（手写 SVG，零图表依赖） ══════════════
+   admin 的 dependencies 只有 react/react-dom，三个视图（UML 类图 / 邀请层级树 / IP 二部图）
+   全部是手写 SVG。**颜色一律在这里用 token 定义，.tsx 里只算几何**（x/y/r/width），
+   这样既守住「颜色只走 :root token」，也让三张图的配色只有一处可改。
+   语义分工：金=品牌与结构线（不表状态）、绿=已开通付费、红=风控标记（只预警不阻断）、
+   灰=仅注册。红绿在这里都只表状态，不作装饰。 */
+
+/* 宽图的横向滚动壳：页面主体永不横滚，只有图自己在框内滚（DESIGN.md 的横向不溢出要求）。 */
+.rf-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); padding: 12px; }
+.rf-scroll::-webkit-scrollbar { height: 6px; }
+.rf-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+.rf-svg { display: block; }
+
+/* 图例：每张图必须有图例，否则「大小=什么、颜色=什么」只有作者知道。 */
+.rf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 12px; font-size: 11px; color: var(--ink-3); }
+.rf-legend-i { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.rf-sw { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); }
+.rf-sw.act { background: var(--success); border-color: var(--success); }
+.rf-sw.reg { background: var(--surface-2); border-color: var(--ink-3); }
+.rf-sw.risk { background: var(--surface); border: 2px solid var(--danger); }
+.rf-sw.ip { border-radius: 3px; background: var(--surface); border: 1px solid var(--danger); }
+
+/* —— 视图① UML 类图（静态说明图）—— */
+.rf-uml-box { fill: var(--surface); stroke: var(--line); }
+.rf-uml-head { fill: var(--surface-2); stroke: var(--line); }
+.rf-uml-div { stroke: var(--line); }
+.rf-uml-t { fill: var(--ink); font: 600 12.5px/1 var(--sans); }
+.rf-uml-sub { fill: var(--ink-3); font: 600 9px/1 var(--mono); }
+.rf-uml-a { fill: var(--ink-2); font: 400 10.5px/1 var(--mono); }
+.rf-uml-a.key { fill: var(--accent-ink); font-weight: 600; }
+.rf-uml-n { fill: var(--accent-ink); font: 600 9.5px/1 var(--mono); }
+
+/* 连线与基数标注：结构线走金（品牌与结构），不表状态。 */
+.rf-edge { fill: none; stroke: var(--accent); stroke-opacity: .55; }
+.rf-edge-l { fill: var(--ink-2); font: 500 10px/1 var(--sans); }
+.rf-edge-c { fill: var(--ink-3); font: 600 9.5px/1 var(--mono); }
+.rf-edge-head { fill: var(--accent); fill-opacity: .55; }
+
+/* —— 视图② 邀请层级树 —— */
+.rf-t-edge { fill: none; stroke: var(--ink-3); stroke-opacity: .32; }
+.rf-t-col { fill: var(--ink-3); font: 600 9.5px/1 var(--mono); }
+.rf-t-guide { stroke: var(--line); stroke-dasharray: 2 5; }
+.rf-n { cursor: pointer; }
+.rf-n-c { stroke: var(--surface); stroke-width: 1.5; }
+.rf-n-c.act { fill: var(--success); }
+.rf-n-c.reg { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 1; }
+/* 风控是**独立一维**：底色仍表开通状态，红环表「落在超阈值 IP 组里」——
+   一个已付费用户同样可能被标记，把它压成同一维会丢信息。 */
+.rf-n-c.risk { stroke: var(--danger); stroke-width: 2.5; }
+.rf-n-t { fill: var(--ink); font: 500 11.5px/1 var(--sans); }
+.rf-n-t.root { font-weight: 600; }
+.rf-n-m { fill: var(--ink-3); font: 400 10px/1 var(--mono); }
+.rf-n-x { fill: var(--accent-deep); font: 600 11px/1 var(--mono); }
+
+/* —— 视图③ IP ↔ 新号二部图 —— */
+.rf-b-edge { fill: none; stroke: var(--danger); stroke-opacity: .28; }
+.rf-b-ip { fill: var(--surface); stroke: var(--danger); }
+.rf-b-ip-t { fill: var(--ink); font: 600 10.5px/1 var(--mono); }
+.rf-b-ip-n { fill: var(--danger); font: 600 9.5px/1 var(--mono); }
+.rf-b-u { fill: var(--surface); stroke: var(--danger); }
+.rf-b-u-t { fill: var(--ink-2); font: 400 10.5px/1 var(--sans); }

@@ -44,6 +44,9 @@ import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
+import {
+  REFERRAL_RISK_FLAG, REFERRAL_RISK_PAYLOAD_KEY, REFERRAL_RISK_DEF, REFERRAL_RISK_MIN, REFERRAL_RISK_MAX,
+} from './adminReferral.js';
 import { WENCE_FLAG, normalizeChips, effectiveArms } from '../services/wence.js';
 import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard } from '../services/alertConfig.js';
 import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota, packRemainingOf } from '../services/tokenQuota.js';
@@ -110,7 +113,18 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
   { id: WENCE_FLAG, label: '问策入口改版 A/B', desc: '关闭即全量走现状军师列表；开启后按权重分组 control（现状）/ dock（列表页+输入坞）/ chat（对话即 tab），未配权重时三臂均分', compliance: false, kind: 'toggle', arms: ['control', 'dock', 'chat'] },
   // 邀请归因窗口：捕获到邀请码距注册超过这么多天就不再归因（services/referral.ts 读它）。
   // 登记在这里才算真的「归运营配置」——只写在代码默认值里、要改得连数据库，等于没有入口。
-  { id: 'referral', label: '邀请归因窗口', desc: '用户点开分享后多少天内注册仍算这次邀请（超过即不建立关系，只留归因记录）', compliance: false, kind: 'number', payloadKey: 'window', def: 30, min: 1, max: 365, unit: '天' },
+  { id: 'referral-window', label: '邀请归因窗口', desc: '用户点开分享后多少天内注册仍算这次邀请（超过即不建立关系，只留归因记录）。单独一个 flag：payload 是整块覆盖写的，与奖励配置共用会互相抹掉', compliance: false, kind: 'number', payloadKey: 'window', def: 30, min: 1, max: 365, unit: '天' },
+  // 邀请风控聚集阈值：同一 IP 在窗口期内注册多少个带码新号就进「邀请增长 · 风控关联」视图。
+  // **另立一个 flag id 而不是复用 'referral' 的 payload**：下面 number 分支是整块 payload 覆盖写
+  // （`setFeatureFlagPayload(id, { [payloadKey]: v })`），两个数值挤一个 flag 会互相抹掉。
+  // 区间与默认值从 routes/adminReferral.ts 引用，保证「这里能改的范围」与「视图判定用的范围」同源。
+  // 公理 5：这只是预警线——超阈值只进视图，关系照常绑定、注册照常放行，本页没有任何封禁动作。
+  {
+    id: REFERRAL_RISK_FLAG, label: '邀请风控聚集阈值',
+    desc: '同一 IP 在所选窗口内注册多少个带码新号就列入风控视图（只预警不阻断：关系照常绑定、注册照常放行）',
+    compliance: false, kind: 'number', payloadKey: REFERRAL_RISK_PAYLOAD_KEY,
+    def: REFERRAL_RISK_DEF, min: REFERRAL_RISK_MIN, max: REFERRAL_RISK_MAX, unit: '个新号/IP',
+  },
   // 监控告警阈值（监控大盘二期）：注册表在 services/alertConfig.ts，默认值=压测方案 §7 口径。
   // 值经 /api/metrics 的 junshi_alert_config 指标喂给 Prometheus 告警规则，改动 ≤75s 生效（60s 缓存 + 一个抓取周期）。
   ...ALERT_CONFIG_DEFS.map((d): FlagDef => ({

@@ -16,7 +16,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant, skuPackAmount } from './purchase.js';
 import { revokeQuotaPack } from './tokenQuota.js';
-import { parseAttribution, recordActivation } from './activation.js';
+import { parseAttribution, recordActivation, recordInviteActivation, type InviteActivationTarget } from './activation.js';
 import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
@@ -634,13 +634,32 @@ export async function markPaidAndApply(parsed: {
   const result = await markPaidAndApplyTx(parsed, source);
   // 支付成功订阅消息（P2）：入账后事务外 fire-and-forget，失败绝不影响入账结果。
   if (result.applied) void notifyPaymentApplied(parsed.outTradeNo).catch(() => {});
-  return result;
+  // 邀请漏斗第四段（2026-08-18）：付费开通成功 → 若该用户有推荐人，补一条 source='invite' 的
+  // ActivationEvent。**挂在这里而不是 applyPlanPurchase**，两条硬理由：
+  //   ① applyPlanPurchase 还被三条**非付费**路径共用——注册测试期自动开通（routes/auth.ts，
+  //      `source='test_default_grant'`，且就在建号事务里）、演示购买（routes/plans.ts `demo_purchase`）、
+  //      运营手工开通（routes/admin.ts `admin_grant`）。挂那里等于把「免费白发」也算成邀请开通：
+  //      开着注册自动开通时，被邀请来的人**注册当场**就落一条 invite 开通，
+  //      「注册 → 首开通」这一段永远 100%，漏斗直接失去意义。
+  //   ② 那三条路径里最早的一条（注册自动开通）跑在建号事务内，而关系绑定是建号提交**之后**
+  //      另开小事务做的（见 auth.ts 的 bindReferralAfterRegister），那一刻 Referral 还不存在，
+  //      查推荐人必然为空——挂那里连该记的也记不到。
+  // markPaidAndApply 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，且已有
+  // outTradeNo advisory lock + appliedAt 幂等锚点），所以 invite 判定就贴着既有的 recordActivation 走。
+  //
+  // 这里**await**而不是像订阅消息那样 fire-and-forget：recordInviteActivation 只有两条本地查询
+  // 且内部吞掉全部异常（永不 reject，见其注释），await 它既不增加失败面，也免得进程在回调响应后
+  // 立刻被回收时把这条统计丢掉；订阅消息要发外网 HTTP，那才必须不等。
+  if (result.applied && result.invite) await recordInviteActivation(result.invite);
+  // 显式收窄返回值：`invite` 带着 userId / tenantId，只在本函数内部用。有路由是把这个结果对象
+  // 直接往响应体里放的形状（`{ ok, applied, reason }`），别让内部字段哪天顺着某个 `return r` 漏出去。
+  return { applied: result.applied, reason: result.reason };
 }
 
 async function markPaidAndApplyTx(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   amountTotal?: number; appId?: string; mchId?: string;
-}, source: string): Promise<{ applied: boolean; reason?: string }> {
+}, source: string): Promise<{ applied: boolean; reason?: string; invite?: InviteActivationTarget }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
@@ -694,6 +713,8 @@ async function markPaidAndApplyTx(parsed: {
     // 历史无快照订单回退读当前配置（行为与旧版一致）。
     const snapshot = (order.snapshotJson ?? null) as OrderSnapshot | null;
     const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
+    // 邀请漏斗第四段要用的最小信息，在事务里攒好、事务提交后再判推荐人（理由见 markPaidAndApply）。
+    let invite: InviteActivationTarget | undefined;
     if (order.skuKey) {
       // V7-12：单次付费商品 → 发放对应权益（模块启用/一次性服务/空间加档）。
       const skuRow = snapshot?.kind === 'sku' && snapshot.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
@@ -709,6 +730,7 @@ async function markPaidAndApplyTx(parsed: {
       );
       // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key, source: attrSource, refId: attrRefId }, tx).catch(() => {});
+      invite = { tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key };
     } else {
       // 无快照的存量订单才回读套餐：此时只能按「入账这一刻」解析成交价（快照才是准确的下单时条件）。
       const planRow = snapshot?.kind === 'plan' && snapshot.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
@@ -728,6 +750,7 @@ async function markPaidAndApplyTx(parsed: {
       );
       // 套餐订单归因（P2）：与 SKU 同口径落 ActivationEvent，供多来源漏斗报表。
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id, source: attrSource, refId: attrRefId }, tx).catch(() => {});
+      invite = { tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id };
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
@@ -758,7 +781,7 @@ async function markPaidAndApplyTx(parsed: {
     // 它单独计一条 junshi_pay_mock_total，测试期的量仍然可见。
     if (isMockOrder(order)) notePayMock('applied');
     else notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount);
-    return { applied: true };
+    return { applied: true, invite };
   });
 }
 
