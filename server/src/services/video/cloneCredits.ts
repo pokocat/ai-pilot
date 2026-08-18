@@ -212,6 +212,15 @@ export async function pendingCloneHolds(userId: string): Promise<VideoCloneHold[
   });
 }
 
+/** 直传受理号恢复时按同一个基础 clientRequestId 找回整批档位 hold。 */
+export async function cloneHoldsForRequest(userId: string, clientRequestId: string): Promise<VideoCloneHold[]> {
+  return prisma.videoCloneHold.findMany({
+    where: { userId, clientRequestId: { startsWith: `${clientRequestId}:` } },
+    orderBy: { createdAt: 'asc' },
+    take: 10,
+  });
+}
+
 /** 扣费后、上游建单前进程崩溃 → 自动退回。只碰还没拿到 targetId 的行，不动正常在训的长任务。 */
 export async function refundStaleUnsubmittedCloneHolds(maxAgeMs = 10 * 60_000): Promise<number> {
   const rows = await prisma.videoCloneHold.findMany({

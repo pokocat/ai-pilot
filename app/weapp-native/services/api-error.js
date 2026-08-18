@@ -27,7 +27,8 @@ const USER_MESSAGES = {
   // 「这个形象用谁的声音」必须由用户决定 —— 曾经服务端会静默挑一条最近的，
   // 结果成片里男声女声错位而用户毫不知情。现在宁可拦住也不猜。
   CLIP_VOICE_NOT_SELECTED: '这个数字人还没有关联声音，先去分身管理里选一个或采集一个。',
-  CLIP_UPSTREAM_TIMEOUT: '视频服务响应超时，请稍后重试。',
+  CLIP_UPSTREAM_TIMEOUT: '素材可能仍在受理，请不要重复上传；稍后到分身管理查看。',
+  CLIP_CLONE_ACCEPTING: '素材已经上传，军师仍在受理，请不要重复提交，稍后到分身管理查看。',
   CLIP_UPSTREAM_UNAVAILABLE: '视频服务暂时连不上，请稍后重试。',
   CLIP_MEDIA_MODERATION_NOT_CONFIGURED: '素材审核能力还没配置好，请联系运营。',
   SKU_REQUIRED: '这项专项能力尚未启用。',
@@ -122,7 +123,7 @@ function httpErrorInfo(statusCode, data, noun) {
   const body = data && typeof data === 'object' ? data : {};
   const code = body.code;
   const technical = body.error || `HTTP ${statusCode}`;
-  if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code, technicalMessage: technical };
+  if (statusCode === 408 || statusCode === 504) return { message: USER_MESSAGES[code] || '响应超时，后台可能仍在处理，请不要重复提交。', code, technicalMessage: technical };
   if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code, technicalMessage: technical };
   if (statusCode >= 500) {
     // 5xx 默认不外露服务端原文（多半是堆栈/内部细节），但**服务端特意给了业务 code

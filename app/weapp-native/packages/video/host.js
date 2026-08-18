@@ -12,8 +12,8 @@ const store = require('../../services/store');
 const { baseData, capsuleMetrics } = require('../../services/page');
 const { navTo } = require('../../services/nav');
 const { getToken } = require('../../services/token');
-const { request, upload } = require('../../services/request');
-const { useMockApi } = require('../../services/runtime-mode');
+const { request, upload, directUpload } = require('../../services/request');
+const { useMockApi, getApiBaseUrl } = require('../../services/runtime-mode');
 
 /* ── 1. 页面基座：主题、导航安全区、mock 标记 ────────────────────────── */
 
@@ -84,9 +84,16 @@ function back(delta) {
  * 详见 config.js 的 BACKEND_MODE 注释与技术方案 §3。
  */
 function httpRequest(path, options) { return request(path, options); }
+function httpUrl(path) { return `${getApiBaseUrl()}${path}`; }
 
 /** 上传文件（b-roll 素材、克隆采集素材）。 */
 function httpUpload(path, filePath, formData, options) { return upload(path, filePath, formData, options); }
+function directFileUpload(url, filePath, formData, options) { return directUpload(url, filePath, formData, options); }
+function downloadFile(url, options) {
+  const opts = options || {};
+  const token = getToken();
+  return wx.downloadFile(Object.assign({}, opts, { url, header: Object.assign({}, opts.header || {}, token ? { 'x-user-id': token } : {}) }));
+}
 
 /* ── 5. 反馈 ────────────────────────────────────────────────────────── */
 
@@ -216,7 +223,7 @@ module.exports = {
   hostBaseData, navMetrics,
   isLoggedIn, currentUser, shouldUseMock, requireLogin,
   go, goHost, back, ROOT,
-  httpRequest, httpUpload,
+  httpRequest, httpUrl, httpUpload, directFileUpload, downloadFile,
   toast, loading, hideLoading, confirm, alert, prompt, chooseMedia, setOverlay,
   readDraft, writeDraft, clearDraft,
 };

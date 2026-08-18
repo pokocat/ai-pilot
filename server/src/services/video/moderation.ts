@@ -1,6 +1,7 @@
 import { moderate } from '../moderation.js';
 import { recordAudit } from '../audit.js';
 import { aliyunGreenConfig, clipMediaKind, isAliyunGreenConfigured, moderateClipMedia } from './aliyunGreenMedia.js';
+import { assertSafeUrl } from '../../llm/tools/httpTool.js';
 
 export class VideoContentBlockedError extends Error {
   statusCode = 422;
@@ -121,6 +122,40 @@ export async function assertVideoUploadContent(
     },
   });
   if (!verdict.pass) throw new VideoContentBlockedError();
+}
+
+/**
+ * OSS 直传后的同口径机审。测试期旁路只记声明字节，不把大文件重新下载进 BFF；真实机审开启后，
+ * 才从 AIStar 给 service caller 的短签名地址取回字节送审。这样旁路不会把单次上传退化成双传，
+ * 而正式审核也不会因改了传输拓扑被绕开。
+ */
+export async function assertVideoUploadedContent(
+  reviewUrl: string,
+  mimeType: string,
+  bytes: number,
+  identity: { tenantId: string; userId: string },
+) {
+  if (!clipMediaKind(mimeType)) throw new VideoMediaTypeUnsupportedError();
+  if (clipMediaModerationBypassEnabled()) {
+    await recordAudit({
+      ...identity,
+      action: 'user.video.media.moderation.bypassed',
+      payload: { provider: process.env.NODE_ENV === 'production' ? 'operator-bypass' : 'test-bypass', mimeType, bytes, pass: true, transport: 'direct-upload' },
+    });
+    return;
+  }
+  await assertSafeUrl(reviewUrl);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120_000);
+  try {
+    const response = await fetch(reviewUrl, { signal: ctrl.signal, redirect: 'error' });
+    if (!response.ok) throw Object.assign(new Error('素材审核读取失败'), { code: 'CLIP_UPLOAD_REVIEW_FETCH_FAILED', statusCode: 502 });
+    const declared = Number(response.headers.get('content-length') || 0);
+    if (declared > 100 * 1024 * 1024) throw new VideoMediaTypeUnsupportedError();
+    const input = Buffer.from(await response.arrayBuffer());
+    if (input.length !== bytes) throw Object.assign(new Error('上传文件大小与审核对象不一致'), { code: 'CLIP_UPLOAD_SIZE_MISMATCH', statusCode: 409 });
+    await assertVideoUploadContent(input, mimeType, identity);
+  } finally { clearTimeout(timer); }
 }
 
 /** 在读取大文件前先确认审核 provider 真存在；避免“明知会拒绝”仍把 100MB 读进内存。 */

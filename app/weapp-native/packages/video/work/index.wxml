@@ -54,7 +54,7 @@
           </view>
         </view>
 
-        <view class="vd-btn wd-act" bindtap="saveToAlbum">{{saving ? '保存中…' : '保存到相册'}}</view>
+        <view class="vd-btn wd-act" bindtap="saveToAlbum">{{saving ? '保存中 ' + saveProgress + '%' : '保存到相册'}}</view>
 
         <view class="wd-again vd-card" bindtap="again">
           <view class="wa-body">

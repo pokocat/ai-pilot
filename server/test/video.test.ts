@@ -30,6 +30,7 @@ let renderCalls = 0;
 let seenHeaders: Headers | null = null;
 let renderBlock: Promise<void> | null = null;
 let signalRenderStarted: (() => void) | null = null;
+let directUploadSubmitCalls = 0;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -80,6 +81,19 @@ before(async () => {
       if (cloneUpstreamError) return json({ error: cloneUpstreamError.error, code: cloneUpstreamError.code }, cloneUpstreamError.status);
       return json({ ok: true, kind: 'voice', status: 'training', ...cloneUpstream });
     }
+    if (url.pathname === '/api/me/clip/avatar/uploads' && init?.method === 'POST') {
+      return json({ uploadId: 'CU-test', status: 'issued', uploadUrl: 'https://aiartist.oss-cn-hangzhou.aliyuncs.com', formData: { key: 'media/clip/test.mp3' }, expiresAt: '2026-08-18T10:10:00Z' });
+    }
+    if (url.pathname === '/api/me/clip/avatar/uploads/CU-test/complete' && init?.method === 'POST') {
+      return json({ uploadId: 'CU-test', clientRequestId: 'clone:direct-0001', kind: 'voice', status: 'uploaded', reviewUrl: 'https://aiartist.oss-cn-hangzhou.aliyuncs.com/media/clip/test.mp3' });
+    }
+    if (url.pathname === '/api/me/clip/avatar/uploads/CU-test/submit' && init?.method === 'POST') {
+      directUploadSubmitCalls += 1;
+      return json({ uploadId: 'CU-test', clientRequestId: 'clone:direct-0001', kind: 'voice', status: 'accepted', voiceId: 'VC-direct' });
+    }
+    if (url.pathname === '/api/me/clip/avatar/uploads/CU-test' && (!init?.method || init.method === 'GET')) {
+      return json({ uploadId: 'CU-test', clientRequestId: 'clone:direct-0001', kind: 'voice', status: 'accepted', voiceId: 'VC-direct' });
+    }
     if (url.pathname === '/api/me/clip/avatars/DH-scene' && init?.method === 'DELETE') {
       return json({ ok: true });
     }
@@ -91,6 +105,12 @@ before(async () => {
     }
     if (url.pathname === '/api/me/clip/works/cp_test' && init?.method === 'DELETE') {
       return json({ ok: true, cancelledJobIds: ['cj_test'] });
+    }
+    if (url.pathname === '/api/me/clip/works/cp_test' && (!init?.method || init.method === 'GET')) {
+      return json({ id: 'cp_test', projectId: 'cp_test', title: '测试作品', status: 'done', durationSec: 12, avatarSec: 4, videoUrl: 'https://aiartist.oss-cn-hangzhou.aliyuncs.com/media/final.mp4' });
+    }
+    if (url.hostname === 'aiartist.oss-cn-hangzhou.aliyuncs.com' && url.pathname === '/media/final.mp4') {
+      return new Response(Buffer.from('test-video-bytes'), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '16' } });
     }
     return json({ error: 'not found', code: 'CLIP_NOT_FOUND' }, 404);
   };
@@ -114,6 +134,7 @@ beforeEach(async () => {
   seenHeaders = null;
   renderBlock = null;
   signalRenderStarted = null;
+  directUploadSubmitCalls = 0;
 });
 
 test('视频 BFF 未登录一律 401', async () => {
@@ -166,6 +187,40 @@ test('视频 BFF 透传作品生成时间并支持删除作品', async () => {
   assert.deepEqual(deleted.body.cancelledJobIds, ['cj_test']);
   assert.equal(await getBalance(token), beforeBalance, '删除生成中作品必须立即退回未结算预扣');
   assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'refunded' } }), 1);
+});
+
+test('本人素材直传只在完成校验后扣费，并按同一受理号附着目标', async () => {
+  const token = await cloneUser(1000);
+  const before = await getBalance(token);
+  const body = {
+    kind: 'voice', clientRequestId: 'clone:direct-0001', expectedCredits: 200,
+    fileName: 'voice.mp3', contentType: 'audio/mpeg', sizeBytes: 1234,
+  };
+  const issued = await api('POST', '/api/video/avatar/uploads', { token, body });
+  assert.equal(issued.status, 200, JSON.stringify(issued.body));
+  assert.equal(issued.body.uploadId, 'CU-test');
+  assert.equal(await getBalance(token), before, '只签票不扣费');
+
+  const completed = await api('POST', '/api/video/avatar/uploads/CU-test/complete', { token, body });
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+  assert.equal(completed.body.status, 'accepted');
+  assert.equal(completed.body.reviewUrl, undefined, '内部审核短签名不得下发给小程序');
+  assert.equal(directUploadSubmitCalls, 1);
+  assert.equal(await getBalance(token), before - 200);
+
+  const status = await api('GET', '/api/video/avatar/uploads/CU-test', { token });
+  assert.equal(status.status, 200, JSON.stringify(status.body));
+  assert.equal(status.body.voiceId, 'VC-direct');
+  assert.equal(await prisma.videoCloneHold.count({ where: { userId: token, targetId: 'VC-direct' } }), 1);
+});
+
+test('成片保存经军师同源流式下载并刷新上游签名', async () => {
+  const token = await login(uniquePhone(), '成片保存用户');
+  const app = await getApp();
+  const response = await app.inject({ method: 'GET', url: '/api/video/works/cp_test/file', headers: { 'x-user-id': token } });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.headers['content-type'], 'video/mp4');
+  assert.equal(response.rawPayload.toString(), 'test-video-bytes');
 });
 
 test('视频 BFF 原样保存默认关闭的 AI 水印偏好', async () => {

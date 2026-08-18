@@ -70,8 +70,9 @@
 
         <view wx:if="{{voiceFile}}" class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeVoice">重新选择</view>
-          <view class="vd-btn cl-act {{retrainBlocked ? 'disabled' : ''}}" bindtap="submitVoice">{{submitting ? '提交中…' : (retrainBlocked ? '这条声音训不了' : '提交声音增强')}}</view>
+          <view class="vd-btn cl-act {{retrainBlocked ? 'disabled' : ''}}" bindtap="submitVoice">{{submitting ? submitPhaseText : (retrainBlocked ? '这条声音训不了' : '提交声音增强')}}</view>
         </view>
+        <view wx:if="{{submitting}}" class="cl-upload-progress"><view class="cup-track"><view class="cup-fill" style="width:{{uploadProgress}}%"></view></view><text>{{submitPhaseText}}{{uploadProgress > 0 && uploadProgress < 100 ? ' · ' + uploadProgress + '%' : ''}}</text><text class="cup-note">上传后会自动受理，请不要重复提交</text></view>
       </block>
 
       <!-- ① 只需一段视频就创建 Avatar；speakerId / authId 都不再做前置。 -->
@@ -155,8 +156,9 @@
         </view>
         <view wx:else class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeFace">更换视频</view>
-          <view class="vd-btn cl-act {{agreed ? '' : 'disabled'}}" bindtap="submitAvatar">{{submitting ? '提交中…' : '创建视频数字人'}}</view>
+          <view class="vd-btn cl-act {{agreed ? '' : 'disabled'}}" bindtap="submitAvatar">{{submitting ? submitPhaseText : '创建视频数字人'}}</view>
         </view>
+        <view wx:if="{{submitting}}" class="cl-upload-progress"><view class="cup-track"><view class="cup-fill" style="width:{{uploadProgress}}%"></view></view><text>{{submitPhaseText}}{{uploadProgress > 0 && uploadProgress < 100 ? ' · ' + uploadProgress + '%' : ''}}</text><text class="cup-note">上传后会自动受理，请不要重复提交</text></view>
 
         <view class="cl-agree" bindtap="toggleAgree">
           <view class="ca-box {{agreed ? 'on' : ''}}"><native-icon wx:if="{{agreed}}" name="check" tone="white" size="12"></native-icon></view>

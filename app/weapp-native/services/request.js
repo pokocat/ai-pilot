@@ -142,4 +142,31 @@ function upload(path, filePath, formData, options) {
   });
 }
 
-module.exports = { request, upload, setAuthLostHandler, networkErrorInfo, unauthorized, parseBody };
+/** OSS PostObject 直传：完整 URL 由服务端短时票据给出，不附军师 JWT。 */
+function directUpload(url, filePath, formData, options) {
+  const opts = options || {};
+  return new Promise((resolve, reject) => {
+    const task = wx.uploadFile({
+      url,
+      filePath,
+      name: opts.name || 'file',
+      formData: formData || {},
+      timeout: opts.timeout || 360000,
+      success(res) {
+        const data = parseBody(res.data);
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(Object.assign(new Error('文件直传未完成，请稍后重试。'), {
+            code: 'CLIP_DIRECT_UPLOAD_FAILED', statusCode: res.statusCode, data,
+            technicalMessage: typeof res.data === 'string' ? res.data.slice(0, 500) : `HTTP ${res.statusCode}`,
+          }));
+          return;
+        }
+        resolve(data || { ok: true });
+      },
+      fail(error) { reject(networkErrorInfo(error && error.errMsg, String(url || '').match(/^https?:\/\/[^/]+/)?.[0] || 'direct-upload')); },
+    });
+    if (opts.onProgress) task.onProgressUpdate(opts.onProgress);
+  });
+}
+
+module.exports = { request, upload, directUpload, setAuthLostHandler, networkErrorInfo, unauthorized, parseBody };

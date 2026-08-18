@@ -16,6 +16,8 @@
 - 石榴官方 API v1 已接 speaker/avatar 训练、可选授权视频、V2 TTS、V2 音频驱动出片、状态轮询与删除；Train Avatar Model 的 `authId` 不再被误做必填。上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 V2 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
 - 数字人创建主链按官方契约收成“一段视频 → Avatar 训练”：`speakerId` 只是制作 demo 的选填参数，未克隆声音时也必须立即调用 `/avatar/create`。AIStar 会 best-effort 从视频中提取原声创建基础 V2 speaker，任何提取/声音失败都不回滚形象；专门采集声音是独立增强。出片前仍需可用 speaker，视频原声不可用时提示用户补录，而不是把该限制前置成创建门槛。
 - 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
+- 2026-08-18 本人素材改为受限 OSS 单次直传：军师核价/验余额后向 AIStar领取精确 object key、字节数、MIME、10 分钟有效的 PostObject V4 票据；手机不再先传军师再由军师搬到 AIStar。AIStar 以 owner + clientRequestId 持久化 uploadId，HEAD 核验后异步做媒体深检、HEVC/H.265 转 H.264 与石榴受理，客户端只轮状态，超时不得重新上传。旧 multipart 路由仅保留旧版本兼容。
+- 成片保存新增军师同源下载：`GET /api/video/works/:id/file` 每次读取作品后刷新上游短签名并流式转发；小程序带原登录头下载、校验 HTTP 状态并展示进度，明确处理相册权限、格式与空间错误，不再直接下载 OSS URL。
 - 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段可显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 必须再显式设置 `CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION=true`，审计 provider 标为 `operator-bypass`。待正确账号开通内容安全并授权专用身份后，两个开关必须同时恢复为 false。
 - AIStar v0.113 预发已完成逐段 avatar/b-roll 标准化、真实 TTS 时长、H.264/AAC 多段总装、可选低音量 BGM、字幕与全程 AI 标识、三套模板各自的运行时固定品牌尾卡、最终音轨 -16 LUFS / -1.5 dBTP 归一、平均亮度/综合响度/真峰值失败关闭和作品缩略图。预发宿主 180 秒 720×1280 合成探针得到平均亮度 125.50、-16.05 LUFS、单音轨并通过解析；这只证明宿主编解码/滤镜链路，不替代本人授权真实长片压力验收。
 - 预发采用同机隔离拓扑：`8.136.36.175` 虽然是军师生产宿主机，但其中的军师 `junshi-api-preprod :4001` 只通过独立 service token 回源同机 `aistareco-clip-preprod 127.0.0.1:8081`，所以这是**共宿主的逻辑预发**而非独立预发服务器；公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`。军师生产不走该实例，而是通过 `https://api.aibuzz.cn` 跨服务器调用 `47.98.162.120` 上的 AIStar 生产。
@@ -133,7 +135,7 @@ app/weapp-native/packages/video/
 - 小程序**不用加合法域名**（还是打 wxapi.aibuzz.cn）
 - 鉴权不用换票：军师 server 认自己的 token，转发时用服务账号身份调 aidrama
 - **积分统一在军师侧**——用户在军师充值，视频出片扣军师积分，aidrama 侧走内部结算或不计费
-- 当前 M1 为了先把媒体审核闸收在一处，上传经军师 BFF 代理到 AIStar；军师将 multipart 总上限提高到 100MB，但视频路由单独限流且在读取大文件前检查审核 provider。后续若改成 OSS/CDN 签名直传直取，必须把对应域名加入微信 `uploadFile / downloadFile` 合法域名，并把审核前置/回调做成同等强度，不能继续宣称“不用加合法域名”。
+- 本人克隆素材已改为 OSS 受限票据直传，`https://aiartist.oss-cn-hangzhou.aliyuncs.com` 必须加入微信 `uploadFile` 合法域名；军师仍在签票前检查审核 provider，上传完成后先由军师完成真实审核/审计，再允许 AIStar异步受理。成片下载不要求 OSS `downloadFile` 域名，统一走已备案的军师 API 同域。b-roll/旧客户端仍保留 BFF multipart 路径与 100MB 业务上限。
 
 **方案 B · 分包直连 aidrama**
 

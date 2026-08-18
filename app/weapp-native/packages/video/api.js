@@ -9,6 +9,32 @@ const catalog = require('./catalog');
 
 const q = (value) => encodeURIComponent(value == null ? '' : String(value));
 const useMock = () => config.BACKEND_MODE === 'mock' && host.shouldUseMock();
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function captureFileMeta(kind, payload) {
+  const filePath = String(payload.filePath || '');
+  let fileName = filePath.split(/[\\/]/).pop() || `capture-${Date.now()}`;
+  const defaults = kind === 'voice' ? { ext: 'mp3', mime: 'audio/mpeg' }
+    : kind === 'avatarImage' ? { ext: 'jpg', mime: 'image/jpeg' }
+      : { ext: 'mp4', mime: 'video/mp4' };
+  if (!/\.[A-Za-z0-9]{2,6}$/.test(fileName)) fileName += `.${defaults.ext}`;
+  const ext = (fileName.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  const mime = ({ mov: 'video/quicktime', mp4: 'video/mp4', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac' })[String(ext || '').toLowerCase()] || defaults.mime;
+  return { fileName, contentType: mime, sizeBytes: Number(payload.sizeBytes || 0) };
+}
+
+async function waitCloneAccepted(uploadId, onPhase) {
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    const status = await call(`/avatar/uploads/${q(uploadId)}`);
+    if (status.status === 'accepted') return status;
+    if (status.status === 'failed') throw Object.assign(new Error(status.errorMessage || '训练受理失败，请重新提交'), { code: status.errorCode || 'CLIP_CLONE_SUBMIT_FAILED', statusCode: 422 });
+    if (onPhase) onPhase('processing');
+    await delay(1500);
+  }
+  throw Object.assign(new Error('素材已经上传，军师仍在受理，请不要重复提交，稍后到分身管理查看。'), { code: 'CLIP_CLONE_ACCEPTING', statusCode: 409 });
+}
 
 /** 真实请求统一进入军师 BFF。 */
 function call(path, options) {
@@ -87,6 +113,7 @@ const api = {
   /* ── 作品 ── */
   works: () => (useMock() ? mock.works() : call('/works')),
   work: (id) => (useMock() ? mock.work(id) : call(`/works/${q(id)}`)),
+  workDownloadUrl: (id) => host.httpUrl(`${config.BFF_PREFIX}/works/${q(id)}/file`),
   deleteWork: (id) => (useMock()
     ? mock.deleteWork(id)
     : call(`/works/${q(id)}`, { method: 'DELETE' })),
@@ -119,23 +146,45 @@ const api = {
     if (!filePath || !text) return Promise.reject(new Error('请先录制本人授权视频'));
     return host.httpUpload(`${config.BFF_PREFIX}/avatar/consent`, filePath, { text }, { timeout: 180000 });
   },
-  startClone: (kind, payload) => {
+  startClone: async (kind, payload) => {
     if (useMock()) return mock.startClone(kind, payload);
     const filePath = payload && payload.filePath;
     if (!filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
-    return host.httpUpload(`${config.BFF_PREFIX}/avatar/clone`, filePath, {
+    const meta = captureFileMeta(kind, payload || {});
+    const request = Object.assign({}, meta, {
       kind,
-      // 显式告诉服务端「用户选的是视频原声」，不能靠空 voiceId 猜 —— 猜的结果是回退旧声音。
-      voiceSource: payload.voiceSource || '',
-      avatarId: payload.avatarId || '',
-      voiceId: payload.voiceId || '',
-      name: payload.name || '',
-      // 训练要预扣钻石，所以这两个字段是必需的，缺了服务端直接 422：
-      // clientRequestId —— 上传超时重试不能扣两次；expectedCredits —— 端上看到的价和服务端要收的价
-      // 对不上时停下来重新确认，而不是按另一个数字静默扣。两者口径同出片确认页。
-      clientRequestId: payload.clientRequestId || '',
-      expectedCredits: String(payload.expectedCredits == null ? '' : payload.expectedCredits),
-    }, { timeout: 180000 });
+      voiceSource: payload.voiceSource || '', avatarId: payload.avatarId || '', voiceId: payload.voiceId || '', name: payload.name || '',
+      clientRequestId: payload.clientRequestId || '', expectedCredits: payload.expectedCredits,
+    });
+    if (payload.onPhase) payload.onPhase('preparing');
+    const ticket = await call('/avatar/uploads', { method: 'POST', data: request, timeout: 30000 });
+    if (ticket.status === 'issued') {
+      if (!ticket.uploadUrl) throw Object.assign(new Error('上传服务没有返回地址'), { code: 'CLIP_DIRECT_UPLOAD_NOT_CONFIGURED' });
+      if (payload.onPhase) payload.onPhase('uploading');
+      try {
+        await host.directFileUpload(ticket.uploadUrl, filePath, ticket.formData || {}, { timeout: 360000, onProgress: payload.onProgress });
+      } catch (error) {
+        // 首次直传其实已写入 OSS、但成功响应在弱网中丢失时，同一受理号重试会被
+        // forbid-overwrite 以 409 拒绝。此时继续 complete 做 HEAD 精确核验，不能换 ID 再传一份。
+        if (error && error.statusCode === 409) {
+          if (payload.onPhase) payload.onPhase('verifying');
+        }
+        // 域名白名单没生效时文件确定没有离开手机，安全回退旧 BFF；其它网络错误可能已写入 OSS，不能盲传第二份。
+        else if (error && error.reason === 'domain') {
+          if (payload.onPhase) payload.onPhase('uploading');
+          return host.httpUpload(`${config.BFF_PREFIX}/avatar/clone`, filePath, {
+            kind, voiceSource: request.voiceSource, avatarId: request.avatarId, voiceId: request.voiceId, name: request.name,
+            clientRequestId: request.clientRequestId, expectedCredits: String(request.expectedCredits),
+          }, { timeout: 360000, onProgress: payload.onProgress });
+        }
+        else throw error;
+      }
+    }
+    if (payload.onPhase) payload.onPhase('verifying');
+    const submitted = await call(`/avatar/uploads/${q(ticket.uploadId)}/complete`, { method: 'POST', data: request, timeout: 120000 });
+    if (submitted.status === 'accepted') return submitted;
+    if (submitted.status === 'failed') throw Object.assign(new Error(submitted.errorMessage || '上传校验失败'), { code: submitted.errorCode || 'CLIP_UPLOAD_VERIFY_FAILED', statusCode: 422 });
+    return waitCloneAccepted(ticket.uploadId, payload.onPhase);
   },
   consentLogs: () => (useMock() ? mock.consentLogs() : call('/avatar/consents')),
   usageLogs: () => (useMock() ? mock.usageLogs() : call('/avatar/usages')),

@@ -2763,8 +2763,41 @@ export interface ClipVoiceView {
   id: string; name: string; status: 'none' | 'training' | 'ready' | 'failed';
   source?: 'video' | 'dedicated' | null; trainedText?: string | null; progress: number;
 }
+export type ClipCloneKind = 'avatar' | 'voice' | 'avatarImage';
+export interface ClipCloneUploadRequest {
+  kind: ClipCloneKind;
+  clientRequestId: string;
+  expectedCredits: number;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  avatarId?: string;
+  voiceId?: string;
+  name?: string;
+  voiceSource?: string;
+}
+export interface ClipCloneUploadTicket {
+  uploadId: string;
+  uploadUrl?: string | null;
+  formData: Record<string, string>;
+  expiresAt?: string | null;
+  status: 'issued' | 'uploaded' | 'processing' | 'accepted' | 'failed';
+  reused?: boolean;
+}
+export interface ClipCloneUploadStatus {
+  uploadId: string;
+  clientRequestId: string;
+  kind: ClipCloneKind;
+  status: 'issued' | 'uploaded' | 'processing' | 'accepted' | 'failed';
+  avatarId?: string | null;
+  voiceId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  expiresAt?: string | null;
+  updatedAt?: string | null;
+}
 export interface ClipCaptureRule {
-  kind: 'consent' | 'avatar' | 'voice';
+  kind: 'consent' | 'avatar' | 'voice' | 'avatarImage';
   vendorMinDurationSec: number; vendorMaxDurationSec: number; minDurationSec: number;
   recommendedMinDurationSec: number; recommendedMaxDurationSec: number; maxDurationSec: number;
   vendorMaxBytes: number; maxBytes: number; vendorFormats: string[]; formats: string[];

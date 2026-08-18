@@ -37,6 +37,7 @@ Page({
     platforms: PLATFORMS,
     publishReady: PUBLISH_READY,
     saving: false,
+    saveProgress: 0,
     publishing: '',
     showLogin: false,
   }),
@@ -85,27 +86,57 @@ Page({
     if (!work || !work.videoUrl) { host.toast('成片地址待接入'); return; }
     if (this.data.saving) return;
 
-    this.setData({ saving: true });
-    host.loading('保存中');
-    wx.downloadFile({
-      url: work.videoUrl,
+    wx.getSetting({
+      success: (setting) => {
+        if (setting && setting.authSetting && setting.authSetting['scope.writePhotosAlbum'] === false) {
+          this.openAlbumSetting();
+          return;
+        }
+        this.downloadAndSave();
+      },
+      fail: () => this.downloadAndSave(),
+    });
+  },
+
+  openAlbumSetting() {
+    host.confirm({ title: '需要相册权限', content: '去设置里打开「保存到相册」，回来后再点一次保存。', confirmText: '去设置' })
+      .then((ok) => { if (ok) wx.openSetting({}); });
+  },
+
+  downloadAndSave() {
+    this.setData({ saving: true, saveProgress: 0 });
+    host.loading('下载成片');
+    const task = host.downloadFile(api.workDownloadUrl(this.data.workId), {
       success: (res) => {
+        if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
+          host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
+          host.toast(Number(res.statusCode) === 401 ? '登录态已失效，请重新登录后保存' : '成片下载没有完成，请稍后重试');
+          return;
+        }
+        host.loading('写入相册');
         wx.saveVideoToPhotosAlbum({
           filePath: res.tempFilePath,
-          success: () => { host.hideLoading(); this.setData({ saving: false }); host.toast('已存到相册', 'success'); },
+          success: () => { host.hideLoading(); this.setData({ saving: false, saveProgress: 100 }); host.toast('已存到相册', 'success'); },
           fail: (error) => {
             host.hideLoading();
-            this.setData({ saving: false });
-            if (String(error && error.errMsg || '').indexOf('auth deny') >= 0) {
-              host.confirm({ title: '需要相册权限', content: '去设置里打开「保存到相册」就能存了。', confirmText: '去设置' })
-                .then((ok) => { if (ok) wx.openSetting({}); });
+            this.setData({ saving: false, saveProgress: 0 });
+            const message = String(error && error.errMsg || '');
+            if (/auth|deny|denied|permission|writePhotosAlbum/i.test(message)) {
+              this.openAlbumSetting();
               return;
             }
-            host.toast('保存失败');
+            host.toast(/invalid video|format/i.test(message) ? '成片文件暂时无法识别，请联系运营' : '写入相册失败，请检查手机存储空间');
           },
         });
       },
-      fail: () => { host.hideLoading(); this.setData({ saving: false }); host.toast('下载失败'); },
+      fail: (error) => {
+        host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
+        const message = String(error && error.errMsg || '');
+        host.toast(/domain|合法域名/i.test(message) ? '下载域名配置未生效，请联系运营' : '成片下载失败，请检查网络后重试');
+      },
+    });
+    if (task && typeof task.onProgressUpdate === 'function') task.onProgressUpdate((event) => {
+      this.setData({ saveProgress: Math.max(0, Math.min(99, Number(event && event.progress) || 0)) });
     });
   },
 

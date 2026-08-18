@@ -2475,3 +2475,31 @@ test('平台代发未接入时不许摆可点的按钮：上游恒 503，点了�
     assert.match(wxml, /publishReady \? '' : 'off'/, '未接入的平台芯片必须置灰');
   }
 });
+
+test('数字分身素材只直传一次，展示真实进度并按受理号恢复，不诱导重复上传', () => {
+  const api = fs.readFileSync(path.join(sourceRoot, 'packages/video/api.js'), 'utf8');
+  const request = fs.readFileSync(path.join(sourceRoot, 'services/request.js'), 'utf8');
+  const clone = fs.readFileSync(path.join(sourceRoot, 'packages/video/clone/index.js'), 'utf8');
+  const view = fs.readFileSync(path.join(sourceRoot, 'packages/video/clone/index.wxml'), 'utf8');
+  const errors = fs.readFileSync(path.join(sourceRoot, 'services/api-error.js'), 'utf8');
+  assert.match(api, /call\('\/avatar\/uploads',[\s\S]*directFileUpload\(ticket\.uploadUrl[\s\S]*\/complete/);
+  assert.match(api, /waitCloneAccepted\(ticket\.uploadId/);
+  assert.match(api, /error\.statusCode === 409/);
+  assert.match(api, /forbid-overwrite[\s\S]{0,180}不能换 ID 再传一份/);
+  assert.match(request, /function directUpload\([\s\S]*wx\.uploadFile/);
+  assert.match(clone, /onProgress:\s*\(event\) => this\.updateUploadProgress\(event\)/);
+  assert.match(clone, /error\.code !== 'CLIP_CLONE_ACCEPTING'/);
+  assert.match(view, /上传后会自动受理，请不要重复提交/);
+  assert.match(errors, /后台可能仍在处理，请不要重复提交/);
+});
+
+test('保存成片走军师同源下载并检查下载状态、相册权限与真实进度', () => {
+  const api = fs.readFileSync(path.join(sourceRoot, 'packages/video/api.js'), 'utf8');
+  const work = fs.readFileSync(path.join(sourceRoot, 'packages/video/work/index.js'), 'utf8');
+  assert.match(api, /workDownloadUrl:[\s\S]{0,160}\/works\/\$\{q\(id\)\}\/file/);
+  assert.match(work, /wx\.getSetting/);
+  assert.match(work, /scope\.writePhotosAlbum/);
+  assert.match(work, /Number\(res\.statusCode\)\s*!==\s*200/);
+  assert.match(work, /onProgressUpdate/);
+  assert.match(work, /saveVideoToPhotosAlbum/);
+});

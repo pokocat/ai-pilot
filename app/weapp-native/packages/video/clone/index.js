@@ -99,6 +99,8 @@ Page({
     recaptureKind: null,
     presetAvailable: api.isMock(),
     submitting: false,
+    submitPhaseText: '',
+    uploadProgress: 0,
     notificationTemplate: null,
     notificationRequesting: false,
     showLogin: false,
@@ -489,8 +491,8 @@ Page({
    * - 纯网络失败（没有 statusCode）：保留标识，重试才能被服务端识别为同一次提交、不重复扣费。
    */
   handleCloneError(error, fallbackMessage) {
-    this.setData({ submitting: false });
-    if (error && error.statusCode) this.cloneRequestId = '';
+    this.setData({ submitting: false, submitPhaseText: '', uploadProgress: 0 });
+    if (error && error.statusCode && error.code !== 'CLIP_CLONE_ACCEPTING') this.cloneRequestId = '';
     if (error && error.code === 'INSUFFICIENT_CREDITS') {
       host.confirm({
         title: '钻石不够',
@@ -502,6 +504,18 @@ Page({
     host.toast(error && error.message ? error.message : fallbackMessage);
   },
 
+  updateSubmitPhase(phase) {
+    const text = {
+      preparing: '正在确认上传条件', uploading: '正在上传素材', verifying: '正在校验素材', processing: '军师正在受理训练',
+    }[phase] || '正在处理';
+    this.setData({ submitPhaseText: text });
+  },
+
+  updateUploadProgress(event) {
+    const value = Math.max(0, Math.min(100, Number(event && event.progress) || 0));
+    this.setData({ uploadProgress: value });
+  },
+
   submitVoice() {
     if (!this.data.voiceFile) { host.toast('先录一段声音或上传音频'); return; }
     if (this.data.submitting) return;
@@ -511,12 +525,15 @@ Page({
     this.setData({ submitting: true });
     api.startClone('voice', {
       filePath: this.data.voiceFile.path,
+      sizeBytes: this.data.voiceFile.size,
       avatarId: this.data.avatarId,
       // 非空 = 重训这一条已有声音：供应商每条给 4 次免费重训，且不消耗新的克隆权益。
       // 少了这个字段，每次「重新录制」都会新建一条 speaker，把账户的克隆权益烧光。
       voiceId: this.data.retrainVoiceId,
       clientRequestId: this.ensureCloneRequestId(this.data.voiceFile.path),
       expectedCredits: this.data.expectedCredits,
+      onPhase: (phase) => this.updateSubmitPhase(phase),
+      onProgress: (event) => this.updateUploadProgress(event),
     })
       // 必须接住 voiceId：这一屏接下来要靠它轮询这条声音。丢了它就只能去轮形象，
       // 而「只训了声音、没建形象」的用户压根没有形象可轮 —— 进度会永远停在训练中。
@@ -618,6 +635,7 @@ Page({
     this.setData({ submitting: true });
     api.startClone(image ? 'avatarImage' : 'avatar', {
       filePath: this.data.faceFile.path,
+      sizeBytes: this.data.faceFile.size,
       avatarId: this.data.avatarId,
       voiceId: this.data.selectedVoiceId,
       // 没选已有声音 = 用户选的是「视频原声」。显式传，服务端才不会回退到该形象原先关联的声音。
@@ -625,6 +643,8 @@ Page({
       name: this.data.avatarName,
       clientRequestId: this.ensureCloneRequestId(this.data.faceFile.path),
       expectedCredits: this.data.expectedCredits,
+      onPhase: (phase) => this.updateSubmitPhase(phase),
+      onProgress: (event) => this.updateUploadProgress(event),
     })
       .then((result) => {
         if (result && result.avatarId) this.setData({ avatarId: result.avatarId });
@@ -638,6 +658,8 @@ Page({
   enterTraining() {
     this.setData({
       submitting: false,
+      submitPhaseText: '',
+      uploadProgress: 0,
       step: 2,
       training: initialTraining(this.data.mode),
     });

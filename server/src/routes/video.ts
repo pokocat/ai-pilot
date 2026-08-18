@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { Readable } from 'node:stream';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { aidramaJson, aidramaUpload } from '../services/video/aidramaGateway.js';
@@ -7,19 +8,21 @@ import {
 } from '../services/video/credits.js';
 import {
   applyCloneSettlements, assertCloneAffordable, attachCloneTargets, cloneChargeItems, cloneChargeTotal,
-  pendingCloneHolds, refundCloneHold, refundStaleUnsubmittedCloneHolds, refundStalledCloneHolds,
+  cloneHoldsForRequest, pendingCloneHolds, refundCloneHold, refundStaleUnsubmittedCloneHolds, refundStalledCloneHolds,
   reserveCloneCredits, resolveCloneSettlements, type CloneStatusProbe,
 } from '../services/video/cloneCredits.js';
-import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
+import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent, assertVideoUploadedContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import { clonePricing, clonePricingView } from '../services/video/pricing.js';
 import { buyStoragePack, purchasedPackCount, purchasedStorageBytes, storagePlan } from '../services/video/storagePlan.js';
 import type {
-  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
+  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
+import { assertSafeUrl } from '../llm/tools/httpTool.js';
 
 type Identity = { userId: string; tenantId: string };
+type UpstreamCloneUploadStatus = ClipCloneUploadStatus & { reviewUrl?: string | null };
 
 function sendErr(reply: FastifyReply, error: unknown, fallback = 400) {
   const e = error as { statusCode?: number; code?: string; message?: string };
@@ -35,6 +38,35 @@ function identityOf(user: { id: string; tenantId: string }): Identity {
 
 function assertId(id: string) {
   if (!validId(id)) throw Object.assign(new Error('资源标识非法'), { statusCode: 400, code: 'CLIP_ID_INVALID' });
+}
+
+function directCloneInput(body: unknown): ClipCloneUploadRequest {
+  const row = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const kind = String(row.kind ?? '') as ClipCloneUploadRequest['kind'];
+  const clientRequestId = String(row.clientRequestId ?? '').trim();
+  const fileName = String(row.fileName ?? '').trim();
+  const contentType = String(row.contentType ?? '').trim().toLowerCase();
+  const sizeBytes = Number(row.sizeBytes);
+  const expectedCredits = Number(row.expectedCredits);
+  if (!['avatar', 'voice', 'avatarImage'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
+  if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) throw Object.assign(new Error('请求信息已失效，请重新提交'), { statusCode: 422, code: 'CLIENT_REQUEST_ID_REQUIRED' });
+  if (!fileName || fileName.length > 255 || /[\\/\r\n]/.test(fileName)) throw Object.assign(new Error('文件名无效，请重新选择'), { statusCode: 422, code: 'CLIP_UPLOAD_FILENAME_INVALID' });
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1) throw Object.assign(new Error('文件大小无效，请重新选择'), { statusCode: 422, code: 'CLIP_UPLOAD_SIZE_INVALID' });
+  if (!Number.isSafeInteger(expectedCredits) || expectedCredits < 0) throw Object.assign(new Error('训练报价无效，请返回重新确认'), { statusCode: 422, code: 'CLIP_CLONE_CLIENT_OUTDATED' });
+  const mimeAllowed = kind === 'voice' ? VOICE_CAPTURE_MIMES : kind === 'avatarImage' ? IMAGE_CAPTURE_MIMES : VIDEO_CAPTURE_MIMES;
+  if (!mimeAllowed.has(contentType)) throw Object.assign(new Error(kind === 'voice' ? '声音格式暂不支持' : kind === 'avatarImage' ? '照片只支持 JPG 或 PNG' : '视频只支持 MP4 或 MOV'), { statusCode: 415, code: 'CLIP_CAPTURE_FORMAT_INVALID' });
+  const max = kind === 'voice' ? 20 * 1024 * 1024 : kind === 'avatarImage' ? 10 * 1024 * 1024 : 100 * 1024 * 1024;
+  if (sizeBytes > max) throw Object.assign(new Error(kind === 'voice' ? '声音文件不能超过 20MB' : kind === 'avatarImage' ? '照片不能超过 10MB' : '形象视频超过 100MB，请压缩或缩短后重新上传'), { statusCode: 413, code: 'CLIP_CAPTURE_TOO_LARGE' });
+  return {
+    kind, clientRequestId, expectedCredits, fileName, contentType, sizeBytes,
+    avatarId: String(row.avatarId ?? ''), voiceId: String(row.voiceId ?? ''),
+    name: String(row.name ?? ''), voiceSource: String(row.voiceSource ?? ''),
+  };
+}
+
+function publicUploadStatus(status: UpstreamCloneUploadStatus): ClipCloneUploadStatus {
+  const { reviewUrl: _privateReviewUrl, ...safe } = status;
+  return safe;
 }
 
 function rewriteBody(body: unknown) {
@@ -480,6 +512,24 @@ export async function videoRoutes(app: FastifyInstance) {
     try { assertId(req.params.id); return await aidramaJson<ClipWork>(`/api/me/clip/works/${enc(req.params.id)}`, identityOf(user)); }
     catch (e) { return sendErr(reply, e, 404); }
   });
+  /** 同源保存入口：刷新上游短签名并流式转发，避免 OSS downloadFile 合法域名/签名过期导致相册保存失败。 */
+  app.get<{ Params: { id: string } }>('/video/works/:id/file', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const work = await aidramaJson<ClipWork>(`/api/me/clip/works/${enc(req.params.id)}`, identityOf(user), { timeoutCapMs: 15_000 });
+      if (!work?.videoUrl) throw Object.assign(new Error('成片还没有准备好'), { statusCode: 409, code: 'CLIP_WORK_NOT_READY' });
+      await assertSafeUrl(work.videoUrl);
+      const response = await fetch(work.videoUrl, { redirect: 'error' });
+      if (!response.ok || !response.body) throw Object.assign(new Error('成片下载暂时不可用'), { statusCode: 502, code: 'CLIP_WORK_DOWNLOAD_FAILED' });
+      const contentLength = response.headers.get('content-length');
+      reply.header('Content-Type', response.headers.get('content-type') || 'video/mp4');
+      if (contentLength) reply.header('Content-Length', contentLength);
+      reply.header('Content-Disposition', `attachment; filename="junshi-${req.params.id}.mp4"`);
+      reply.header('Cache-Control', 'private, no-store');
+      return reply.send(Readable.fromWeb(response.body as never));
+    } catch (e) { return sendErr(reply, e, 502); }
+  });
   app.delete<{ Params: { id: string } }>('/video/works/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
@@ -579,6 +629,98 @@ export async function videoRoutes(app: FastifyInstance) {
     }
     catch (e) { return sendErr(reply, e, 422); }
   });
+
+  /**
+   * 本人素材新链路：军师只签发/核价，客户端凭短时 policy 一次直传 AIStar OSS。
+   * 长期密钥与 service token 都不下发；真正扣费在 complete 后、机审通过且异步受理前。
+   */
+  app.post<{ Body: ClipCloneUploadRequest }>('/video/avatar/uploads', { config: { rateLimit: { max: 12, timeWindow: '1 hour' } } }, async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      const input = directCloneInput(req.body);
+      const pricing = await clonePricing();
+      const items = cloneChargeItems(input, pricing);
+      const total = cloneChargeTotal(items);
+      if (input.expectedCredits !== total) throw Object.assign(new Error('训练报价已变化，请返回重新确认'), { statusCode: 409, code: 'CLIP_CLONE_QUOTE_CHANGED' });
+      await assertCloneAffordable(user.id, total);
+      await assertVideoMediaModerationReady(input.contentType);
+      const ticket = await aidramaJson<ClipCloneUploadTicket>('/api/me/clip/avatar/uploads', identityOf(user), {
+        method: 'POST',
+        body: {
+          kind: input.kind, clientRequestId: input.clientRequestId, fileName: input.fileName,
+          contentType: input.contentType, sizeBytes: input.sizeBytes,
+        },
+      });
+      return ticket;
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+
+  app.post<{ Params: { id: string }; Body: ClipCloneUploadRequest }>('/video/avatar/uploads/:id/complete', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    let holds: Awaited<ReturnType<typeof reserveCloneCredits>>['holds'] = [];
+    try {
+      assertId(req.params.id);
+      const input = directCloneInput(req.body);
+      const completed = await aidramaJson<UpstreamCloneUploadStatus>(`/api/me/clip/avatar/uploads/${enc(req.params.id)}/complete`, identityOf(user), { method: 'POST', body: {} });
+      if (completed.clientRequestId !== input.clientRequestId || completed.kind !== input.kind) {
+        throw Object.assign(new Error('上传受理号与本次请求不一致'), { statusCode: 409, code: 'CLIP_UPLOAD_REQUEST_CONFLICT' });
+      }
+      if (completed.status === 'failed') return reply.code(422).send({ error: completed.errorMessage ?? '上传校验失败', code: completed.errorCode ?? 'CLIP_UPLOAD_VERIFY_FAILED' });
+      if (completed.status === 'accepted' || completed.status === 'processing') return publicUploadStatus(completed);
+      if (completed.status !== 'uploaded' || !completed.reviewUrl) throw Object.assign(new Error('文件还没有上传完成'), { statusCode: 409, code: 'CLIP_UPLOAD_NOT_COMPLETED' });
+
+      const pricing = await clonePricing();
+      const items = cloneChargeItems(input, pricing);
+      const total = cloneChargeTotal(items);
+      if (input.expectedCredits !== total) throw Object.assign(new Error('训练报价已变化，请返回重新确认'), { statusCode: 409, code: 'CLIP_CLONE_QUOTE_CHANGED' });
+      await assertCloneAffordable(user.id, total);
+      await assertVideoUploadedContent(completed.reviewUrl, input.contentType, input.sizeBytes, identityOf(user));
+
+      const reservation = await reserveCloneCredits({ tenantId: user.tenantId, userId: user.id, clientRequestId: input.clientRequestId, items });
+      holds = reservation.holds;
+      if (holds.some((hold) => hold.status === 'refunded')) throw Object.assign(new Error('这次训练已经结束，请重新提交'), { statusCode: 409, code: 'CLIP_CLONE_REQUEST_CLOSED' });
+      const alreadyAttached = holds.filter((hold) => hold.targetId);
+      if (alreadyAttached.length) {
+        return {
+          uploadId: completed.uploadId, clientRequestId: input.clientRequestId, kind: input.kind, status: 'accepted',
+          avatarId: alreadyAttached.find((hold) => hold.targetKind === 'avatar')?.targetId ?? undefined,
+          voiceId: alreadyAttached.find((hold) => hold.targetKind === 'voice')?.targetId ?? undefined,
+        } satisfies ClipCloneUploadStatus;
+      }
+      const submitted = await aidramaJson<UpstreamCloneUploadStatus>(`/api/me/clip/avatar/uploads/${enc(req.params.id)}/submit`, identityOf(user), {
+        method: 'POST', body: {
+          clientRequestId: input.clientRequestId, avatarId: input.avatarId, voiceId: input.voiceId,
+          name: input.name, voiceSource: input.voiceSource,
+        },
+      });
+      if (submitted.status === 'failed') {
+        for (const hold of holds) await refundCloneHold(hold.id, 'submit_failed').catch(() => {});
+      } else if (submitted.status === 'accepted') {
+        holds = await attachCloneTargets(holds, submitted);
+      }
+      await recordAudit({
+        tenantId: user.tenantId, userId: user.id, action: 'user.video.clone.direct-upload.accepted',
+        payload: { kind: input.kind, uploadId: submitted.uploadId, clientRequestId: input.clientRequestId, credits: total, status: submitted.status },
+      });
+      return publicUploadStatus(submitted);
+    } catch (e) {
+      // 连接超时不在这里猜「上游没受理」：同 uploadId 状态可恢复，立即退款反而会造成已开工却没扣费。
+      return sendErr(reply, e, 422);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>('/video/avatar/uploads/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const status = await aidramaJson<UpstreamCloneUploadStatus>(`/api/me/clip/avatar/uploads/${enc(req.params.id)}`, identityOf(user), { timeoutCapMs: 15_000 });
+      const holds = await cloneHoldsForRequest(user.id, status.clientRequestId);
+      if (status.status === 'accepted') await attachCloneTargets(holds, status);
+      else if (status.status === 'failed') for (const hold of holds) await refundCloneHold(hold.id, 'submit_failed').catch(() => {});
+      return publicUploadStatus(status);
+    } catch (e) { return sendErr(reply, e, 404); }
+  });
+
   app.post('/video/avatar/clone', { config: { rateLimit: { max: 10, timeWindow: '1 hour' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     // 预扣成功后但凡后面任一步失败，都要把这批 hold 退回；ownsSubmission 保证并发复用者无退款权。
