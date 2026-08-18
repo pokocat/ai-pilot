@@ -72,7 +72,7 @@
 
 - ① `share_expose`（新事件名）：用户点开「转发给朋友」/「分享到朋友圈」时报。落点刻意在 `services/share.js` 的 `withShare` **wrapper** 里，不在两个 mixin 里——那 4 个成果型分享页（速诊 / 命盘 / 天时日历 / 成片）是**整体覆盖** mixin 的，埋在 mixin 里它们一条都不报，而它们恰好是最活跃的几页（这正是上一轮 `imageUrl` 兜底踩过的同一个坑的另一面）；埋在 wrapper 里则 54 页统一一条、且不可能双报。props 只有 `channel`（`friend`/`timeline`）与 `poster`（当日素材序号），**不带页面路径 / 页面内容 / 邀请码**：带上页面就等于把「谁在账本页点了转发」写进埋点库，与「分享内容与页面解耦」自相矛盾。
 - ② `invite_landing`（新事件名）：`captureInvite` 捕获成功即报，props 只有 `channel`（`query`=分享卡 / `scene`=小程序码）。**每次捕获都报**，含 `onShow` 那次重复进入——同一个人被同一张卡拉回来几次本身就是漏斗要看的数据，端上不偷偷合并。这条几乎全是**游客**上报（点开卡的人此刻还没有账号），正是漏斗分母的来源，`POST /events` 鉴权可选恰好为它而设。
-- ③ 注册段**不占事件名**：从 `ReferralAttribution` 算（每次带码进线一行，六种 outcome 全留痕）。再补一份客户端埋点只会造出「端上报了、库里没有」的对不上账，服务端账本比端上准。
+- ③ 注册段**不占事件名**：从 `ReferralAttribution` 算（每次带码进线一行，**八种** outcome 全留痕：bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp——按文档只聚合六种会漏掉后两类「判不了所以没建关系」的进线）。再补一份客户端埋点只会造出「端上报了、库里没有」的对不上账，服务端账本比端上准。
 - ④ 首开通段：新增 `services/activation.ts` 的 `recordInviteActivation`，在**付费入账成功后**判该用户有无推荐人（查 `Referral`），有则落一条 `source='invite'`。
 
 **④ 为什么挂 `markPaidAndApply` 而不是 `applyPlanPurchase`**（这是本次唯一需要判断的挂点问题）：`applyPlanPurchase` 还被三条**非付费**路径共用——注册测试期自动开通（`routes/auth.ts`，`source='test_default_grant'`）、演示购买（`routes/plans.ts`）、运营手工开通（`routes/admin.ts`）。挂那里有两个方向都错：正向会把免费白发算成邀请开通，**开着注册自动开通时被邀人「注册当场即首开通」，「注册 → 首开通」这一段永远 100%**，漏斗直接失去意义；反向那条路径跑在建号事务内，而关系绑定是建号提交**之后**才另开小事务做的，那一刻 `Referral` 还不存在、查推荐人必然为空，连该记的也记不到。`markPaidAndApply` 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，已有 `outTradeNo` advisory lock + `appliedAt` 幂等锚点），所以 invite 判定就贴着既有的 `recordActivation` 走。

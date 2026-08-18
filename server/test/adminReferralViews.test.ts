@@ -5,20 +5,30 @@
 //      不是测试自己捏的 lv 值），且 directCount 在树末端也不谎报成 0；
 //   ② 风控只回**超阈值**的组，阈值来自运营配置（`PATCH /admin/flags/referral-risk`），
 //      改配置就改判定 —— 证明它没写死在代码里；
-//   ③ 未授权访问一律拒绝（三个端点都在 requireAdmin 后面）；
+//   ③ 未授权访问一律拒绝（四个端点都在 requireAdmin 后面）；
 //   ④ **读数为空 ≠ 读失败**：空作用域回 200 + 显式的零计数（还告诉你扫了多少 IP），
-//      查询真的挂了回 5xx，绝不伪装成「你还没有邀请数据」。
+//      查询真的挂了回 5xx，绝不伪装成「你还没有邀请数据」；
+//   ⑤ **真实规模下不许漏报**（2026-08-18 复核补）：单个 IP 的重复留痕再多也不能挤掉别的组，
+//      组数触顶要如实回总组数，树的红环只按「本次返回的那批组」着色；
+//   ⑥ **隐私不扩散**：风控/树响应里没有完整手机号（掩码走审计同一口径）、没有 userAgent。
 //
 // 另外钉一条公理 5：风控只预警不阻断 —— 这组端点里不存在任何处置/封禁写操作。
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.ts';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from './helpers.ts';
-import { REFERRAL_RISK_FLAG, REFERRAL_RISK_DEF } from '../src/routes/adminReferral.ts';
+import { REFERRAL_RISK_FLAG, REFERRAL_RISK_DEF, TREE_ROW_CAP } from '../src/routes/adminReferral.ts';
 import { __clearFeatureCache } from '../src/services/featureFlag.ts';
+import { maskAuditPhone } from '../src/services/audit.ts';
 import type {
-  AdminReferralOverview, AdminReferralRisk, AdminReferralTree, AdminReferralTreeNode,
+  AdminReferralOverview, AdminReferralRisk, AdminReferralRiskGroup, AdminReferralRiskMember,
+  AdminReferralTenantOption, AdminReferralTree, AdminReferralTreeNode,
 } from '../../shared/contracts';
+
+/* 风控响应形状 = 契约本身（2026-08-18 已收口：`groupTotal` 已加、`members[].userAgent` 已删）。
+   保留这两个别名只为少改下面的断言引用点。 */
+type RiskMemberBody = AdminReferralRiskMember;
+type RiskBody = AdminReferralRisk;
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
@@ -47,8 +57,11 @@ function childOf(node: AdminReferralTreeNode, userId: string): AdminReferralTree
   return hit!;
 }
 
-describe('鉴权：三个端点都在 requireAdmin 之后', () => {
-  for (const path of ['/api/admin/referral/overview', '/api/admin/referral/tree', '/api/admin/referral/risk']) {
+describe('鉴权：四个端点都在 requireAdmin 之后', () => {
+  for (const path of [
+    '/api/admin/referral/overview', '/api/admin/referral/tree',
+    '/api/admin/referral/risk', '/api/admin/referral/tenants',
+  ]) {
     test(`无凭证访问 ${path} → 401`, async () => {
       const r = await api('GET', path, { adminToken: false });
       assert.equal(r.status, 401, `应 401，实际 ${r.status}`);
@@ -134,6 +147,45 @@ describe('视图② 邀请关系树', () => {
     assert.equal(childOf(root!, expired).status, 'registered', '套餐到期应回落成「仅注册」');
   });
 
+  test('节点上的手机号是掩码值：树上同时挂着风控红环，不该顺带把完整号码发给每个后台账号', async () => {
+    const a = await register();
+    const b = await register({ inviteCode: await inviteCodeOf(a) });
+    const ub = await prisma.user.findUniqueOrThrow({ where: { id: b }, select: { phone: true } });
+    assert.ok(ub.phone, '注册用的是手机号，库里必须有');
+
+    const r = await api<AdminReferralTree>('GET', '/api/admin/referral/tree');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const node = childOf(r.body.roots.find((n) => n.userId === a)!, b);
+    assert.notEqual(node.phone, ub.phone, '不得下发完整号码');
+    // 掩码规则不在这里重写一遍：本仓只有 services/audit.ts 一处口径，两边必须逐字一致。
+    assert.equal(node.phone, maskAuditPhone(ub.phone), '必须是审计同一口径的掩码值');
+  });
+
+  test(`边数上限是「多于 ${TREE_ROW_CAP} 才算截断」：刚好 ${TREE_ROW_CAP} 条不许误报成不完整`, async () => {
+    // off-by-one 的真实代价：运营看到「这棵树不是全部」就会去缩小一个本来不需要缩小的范围，
+    // 并从此不信这块屏。所以边界值必须钉死：== 上限 → 完整；> 上限 → 截断。
+    const inviter = await register();
+    const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: inviter }, select: { tenantId: true } })).tenantId;
+    const edge = (i: number) => ({
+      userId: `syn-edge-${i}`, tenantId: tenant, referrerId: inviter, lv1: inviter,
+      inviteCode: 'JS2K7P', source: 'poster_qr' as const, boundAt: new Date(Date.now() - i * 1000),
+    });
+    await prisma.referral.createMany({ data: Array.from({ length: TREE_ROW_CAP }, (_, i) => edge(i)) });
+
+    const exact = await api<AdminReferralTree>('GET', '/api/admin/referral/tree');
+    assert.equal(exact.status, 200, JSON.stringify(exact.body));
+    assert.equal(exact.body.edgeTotal, TREE_ROW_CAP);
+    assert.equal(exact.body.truncated, false, `刚好 ${TREE_ROW_CAP} 条是完整的，不是截断`);
+    assert.equal(exact.body.roots[0].children.length, TREE_ROW_CAP, '整棵树都该在响应里');
+
+    // 再加一条 → 这次真的取不完，必须如实说截断了
+    await prisma.referral.createMany({ data: [edge(TREE_ROW_CAP)] });
+    const over = await api<AdminReferralTree>('GET', '/api/admin/referral/tree');
+    assert.equal(over.status, 200, JSON.stringify(over.body));
+    assert.equal(over.body.truncated, true, `超过 ${TREE_ROW_CAP} 条必须报截断`);
+    assert.equal(over.body.roots[0].children.length, TREE_ROW_CAP, '只渲染取回来的那批，不拼半条边');
+  });
+
   test('tenantId 可筛：另一个租户的邀请边不出现在本租户视图里', async () => {
     const a = await register();
     const b = await register({ inviteCode: await inviteCodeOf(a) });
@@ -166,21 +218,36 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
     __clearFeatureCache();
   });
 
-  /** 造 n 个带码进线留痕，全部挂在同一个 IP 上。 */
+  /** 造 n 个带码进线留痕（每条都对应一个真实用户，二部图右侧要能认人），全部挂在同一个 IP 上。 */
   async function attributions(ip: string, n: number, opts: { code?: string; tenantId?: string } = {}) {
     const tenant = opts.tenantId ?? (await prisma.tenant.create({ data: { name: '风控测试租户' } })).id;
-    const ids: string[] = [];
+    const users: { id: string; phone: string }[] = [];
     for (let i = 0; i < n; i++) {
-      const u = await prisma.user.create({ data: { tenantId: tenant, phone: uniquePhone(), name: `新号${i}` } });
+      const phone = uniquePhone();
+      const u = await prisma.user.create({ data: { tenantId: tenant, phone, name: `新号${i}` } });
       await prisma.referralAttribution.create({
         data: {
           tenantId: tenant, inviteCode: opts.code ?? 'JS2K7P', source: 'poster_qr',
           newUserId: u.id, referrerId: null, outcome: 'bound', clientIp: ip, userAgent: 'test-ua',
         },
       });
-      ids.push(u.id);
+      users.push({ id: u.id, phone });
     }
-    return { tenantId: tenant, userIds: ids };
+    return { tenantId: tenant, userIds: users.map((u) => u.id), users };
+  }
+
+  /**
+   * 批量灌留痕（不建 User，只为压规模）：newUserId 没有外键，风控判定只关心「有没有值、去重后几个」。
+   * createdAt 显式给，用来复现「旧留痕最老、新号最新」这个真实时间分布——正是旧实现按 createdAt asc
+   * 全局 take 之后会把新号整批切掉的形状。
+   */
+  async function bulkAttributions(tenantId: string, rows: { ip: string; userId: string | null; at: Date }[]) {
+    await prisma.referralAttribution.createMany({
+      data: rows.map((r) => ({
+        tenantId, inviteCode: 'JS2K7P', source: 'poster_qr', newUserId: r.userId,
+        referrerId: null, outcome: 'bound' as const, clientIp: r.ip, userAgent: 'test-ua', createdAt: r.at,
+      })),
+    });
   }
 
   test('只回超阈值的组；阈值来自运营配置，改阈值就改结果（没有写死）', async () => {
@@ -188,11 +255,12 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
     await attributions(IP_NORMAL, 2, { tenantId: cluster.tenantId });
 
     // 默认阈值（代码兜底 5）下：4 个新号还够不上，一个组都不回
-    const def = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const def = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(def.status, 200, JSON.stringify(def.body));
     assert.equal(def.body.threshold, REFERRAL_RISK_DEF);
     assert.equal(def.body.configured, false, '运营还没配 → 必须如实说这是兜底默认值');
     assert.deepEqual(def.body.groups, [], `阈值 ${REFERRAL_RISK_DEF} 时 4 个新号不该入列`);
+    assert.equal(def.body.groupTotal, 0, '一组都没超阈值 → 总组数也是 0');
     assert.equal(def.body.scannedIps, 2, '扫过 2 个 IP —— 这与「一条数据都没有」必须分得开');
     assert.equal(def.body.scannedAttributions, 6);
 
@@ -200,12 +268,13 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
     const patch = await api('PATCH', `/api/admin/flags/${REFERRAL_RISK_FLAG}`, { body: { value: 3 } });
     assert.equal(patch.status, 200, JSON.stringify(patch.body));
 
-    const r = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const r = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.threshold, 3);
     assert.equal(r.body.configured, true);
     assert.equal(r.body.flagKey, REFERRAL_RISK_FLAG);
     assert.equal(r.body.groups.length, 1, '只该回超阈值的那一组');
+    assert.equal(r.body.groupTotal, 1, '没被截断时总组数 = 返回组数');
     const g = r.body.groups[0];
     assert.equal(g.clientIp, IP_CLUSTER);
     assert.equal(g.userCount, 4);
@@ -214,7 +283,107 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
     assert.equal(g.members.length, 4);
     assert.deepEqual([...g.members.map((m) => m.userId)].sort(), [...cluster.userIds].sort());
     assert.equal(r.body.flaggedUsers, 4);
-    assert.ok(g.members.every((m) => m.name && m.phone), '二部图右侧要能认人（名字/手机号一次查完）');
+    assert.ok(g.members.every((m) => m.name), '二部图右侧要能认人（名字一次查完）');
+
+    // ── 隐私：能认人 ≠ 下发完整身份 ────────────────────────────────────────
+    // 这一行已经把 IP + 用户 id + 归因码摆在一起，再加完整手机号就是把「可直接触达的名单」
+    // 发给每一个后台账号；userAgent 前端一处也不展示，属纯粹的指纹扩散。
+    const phoneById = new Map(cluster.users.map((u) => [u.id, u.phone]));
+    for (const m of g.members) {
+      const real = phoneById.get(m.userId);
+      assert.ok(real, '测试自身前提：这些新号都是本用例造的');
+      assert.notEqual(m.phone, real, '不得下发完整手机号');
+      assert.equal(m.phone, maskAuditPhone(real), '必须是 services/audit.ts 同一口径的掩码值');
+      assert.ok(!('userAgent' in m), 'userAgent 前端不用，不该出现在响应里');
+    }
+  });
+
+  test('单个 IP 的重复留痕不得挤掉别的组：5000 条旧留痕之后的新聚集必须照样报出来', async () => {
+    // 这是旧实现真正会漏报的形状（明细一条 findMany 全局 take 5000 之后才去重判阈值）：
+    // 一个 IP 上先攒够 5000 条重复旧留痕，另一个 IP 上随后来了一批真实新号 → 排序取前 5000 后
+    // 第二组整组消失，页面显示「没有聚集」，而 scannedAttributions 里明明包含这些记录。
+    const patch = await api('PATCH', `/api/admin/flags/${REFERRAL_RISK_FLAG}`, { body: { value: 3 } });
+    assert.equal(patch.status, 200, JSON.stringify(patch.body));
+    const tenant = (await prisma.tenant.create({ data: { name: '重复留痕压规模租户' } })).id;
+    const IP_HEAVY = '198.51.100.7';
+    const IP_QUIET = '198.51.100.9';
+    const t0 = Date.now();
+    const DUPES = 4995;
+
+    const rows: { ip: string; userId: string | null; at: Date }[] = [];
+    // ① 最老：一个人在 IP_HEAVY 上反复点码 4995 次（去重后只算 1 个新号）
+    for (let i = 0; i < DUPES; i++) rows.push({ ip: IP_HEAVY, userId: 'syn-heavy-loop', at: new Date(t0 - 20 * 86_400_000 + i) });
+    // ② 其次：IP_HEAVY 上 10 个真实的不同新号
+    for (let i = 0; i < 10; i++) rows.push({ ip: IP_HEAVY, userId: `syn-heavy-${i}`, at: new Date(t0 - 2 * 86_400_000 + i) });
+    // ③ 最新：IP_QUIET 上另外 10 个新号——旧实现里被 take 切光的正是这一批
+    for (let i = 0; i < 10; i++) rows.push({ ip: IP_QUIET, userId: `syn-quiet-${i}`, at: new Date(t0 - 3_600_000 + i) });
+    await bulkAttributions(tenant, rows);
+
+    const r = await api<RiskBody>('GET', '/api/admin/referral/risk');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.scannedAttributions, DUPES + 20, '分母照实：这些记录都在扫描范围内');
+    assert.equal(r.body.scannedIps, 2);
+    assert.equal(r.body.groupTotal, 2, '两个 IP 都超阈值 → 总组数 2');
+    assert.equal(r.body.groups.length, 2, '第二组不能因为第一组记录多而消失');
+
+    const heavy = r.body.groups.find((g) => g.clientIp === IP_HEAVY);
+    const quiet = r.body.groups.find((g) => g.clientIp === IP_QUIET);
+    assert.ok(heavy, `${IP_HEAVY} 应报出（11 个去重新号）`);
+    assert.ok(quiet, `${IP_QUIET} 应报出 —— 它就是旧实现会整组漏掉的那一组`);
+    assert.equal(heavy!.userCount, 11, '4995 条重复留痕去重后只顶 1 个新号，再加 10 个 = 11');
+    assert.equal(heavy!.attributionCount, DUPES + 10, '留痕条数照实（含重复的）');
+    // 同组内也不许被重复留痕挤掉名字：名单上限是按 IP 分区的，不是全局 take。
+    assert.equal(heavy!.members.length, 11, '这一组的名单要完整，11 个人一个不少');
+    assert.equal(new Set(heavy!.members.map((m) => m.userId)).size, 11, '名单不许重复计人');
+    assert.equal(quiet!.userCount, 10);
+    assert.equal(quiet!.attributionCount, 10);
+    assert.equal(quiet!.members.length, 10);
+    assert.equal(r.body.groups[0].clientIp, IP_HEAVY, '排序按聚集度：11 在 10 前面');
+    assert.equal(r.body.flaggedUsers, 21, '被标记的新号 = 两组去重后的总人数');
+  });
+
+  test('组数触顶：41 组时如实回总组数，且树的红环只按本次返回的 40 组着色', async () => {
+    // 旧实现：flagged 按**全量**超阈值组算、groups 只回前 40 组 → 第 41 组的人在树上被标红，
+    // 但运营在风控屏里翻不到对应的 IP（页面还写着「完整名单见下方」）。红环与返回的组必须同一集合。
+    const patch = await api('PATCH', `/api/admin/flags/${REFERRAL_RISK_FLAG}`, { body: { value: 2 } });
+    assert.equal(patch.status, 200, JSON.stringify(patch.body));
+
+    const inviter = await register();
+    const code = await inviteCodeOf(inviter);
+    const inGroup = await register({ inviteCode: code });   // 落在会被返回的那组里
+    const outGroup = await register({ inviteCode: code });  // 落在被截断掉的第 41 组里
+    const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: inGroup }, select: { tenantId: true } })).tenantId;
+
+    // 零填充保证字符串序稳定（排序兜底是 clientIp ASC，`.41` 会排在 `.5` 前面这种坑要避开）。
+    const ipOf = (i: number) => `198.51.100.${String(i + 1).padStart(3, '0')}`;
+    const rows: { ip: string; userId: string | null; at: Date }[] = [];
+    const t0 = Date.now();
+    // 前 40 组各 3 个新号；第 41 组（IP 序最大）只有 2 个 → 排序必然落在最后，被截断的就是它
+    for (let g = 0; g < 40; g++) for (let i = 0; i < 3; i++) rows.push({ ip: ipOf(g), userId: `syn-${g}-${i}`, at: new Date(t0 - 3_600_000 + g * 10 + i) });
+    for (let i = 0; i < 2; i++) rows.push({ ip: ipOf(40), userId: `syn-40-${i}`, at: new Date(t0 - 3_600_000 + 500 + i) });
+    await bulkAttributions(tenant, rows);
+    // 两个真实新号各挂到「会被返回的第 1 组」和「被截断的第 41 组」上
+    await prisma.referralAttribution.updateMany({ where: { newUserId: inGroup }, data: { clientIp: ipOf(0) } });
+    await prisma.referralAttribution.updateMany({ where: { newUserId: outGroup }, data: { clientIp: ipOf(40) } });
+
+    const risk = await api<RiskBody>('GET', '/api/admin/referral/risk');
+    assert.equal(risk.status, 200, JSON.stringify(risk.body));
+    assert.equal(risk.body.groupTotal, 41, '总组数必须如实回，否则截断是静默的');
+    assert.equal(risk.body.groups.length, 40, '一页只返回 40 组');
+    const returnedIps = new Set(risk.body.groups.map((g) => g.clientIp));
+    assert.ok(returnedIps.has(ipOf(0)), '聚集度最高的组必须在返回列表里');
+    assert.ok(!returnedIps.has(ipOf(40)), '第 41 组按排序被截断（本用例的前提）');
+    assert.equal(risk.body.flaggedUsers, 121, '被标记的新号只数返回的这 40 组（40*3 + 第 1 组多出来的那个真实新号）');
+
+    const tree = await api<AdminReferralTree>('GET', '/api/admin/referral/tree');
+    assert.equal(tree.status, 200, JSON.stringify(tree.body));
+    const root = tree.body.roots.find((n) => n.userId === inviter);
+    assert.ok(root);
+    assert.equal(childOf(root!, inGroup).risk, true, '风控屏返回了这个 IP → 树上必须标红');
+    assert.equal(
+      childOf(root!, outGroup).risk, false,
+      '风控屏没返回第 41 组 → 树上就不能标红，否则运营找不到红环对应的 IP',
+    );
   });
 
   test('聚集度按去重新号数算：同一个新号在同 IP 上多次留痕只算一个', async () => {
@@ -230,7 +399,7 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
         },
       });
     }
-    const r = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const r = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.scannedAttributions, 5, '5 条留痕都在扫描范围内');
     assert.deepEqual(r.body.groups, [], '但只有 1 个去重新号 → 不是聚集，不该报警');
@@ -249,7 +418,7 @@ describe('视图③ 风控关联（IP ↔ 新号二部图）', () => {
       data: { clientIp: IP_CLUSTER },
     });
 
-    const risk = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const risk = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(risk.status, 200, JSON.stringify(risk.body));
     const group = risk.body.groups.find((x) => x.clientIp === IP_CLUSTER);
     assert.ok(group, '二部图应报出这个 IP');
@@ -308,27 +477,48 @@ describe('视图① 本体 Schema 的真实行数 + 空态与读失败必须分�
     assert.equal(tree.body.inviterTotal, 0);
     assert.deepEqual(tree.body.roots, []);
 
-    const risk = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const risk = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(risk.status, 200);
     assert.equal(risk.body.scannedIps, 0, '「扫了 0 个 IP」与「扫了 200 个但没聚集」是两回事');
     assert.deepEqual(risk.body.groups, []);
+    assert.equal(risk.body.groupTotal, 0);
+
+    const tenants = await api<AdminReferralTenantOption[]>('GET', '/api/admin/referral/tenants');
+    assert.equal(tenants.status, 200);
+    assert.deepEqual(tenants.body, [], '空作用域下也是 200 + 空数组，前端据此说「确实没有租户」');
+  });
+
+  test('租户筛选项是独立端点：与 overview 里的那份同源，前端可独立三态重试', async () => {
+    const a = await register();
+    const b = await register({ inviteCode: await inviteCodeOf(a) });
+    const tb = await prisma.user.findUniqueOrThrow({ where: { id: b }, select: { tenantId: true } });
+
+    const tenants = await api<AdminReferralTenantOption[]>('GET', '/api/admin/referral/tenants');
+    assert.equal(tenants.status, 200, JSON.stringify(tenants.body));
+    assert.deepEqual(tenants.body, [{ tenantId: tb.tenantId, name: '', edges: 1 }]);
+
+    // 与 overview 的 tenants 必须逐字相同：同一个函数算出来的，不能有第二份口径。
+    const ov = await api<AdminReferralOverview>('GET', '/api/admin/referral/overview?days=7');
+    assert.deepEqual(tenants.body, ov.body.tenants, '筛选项换端点取，内容不许漂移');
   });
 
   test('查询失败回 5xx，绝不伪装成空数据', async () => {
     // 这条用例守的是「路由里没有兜底 catch」。把聚合查询打断，端点必须把故障抛出去，
     // 而不是回一个漂亮的空结果——运营后台在出事时说谎，比没有这块屏更糟。
-    const delegate = prisma.referralAttribution as unknown as { groupBy: unknown };
-    const original = delegate.groupBy;
-    delegate.groupBy = async () => { throw new Error('模拟数据库抖动'); };
+    // 打断的是 $queryRaw：聚集判定（COUNT(DISTINCT) + HAVING）现在下推到 SQL 里做，
+    // 这是风控端点唯一的取数通道。
+    const client = prisma as unknown as { $queryRaw: unknown };
+    const original = client.$queryRaw;
+    client.$queryRaw = async () => { throw new Error('模拟数据库抖动'); };
     try {
       const r = await api('GET', '/api/admin/referral/risk');
       assert.ok(r.status >= 500, `查询失败必须回 5xx，实际 ${r.status} ${JSON.stringify(r.body)}`);
       assert.notDeepEqual(r.body?.groups, [], '不得把失败渲染成「没有聚集」');
     } finally {
-      delegate.groupBy = original;
+      client.$queryRaw = original;
     }
     // 复原后照常可用（证明上面改的是同一个 client 实例，这条用例真的生效过）
-    const ok = await api<AdminReferralRisk>('GET', '/api/admin/referral/risk');
+    const ok = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(ok.status, 200);
   });
 });

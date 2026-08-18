@@ -122,10 +122,25 @@ export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<Re
     console.warn(`[referral] 运营配置读取失败，本次不建边: ${(err as Error).message}`);
     throw new ReferralConfigUnavailable((err as Error).message);
   }
-  const days = Number(raw?.window);
+  // 窗口取值顺序：新键 → **旧键回退** → 代码默认。
+  //
+  // 旧键回退不是多余的谨慎：窗口原本就住在 `referral` 这个 payload 里（与奖励键同住），
+  // 是后来为了躲开「整块覆盖写」才搬到 `referral-window` 的。如果运营在搬迁前已经把窗口
+  // 调成过 7 天，而升级后只读新键，就会静默回落 30 天——于是 20 天前捕获的码从「过期」
+  // 变成建立一条**不可变更**的关系，关系与漏斗口径一起写错，事后无法修正。
+  // 回退时打 warn 提示把值搬到新键（搬完这段可以删，删之前先确认线上旧键已无 window）。
+  const valid = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 && n <= 3650 ? n : null;
+  };
+  const fromNew = valid(raw?.window);
+  const fromLegacy = fromNew === null ? valid((rewards as Record<string, unknown> | null)?.window) : null;
+  if (fromLegacy !== null) {
+    console.warn(`[referral] 归因窗口仍存在旧键 ${REFERRAL_REWARD_FLAG}.window=${fromLegacy}（新键 ${REFERRAL_WINDOW_FLAG} 未设）——本次按旧值生效，请在运营后台重新保存一次以迁移到新键`);
+  }
   return {
     // 越界/脏值回落默认，不让一个错配把归因窗口带到沟里（沿用告警阈值配置化的处理方式）。
-    windowDays: Number.isFinite(days) && days > 0 && days <= 3650 ? days : DEFAULT_WINDOW_DAYS,
+    windowDays: fromNew ?? fromLegacy ?? DEFAULT_WINDOW_DAYS,
     rewardInviter: rewards?.rewardInviter ?? null,
     rewardInvitee: rewards?.rewardInvitee ?? null,
     rewardOnPaid: rewards?.rewardOnPaid ?? null,

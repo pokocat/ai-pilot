@@ -96,12 +96,13 @@ export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recor
  *
  * 漏斗那一段问的是「被邀请来的人里有多少**转化成了付费用户**」——是**人**的口径，不是订单口径：
  * 同一个人续费、加购、再买一个 SKU 都不该再进一次分子。所以按 userId 去重，已有 invite 行就直接返回。
- * 这一条同时兜住三种重复：① 同一订单重复回调（回调侧另有 appliedAt 幂等，这里是第二道）；
+ * 这一条同时兜住三种重复：① 同一订单重复回调——重投**刻意**照样派发一次补记（`markPaidAndApply`
+ * 的 already_applied 分支，为的是给首次那次失败留下补上的机会），这道去重就是它的安全网；
  * ② 同一用户先后两笔订单；③ 同一用户两笔订单**并发**到账——ActivationEvent 上没有唯一约束，
  * check-then-insert 必须自己串行化，故进来先取 `activation:invite:{userId}` 事务级 advisory lock
  * （与 credits.ts / tokenQuota.ts 的按用户加锁同一套路，命名空间独立，不与支付侧的锁互相牵连）。
  *
- * ## 为什么跑在支付事务之外，而且从不抛错
+ * ## 为什么跑在支付事务之外、不被 await，而且从不抛错
  *
  * 这段查询绝不能给支付回调增加失败面。Postgres 里事务内任一语句失败即整体 aborted，
  * 塞进 `markPaidAndApply` 的事务里，「查 Referral 时抖一下」就会连带回滚已经算成功的入账，
@@ -109,6 +110,13 @@ export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recor
  * 所以它在入账事务**提交之后**才跑，自带一个只包「判推荐人 + 落一行」的小事务，
  * 任何异常在函数内部就地吞掉并记 warn，返回 'failed'。**漏一条统计远好过让一笔真钱卡在未入账。**
  * 查不到 Referral 就当没有推荐人（'no_referrer'），不重试、不报警。
+ *
+ * 「事务外」还不够，调用方**也不许 await 它**（2026-08-18 订正）：这个小事务不是「两条查询」——
+ * BEGIN + advisory lock + 查 Referral 就已经 2 条 SQL（无推荐人到此结束），有推荐人再加查重（3 条）、
+ * 首次写入再加 insert（4 条），外加 COMMIT。真钱早已入账，可连接池拥塞或 advisory lock 排队时
+ * 这几条照样能把支付回调的响应拖过微信的超时，换来一次重复回调。故 `markPaidAndApply` 派发出去就走
+ * （见那里的 dispatchInviteActivation）；丢掉的那条统计由微信重投补——重投也会派发一次补记，
+ * 而本函数幂等，重复调用只会返回 'already_recorded'。
  */
 export async function recordInviteActivation(target: InviteActivationTarget): Promise<InviteActivationResult> {
   try {

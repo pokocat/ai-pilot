@@ -1851,7 +1851,14 @@ export interface AdminPrescriptionFunnelRow {
   toolKey: string; toolType: string;
   proposed: number; seen: number; clicked: number; activated: number; used: number; verified: number; dismissed: number;
 }
-/** 开通侧：ActivationEvent 按来源分组计数（prescription | catalog | market）。 */
+/**
+ * 开通侧：ActivationEvent 按来源分组计数。
+ *
+ * 取值 `prescription | catalog | market | invite`，但**这四桶不是一组互斥枚举、不能相加**：
+ * 前三个回答「从哪个位子成交的」（值由下单请求带入，互斥）；`invite` 回答「这个人是被谁带来的」
+ * （由服务端按 `Referral` 判定，在付费入账后**另落一行**，按人去重 = 首次付费开通）。
+ * 一次开通完全可能同时出现在 `catalog` 和 `invite` 两桶里。要总开通数请数人/订单，别把桶求和。
+ */
 export interface AdminActivationSourceRow { source: string; count: number; }
 /** 漏斗响应：处方侧六态聚合 + 开通侧来源计数，一次返回两块。 */
 export interface AdminPrescriptionFunnel {
@@ -2916,6 +2923,7 @@ export interface AdminReferralOverview {
 export interface AdminReferralTreeNode {
   userId: string;
   name: string | null;
+  /** 同样按审计口径掩码——树上同时挂着风控红环，与风控屏属同一关联面。 */
   phone: string | null;
   /** 直邀人数 = 节点大小编码。**任意深度都准**（从全量 groupBy 取，不是从本次子树数出来的） */
   directCount: number;
@@ -2949,11 +2957,13 @@ export interface AdminReferralTree {
 export interface AdminReferralRiskMember {
   userId: string;
   name: string | null;
+  /** **已按审计口径掩码**（`services/audit.ts` 的 `maskAuditPhone`，形如 `138****1234`），不是完整号码。 */
   phone: string | null;
   inviteCode: string;
   outcome: string;
   createdAt: string;
-  userAgent: string | null;
+  // userAgent 刻意不下发：前端一处不展示，而把 IP + 用户 id + 手机号 + 设备指纹一起端到
+  // 所有后台账号面前，是没有必要的隐私扩散（2026-08-18 复核移除）。
 }
 
 export interface AdminReferralRiskGroup {
@@ -2985,7 +2995,15 @@ export interface AdminReferralRisk {
   scannedIps: number;
   /** 带 IP 的归因记录数（IP 列是后加的，老记录没有，不参与判定） */
   scannedAttributions: number;
-  /** 被标记的新号总数（超阈值组内去重后） */
+  /** 被标记的新号总数（**本次返回的**组内去重后；同一人可能出现在两个 IP 上，故不是各组相加） */
   flaggedUsers: number;
+  /**
+   * 超阈值组的**总数**（未截断）。`groupTotal > groups.length` 即本页被截断。
+   *
+   * 必须有这个数：响应只回前 N 组，不透出总数就是**静默截断**——运营会以为「一共就这么多组」，
+   * 而风控视图唯一的价值就是看见聚集。页面据此说明「共 N 组、本页返回 M 组、另有 K 组未返回」，
+   * 并点明下方清单、被标记新号计数、树上红环三处都只覆盖返回的这 M 组。
+   */
+  groupTotal: number;
   groups: AdminReferralRiskGroup[];
 }

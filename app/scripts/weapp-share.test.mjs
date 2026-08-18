@@ -234,16 +234,56 @@ function stubApiTrack(mode = 'ok') {
   return { calls, restore() { Module.prototype.require = original; } };
 }
 
-/** 加载 services/invite.js，桩一个最小 wx storage。 */
-function loadInvite(store = {}) {
-  const invitePath = path.join(sourceRoot, 'services/invite.js');
+/** 桩一个最小 wx storage（invite.js 只用这三个同步接口）。 */
+function stubStorage(store) {
   global.wx = {
     getStorageSync: (k) => (k in store ? store[k] : ''),
     setStorageSync: (k, v) => { store[k] = v; },
     removeStorageSync: (k) => { delete store[k]; },
   };
+  return store;
+}
+
+/** 加载 services/invite.js，桩一个最小 wx storage。 */
+function loadInvite(store = {}) {
+  const invitePath = path.join(sourceRoot, 'services/invite.js');
+  stubStorage(store);
   delete cjsRequire.cache[cjsRequire.resolve(invitePath)];
   return { mod: cjsRequire(invitePath), store };
+}
+
+/**
+ * 加载 **app.js 本体**并取回它注册给微信的生命周期对象，用来跑真实的 onLaunch / onShow 次序。
+ *
+ * 为什么必须这样测而不是手工重复调 captureInvite：冷启动的重复上报是**生命周期**造成的
+ * （微信把同一份启动参数先给 onLaunch、再给紧随其后的首次 onShow），手工调两次
+ * 既模拟不出「同一份 options 两次投递」，也验不到 app.js 到底给哪一路传了 `{ launch: true }`。
+ *
+ * 桩掉 ./services/store 与 ./services/font（它们会拉起 api / token / request / env 整条链，
+ * 与本测试无关），**invite 走真实实现**；invite 的模块级去重状态每次加载都清干净（删 require 缓存）。
+ */
+function loadApp(store = {}) {
+  const Module = cjsRequire('node:module');
+  const original = Module.prototype.require;
+  const appPath = path.join(sourceRoot, 'app.js');
+  const invitePath = path.join(sourceRoot, 'services/invite.js');
+  let registered = null;
+  global.App = (options) => { registered = options; };
+  stubStorage(store);
+  Module.prototype.require = function patched(id) {
+    if (id === './services/store') return { bootstrap() {} };
+    if (id === './services/font') return { loadAppFont() {} };
+    return original.apply(this, arguments);
+  };
+  try {
+    delete cjsRequire.cache[cjsRequire.resolve(appPath)];
+    delete cjsRequire.cache[cjsRequire.resolve(invitePath)];
+    cjsRequire(appPath);
+  } finally {
+    Module.prototype.require = original;
+  }
+  assert.ok(registered && typeof registered.onLaunch === 'function' && typeof registered.onShow === 'function', 'app.js 应向 App() 注册 onLaunch 与 onShow');
+  return { app: registered, store };
 }
 
 test('分享回调实际执行：必须带真图（留空会让微信截当前页，从账本页转发就泄露经营数据）', () => {
@@ -442,7 +482,9 @@ test('落地打开埋点：每次成功捕获都报一条 invite_landing（重�
     mod.captureInvite({ query: { ic: 'JS2K7P' } });
     mod.captureInvite({ query: { scene: 'ic%3AJSWXYZ' } });
     // onShow 那次「小程序已在后台、又点了一张分享卡」：重复进入本身就是漏斗要看的数据，
-    // 端上不偷偷合并，去重交给取数侧。
+    // 端上不偷偷合并，去重交给取数侧。（唯一的例外是冷启动那次回响——它由 onLaunch 传
+    // `{ launch: true }` 标出来，见下一条「冷启动只算一次落地」。这里三次都没带那个标记，
+    // 全都是货真价实的落地，必须三条。）
     mod.captureInvite({ query: { ic: 'JS2K7P' } });
     assert.deepEqual(stub.calls.map((c) => c.name), ['invite_landing', 'invite_landing', 'invite_landing']);
     assert.deepEqual(stub.calls.map((c) => c.props.channel), ['query', 'scene', 'query']);
@@ -454,6 +496,63 @@ test('落地打开埋点：每次成功捕获都报一条 invite_landing（重�
       mod.captureInvite(bad);
     }
     assert.equal(stub.calls.length, before, '没捕获到码就不该有落地事件，否则漏斗分母被灌水');
+  } finally { stub.restore(); }
+});
+
+test('冷启动只算一次落地：微信把同一份启动参数投给 onLaunch + 首次 onShow，埋点只许一条', () => {
+  // 这是 codex 审出的阻断 1：小程序**已被销毁**时点分享卡，微信依次触发 onLaunch(options) 与
+  // 紧随其后的首次 onShow(**同一份** options)，两处都上报就写两条 invite_landing；暖启动只走
+  // onShow 一次、只写一条——漏斗分母于是按启动形态系统性失真。
+  const stub = stubApiTrack();
+  try {
+    const { app, store } = loadApp();
+    // 微信真实次序 + 真实形状：options 带 path / scene / query，两次是同一个对象内容。
+    const launchOptions = { path: 'pages/sessions/index', scene: 1007, query: { ic: 'JS2K7P' } };
+    app.onLaunch(launchOptions);
+    app.onShow({ ...launchOptions });
+    assert.deepEqual(stub.calls.map((c) => c.name), ['invite_landing'], '冷启动的两次投递只许上报一条');
+    assert.equal(store['junshi.invite'], 'JS2K7P', '捕获仍然两处都做（游客可能从任一路径进来），只是不重复上报');
+
+    // 运行期间用户又点了一张**别人的**卡：新的一次落地，照报。
+    app.onShow({ query: { ic: 'JSWXYZ' } });
+    // 同一张卡把人**再拉回来一次**：也是新的一次落地（这正是漏斗要看的「被同一张卡拉回几次」），
+    // 所以去重绝不能做成「整个生命周期只报一次」或「同码只报一次」。
+    app.onShow({ query: { ic: 'JSWXYZ' } });
+    assert.deepEqual(
+      stub.calls.map((c) => c.props.channel), ['query', 'query', 'query'],
+      '冷启动 1 条 + 运行期两次真落地 2 条 = 3 条',
+    );
+    assert.equal(store['junshi.invite'], 'JSWXYZ', '末次触点覆盖口径不变');
+
+    // 抑制额度只有一次性的一份：它已经被首次 onShow 消费掉，之后同码再进来照报（上面第 3 条即是）。
+    const before = stub.calls.length;
+    app.onShow({ ...launchOptions });
+    assert.equal(stub.calls.length, before + 1, '回到最初那个码也是新落地，不得被残留的标记吞掉');
+  } finally { stub.restore(); }
+});
+
+test('暖启动一条不少：没有 onLaunch 的纯 onShow 进入，每次都是一条落地', () => {
+  // 去重的实现是「onLaunch 置一次性标记 → 紧邻的下一次调用消费」。这条守住反面：
+  // 小程序还在后台、只走 onShow 的路径上没有任何标记被置上，两次进入必须两条。
+  const stub = stubApiTrack();
+  try {
+    const { app } = loadApp();
+    app.onShow({ query: { ic: 'JS2K7P' } });
+    app.onShow({ query: { ic: 'JS2K7P' } });
+    assert.equal(stub.calls.length, 2, '暖启动重复进入不许被合并（否则修阻断 1 反而少报）');
+  } finally { stub.restore(); }
+});
+
+test('冷启动那次 onShow 没带码时，抑制标记也必须被消费掉（不许留到下一次真落地上）', () => {
+  // 一次性标记若只在「同码」时才消费，onLaunch 捕到码而紧随的 onShow 参数为空（基础库差异）
+  // 就会把标记留着，下一次真落地被白吞一条。这条把「无论捕不捕到码都消费」钉住。
+  const stub = stubApiTrack();
+  try {
+    const { app } = loadApp();
+    app.onLaunch({ query: { ic: 'JS2K7P' } });
+    app.onShow({});                              // 没带码：不捕获、不上报，但把标记消费掉
+    app.onShow({ query: { ic: 'JS2K7P' } });     // 真的又点了一次同一张卡：必须照报
+    assert.equal(stub.calls.length, 2, '标记不得跨过一次空 onShow 继续抑制');
   } finally { stub.restore(); }
 });
 
@@ -470,16 +569,39 @@ test('落地埋点炸了不得影响冷启动：track 抛 / require 抛，captur
   }
 });
 
-test('事件名必须同时在 SSOT 与服务端白名单里（漏一处就是静默 400、库里一条都没有）', () => {
-  // 两处必须一起改：shared/contracts.d.ts 的 ClientEventName 与 server/src/routes/wence.ts 的 EVENT_NAMES。
-  // 只改端上不改服务端，事件会被 400 掉且端上完全静默（api.track 的 fail 是空实现），
-  // 症状是「代码明明埋了、库里查不到」——这条守卫就是为它。
+/**
+ * 从 TS 源码里**解析出真实的事件名清单**（而不是全文正则匹配整个文件）。
+ *
+ * 上一版守卫是 `assert.match(wenceRoute, /'invite_landing'/)`：从 EVENT_NAMES 集合里删掉这一项、
+ * 只要文件里还留着提到它的说明注释，测试照样全绿——而线上此刻已经在 400，端上 `api.track` 的
+ * fail 是空实现，事件静默消失。所以这里先把**声明本身**截出来，再**剥掉注释**，只认引号里的名字。
+ */
+function parseDeclaredNames(source, label, declaration) {
+  const block = source.match(declaration);
+  assert.ok(block, `${label}：没解析到事件名声明（声明形状变了就来这里改，别把守卫退回全文匹配）`);
+  const body = block[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const names = (body.match(/'[^']+'/g) || []).map((quoted) => quoted.slice(1, -1));
+  assert.ok(names.length >= 10, `${label}：只解析出 ${names.length} 个名字，解析器多半失效了`);
+  return names.sort();
+}
+
+test('事件名白名单必须真的一致：解析服务端集合与 SSOT 联合类型逐项比对（不是全文匹配）', () => {
+  // 两处必须一起改：shared/contracts.d.ts 的 ClientEventName 与 server/src/routes/wence.ts 的
+  // EVENT_NAMES（已导出，就是为了让这条守卫拿到真集合）。只改端上不改服务端，事件会被 400 掉
+  // 且端上完全静默，症状是「代码明明埋了、库里查不到」——这条守卫就是为它。
   const repoRoot = path.resolve(appRoot, '..');
   const contracts = fs.readFileSync(path.join(repoRoot, 'shared/contracts.d.ts'), 'utf8');
   const wenceRoute = fs.readFileSync(path.join(repoRoot, 'server/src/routes/wence.ts'), 'utf8');
+
+  const serverNames = parseDeclaredNames(wenceRoute, 'server/src/routes/wence.ts 的 EVENT_NAMES', /export const EVENT_NAMES = new Set\(\[([\s\S]*?)\]\)/);
+  const contractNames = parseDeclaredNames(contracts, 'shared/contracts.d.ts 的 ClientEventName', /export type ClientEventName =([\s\S]*?);\n/);
+
+  // 逐项相等：任何一侧多一个 / 少一个都红。多出来的那侧要么是 400（服务端缺），
+  // 要么是「后端认了但端上类型不认」（SSOT 缺），两种都必须当场发现。
+  assert.deepEqual(serverNames, contractNames, '服务端白名单与 SSOT 联合类型必须逐项一致');
   for (const name of ['share_expose', 'invite_landing']) {
-    assert.match(contracts, new RegExp(`'${name}'`), `shared/contracts.d.ts 的 ClientEventName 缺 ${name}`);
-    assert.match(wenceRoute, new RegExp(`'${name}'`), `server/src/routes/wence.ts 的 EVENT_NAMES 缺 ${name}`);
+    assert.ok(serverNames.includes(name), `server/src/routes/wence.ts 的 EVENT_NAMES 缺 ${name}`);
+    assert.ok(contractNames.includes(name), `shared/contracts.d.ts 的 ClientEventName 缺 ${name}`);
   }
   // 端上真的用了这两个名字（防止改名后只剩白名单里的死取值）
   assert.match(read('services/share.js'), /track\('share_expose'/);

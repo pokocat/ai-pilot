@@ -598,6 +598,12 @@ select.ai-input { appearance: none; }
 .rf-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
 .rf-svg { display: block; }
 
+/* 租户筛选条：**每个租户都可选**（旧版只渲染前 8 个，第 9 个租户出事时运营切不过去）。
+   数量多时纵向滚动，而不是截断列表——横向不溢出仍由外层 .pad 保证，这里只滚自己。 */
+.rf-tenants { max-height: 108px; overflow-y: auto; align-content: flex-start; padding-right: 2px; }
+.rf-tenants::-webkit-scrollbar { width: 6px; }
+.rf-tenants::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+
 /* 图例：每张图必须有图例，否则「大小=什么、颜色=什么」只有作者知道。 */
 .rf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 12px; font-size: 11px; color: var(--ink-3); }
 .rf-legend-i { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
