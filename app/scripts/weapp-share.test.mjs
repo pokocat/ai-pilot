@@ -302,3 +302,42 @@ test('邀请码捕获实际执行：query 与 scene 两路都认，脏值不写�
   assert.deepEqual(mod.inviteParams(), {}, '清码后请求体不得出现 undefined 字段');
   assert.equal(Object.keys(store).length, 0, 'storage 应被清空');
 });
+
+test('页面自定义分享回调漏了 imageUrl 时，withShare 必须兜上默认图', () => {
+  // 这是上一轮 codex 抓到的假闭环：mixin 自己返回了图，但那 4 个成果型分享页
+  // **整体覆盖**了 mixin 的实现，只要它们漏写 imageUrl，微信就退回截当前页——
+  // 从命盘 / 成片页转发等于把个人内容贴进聊天窗。逐页补容易再漏，所以兜在 withShare 里。
+  //
+  // 这条断言 + 上面「零漏挂：54 页全部经过 withShare」两条合起来，才等价于
+  // 「任何页面的任何分享都一定带图」——单独任何一条都不够。
+  const share = loadShare({ inviteCode: 'JS2K7P' });
+
+  const leaky = share.withShare({
+    onShareAppMessage() { return { title: '我的命盘报告', path: '/packages/work/mingpan/index' }; },
+  }, { timeline: true });
+  const friend = leaky.onShareAppMessage();
+  assert.equal(friend.imageUrl, share.CARD_FRIEND, '漏图的自定义回调必须被补上品牌底图');
+  assert.equal(friend.title, '我的命盘报告', '页面自己的标题不能被改掉');
+  assert.equal(friend.path, '/packages/work/mingpan/index', '页面自己的落地页不能被改掉');
+  const timeline = leaky.onShareTimeline();
+  assert.equal(timeline.imageUrl, share.CARD_TIMELINE, '朋友圈要补 1:1 那张');
+
+  // 页面自己给了图就不许被覆盖（将来运营给某页配专属图时不能被兜底顶掉）
+  const own = share.withShare({
+    onShareAppMessage() { return { title: 'x', path: '/y', imageUrl: '/assets/custom.png' }; },
+  });
+  assert.equal(own.onShareAppMessage().imageUrl, '/assets/custom.png');
+
+  // 回调返回空 / 不返回对象时不得抛错（微信允许返回 undefined）
+  const empty = share.withShare({ onShareAppMessage() { return undefined; } });
+  assert.doesNotThrow(() => empty.onShareAppMessage());
+});
+
+test('四个成果型分享页确实走的是 withShare 包装（否则上一条兜底不生效）', () => {
+  // 它们保留自己的 onShareAppMessage，但必须仍然经过 withShare —— 否则兜底那层不会挂上。
+  for (const route of CUSTOM_SHARE_ROUTES) {
+    const src = read(`${route}.js`);
+    assert.match(src, /Page\(withShare\(/, `${route} 必须经 withShare 包装`);
+    assert.match(src, /onShareAppMessage\(\)\s*\{/, `${route} 应保留自己的成果型分享`);
+  }
+});

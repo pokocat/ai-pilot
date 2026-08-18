@@ -185,7 +185,24 @@ const timelineMixin = {
 function withShare(page, opts) {
   const wantTimeline = Boolean(opts && opts.timeline);
   const base = wantTimeline ? Object.assign({}, friendMixin, timelineMixin) : Object.assign({}, friendMixin);
-  return Object.assign(base, page);
+  const merged = Object.assign(base, page);
+  // 页面自定义的分享回调（那 4 个成果型分享页）**整体覆盖**了 mixin 的实现，
+  // 于是它们只要漏写 imageUrl，微信就会退回截**当前页**当封面——从命盘 / 成片这类
+  // 页面转发出去等于把个人内容贴到聊天窗里。逐页去补容易再漏，所以在这里统一兜：
+  // 页面自己给了图就用它的，没给就补品牌底图。往后新增自定义分享页也不可能漏。
+  merged.onShareAppMessage = withDefaultImage(merged.onShareAppMessage, CARD_FRIEND);
+  if (wantTimeline) merged.onShareTimeline = withDefaultImage(merged.onShareTimeline, CARD_TIMELINE);
+  return merged;
+}
+
+/** 包一层：回调结果缺 imageUrl 时补默认图；回调没定义或返回空则原样放过。 */
+function withDefaultImage(fn, fallback) {
+  if (typeof fn !== 'function') return fn;
+  return function wrapped(...args) {
+    const result = fn.apply(this, args);
+    if (!result || typeof result !== 'object') return result;
+    return result.imageUrl ? result : Object.assign({}, result, { imageUrl: fallback });
+  };
 }
 
 module.exports = {
