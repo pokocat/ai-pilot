@@ -90,6 +90,9 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
   if (isUnauthorizedError(e)) {
     // 游客从未持有 token：这是动作级登录门，不是「登录态失效」。不清状态、不提示、不跳路由。
     if ((e as { hadToken?: boolean })?.hadToken === false) return 'unauthorized';
+    // 请求层已处理过全局退出，或旧请求在新会话建立后才返回 401：页面 catch 不得再跳一次。
+    if ((e as { authHandled?: boolean; staleAuth?: boolean })?.authHandled === true
+      || (e as { authHandled?: boolean; staleAuth?: boolean })?.staleAuth === true) return 'unauthorized';
     resetAuthState();
     emit();
     if (!options.silent) {

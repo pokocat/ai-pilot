@@ -32,14 +32,26 @@ function networkErrorInfo(errMsg, origin) {
 
 function unauthorized(tokenAtRequest, data, isolatedAuth) {
   const hadToken = Boolean(tokenAtRequest);
+  let authHandled = false;
+  let staleAuth = false;
   if (hadToken && !isolatedAuth) {
-    clearToken();
-    if (onAuthLost) onAuthLost();
+    // 同一页面常会并发发出多条鉴权请求。第一条 401 清 token 后，其余旧请求仍会带着
+    // tokenAtRequest 陆续返回；若每条都触发 onAuthLost，会连续 toast/reLaunch，看起来像闪退。
+    // 更重要的是：旧请求若晚于一次新登录返回，绝不能把新 token 一并清掉。
+    if (getToken() === tokenAtRequest) {
+      clearToken();
+      authHandled = true;
+      if (onAuthLost) onAuthLost();
+    } else {
+      staleAuth = true;
+    }
   }
   return Object.assign(new Error((data && data.error) || '未登录'), {
     code: 'UNAUTHORIZED',
     data,
     hadToken,
+    authHandled,
+    staleAuth,
   });
 }
 

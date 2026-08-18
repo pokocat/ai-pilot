@@ -54,6 +54,9 @@ function handleApiError(error, options) {
   const code = String((error && (error.code || (error.data && error.data.code))) || '');
   if (code === 'UNAUTHORIZED') {
     if (error && error.hadToken === false) return 'unauthorized';
+    // request 层已经完成过全局退出，或这是旧请求晚到的 401：页面 catch 只收口错误，
+    // 不得再次清状态 / toast / reLaunch，否则一次并发失败会表现成连续闪退。
+    if (error && (error.authHandled === true || error.staleAuth === true)) return 'unauthorized';
     resetAuth();
     if (!opts.silent) wx.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
     if (currentRoute() !== 'pages/sessions/index') {

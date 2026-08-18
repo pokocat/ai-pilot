@@ -89,14 +89,25 @@ export { BASE_URL };
 
 function throwUnauthorized(tokenAtRequest: string, data?: unknown, message = '未登录'): never {
   const hadToken = shouldInterruptForUnauthorized(tokenAtRequest);
+  let authHandled = false;
+  let staleAuth = false;
   if (hadToken) {
-    clearToken();
-    onAuthLost?.();
+    // 多条并发请求可能一起拿到 401：只让仍对应当前会话的第一条执行全局退出。
+    // 后到的旧响应不能重复 reLaunch，更不能清掉用户刚重新登录得到的新 token。
+    if (getToken() === tokenAtRequest) {
+      clearToken();
+      authHandled = true;
+      onAuthLost?.();
+    } else {
+      staleAuth = true;
+    }
   }
   throw Object.assign(new Error((data as { error?: string } | undefined)?.error || message), {
     code: 'UNAUTHORIZED',
     data,
     hadToken,
+    authHandled,
+    staleAuth,
   });
 }
 
