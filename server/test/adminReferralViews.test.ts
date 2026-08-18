@@ -16,6 +16,9 @@
 // 另外钉一条公理 5：风控只预警不阻断 —— 这组端点里不存在任何处置/封禁写操作。
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { prisma } from '../src/db.ts';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from './helpers.ts';
 import { REFERRAL_RISK_FLAG, REFERRAL_RISK_DEF, TREE_ROW_CAP } from '../src/routes/adminReferral.ts';
@@ -581,5 +584,46 @@ describe('视图① 本体 Schema 的真实行数 + 空态与读失败必须分�
     // 复原后照常可用（证明上面改的是同一个 client 实例，这条用例真的生效过）
     const ok = await api<RiskBody>('GET', '/api/admin/referral/risk');
     assert.equal(ok.status, 200);
+  });
+});
+
+/* ── 前端接线：服务端同源了，但前端不传就白搭 ─────────────────────────────────
+   上面那条「树的红环窗口跟着 days 走」只证明**端点**做对了。真实的阻断是端到端的：
+   运营在风控屏切到 7 天、再点回树，如果前端压根不把 days 传下去，服务端就退回默认 30 天，
+   两屏照样各说一套——而这种漏法在 HTTP 层是完全合法的（days 是可选参数），tsc 也不会报。
+   admin 侧没有渲染测试，所以这里退一步做**接线守卫**：只认调用点上确实出现了那个参数。
+   （同类做法见 test/alertRules.test.ts 跨到 deploy/ 读 yml；调用形状将来变了就来这里改，
+   别把守卫删掉——删掉等于把这条阻断的端到端那一半重新放开。）*/
+describe('前端接线：树必须把当前窗口传给树接口', () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const viewSrc = readFileSync(join(repoRoot, 'admin/src/views/referral.tsx'), 'utf8');
+  const apiSrc = readFileSync(join(repoRoot, 'admin/src/api.ts'), 'utf8');
+
+  test('api.referralTree 接收 days，且树的取数调用真的把它传下去了', () => {
+    assert.match(
+      apiSrc, /referralTree:\s*\(q:\s*\{[^}]*\bdays\?:\s*number/,
+      'admin/src/api.ts 的 referralTree 必须接收 days（否则调用点根本传不进去）',
+    );
+    assert.match(
+      viewSrc, /api\.referralTree\(\{\s*days\s*,/,
+      'admin/src/views/referral.tsx 里 api.referralTree 的调用必须带上当前 days',
+    );
+    assert.match(
+      viewSrc, /<TreeSection[^>]*\bdays=\{days\}/,
+      'TreeSection 必须从外壳拿到当前 days（days 状态在 ReferralView 上，四个 tab 共用）',
+    );
+  });
+
+  test('天数筛选条在树那一屏也要露出来（不能按一个运营看不见的窗口标红）', () => {
+    // 旧版把天数筛选整条藏在 `tab !== 'tree'` 后面，理由是「树是全量视图」——那个理由对边成立、
+    // 对红环不成立。窗口既然真的作用在红环上，就必须可见可改，否则运营无法解释红环为什么变了。
+    assert.doesNotMatch(
+      viewSrc, /tab\s*!==\s*'tree'\s*&&\s*tab\s*!==\s*'funnel'/,
+      '天数筛选不得再对树整条隐藏（它现在真的作用于红环）',
+    );
+    assert.match(
+      viewSrc, /只作用于红环/,
+      '树上要写清天数作用在哪：只管红环、不筛关系边',
+    );
   });
 });
