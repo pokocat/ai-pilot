@@ -626,6 +626,51 @@ interface OrderSnapshot {
   quote?: { quoteFingerprint?: string; remainingValue?: number; chargeAmount?: number; relation?: string };
 }
 
+/**
+ * 已派发、可能还没落地的 invite 归因补记。**生产路径从不 await 它**（见 markPaidAndApply 的注释），
+ * 这两个句柄只为「测试能确定性地等到补记完成」而存在：
+ *   · `settleInviteActivations()` 等到目前派发出去的全部补记落地；
+ *   · `pendingInviteActivations()` 报还在飞的条数，用来把「支付响应没有 await 补记」钉成断言
+ *     （回调 resolve 的那一刻计数必须 > 0——微任务队列里 DB 往返不可能已经完成）。
+ * 尾链每次都 `.then(() => undefined)` 收掉结果，避免把历次结果数组一路串起来常驻内存。
+ */
+let inviteActivationTail: Promise<unknown> = Promise.resolve();
+let inviteActivationInflight = 0;
+
+function dispatchInviteActivation(target: InviteActivationTarget): void {
+  inviteActivationInflight += 1;
+  // recordInviteActivation 内部吞掉全部异常、从不 reject（见其注释）。这层 catch 是防「将来有人
+  // 在它里面加了一句会抛的代码」时留下 unhandledRejection —— 不 await 的 promise 一旦 reject，
+  // Node 会直接终止进程，那就把支付回调进程赔进去了，比丢一条统计严重得多。
+  const started = recordInviteActivation(target)
+    .catch((err: unknown) => {
+      console.warn(`[pay] invite 归因补记异常逃逸 userId=${target.userId} item=${target.itemType}:${target.itemKey}: ${(err as Error)?.message}`);
+    })
+    .finally(() => { inviteActivationInflight -= 1; });
+  inviteActivationTail = Promise.all([inviteActivationTail, started]).then(() => undefined);
+}
+
+/** 测试用：等到已派发的 invite 归因补记全部落地。生产路径**不得**调用（那就等于把 await 加回来了）。 */
+export function settleInviteActivations(): Promise<unknown> {
+  return inviteActivationTail;
+}
+
+/** 测试用：还在飞的 invite 归因补记条数。 */
+export function pendingInviteActivations(): number {
+  return inviteActivationInflight;
+}
+
+/**
+ * 从订单行推出 invite 归因所需的最小信息。itemKey 与入账路径同源：SKU 单认 skuKey、套餐单认 planId
+ * （schema 上二选一，SKU 单的 planId 是空串）。重投分支没有再解一遍条款快照，直接读订单行即可
+ * ——两者本来就是同一个值（快照里的 sku.key / plan.id 就是下单时写进订单的那个）。
+ */
+function inviteTargetOf(order: { tenantId: string; userId: string; planId: string; skuKey: string | null }): InviteActivationTarget {
+  return order.skuKey
+    ? { tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: order.skuKey }
+    : { tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: order.planId };
+}
+
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   /** 解密报文/查单结果中的订单金额（分）、appid、mchid：提供即校验，与本单不一致绝不入账（防串单/伪造）。 */
@@ -647,10 +692,18 @@ export async function markPaidAndApply(parsed: {
   // markPaidAndApply 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，且已有
   // outTradeNo advisory lock + appliedAt 幂等锚点），所以 invite 判定就贴着既有的 recordActivation 走。
   //
-  // 这里**await**而不是像订阅消息那样 fire-and-forget：recordInviteActivation 只有两条本地查询
-  // 且内部吞掉全部异常（永不 reject，见其注释），await 它既不增加失败面，也免得进程在回调响应后
-  // 立刻被回收时把这条统计丢掉；订阅消息要发外网 HTTP，那才必须不等。
-  if (result.applied && result.invite) await recordInviteActivation(result.invite);
+  // **绝不 await**（2026-08-18 订正，codex 审出的阻断 2）：旧写法把补记挡在支付回调返回 200 之前，
+  // 违了「绝不阻断支付主链路」这条铁律。它不是「两条查询」——那个说法也是错的：这段小事务实际是
+  // BEGIN + advisory lock + 查 Referral（到此 2 条 SQL，无推荐人就结束）+ 查重（3 条）+ 首次还要
+  // insert（4 条）+ COMMIT。主支付事务此刻**已经提交**、真钱已入账，可连接池打满或 advisory lock
+  // 排队时这几条 SQL 照样能卡住，`routes/pay.ts` 就来不及应答，微信超时后重投——为一条统计
+  // 换来一次重复回调，账算不过来。所以派发出去就走，失败面为零（recordInviteActivation 内部吞掉
+  // 全部异常，dispatchInviteActivation 再兜一层防 unhandledRejection）。
+  //
+  // 「不 await 会不会在进程被回收时丢掉这条统计」——会，但那本来就是可接受损失（漏一条统计远好过
+  // 让一笔真钱卡在未入账）；而且现在**重投能补**：`already_applied` 分支也派发一次补记（阻断 3），
+  // 微信的重试本身就是重试入口，不必自己扛住这一次。
+  if (result.invite) dispatchInviteActivation(result.invite);
   // 显式收窄返回值：`invite` 带着 userId / tenantId，只在本函数内部用。有路由是把这个结果对象
   // 直接往响应体里放的形状（`{ ok, applied, reason }`），别让内部字段哪天顺着某个 `return r` 漏出去。
   return { applied: result.applied, reason: result.reason };
@@ -666,7 +719,17 @@ async function markPaidAndApplyTx(parsed: {
 
     const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
     if (!order) return { applied: false, reason: 'order_not_found' };
-    if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+    if (order.appliedAt || order.status === 'applied') {
+      // 已发放，权益一步都不再动（appliedAt 是「恰好一次」的终态锚点）；但 invite 归因**照样派发一次**
+      // （2026-08-18，codex 审出的阻断 3）。要修的洞是：首次回调设了 appliedAt、随后那次补记里
+      // 「查 Referral / insert」短暂失败被吞成 'failed'，本次仍回成功；旧写法在这条分支上直接返回，
+      // 后续重投也就再也不会调补记，那个用户**永远**缺 source='invite'，漏斗持续少算。
+      // 微信的重投是天然的重试入口，补记本身幂等（advisory lock + 查重，已存在只回 'already_recorded'），
+      // 所以这里重复派发是安全的、且不会拖慢响应——它跟成功分支一样是**不 await** 的后台派发。
+      // 退款单（status='refunded' 但 appliedAt 仍在）也照补：ActivationEvent 不随退款回收，
+      // 「首次补记成功后再退款」的终态本来就留着这一行，不为它再造第二套口径。
+      return { applied: false, reason: 'already_applied', invite: inviteTargetOf(order) };
+    }
     // 不同订单也必须按用户串行化，否则两笔同时到账会各自读取同一份旧套餐状态，造成时长覆盖。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${order.userId}`}))`;
 
@@ -702,6 +765,8 @@ async function markPaidAndApplyTx(parsed: {
       where: { outTradeNo: parsed.outTradeNo, status: { in: ['created', 'paid'] }, appliedAt: null },
       data: { status: 'paid', paidAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
     });
+    // 这条 already_applied 与上面那条不同，**刻意不派发** invite 补记：抢不到 claim 说明这一刻另有
+    // 一条路径正在发放（或订单已被退款/关闭改了 status），由抢到的那一侧负责派发，这里跟着派只是重复。
     if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
 
     // 流水/审计里的支付方式标签。mock 单必须自带「测试模拟」字样：这条 reason 会出现在用户的

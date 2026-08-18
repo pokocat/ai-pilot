@@ -55,14 +55,45 @@ function trackLanding(channel) {
 }
 
 /**
+ * 冷启动回响抑制（2026-08-18，codex 审出的阻断 1）。
+ *
+ * 小程序**已被销毁**时点分享卡进来，微信依次触发 `onLaunch(options)` 与紧随其后的第一次
+ * `onShow(options)`，**两处拿到的是同一份启动参数**——同一次落地被投递了两次；而暖启动
+ * （小程序还在后台）只触发 onShow 一次。捕获必须两处都做（游客可能从任一路径进来，见文件头），
+ * 但落地埋点如果两处都报，`invite_landing` 的条数就随启动形态浮动，**漏斗分母按启动形态系统性失真**。
+ *
+ * 判断依据 = **只抵消这一次回响**，不是「整个生命周期只报一次」：
+ *   · onLaunch 那一路上报后，把刚上报的码置成一次性标记；
+ *   · 标记被**紧邻的下一次** captureInvite 消费掉，无论那次捕到什么码、捕不捕到——
+ *     于是抑制窗口精确等于「onLaunch 之后的第一次投递」，也就是微信那次回响；
+ *   · 只有那一次拿到**同一个码**时才抑制。换了码（用户运行期间点了另一张卡）照报。
+ * 因此「小程序运行期间用户又点了一张分享卡」——换码、或同码再次进入——都算**新的一次落地**，
+ * 照常上报：同一个人被同一张卡拉回来几次，本身就是漏斗要看的数据，去重仍然交给取数侧。
+ *
+ * 为什么不用 onHide 之类的「前台会话」边界来重置：那要另一个生命周期钩子配合，钩子漏挂 /
+ * 某些基础库不发就会**长期静默少报**。一次性标记的最坏情况有界——万一哪个版本在 onLaunch 之后
+ * 不发 onShow，也只是让紧接着那一次同码落地少一条，不会持续少报。
+ */
+let launchEcho = '';
+
+/**
  * 从启动 / 页面参数里捕获邀请码。
  *
  * 覆盖口径 = **末次触点**：新码覆盖旧码，捕获时间一并更新。理由：用户先点了 A 的分享没注册、
  * 又点了 B 的分享才注册，促成转化的是 B；而归因窗口也应该从最后一次接触算起。
  * 「一人只归因一个邀请人」是**绑定**那一刻的公理（服务端 `Referral.userId` 主键保证，
  * 绑定后不可变更），不是捕获阶段的约束——这两件事别混。
+ *
+ * @param {object} options 启动 / 页面参数（`{ query }` 或直接是 query 对象）
+ * @param {{ launch?: boolean }} [opts] `{ launch: true }` 只由 `app.js` 的 **onLaunch** 传：
+ *   它声明「这是冷启动的第一次投递」，用来抵消紧随其后那次 onShow 的重复上报（见 launchEcho）。
+ *   捕获行为与它无关——不管谁调、传不传，码照样存。
  */
-function captureInvite(options) {
+function captureInvite(options, opts) {
+  // 一次性标记在最前面消费掉：抑制窗口就是「onLaunch 之后紧邻的这一次调用」，
+  // 与本次捕不捕到码无关——否则一次「onShow 没带码」就会把标记留到下一次真落地上，白吞一条。
+  const echo = launchEcho;
+  launchEcho = '';
   const source = options || {};
   const query = source.query || source || {};
   let code = isInviteCode(query.ic) ? query.ic : '';
@@ -83,8 +114,12 @@ function captureInvite(options) {
     wx.setStorageSync(KEY, code);
     wx.setStorageSync(AT_KEY, Date.now());
   } catch (_) { /* 存不下就这一跳不计归因，不影响任何功能 */ }
-  // **每次捕获都报**，包括 onShow 那次「小程序已在后台、又点了一张分享卡」——重复进入本身
+  // onLaunch 那一路记下刚上报的码，供紧随其后的首次 onShow 抵消（见 launchEcho 的注释）。
+  if (opts && opts.launch) launchEcho = code;
+  // **每次真落地都报**，包括「小程序已在后台、又点了一张分享卡」那次 onShow——重复进入本身
   // 就是漏斗要看的数据（同一个人被同一张卡拉回来几次），去重交给取数侧，不在端上偷偷合并。
+  // 唯一的例外是上面那次冷启动回响：同一份启动参数被微信投递了两次，不是两次落地。
+  if (code === echo) return code;
   // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
   trackLanding(channel);
   return code;

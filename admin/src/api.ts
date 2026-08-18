@@ -202,6 +202,7 @@ import type {
   PosterDirectionKey,
   AdminClonePricing, AdminClonePricingUpdate,
   AdminReferralOverview, AdminReferralTree, AdminReferralRisk,
+  AdminReferralRiskGroup, AdminReferralRiskMember, AdminReferralTenantOption,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
 // —— 邀请增长三视图（P3，全只读；风控只预警不阻断，故没有任何写方法）——
@@ -209,6 +210,15 @@ export type {
   AdminReferralOverview, AdminReferralTree, AdminReferralTreeNode, AdminReferralRisk,
   AdminReferralRiskGroup, AdminReferralRiskMember, AdminReferralTenantOption, AdminReferralCount,
 } from '../../shared/contracts';
+/* 风控响应的两处契约待补（服务端 routes/adminReferral.ts 里有同一份局部声明，contracts.d.ts
+   已在契约里收口）：`groupTotal` 已加（不给总数就是静默截断，页面会说谎）、`userAgent` 已删
+   （前端一处不展示，下发等于白白扩散设备指纹）。`phone` 类型不变但语义收窄：
+   服务端已按审计口径掩码（138****1234），不再有完整号码。 */
+// 契约已收口（2026-08-18）：`groupTotal` 已加、`userAgent` 已删，这三个 View 别名不再修形，
+// 保留只为少改视图里的引用点。
+export type AdminReferralRiskMemberView = AdminReferralRiskMember;
+export type AdminReferralRiskGroupView = AdminReferralRiskGroup;
+export type AdminReferralRiskView = AdminReferralRisk;
 // —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
 export type { AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
@@ -349,7 +359,10 @@ export const api = {
   referralTree: (q: { tenantId?: string; roots?: number } = {}) =>
     req<AdminReferralTree>(`/admin/referral/tree${referralQs(q)}`),
   referralRisk: (q: { days?: number; tenantId?: string } = {}) =>
-    req<AdminReferralRisk>(`/admin/referral/risk${referralQs(q)}`),
+    req<AdminReferralRiskView>(`/admin/referral/risk${referralQs(q)}`),
+  // 租户筛选项单独取：四个 tab 都要用，且不随天数窗口/当前租户变化 —— 绑在 overview 上会让
+  // 每次切 tab、换窗口都重跑一遍全量计数，也让「筛选项读失败」被伪装成「没有租户」。
+  referralTenants: () => req<AdminReferralTenantOption[]>('/admin/referral/tenants'),
   // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
   ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
   createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),
