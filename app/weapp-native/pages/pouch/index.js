@@ -17,8 +17,9 @@
 // （教育归军师，本页不卖；见 memory weapp-ia-redesign-2026-08）。
 const { api } = require('../../services/api');
 const store = require('../../services/store');
-const { navTo } = require('../../services/nav');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { navTo, gotoExecution } = require('../../services/nav');
+const { baseData, backendEnvironmentData } = require('../../services/page');
+const worksCache = require('../../services/works-cache');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
@@ -197,7 +198,6 @@ Page({
       mockProfileLabel: state.mock ? mockProfile.label() : '',
       authed: state.authed,
     }, backendEnvironmentData()));
-    syncTabBar(this, 2);
     this.load();
   },
 
@@ -205,26 +205,24 @@ Page({
    * 取数：agents + 三条作品通道一律 Promise.allSettled，任何一路失败都不拦页面。
    * 游客只取 agents（/agents 免登录可得），三条作品通道不请求——不能为了一格计数把人推去登录。
    *
-   * 90 秒内切回本 tab 直接用上一次结果（`force=true` 跳过，用于启用/切档案后的主动刷新）。
+   * 90 秒内再次进入锦囊直接用上一次结果（`force=true` 跳过，用于启用/切档案后的主动刷新）。
    * 动因：`/video/works` 是服务端到 aidrama 的**同步代理**（上游预算 15–60s），且不在
-   * server 过载闸 MAX_IN_FLIGHT 的豁免名单里；本页从子页升成一级 tab 后，每次 onShow 都打一次
+   * server 过载闸 MAX_IN_FLIGHT 的豁免名单里；普通页每次重进都会新建页面实例，若无模块缓存就会再打一次
    * 会把在途槽位耗在等外部上游上，拖累无关的快接口。海报缩略图是 600 秒签名链接，90 秒缓存远在有效期内。
    * 正解是服务端把 BFF 代理排除在过载计数外，已记 AGENTS §13。
    */
   async load(options) {
     if (this.data.loading) return;
     // 游客态整页只出一屏登录引导，不取任何数（连 /agents 都不用——宫格根本不渲染）。
-    if (!store.isAuthed()) { this.setData({ authed: false, recent: [], crafts: [], loadFailed: false }); return; }
+    if (!store.isAuthed()) { this.setData({ authed: false, recent: [], crafts: [], loadFailed: false, loading: false }); return; }
     const force = Boolean(options && options.force);
-    const fresh = this._loadedAt && (Date.now() - this._loadedAt) < 90000;
-    if (!force && fresh && this.data.recent.length) return;
     this.setData({ loading: true });
     const authed = store.isAuthed();
     const [agentsResult, postersResult, clipsResult, reportsResult] = await Promise.allSettled([
       store.loadAgents(),
-      authed ? api.creativePosters(undefined, 20) : Promise.resolve(null),
-      authed ? api.videoWorks() : Promise.resolve(null),
-      authed ? api.reports() : Promise.resolve(null),
+      authed ? worksCache.loadPosters({ force }) : Promise.resolve(null),
+      authed ? worksCache.loadClips({ force }) : Promise.resolve(null),
+      authed ? worksCache.loadReports({ force }) : Promise.resolve(null),
     ]);
 
     const posters = authed && settled(postersResult) ? posterWorks(settled(postersResult)) : null;
@@ -289,8 +287,6 @@ Page({
         .filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key) && !covered.has(text(agent.key)))
         .map(craftFromAgent));
 
-    // 只有真取到过数才记时间戳：失败不算「刚刷过」，否则 90 秒内都拿不到重试机会。
-    this._loadedAt = loadFailed ? 0 : Date.now();
     this.setData({ authed, recent, crafts, loadFailed, loading: false });
   },
   retry() { this.setData({ loadFailed: false }); this.load({ force: true }); },
@@ -319,7 +315,7 @@ Page({
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据（作品流与手艺格计数一起变）。 */
   switchMockProfile() {
     if (!this.data.isMock) return;
-    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load({ force: true }); });
+    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); worksCache.invalidate(); this.load({ force: true }); });
   },
 
   requireLogin() {
@@ -371,5 +367,9 @@ Page({
     this.load({ force: true });
     navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(agent.key)}&continue=1`);
   },
-  goBattle() { wx.switchTab({ url: '/pages/home/index' }); },
+  back() {
+    try { if (getCurrentPages().length > 1) { wx.navigateBack(); return; } } catch (_) { /* fall through */ }
+    gotoExecution('today');
+  },
+  goExecution() { gotoExecution('today'); },
 });

@@ -10,7 +10,7 @@
 // 这层只做「转接」，不做业务判断。业务判断在 model.js / 各页面里。
 const store = require('../../services/store');
 const { baseData, capsuleMetrics } = require('../../services/page');
-const { navTo } = require('../../services/nav');
+const { navTo, gotoExecution } = require('../../services/nav');
 const { getToken } = require('../../services/token');
 const { request, upload } = require('../../services/request');
 const { useMockApi } = require('../../services/runtime-mode');
@@ -69,11 +69,11 @@ function go(relative) {
 /** 跳出分包，去军师宿主的页面（充值、协议等）。抽走后这些要换成自己的实现或降级隐藏。 */
 function goHost(absolute) { return navTo(absolute); }
 
-/** 返回上一页；没有上一页时回军师「点兵」tab。 */
+/** 返回上一页；没有上一页时回军师「执行」tab。 */
 function back(delta) {
   const pages = getCurrentPages();
   if (pages.length > (delta || 1)) { wx.navigateBack({ delta: delta || 1 }); return; }
-  wx.switchTab({ url: '/pages/home/index' });
+  gotoExecution('today');
 }
 
 /* ── 4. 网络 ────────────────────────────────────────────────────────── */

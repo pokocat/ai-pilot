@@ -1,7 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
-const { navTo } = require('../../../services/nav');
+const { navTo, gotoExecution } = require('../../../services/nav');
 const ICONS = new Set(['home', 'grid', 'agent', 'user', 'chat', 'insight', 'attach', 'trend', 'check', 'target', 'layers', 'doc', 'image', 'video', 'pen', 'spark', 'chart', 'clock', 'flow', 'bolt', 'shield', 'crown', 'flag', 'token', 'pouch', 'upload', 'lock', 'diamond']);
 
 function fmt(iso) { const date = new Date(iso); return date.getTime() ? `${date.getMonth() + 1}月${date.getDate()}日` : ''; }
@@ -31,7 +31,7 @@ Page({
   retry() { this.load(); },
   setTab(event) { this.setData({ tab: event.currentTarget.dataset.tab }); },
   startChat() { navTo(`/packages/main/chat/index?projectId=${encodeURIComponent(this._id)}&fresh=1`); },
-  goStudio() { wx.switchTab({ url: '/pages/home/index' }); },
+  goStudio() { gotoExecution('today'); },
   openSession(event) { navTo(`/packages/main/chat/index?sessionId=${encodeURIComponent(event.currentTarget.dataset.id)}`); },
   openReport(event) { navTo(`/packages/work/report/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}`); },
   openKnowledge(event) { navTo(`/packages/work/knowledge/detail/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}`); },

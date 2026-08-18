@@ -1,0 +1,89 @@
+<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll exec-scroll" scroll-top="{{scrollTop}}" scroll-with-animation bindscroll="onScroll">
+    <view class="native-nav-inset"></view>
+    <view class="pad execution exec-page">
+      <tab-header title="今日" kicker="今天该做的都在这" glyph="今"></tab-header>
+
+      <view class="exec-seg exec-seg-sticky"><view wx:for="{{segments}}" wx:key="*this" class="seg-item {{segment===index?'on':''}}" data-index="{{index}}" bindtap="selectSegment">{{item}}</view></view>
+
+      <block wx:if="{{!authed}}">
+        <view class="exec-guest card">
+          <view class="eg-mark"><native-icon name="check" tone="accent" color-key="{{colorKey}}" size="24"></native-icon></view>
+          <text class="eg-title serif">把每天做的事记在一处</text>
+          <text class="eg-desc">军令、打卡和锦囊都记在你的名下 · 登录后开始</text>
+          <view class="eg-action" bindtap="askLogin"><text>登录后开始执行</text></view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <view wx:if="{{coreStatus==='error'}}" class="pch-retry card" bindtap="retryCore"><text class="pch-retry-t">{{coreError}}</text><text class="pch-retry-go">重试</text></view>
+
+        <block wx:if="{{coreStatus==='loading' && !orders.length}}">
+          <view class="exec-skeleton card"><view class="esk-line short"></view><view class="esk-line"></view><view class="esk-line"></view></view>
+          <view class="exec-skeleton card"><view class="esk-line tiny"></view><view class="esk-line"></view></view>
+        </block>
+
+        <block wx:elif="{{coreStatus==='ready'}}">
+          <block wx:if="{{segment===0}}">
+            <view wx:if="{{reviewDue}}" class="review-due card" bindtap="openReview"><native-icon name="alert" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>今晚复盘还没做</text><view class="rd-go"><text>现在复盘</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
+
+            <view class="ohead"><text class="ohead-t serif">今日军令</text><text class="ohead-m {{committing?'busy':''}}" bindtap="arrangeOrders">{{committing?'排兵布阵中…':(orders.length?('完成 '+orderDone+' / '+orders.length+' · 让军师重排'):'让军师来拆')}}</text></view>
+            <view wx:if="{{!orders.length}}" class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">还没有军令</text><text class="oe-d">先让总军师把当前判断拆成今天能做完的动作。</text><view class="oe-go"><text>去对话拆军令</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
+
+            <view wx:for="{{displayOrders}}" wx:key="id" class="task card {{item.done?'done':''}}" data-id="{{item.id}}" data-text="{{item.text}}" bindtap="openOrder" bindlongpress="removeOrder">
+              <view class="task-b">
+                <text class="task-t serif {{item.done?'struck':''}}">{{item.text}}</text>
+                <text class="task-meta-info">{{item.done?(item.resultNote?'回填：'+item.resultNote:'已办 · 长按删除'):('来自 '+(item.from||'案卷')+' · 优先级 '+item.no)}}</text>
+                <view wx:if="{{item.weapon}}" class="task-weapon" data-index="{{index}}" catchtap="openWeapon"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.name}}</text> {{item.weapon.line}}</text><view class="tw-go"><text>带我做</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
+                <view wx:if="{{!item.done}}" class="task-verbs"><view class="task-verb" data-text="{{item.text}}" catchtap="makeScript"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text>帮我写脚本</text></view></view>
+                <view wx:if="{{fillingOrderId===item.id}}" class="task-fill" catchtap="stop"><text class="tf-k">数 据 回 填 · 做完了多少？</text><view class="tf-row"><input class="tf-input native-result-input" value="{{fillingOrderText}}" maxlength="200" placeholder="如：发 8 条 / 见 3 个客户 / 回款 2 万" bindinput="inputOrderResult" bindconfirm="saveOrderResult"/><view class="tf-btn {{savingOrderResult?'busy':''}}" bindtap="saveOrderResult"><text>{{savingOrderResult?'保存中…':'回填'}}</text></view></view></view>
+              </view>
+              <view class="task-check" data-id="{{item.id}}" catchtap="toggleOrder"><native-icon wx:if="{{item.done}}" name="check" tone="white" size="15"></native-icon></view>
+            </view>
+            <view wx:if="{{doneHidden || showDoneArchive}}" class="done-more" bindtap="toggleDoneArchive"><text>{{showDoneArchive ? '收起已办' : '还有 '+doneHidden+' 条已办 · 展开'}}</text><native-icon name="{{showDoneArchive?'collapse':'chevron'}}" tone="neutral" size="13"></native-icon></view>
+            <view wx:for="{{leftoverWeapons}}" wx:key="id" class="rx-item card" data-id="{{item.id}}" bindtap="openPrescription"><view class="rx-main"><text class="rx-for">为「{{item.problem}}」</text><text class="rx-play">{{item.playbook}}</text></view><view class="rx-cta"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>军师配了兵器</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
+            <view wx:if="{{orders.length}}" class="order-add-row" bindtap="addOrderByModal"><native-icon name="plus" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>手动加一条今天的军令</text></view>
+
+            <view class="works-head"><text class="works-title serif">今天出的活</text><text class="works-note">只按今日成品汇总，不归到某条军令</text></view>
+            <view wx:if="{{worksStatus==='error'}}" class="works-retry card" bindtap="retryWorks"><text>{{worksError}}</text><text class="wr-go">重试</text></view>
+            <view wx:elif="{{worksStatus==='loading'}}" class="works-loading"><view wx:for="{{[1,2]}}" wx:key="*this" class="work-skeleton card"></view></view>
+            <scroll-view wx:elif="{{todayWorks.length}}" scroll-x enhanced show-scrollbar="false" class="today-works"><view class="today-works-track"><view wx:for="{{todayWorks}}" wx:key="id" class="today-work card" data-index="{{index}}" bindtap="openWork"><image src="{{item.thumb}}" class="today-work-img" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onWorkThumbError"></image><view class="today-work-foot"><text class="today-work-title">{{item.title}}</text><text class="today-work-again">再来一张</text></view></view></view></scroll-view>
+            <view wx:else class="works-empty"><text>今天还没有新成品。用军令里的兵器做出第一件，会收在这里。</text></view>
+
+            <view class="result-entry card" bindtap="openReview"><view class="result-mark"><native-icon name="chart" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="result-copy"><text class="result-title serif">今日经营结果</text><text class="result-desc">{{backfill?('线索 '+backfill.leads+' · 咨询 '+backfill.consults+' · 成交 '+backfill.deals):'有结果再记，不要求每天填满'}}</text></view><text class="result-state {{backfill?'ok':''}}">{{backfill?'已记录':'记一下'}}</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
+          </block>
+
+          <block wx:else>
+            <view class="week-card card"><view class="wk-head"><text class="wk-k">近 七 日 执 行</text><text class="wk-sum">完成 {{weekDone}} / {{weekTotal}}</text></view><view class="wk-strip"><view wx:for="{{weekStrip}}" wx:key="date" class="wk-cell {{item.isToday?'today':''}}"><text class="wk-wd">{{item.weekday}}</text><view class="wk-dot wk-{{item.state}}"></view><text class="wk-num">{{item.dayNum}}</text></view></view><view class="week-metrics"><text>实心全办完 · 半实办了一部分 · 空心有令未动</text><text class="review-streak">连续复盘 {{streak}} 天</text></view></view>
+            <view wx:if="{{weekGroups.length}}" class="week-list card"><view wx:for="{{weekGroups}}" wx:key="date" class="week-group"><view class="wg-head"><text class="wg-date serif">{{item.label}}</text><text class="wg-done">{{item.doneText}}</text></view><view wx:for="{{item.orders}}" wx:for-item="order" wx:key="id" class="wg-row"><view class="wg-state {{order.done?'ok':''}}"><native-icon wx:if="{{order.done}}" name="check" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><text class="wg-text {{order.done?'done':''}}">{{order.text}}</text></view></view></view>
+            <view wx:else class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">近七天还没有军令记录</text><text class="oe-d">连续执行从第一条军令开始——让军师把判断拆成今天能做的事。</text><view class="oe-go"><text>去对话</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
+          </block>
+
+          <view class="review-entry card" bindtap="openReview"><view class="re-b"><text class="re-t serif">{{streak?('今晚复盘 · 连续 '+streak+' 天'):'今晚复盘'}}</text><text class="re-s">军令 + 数据都在，复盘决定明日军令</text></view><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view>
+          <view class="pouch-entry card" bindtap="openPouch"><view class="pouch-mark"><native-icon name="pouch" tone="accent" color-key="{{colorKey}}" size="22"></native-icon></view><view class="pouch-copy"><view class="pouch-title-row"><text class="pouch-title serif">锦囊</text><text wx:if="{{pouchMovedHint}}" class="pouch-moved">锦囊搬到这了</text></view><text class="pouch-desc">出过的成品、会用的手艺，都收在锦囊里</text></view><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view>
+        </block>
+      </block>
+      <view class="tabbar-space"></view>
+    </view>
+  </scroll-view>
+  <view class="native-bottom-fade"></view>
+
+  <view wx:if="{{reviewOpen}}" class="force-sheet-mask" style="--review-keyboard:{{reviewKeyboardHeight}}px" bindtap="closeReview" catchtouchmove="stop"><view class="force-sheet fs-pad" catchtap="stop"><view class="force-sheet-grip"></view><text class="fs-kicker">今 日 复 盘</text><text class="fs-title serif">用今天的动作和结果，决定明天做什么</text><scroll-view scroll-y class="fs-body" scroll-into-view="{{reviewAnchor}}" scroll-with-animation>
+    <view class="data-fill review-daily-fill"><view class="df-head"><view><text class="df-t serif">今日经营结果</text><text class="df-note">有实际结果再记；没有发生，不必为了打卡填 0。</text></view><text class="df-s {{backfill?'ok':''}}">{{backfill?'已记录':'可选'}}</text></view><view class="df-row"><view class="df-cell"><text class="df-label">线索</text><input id="review-daily-leads" class="df-input" type="number" value="{{backfill.leads||''}}" data-field="leads" data-anchor="review-daily-leads" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="12" bindfocus="focusReviewInput" bindinput="inputBackfill" bindkeyboardheightchange="onReviewKeyboard" /></view><view class="df-cell"><text class="df-label">咨询</text><input id="review-daily-consults" class="df-input" type="number" value="{{backfill.consults||''}}" data-field="consults" data-anchor="review-daily-consults" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="12" bindfocus="focusReviewInput" bindinput="inputBackfill" bindkeyboardheightchange="onReviewKeyboard" /></view><view class="df-cell"><text class="df-label">成交</text><input id="review-daily-deals" class="df-input" type="number" value="{{backfill.deals||''}}" data-field="deals" data-anchor="review-daily-deals" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="12" bindfocus="focusReviewInput" bindinput="inputBackfill" bindkeyboardheightchange="onReviewKeyboard" /></view></view><view class="df-save" bindtap="saveBackfill">{{savingBackfill?'保存中…':'保存今日结果'}}</view></view>
+    <view wx:if="{{reviewStatus==='loading'}}" class="review-load card"><text>正在整理复盘资料…</text></view>
+    <view wx:elif="{{reviewStatus==='error'}}" class="pch-retry card" bindtap="retryReview"><text class="pch-retry-t">{{reviewError}}</text><text class="pch-retry-go">重试</text></view>
+    <block wx:else>
+    <view wx:if="{{battleForces.length}}" class="force-check card"><view class="fc-head"><text class="fc-k">三势检查</text><text class="fc-t">今天的动作是否还在主线上？</text></view><view wx:for="{{battleForces}}" wx:key="kind" class="fc-row"><view class="fc-b"><text class="fc-l">{{item.label}} · {{item.conclusion}}</text><text class="fc-d">打法：{{item.tactic}}</text></view><view class="fc-ops"><view class="fc-op {{item.verdict==='on'?'on':''}}" data-kind="{{item.kind}}" data-verdict="on" bindtap="chooseForce">符合</view><view class="fc-op {{item.verdict==='off'?'off':''}}" data-kind="{{item.kind}}" data-verdict="off" bindtap="chooseForce">偏了</view></view></view></view>
+    <view wx:if="{{pendingDecision}}" class="decision-verify card"><view class="dv-head"><text class="dv-k">决策验证 · 待验证</text><text class="dv-seq">决策 #{{pendingDecision.seq}}</text></view><text class="dv-t">{{pendingDecision.decision}}</text><text wx:if="{{pendingDecision.verifyStandard}}" class="dv-d">验证标准：{{pendingDecision.verifyStandard}}</text><view class="dv-ops"><view class="dv-op main {{verifying?'busy':''}}" data-outcome="correct" bindtap="verifyDecision">判断正确</view><view class="dv-op {{verifying?'busy':''}}" data-outcome="revise" bindtap="verifyDecision">需修正</view></view><view class="dv-more" bindtap="openLedger"><text>看完整战略账本</text><native-icon name="arrow" tone="neutral" size="13"></native-icon></view></view>
+    <view wx:if="{{bizItems.length}}" class="data-fill biz-fill"><view class="df-head"><view><text class="df-t serif">本周关键指标</text><text class="df-note">按你的行业模板汇总，每周记一次。</text></view><text wx:if="{{bizSaved && !bizEditing}}" class="bm-edit" bindtap="startBizEdit">改</text><text wx:else class="df-s {{bizSaved?'ok':''}}">{{bizItems.length}} 项</text></view><view wx:if="{{bizSaved && !bizEditing}}" class="bm-row"><view wx:for="{{bizItems}}" wx:key="key" class="bm-cell ro"><text class="df-label">{{item.name}}</text><text class="bm-val">{{item.value||'—'}}<text class="bm-unit">{{item.unit}}</text></text></view></view><block wx:else><view class="bm-row"><view wx:for="{{bizItems}}" wx:key="key" class="bm-cell"><text class="df-label">{{item.name}}（{{item.unit}}）</text><input id="review-week-{{index}}" class="df-input" type="digit" value="{{item.value}}" placeholder="__" data-key="{{item.key}}" data-anchor="review-week-{{index}}" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="12" bindfocus="focusReviewInput" bindinput="inputBiz" bindkeyboardheightchange="onReviewKeyboard" /></view></view><view class="df-save" bindtap="saveBiz">{{savingBiz?'保存中…':'保存本周指标'}}</view></block></view>
+    <view class="goal-head"><text class="goal-head-t serif">目标对照</text><text class="goal-head-more" bindtap="makeGoalPlan">让军师拆解</text></view><view class="goal-ladder"><view wx:for="{{goalRows}}" wx:key="field" class="gl-cell card" data-field="{{item.field}}" bindtap="openGoalEdit"><text class="gl-k">{{item.label}}</text><text class="gl-v {{item.empty?'empty':''}}">{{item.value||'补目标'}}</text></view></view>
+    <view class="remind-row sheet-remind" bindtap="openReminders"><text class="remind-time">{{reminders.length?reminders[0].time:'提醒'}}</text><text class="remind-text">{{reminders.length?(reminders[0].title||'复盘提醒'):'设置复盘提醒节奏'}}</text><native-icon name="arrow" tone="neutral" size="13"></native-icon></view>
+    <view class="rc-btn" bindtap="reviewToday"><native-icon name="doc" tone="white" size="15"></native-icon><text>开始复盘</text></view><view class="rc-btn ghost" bindtap="openDaily"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>查看每日战报</text></view>
+    </block>
+  </scroll-view><view class="sheet-foot"><view class="fs-close" bindtap="closeReview"><text>收起</text></view></view></view></view>
+
+  <view wx:if="{{goalEdit}}" class="goal-editor"><view class="ge-head"><view class="ge-copy"><text class="gs-title serif">{{goalEdit.label}}目标</text><text class="gs-hint">一句话目标 + 关键指标，复盘时按这条对照。</text></view><text class="ge-close" bindtap="closeGoalEdit">取消</text></view><input class="gs-input native-goal-input" value="{{goalDraft}}" maxlength="200" placeholder="如：营收翻倍，复购率 30%" focus="true" always-embed="true" adjust-position="true" cursor-spacing="20" bindinput="inputGoal" bindconfirm="saveGoal"/><view class="ge-save {{savingGoal?'busy':''}}" bindtap="saveGoal"><text>{{savingGoal?'保存中…':'保存目标'}}</text></view></view>
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>

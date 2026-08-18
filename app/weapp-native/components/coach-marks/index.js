@@ -1,5 +1,6 @@
 const store = require('../../services/store');
 const coach = require('../../services/coach');
+const { gotoExecution } = require('../../services/nav');
 
 function currentRoute() { try { const pages = getCurrentPages(); return pages.length ? pages[pages.length - 1].route : ''; } catch (_) { return ''; } }
 
@@ -32,6 +33,6 @@ Component({
       this.setData({ active: true, step, kicker: `上手 · ${coach.CN[step]} / 五`, title: item.title, text: item.text, action: step >= coach.STEPS.length - 1 ? '开 始 使 用' : '下 一 步', arrowLeft: 26 + ((width - 52) / 5) * (step + 0.5) });
     },
     skip() { coach.markDone(); this.setData({ active: false }); this.emitState(false); },
-    advance() { const next = this.data.step + 1; if (next >= coach.STEPS.length) { this.skip(); return; } coach.saveStep(next); wx.switchTab({ url: coach.STEPS[next].route }); },
+    advance() { const next = this.data.step + 1; if (next >= coach.STEPS.length) { this.skip(); return; } coach.saveStep(next); if (coach.STEPS[next].route === '/pages/execution/index') gotoExecution('today'); else wx.switchTab({ url: coach.STEPS[next].route }); },
   },
 });

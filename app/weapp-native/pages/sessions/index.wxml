@@ -59,6 +59,7 @@
         <view class="tab-ic">
           <image class="tab-icon tab-icon-{{item.icon}}" src="{{index === 0 ? item.iconActive : item.iconNormal}}" mode="aspectFit"></image>
           <view wx:if="{{index === 0 && unread > 0}}" class="tab-badge"><text class="tab-badge-n">{{unread > 99 ? '99+' : unread}}</text></view>
+          <view wx:if="{{index === 2 && reviewDue}}" class="tab-dot"></view>
         </view>
         <text class="tab-label">{{item.text}}</text>
       </view>

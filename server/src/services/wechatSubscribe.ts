@@ -139,7 +139,7 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
   if (scene === 'report' && opts.reportId) return `packages/work/report/index?id=${encodeURIComponent(opts.reportId)}`;
   if (scene === 'report') return 'packages/work/library/index';
   if (scene === 'payment') return 'packages/work/credits/index'; // 订单明细页（含支付订单段）
-  return 'pages/studio/index';
+  return 'pages/execution/index';
 }
 
 // 模板字段键 = 微信后台该模板的实际关键词编号，对不上整条推送被拒（errcode 47003），且只有

@@ -2,6 +2,7 @@ const { api, isMock } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { fitCanvasText } = require('../../../utils/canvas-text');
+const { gotoExecution } = require('../../../services/nav');
 
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const FALLBACK_ORDERS = [
@@ -308,7 +309,7 @@ Page({
 
   closeSync() { this.setData({ syncOpen: false }); },
   stopTap() {},
-  goStudio() { this.setData({ syncOpen: false }); wx.switchTab({ url: '/pages/home/index' }); },
+  goStudio() { this.setData({ syncOpen: false }); gotoExecution('today'); },
 
   async shareImage() {
     if (this.data.shareBusy) return;

@@ -4,7 +4,7 @@
 // 游客没有 /me，形态读 GET /wence/hints 的 guestForm；登录后立刻改用 /me 的正式分桶。
 const { api } = require('../../services/api');
 const store = require('../../services/store');
-const { navTo } = require('../../services/nav');
+const { navTo, gotoExecution } = require('../../services/nav');
 const { getToken } = require('../../services/token');
 const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
 const { TABS, visualTabs } = require('../../services/tabbar');
@@ -24,8 +24,8 @@ const QUICK = [
   { title: '上传经营资料', desc: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index', reason: 'upload' },
   { title: '账号与数据', desc: '账号矩阵、授权与经营数据', url: '/packages/work/bindings/index', reason: 'execute' },
   { title: '生成方案', desc: '把这次对话炼成一份方案', url: '/packages/work/library/index', reason: 'save' },
-  { title: '转成军令', desc: '方案定了，自动拆成今天要做的事', url: '/pages/home/index', reason: 'execute' },
-  { title: '今日执行', desc: '军令、任务、打卡、复盘', url: '/pages/home/index', reason: 'execute' },
+  { title: '转成军令', desc: '方案定了，自动拆成今天要做的事', url: '/pages/execution/index', reason: 'execute' },
+  { title: '今日执行', desc: '军令、任务、打卡、复盘', url: '/pages/execution/index', reason: 'execute' },
 ];
 const PORTRAITS = { general: 'general', strat: 'strat', growth: 'growth', ip: 'ip', ops: 'ops', org: 'org', intel: 'strat', fund: 'org', model: 'growth', brand: 'ip' };
 
@@ -105,7 +105,7 @@ Page({
     quickCards: QUICK, rows: [], historyRows: [], councilRows: [], searchGroups: [], query: '',
     showHistory: false, showLogin: false, loginReason: 'chat', unlockAgent: null, loading: true, error: false, searching: false,
     // 终态专属
-    isleTabs: visualTabs('theme-green'), unread: 0, councilUnreadText: '', historyUnreadText: '',
+    isleTabs: visualTabs('theme-green'), unread: 0, reviewDue: false, councilUnreadText: '', historyUnreadText: '',
     headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false,
     hintText: '', hintId: '', hintFade: false,
   }),
@@ -125,8 +125,9 @@ Page({
     const snapshot = store.snapshot();
     // 先补 overlay 再 syncTabBar：顺序反过来会让 custom-tab-bar 先亮一帧再被浮岛顶掉。
     if (this.data.form === 'chat') store.setOverlay(true, 'wence-isle');
-    this.setData(Object.assign({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, mockProfileLabel: snapshot.mock ? mockProfile.label() : '', isleTabs: visualTabs(snapshot.themeClass) }, backendEnvironmentData()));
+    this.setData(Object.assign({ themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, isMock: snapshot.mock, mockProfileLabel: snapshot.mock ? mockProfile.label() : '', isleTabs: visualTabs(snapshot.themeClass), reviewDue: snapshot.reviewDue }, backendEnvironmentData()));
     syncTabBar(this, 0);
+    store.loadReviewBadge().then(() => { const next = store.snapshot(); this.setData({ reviewDue: next.reviewDue }); syncTabBar(this, 0); }).catch(() => {});
     this._enterAt = Date.now();
     this.boot(false);
   },
@@ -439,7 +440,8 @@ Page({
   },
   tapQuick(event) {
     const item = this.data.quickCards[Number(event.currentTarget.dataset.index)];
-    if (this.requireLogin(item.reason)) navTo(item.url);
+    if (!item || !this.requireLogin(item.reason)) return;
+    if (item.url === '/pages/execution/index') gotoExecution('today'); else navTo(item.url);
   },
   tapAgent(event) {
     const key = event.currentTarget.dataset.key;
@@ -516,7 +518,7 @@ Page({
     if (!TABS[index] || index === 0) return;
     api.track('tab_switch', { from: TABS[0].path, to: TABS[index].path });
     store.setOverlay(false, 'wence-isle');
-    wx.switchTab({ url: TABS[index].path });
+    if (index === 2) gotoExecution('today'); else wx.switchTab({ url: TABS[index].path });
   },
 
   loadHints() {
