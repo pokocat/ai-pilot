@@ -18,6 +18,12 @@ Component({
     /** 要试听的声音 id。为空时组件不渲染。 */
     voiceId: { type: String, value: '' },
     voiceName: { type: String, value: '' },
+    /**
+     * 训练完成时固化好的样例音频（服务端 ClipDemoWorker 生成）。
+     * 有它的话，默认样例句**点开就响**，不用等三五秒合成，也不消耗按需限流的次数。
+     * 用户改了文字才落回合成路径。没有就是 null —— 那就全走合成，行为和以前一样。
+     */
+    demoAudioUrl: { type: String, value: '' },
     open: { type: Boolean, value: false },
   },
 
@@ -27,6 +33,8 @@ Component({
     busy: false,
     error: '',
     played: false,
+    /** 当前文字是否还是原样例句 —— 是的话才能用固化音频，改过一个字就不能了。 */
+    isSample: true,
   },
 
   observers: {
@@ -34,7 +42,8 @@ Component({
       // 每次开关都换一个代次：关掉浮层（或换成另一条声音）之后，在途的那次合成回来时
       // 代次已经对不上，会被直接丢弃。否则用户关了浮层，几秒后突然从看不见的地方响起来。
       this.gen = (this.gen || 0) + 1;
-      if (value) this.setData({ text: SAMPLE, error: '', played: false, busy: false });
+      this.demoFellBack = false;
+      if (value) this.setData({ text: SAMPLE, error: '', played: false, busy: false, isSample: true });
       else { this.destroyAudio(); this.setData({ busy: false }); }
     },
     voiceId() {
@@ -56,15 +65,32 @@ Component({
     swallow() {},
 
     inputText(event) {
-      this.setData({ text: String(event.detail.value || '').slice(0, MAX) });
+      const text = String(event.detail.value || '').slice(0, MAX);
+      this.setData({ text, isSample: text.trim() === SAMPLE });
     },
 
-    useSample() { this.setData({ text: SAMPLE, error: '' }); },
+    useSample() { this.setData({ text: SAMPLE, error: '', isSample: true }); },
 
     play() {
       const text = String(this.data.text || '').trim();
       if (!text) { this.setData({ error: '先写一句想听的话' }); return; }
       if (this.data.busy) return;
+
+      // 快路径：还是原样例句、而且服务端已经固化好了 —— 直接播，零等待、零供应商调用。
+      // 这是「预生成 + 固化」相对按需合成的全部好处所在，不能因为多写了一行判断就省掉。
+      const demo = String(this.properties.demoAudioUrl || '');
+      if (this.data.isSample && demo) {
+        this.setData({ error: '', played: true });
+        this.playAudio(demo, true);
+        return;
+      }
+
+      this.synthesize(text);
+    },
+
+    /** 按需合成并播放。样例句走不通时也回落到这里。 */
+    synthesize(text) {
+      if (!text) { this.setData({ error: '先写一句想听的话' }); return; }
       this.setData({ busy: true, error: '' });
       this.gen = (this.gen || 0) + 1;
       const gen = this.gen;
@@ -79,7 +105,7 @@ Component({
             return;
           }
           this.setData({ played: true });
-          this.playAudio(result.audioUrl);
+          this.playAudio(result.audioUrl, false);
         })
         .catch((error) => {
           if (gen !== this.gen) return;
@@ -87,12 +113,22 @@ Component({
         });
     },
 
-    playAudio(url) {
+    playAudio(url, isDemo) {
       this.destroyAudio();
       const audio = wx.createInnerAudioContext();
       this.audio = audio;
       audio.src = url;
-      audio.onError(() => this.setData({ error: '音频播放失败，请重试' }));
+      audio.onError(() => {
+        // 固化样例的签名链只有一小时。页面开着超过一小时再点，播的就是一个过期地址。
+        // 这时候不该甩一句「播放失败」了事 —— 同一句话按需合成一遍就有了，用户根本不必知道
+        // 背后换了条路。只回落一次，避免合成也失败时来回打转。
+        if (isDemo && !this.demoFellBack) {
+          this.demoFellBack = true;
+          this.synthesize(String(this.data.text || '').trim());
+          return;
+        }
+        this.setData({ error: '音频播放失败，请重试' });
+      });
       audio.play();
     },
 

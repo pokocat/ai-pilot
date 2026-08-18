@@ -2758,6 +2758,14 @@ export interface ClipAvatarView {
   imageMessage?: string | null; voiceMessage?: string | null;
   engine?: string | null; presetAvailable?: boolean;
   linkedVoiceId?: string | null; linkedVoiceName?: string | null;
+  /**
+   * 训练完成时固化的样例短片：真出镜、带声音、固定样例文案。
+   * 静帧证明不了口型和构图，这条能 —— 而这正是用户在扣钻石前最不确定的部分。
+   * null = 还没生成好（或该形象还没有可用声音），端上此时不展示入口。
+   */
+  demoVideoUrl?: string | null;
+  /** 该形象关联声音的固化样例音频。端上「听听你的声音」优先播它，零等待。 */
+  demoAudioUrl?: string | null;
 }
 /** 声音试听。不依赖任何 project —— 训练完当场就要能听，见 docs/[OPUS5]VIDEO_PREVIEW_FEEDBACK_PLAN_2026-08-18.md V01。 */
 export interface ClipVoicePreview {
@@ -2771,6 +2779,8 @@ export interface ClipVoicePreview {
 export interface ClipVoiceView {
   id: string; name: string; status: 'none' | 'training' | 'ready' | 'failed';
   source?: 'video' | 'dedicated' | null; trainedText?: string | null; progress: number;
+  /** 固化的样例试听音频。有它就零等待直接播；null 时端上回落到按需合成。 */
+  demoAudioUrl?: string | null;
 }
 export type ClipCloneKind = 'avatar' | 'voice' | 'avatarImage';
 export interface ClipCloneUploadRequest {

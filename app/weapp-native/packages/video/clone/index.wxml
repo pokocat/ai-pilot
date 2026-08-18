@@ -229,6 +229,7 @@
     open="{{voicePreviewOpen}}"
     voice-id="{{voiceId}}"
     voice-name="{{avatarName}}"
+    demo-audio-url="{{voiceDemoUrl}}"
     bindclose="closeVoicePreview"
   ></voice-preview>
 

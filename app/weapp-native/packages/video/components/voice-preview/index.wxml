@@ -3,7 +3,7 @@
     <view class="vp-head">
       <view class="vp-headcopy">
         <text class="vp-title">试听{{voiceName ? ' · ' + voiceName : ''}}</text>
-        <text class="vp-sub">写一句想听的话，用你的声音念出来。不扣钻石，想听几次都行。</text>
+        <text class="vp-sub">{{isSample && demoAudioUrl ? '这是训练完成时给你留的样例，点开就能听。想听别的话，改下面这句就行。' : '写一句想听的话，用你的声音念出来。不扣钻石，想听几次都行。'}}</text>
       </view>
       <view class="vp-close" bindtap="close"><native-icon name="close" tone="neutral" size="18"></native-icon></view>
     </view>
@@ -23,7 +23,7 @@
     <text wx:if="{{error}}" class="vp-error">{{error}}</text>
     <view class="vp-actions">
       <view class="vd-btn ghost" bindtap="close">关闭</view>
-      <view class="vd-btn {{busy ? 'disabled' : ''}}" style="flex:1" bindtap="play">{{busy ? '正在合成…' : (played ? '再听一次' : '听听看')}}</view>
+      <view class="vd-btn {{busy ? 'disabled' : ''}}" style="flex:1" bindtap="play">{{busy ? '正在合成…' : (played ? '再听一次' : (isSample && demoAudioUrl ? '听听看' : '合成并试听'))}}</view>
     </view>
   </view>
 </view>

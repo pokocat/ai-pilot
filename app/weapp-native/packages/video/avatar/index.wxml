@@ -61,7 +61,7 @@
             </view>
           </view>
           <text wx:if="{{item.imageMessage}}" class="avc-message">{{item.imageMessage}}</text>
-          <view class="av-item-actions"><view wx:if="{{item.linkedVoiceId && item.voiceStatus === 'ready'}}" class="avc-act primary" data-id="{{item.id}}" bindtap="openVoicePreview">试听声音</view><view class="avc-act" data-id="{{item.id}}" data-kind="image" bindtap="recapture">更换形象</view><view class="avc-act voice" data-id="{{item.id}}" data-kind="voice" bindtap="recapture">{{item.voiceActionText}}</view><view class="av-delete-one" data-id="{{item.id}}" bindtap="removeAvatar">删除</view></view>
+          <view class="av-item-actions"><view wx:if="{{item.demoVideoUrl}}" class="avc-act primary" data-id="{{item.id}}" bindtap="openDemoVideo">看出镜效果</view><view wx:if="{{item.linkedVoiceId && item.voiceStatus === 'ready'}}" class="avc-act {{item.demoVideoUrl ? '' : 'primary'}}" data-id="{{item.id}}" bindtap="openVoicePreview">试听声音</view><view class="avc-act" data-id="{{item.id}}" data-kind="image" bindtap="recapture">更换形象</view><view class="avc-act voice" data-id="{{item.id}}" data-kind="voice" bindtap="recapture">{{item.voiceActionText}}</view><view class="av-delete-one" data-id="{{item.id}}" bindtap="removeAvatar">删除</view></view>
           <view wx:if="{{item.voiceStatus === 'training'}}" class="avv-progress"><view class="avv-progress-fill" style="width:{{item.voiceProgress}}%"></view></view>
           <view wx:if="{{item.voiceMessage}}" class="avv-message">{{item.voiceMessage}}</view>
         </view>
@@ -89,10 +89,30 @@
     </view>
   </scroll-view>
 
+  <!-- 数字人样例短片：静帧看不出口型和构图，这条能。训练完成时固化，看多少次都不再打供应商。 -->
+  <view wx:if="{{demoVideoOpen}}" class="dv-mask" catchtap="closeDemoVideo">
+    <view class="dv-sheet" catchtap="swallow">
+      <view class="dv-head">
+        <view>
+          <text class="dv-title">出镜效果 · {{demoVideoName}}</text>
+          <text class="dv-sub">训练完成时给你留的样例，出片时就是这个人在说话。</text>
+        </view>
+        <view class="dv-close" bindtap="closeDemoVideo"><native-icon name="close" tone="neutral" size="18"></native-icon></view>
+      </view>
+      <view class="vd-portrait dv-player">
+        <video class="inner" src="{{demoVideoUrl}}" object-fit="contain" autoplay
+          show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"></video>
+      </view>
+      <text class="dv-note">成片里的画面、字幕和封面另外配，这条只用来确认人和声音对不对。</text>
+      <view class="vd-btn ghost" bindtap="closeDemoVideo">看完了</view>
+    </view>
+  </view>
+
   <voice-preview
     open="{{voicePreviewOpen}}"
     voice-id="{{voicePreviewId}}"
     voice-name="{{voicePreviewName}}"
+    demo-audio-url="{{voicePreviewDemoUrl}}"
     bindclose="closeVoicePreview"
   ></voice-preview>
 

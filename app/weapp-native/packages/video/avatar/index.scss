@@ -81,3 +81,13 @@
 
 /* 试听：分身卡里的主动作。排在「更换形象」前面 —— 先确认像不像，再决定要不要换。 */
 .avc-act.primary { border-color: var(--vd-avatar-line); background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }
+
+/* 数字人样例短片浮层。用真实 9:16 容器 —— 出片就是这个比例，别让用户按横屏预期去判断构图。 */
+.dv-mask { position: fixed; inset: 0; z-index: 60; background: rgba(24, 20, 18, 0.55); display: flex; align-items: flex-end; }
+.dv-sheet { width: 100%; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); background: var(--vd-surface); border-radius: 22px 22px 0 0; }
+.dv-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.dv-title { display: block; font-size: 16px; font-weight: 700; color: var(--vd-ink); }
+.dv-sub { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.dv-close { flex: none; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }
+.dv-player { max-width: 240px; margin: 0 auto; border-radius: 16px; overflow: hidden; background: #000; }
+.dv-note { display: block; margin: 14px 0 12px; font-size: 11px; line-height: 1.6; color: var(--vd-muted); text-align: center; }

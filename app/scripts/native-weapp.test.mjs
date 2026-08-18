@@ -2559,6 +2559,67 @@ test('两个上传入口用同一道体积闸：超限的文件不该先传完�
   assert.match(assets, /CLIP_ASSET_QUOTA_EXCEEDED/);
 });
 
+test('固化样例：样例句直接播固化音频，改过字才走合成', () => {
+  const comp = readVideo('components/voice-preview/index.js');
+  // 「预生成 + 固化」的全部好处就在这条快路径上：零等待、零供应商调用、不吃按需限流。
+  assert.match(comp, /isSample && demo\)/);
+  // 第二个实参标记「这条是固化产物」，签名过期时才知道该回落到合成
+  assert.match(comp, /this\.playAudio\(demo, true\);/);
+  // 改过一个字就不能再用固化的那条 —— 那已经不是同一句话了
+  assert.match(comp, /isSample: text\.trim\(\) === SAMPLE/);
+  // 没固化好时必须回落到按需合成，不能显示一个点不动的按钮
+  assert.match(comp, /api\.previewVoiceById/);
+});
+
+test('固化样例：三处试听入口都要把 demoAudioUrl 传下去，否则快路径形同虚设', () => {
+  ['avatar/index.wxml', 'clone/index.wxml', 'voices/index.wxml'].forEach((rel) => {
+    assert.match(readVideo(rel), /demo-audio-url="\{\{/, `${rel} 没有传 demo-audio-url`);
+  });
+});
+
+test('数字人样例短片是砍掉试镜后唯一能验口型的地方，必须有入口和生命周期清理', () => {
+  const avatar = readVideo('avatar/index.js');
+  const view = readVideo('avatar/index.wxml');
+  assert.match(view, /bindtap="openDemoVideo"/);
+  assert.match(view, /wx:if="\{\{item\.demoVideoUrl\}\}"/);
+  // 用真实 9:16 容器：出片就是这个比例，别让用户按横屏预期判断构图
+  assert.match(view, /vd-portrait dv-player/);
+  // 浮层必须跟着页面生命周期释放 overlay，否则遮罩计数会漏
+  assert.match(avatar, /demoVideoOpen\) this\.closeDemoVideo\(\)/);
+  assert.match(avatar, /demoVideoOpen\) host\.setOverlay\(false, 'video-demo-video'\)/);
+});
+
+test('全片预览要带上封面和尾卡，且如实说明封面在成片里只占第一帧', () => {
+  const shots = readVideo('shots/index.js');
+  // 封面只在真开启时才放 —— 别让「没设置」看起来像「设置了但没生效」
+  assert.match(shots, /cover\.enabled !== true\) return \[\]/);
+  // 连播里给它 2 秒能看清，但必须说清成片里只占第一帧，否则用户会以为开头真停这么久
+  assert.match(shots, /只占第一帧[\s\S]{0,40}不占正片时长/);
+  // 尾卡本来就在 rows 里（roleClass==='tail'），连播覆盖它
+  assert.match(shots, /isTail \? '模板自带的固定结尾'/);
+});
+
+test('固化音频签名过期时静默回落按需合成，而不是甩一句播放失败', () => {
+  const comp = readVideo('components/voice-preview/index.js');
+  // 签名链只有一小时。页面开着超过一小时再点，播的就是过期地址 —— 同一句话合成一遍就有了，
+  // 用户不必知道背后换了条路。
+  assert.match(comp, /isDemo && !this\.demoFellBack/);
+  assert.match(comp, /this\.synthesize\(/);
+  // 只回落一次，避免合成也失败时来回打转
+  assert.match(comp, /this\.demoFellBack = true;/);
+  assert.match(comp, /this\.demoFellBack = false;/);
+});
+
+test('clone 页的 voiceDemoUrl 必须真有数据来源，不能是个永远为空的绑定', () => {
+  const clone = readVideo('clone/index.js');
+  const view = readVideo('clone/index.wxml');
+  assert.match(view, /demo-audio-url="\{\{voiceDemoUrl\}\}"/);
+  // data 里要定义，轮询里要写入 —— 少任何一半这个入口都等于没接
+  assert.match(clone, /voiceDemoUrl: '',/);
+  assert.match(clone, /voice\.demoAudioUrl\) \|\| '';/);
+  assert.match(clone, /setData\(\{ voiceDemoUrl: demoAudioUrl \}\)/);
+});
+
 test('保存成片走军师同源下载并检查下载状态、相册权限与真实进度', () => {
   const api = fs.readFileSync(path.join(sourceRoot, 'packages/video/api.js'), 'utf8');
   const work = fs.readFileSync(path.join(sourceRoot, 'packages/video/work/index.js'), 'utf8');

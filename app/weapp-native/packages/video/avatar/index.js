@@ -79,10 +79,15 @@ Page({
   onLoad() { this.load(); },
   onShow() { if (!this.data.loading) this.load(); },
   // 页面切走/销毁时要关掉试听：音频还在响、overlay 计数也会漏掉一层。
-  onHide() { this.stopPolling(); if (this.data.voicePreviewOpen) this.closeVoicePreview(); },
+  onHide() {
+    this.stopPolling();
+    if (this.data.voicePreviewOpen) this.closeVoicePreview();
+    if (this.data.demoVideoOpen) this.closeDemoVideo();
+  },
   onUnload() {
     this.stopPolling();
     if (this.data.voicePreviewOpen) host.setOverlay(false, 'video-voice-preview');
+    if (this.data.demoVideoOpen) host.setOverlay(false, 'video-demo-video');
   },
 
   load() {
@@ -193,6 +198,30 @@ Page({
     });
   },
 
+  /**
+   * 看数字人的真实出镜效果。
+   *
+   * 这是砍掉「按需试镜」之后，用户在扣钻石前唯一能验证口型和构图的地方 ——
+   * 形象预览帧只能证明「是我」，证明不了「说起话来自不自然」。
+   * 片子在训练完成时就固化好了，这里只是播它，不产生任何供应商调用。
+   */
+  openDemoVideo(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const avatar = (this.data.avatars || []).find((item) => item.id === id);
+    if (!avatar || !avatar.demoVideoUrl) { host.toast('样例还在生成，稍后再来看'); return; }
+    host.setOverlay(true, 'video-demo-video');
+    this.setData({
+      demoVideoOpen: true,
+      demoVideoUrl: avatar.demoVideoUrl,
+      demoVideoName: avatar.name || '这个分身',
+    });
+  },
+
+  closeDemoVideo() {
+    host.setOverlay(false, 'video-demo-video');
+    this.setData({ demoVideoOpen: false, demoVideoUrl: '' });
+  },
+
   openVoicePreview(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const avatar = (this.data.avatars || []).find((item) => item.id === id);
@@ -203,6 +232,7 @@ Page({
       voicePreviewOpen: true,
       voicePreviewId: avatar.linkedVoiceId,
       voicePreviewName: avatar.linkedVoiceName || avatar.name || '这条声音',
+      voicePreviewDemoUrl: avatar.demoAudioUrl || '',
     });
   },
 
