@@ -1784,9 +1784,12 @@ test('原生 API 的本地真值接口统一委托 mock 实现', () => {
 test('附身验令使用隔离鉴权，失败不清当前会话', () => {
   const api = fs.readFileSync(path.join(sourceRoot, 'services/api.js'), 'utf8');
   const request = fs.readFileSync(path.join(sourceRoot, 'services/request.js'), 'utf8');
+  const store = fs.readFileSync(path.join(sourceRoot, 'services/store.js'), 'utf8');
   assert.match(api, /verifyImpersonation:[\s\S]*isolatedAuth:\s*true/);
   assert.match(request, /opts\.isolatedAuth/);
   assert.match(request, /statusCode\s*===\s*401[\s\S]{0,120}unauthorized\(tokenAtRequest,\s*data,\s*opts\.isolatedAuth\)/);
+  assert.match(request, /getToken\(\)\s*===\s*tokenAtRequest/);
+  assert.match(store, /error\.authHandled\s*===\s*true\s*\|\|\s*error\.staleAuth\s*===\s*true/);
 });
 
 test('mock 原生包按 token 在本地数据与真实会话间切换', async () => {
@@ -1853,6 +1856,33 @@ test('mock 原生包按 token 在本地数据与真实会话间切换', async ()
     );
     assert.equal(token, 'current.session.token', '候选令牌验令失败不得覆盖或清理当前 token');
     assert.equal(removed, 0, '隔离鉴权失败不得调用 clearToken');
+
+    // 今日 tab 会同时加载 me/casefile/reviews/prescriptions；旧 token 失效时这些 401 会并发回来。
+    // 只允许第一条执行全局退出，其余旧响应不得重复 reLaunch，也不得清掉一次新登录。
+    const pendingRequests = [];
+    let authLostCount = 0;
+    globalThis.wx.request = (options) => { pendingRequests.push(options); return {}; };
+    requestService.setAuthLostHandler(() => { authLostCount += 1; });
+    removed = 0;
+    token = 'expired.session.token';
+    const expiredA = requestService.request('/me');
+    const expiredB = requestService.request('/casefile');
+    pendingRequests.shift().success({ statusCode: 401, data: { error: '令牌无效' } });
+    pendingRequests.shift().success({ statusCode: 401, data: { error: '令牌无效' } });
+    const expiredResults = await Promise.allSettled([expiredA, expiredB]);
+    assert.equal(removed, 1, '同一个失效会话只清一次 token');
+    assert.equal(authLostCount, 1, '同一个失效会话只触发一次全局退出');
+    assert.equal(expiredResults[0].status === 'rejected' && expiredResults[0].reason.authHandled, true);
+    assert.equal(expiredResults[1].status === 'rejected' && expiredResults[1].reason.staleAuth, true);
+
+    token = 'old.session.token';
+    const lateRequest = requestService.request('/reviews');
+    token = 'new.session.token';
+    pendingRequests.shift().success({ statusCode: 401, data: { error: '旧请求已失效' } });
+    await assert.rejects(lateRequest, (error) => error && error.staleAuth === true);
+    assert.equal(token, 'new.session.token', '旧请求晚到的 401 不得清掉新登录 token');
+    assert.equal(removed, 1, '旧请求晚到不得再次清 token');
+    assert.equal(authLostCount, 1, '旧请求晚到不得再次触发全局退出');
   } finally {
     if (previousWx === undefined) delete globalThis.wx;
     else globalThis.wx = previousWx;

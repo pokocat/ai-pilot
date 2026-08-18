@@ -18,6 +18,7 @@ const ACCEPT_TOAST: Record<WechatSubscribeScene, string> = {
   payment: '已订阅一次到账提醒',
   avatar: '已订阅一次训练完成提醒',
   poster: '已订阅一次出图完成提醒',
+  clip: '已订阅一次成片完成提醒',
 };
 
 /** 预热模板配置（登录后调用；失败静默——授权时会退回即时拉取）。 */
