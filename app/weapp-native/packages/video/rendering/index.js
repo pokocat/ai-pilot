@@ -9,8 +9,9 @@ const host = require('../host');
 const api = require('../api');
 const model = require('../model');
 const { POLL_INTERVAL_MS } = require('../config');
+const { withShare } = require('../../../services/share');
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     jobId: '',
     projectId: '',
@@ -129,4 +130,4 @@ Page({
   },
 
   back() { host.back(); },
-});
+}));

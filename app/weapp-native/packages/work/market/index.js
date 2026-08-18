@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const CATEGORIES = ['全部', '战略目标', '执行拆解', 'IP 增长', '个人成长', '企业经营', '组织管理', '知识资产', '数据增强'];
 const MODULES = [
@@ -25,7 +26,7 @@ const SKILLS = [
   { id: 'finance-health', icon: 'lock', title: '经营财务体检', desc: '看现金流、利润结构、成本和风险边界。', status: '需上传资料', tier: 'single', cost: '49/次', costIcon: true, prompt: '帮我做一次经营财务体检，看现金流、利润结构和风险边界。' },
 ];
 
-Page({
+Page(withShare({
   data: baseData({ categories: CATEGORIES, category: '全部', modules: MODULES, skills: SKILLS, prescription: null, busy: false, showLogin: false }),
   onLoad(options) { this._pid = options && options.pid || ''; if (!store.isAuthed()) this.setData({ showLogin: true }); if (this._pid) this.loadPrescription(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
@@ -52,4 +53,4 @@ Page({
     } });
   },
   async finishPrescription() { const rx = this._rx; if (!rx) return; try { await api.prescriptionAction(rx.id, 'activated'); wx.showToast({ title: '已记为启用', icon: 'none' }); setTimeout(() => wx.navigateBack(), 500); } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '状态更新失败' }); } },
-});
+}, { timeline: true }));

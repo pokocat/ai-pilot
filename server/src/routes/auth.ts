@@ -18,13 +18,22 @@ import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
+import { bindOnRegister, isInviteCodeShape, type ReferralSource } from '../services/referral.js';
 import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
+// 邀请归因入参（三条建号通道共用）：两个字段都可选，且**形状不对一律当没传**——
+// 分享链路不能因为一个脏参数把登录拦成 400。窗口判定在 services/referral.ts（天数归运营配置）。
+const attributionShape = {
+  inviteCode: z.string().trim().optional(),
+  inviteCodeAt: z.number().int().positive().optional(),
+};
+
 const loginSchema = z.object({
   phone: phoneRule,
   name: z.string().trim().min(1).max(20).optional(),
   code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确').optional(), // 短信验证码；按场景可选/必填
+  ...attributionShape,
 });
 const smsSendSchema = z.object({
   phone: phoneRule,
@@ -44,12 +53,35 @@ const wechatPhoneSchema = z.object({
   phoneCode: z.string().trim().min(1, '缺少手机号 code'), // getPhoneNumber 返回的一次性 code
   loginCode: z.string().trim().min(1).optional(),         // wx.login 的 code，可选：用于顺带关联 openid
   name: z.string().trim().min(1).max(20).optional(),
+  ...attributionShape,
 });
 
 /** 取客户端 IP（优先 X-Forwarded-For 首段）。 */
 function clientIp(req: FastifyRequest): string {
   const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
   return xff || req.ip;
+}
+
+/** 邀请归因入参 + 风控原料（IP / UA）。形状不合法的码直接丢掉，返回 undefined = 本次不归因。 */
+interface RegisterAttribution {
+  inviteCode: string;
+  inviteCodeAt?: number;
+  source: ReferralSource;
+  clientIp: string;
+  userAgent: string;
+}
+
+function attributionOf(req: FastifyRequest, data: { inviteCode?: string; inviteCodeAt?: number }): RegisterAttribution | undefined {
+  if (!isInviteCodeShape(data.inviteCode)) return undefined;
+  return {
+    inviteCode: data.inviteCode,
+    inviteCodeAt: data.inviteCodeAt,
+    // 通道细分（朋友圈 / 海报扫码）目前客户端还没分开上报，统一记 share_friend；
+    // 要分通道时让客户端把 source 一起带上来，不要在服务端猜。
+    source: 'share_friend',
+    clientIp: clientIp(req),
+    userAgent: String(req.headers['user-agent'] ?? '').slice(0, 500),
+  };
 }
 
 type AuthUser = {
@@ -167,15 +199,48 @@ function loginResult(
 }
 
 /** 按手机号登录或注册（短信登录 / 微信一键登录 / 未来运营商一键登录共用）。 */
-async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ user: AuthUser; isNew: boolean }> {
+async function loginOrRegisterByPhone(
+  phone: string,
+  name?: string,
+  attribution?: RegisterAttribution,
+): Promise<{ user: AuthUser; isNew: boolean }> {
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing) {
     await recordAudit({ tenantId: existing.tenantId, userId: existing.id, action: 'auth.login', payload: phoneAudit(phone) });
+    // 老用户登录**不追认**推荐人：存量用户互相填码是最容易被薅的口子。
     return { user: existing, isNew: false };
   }
   // 不编造称呼/公司：未填留空，由首登建档采集。
   const user = await createUserWithTenant({ phone, name: name?.trim() || '', auditAction: 'auth.register', auditPayload: phoneAudit(phone) });
+  await bindReferralAfterRegister(user, attribution);
   return { user, isNew: true };
+}
+
+/**
+ * 注册成功后绑定推荐人。
+ *
+ * **为什么不放进 createUserWithTenant 的事务里**：Postgres 事务中任何一条语句失败就把整个事务
+ * 置为 aborted，之后的语句一律报错。那样「绑定失败绝不能影响注册」就是做不到的——
+ * try/catch 只能抓到 JS 异常，事务本身已经废了，租户与用户会一起回滚。
+ * 所以这里放在注册**之后**单独跑，失败只落一行日志：账号一定建成，关系可以事后按
+ * referral_attribution 的留痕人工补绑。这是刻意的取舍，别为了「原子」把它挪回事务里。
+ */
+async function bindReferralAfterRegister(user: AuthUser, attribution?: RegisterAttribution): Promise<void> {
+  if (!attribution) return;
+  try {
+    await bindOnRegister({
+      db: prisma,
+      userId: user.id,
+      tenantId: user.tenantId,
+      inviteCode: attribution.inviteCode,
+      inviteCodeAt: attribution.inviteCodeAt,
+      source: attribution.source,
+      clientIp: attribution.clientIp,
+      userAgent: attribution.userAgent,
+    });
+  } catch (err) {
+    console.error('[referral] 绑定推荐人失败（注册已成功，不回滚）:', (err as Error).message);
+  }
 }
 
 function isUniqueConflict(error: unknown): boolean {
@@ -354,7 +419,7 @@ export async function authRoutes(app: FastifyInstance) {
       }
     }
 
-    const { user, isNew } = await loginOrRegisterByPhone(phone, name);
+    const { user, isNew } = await loginOrRegisterByPhone(phone, name, attributionOf(req, parsed.data));
     await recordAuthAttempt(req, 'auth.login.attempt', {
       ok: true,
       statusCode: 200,
@@ -490,7 +555,7 @@ export async function authRoutes(app: FastifyInstance) {
         } else {
           // 手机号没账号 → 以手机号建号。即便本次 openid 原挂在别的真实号账号上，
           // 也是建这个手机号的新账号、把微信身份迁过来（手机号才是身份键）。
-          ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
+          ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name, attributionOf(req, parsed.data)));
           ({ user, binding } = await loginAndLink(user));
         }
       }
@@ -584,10 +649,15 @@ export async function authRoutes(app: FastifyInstance) {
   //   const phone = await verifyCarrierToken(parsed.data.provider, parsed.data.token);
   //   const { user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name);
   //   return loginResult(user, isNew, await onboardedOf(user));
+  // 归因字段现在就收下（契约与另两条通道一致），但本入口仍返回 501：
+  //   接通 SDK 时把上面注释里的那行改成
+  //   `await loginOrRegisterByPhone(phone, parsed.data.name, attributionOf(req, parsed.data))`
+  //   即可获得与短信 / 微信一键完全相同的归因行为，不需要再动 referral 那一层。
   const carrierSchema = z.object({
     provider: z.enum(['cmcc', 'cucc', 'ctcc', 'aliyun', 'jiguang']).optional(),
     token: z.string().trim().min(1, '缺少运营商 token'),
     name: z.string().trim().min(1).max(20).optional(),
+    ...attributionShape,
   });
   app.post('/auth/carrier-onetap', async (req, reply) => {
     const parsed = carrierSchema.safeParse(req.body);

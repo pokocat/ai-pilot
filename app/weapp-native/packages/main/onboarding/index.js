@@ -3,6 +3,7 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { armCoach } = require('../../../services/coach');
 const { COLORS, colorByKey } = require('../../../services/colors');
+const { withShare } = require('../../../services/share');
 
 const DEFAULT_SURVEY = [
   { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '电商 / 跨境', '餐饮 / 食品', '美业 / 医美', '大健康 / 养生', '教育 / 培训', '医疗 / 医药', '制造 / 工业', '专业服务 / 咨询', '本地生活服务', '文旅 / 酒店', '房产 / 家居', '消费 / 零售', '其他'] },
@@ -17,7 +18,7 @@ function withTimeout(promise, ms) {
 }
 function isOther(value) { return value === '其他' || value === '其它'; }
 
-Page({
+Page(withShare({
   data: baseData({
     step: 'color', colors: COLORS, currentColor: colorByKey('green'), questions: DEFAULT_SURVEY,
     answers: {}, custom: {}, company: '', surveyDone: false, saving: false,
@@ -147,4 +148,4 @@ Page({
     armCoach();
     wx.switchTab({ url: '/pages/sessions/index' });
   },
-});
+}));

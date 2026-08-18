@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const CATEGORIES = [
   { key: 'founder', title: '创始人 · 你这个人', sub: '创业故事 · 背景 · 性格 · 决策风格 · 天赋与短板', icon: 'insight', tone: 'purple', tint: '#EEEDFE' },
@@ -36,7 +37,7 @@ function mapLibrary(value) {
   });
 }
 
-Page({
+Page(withShare({
   data: baseData({
     loading: true, failed: false, showLogin: false, understanding: null,
     memoryTotal: 0, memoryGroups: [], sections: [], questions: [],
@@ -90,4 +91,4 @@ Page({
       : '请进入个人档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
     navTo(`/packages/main/chat/index?send=${encodeURIComponent(text)}`);
   },
-});
+}));

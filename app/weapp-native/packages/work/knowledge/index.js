@@ -4,6 +4,7 @@ const { baseData } = require('../../../services/page');
 const { navTo } = require('../../../services/nav');
 const { getToken } = require('../../../services/token');
 const { getApiBaseUrl } = require('../../../services/runtime-mode');
+const { withShare } = require('../../../services/share');
 
 const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
 const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
@@ -57,7 +58,7 @@ function viewRow(row) {
 
 function parseUploadBody(value) { if (typeof value !== 'string') return value; try { return JSON.parse(value); } catch (_) { return {}; } }
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, items: [], pasteItems: [], pasteCount: 0, pasteOpen: false, busy: false, pct: 0, pollHint: false, errorText: '', showLogin: false }),
   togglePaste() { this.setData({ pasteOpen: !this.data.pasteOpen }); },
   onLoad() { this._attempt = 0; this.load(true); },
@@ -148,4 +149,4 @@ Page({
     });
   },
   cancelUpload() { this._cancelled = true; if (this._uploadTask) this._uploadTask.abort(); this._uploadTask = null; this.setData({ busy: false, pct: 0 }); wx.showToast({ title: '已取消上传', icon: 'none' }); },
-});
+}, { timeline: true }));

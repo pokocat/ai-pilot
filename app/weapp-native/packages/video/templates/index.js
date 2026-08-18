@@ -7,8 +7,9 @@ const host = require('../host');
 const api = require('../api');
 const { formatDuration } = require('../model');
 const { filterOffered } = require('../catalog');
+const { withShare } = require('../../../services/share');
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     loading: true,
     /** 'ok' | 'empty' | 'failed' —— 空态与读失败必须分开，别把没读到说成没有。 */
@@ -60,4 +61,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

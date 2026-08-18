@@ -7,12 +7,13 @@ const {
   setStreamFinish,
   stopImmediatelyCb,
 } = require('../vendor/towxml/globalCb');
+const { withShare } = require('../../../services/share');
 
 // towxml 留在本分包（packages/main/vendor/towxml），主包的 chat-core 不能反向引用它，
 // 所以由同包的本页把流式打字机回调注入给对话核心。
 useStreamRenderer({ setMdText, setStreamFinish, stopImmediatelyCb });
 
-Page({
+Page(withShare({
   behaviors: [chatCore],
   data: baseData({}),
   onLoad(options) {
@@ -29,4 +30,4 @@ Page({
   openChatMenu() {
     wx.showActionSheet({ itemList: ['整理本轮为方案', '引用已有资产', '开启新对话'], success: (result) => { if (result.tapIndex === 0) this.summarizeChat(); else if (result.tapIndex === 1) this.openPicker(); else wx.redirectTo({ url: `/packages/main/chat/index?agentKey=${this._agentKey}&fresh=1` }); } });
   },
-});
+}));

@@ -3,8 +3,9 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 
-// 归因来源枚举：prescription=处方位（军令语境开方）| catalog=货架/商城 | market=生态市场。缺省 catalog。
-export const ACTIVATION_SOURCES = ['prescription', 'catalog', 'market'] as const;
+// 归因来源枚举：prescription=处方位（军令语境开方）| catalog=货架/商城 | market=生态市场
+// | invite=邀请带来的开通（服务 D-1 漏斗里「邀请贡献了多少开通」这一问，与发奖无关）。缺省 catalog。
+export const ACTIVATION_SOURCES = ['prescription', 'catalog', 'market', 'invite'] as const;
 export type ActivationSource = (typeof ACTIVATION_SOURCES)[number];
 
 /** 解析 source + refId（refId 仅在 source=prescription 时有意义，其余丢弃）。 */

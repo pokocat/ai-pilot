@@ -5,6 +5,7 @@ const host = require('../host');
 const api = require('../api');
 const model = require('../model');
 const { POLL_INTERVAL_MS } = require('../config');
+const { withShare } = require('../../../services/share');
 
 const TABS = [
   { key: 'all', label: '全部' },
@@ -12,7 +13,7 @@ const TABS = [
   { key: 'done', label: '已完成' },
 ];
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     loading: true,
     tabs: TABS,
@@ -116,4 +117,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

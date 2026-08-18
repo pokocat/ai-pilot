@@ -6,6 +6,7 @@ const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('
 const { commitBattle } = require('../../services/battle-commit');
 const worksCache = require('../../services/works-cache');
 const mockProfile = require('../../services/mockProfile');
+const { withShare } = require('../../services/share');
 
 const POUCH_MOVED_KEY = 'junshi.execution.pouch-moved.v1';
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
@@ -49,7 +50,7 @@ function todayPosterWorks(payload) {
   })).slice(0, 8);
 }
 
-Page({
+Page(withShare({
   data: baseData({
     authed: false, showLogin: false, coreStatus: 'idle', coreError: '', worksStatus: 'idle', worksError: '', reviewStatus: 'idle', reviewError: '', committing: false,
     segments: ['今天', '近七日'], segment: 0, scrollTop: 0, pouchMovedHint: safeMovedHint(), reviewDue: false,
@@ -212,4 +213,4 @@ Page({
   async saveGoal() { const edit = this.data.goalEdit; if (!edit || this.data.savingGoal) return; this.setData({ savingGoal: true }); try { await api.saveGoals({ [edit.field]: String(this._goalDraft || '').trim() }); this.closeGoalEdit(); await this.loadCore({ force: true }); wx.showToast({ title: '目标已保存', icon: 'none' }); } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '目标保存失败' }); } finally { this.setData({ savingGoal: false }); } },
   openReminders() { navTo('/packages/work/reminders/index'); }, openDaily() { navTo('/packages/work/daily/index'); }, openLedger() { navTo('/packages/work/ledger/index'); },
   async reviewToday() { if (!this.requireLogin()) return; const checks = this.data.battleForces.filter((item) => this._forceVerdicts[item.kind]).map((item) => `${item.label}：今天${this._forceVerdicts[item.kind] === 'on' ? '符合主线' : '偏离主线'}（打法：${item.tactic}）`); const prompt = ['根据我今天完成的军令和数据回填，带我做一次经营复盘。', checks.length ? `三势自评：\n${checks.join('\n')}` : ''].filter(Boolean).join('\n'); try { await api.reviewCasefile('day'); api.track('review_start', { forceChecks: checks.length }); this._forceVerdicts = {}; this._sheet(false); navTo('/packages/main/chat/index?agentKey=general&continue=1&send=' + encodeURIComponent(prompt)); } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '复盘没有开始' }); } },
-});
+}));

@@ -2,8 +2,9 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { gotoExecution } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, errorText: '', items: [], busy: '', showLogin: false }),
   onLoad() { this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); if (this._loaded) this.load(); },
@@ -33,4 +34,4 @@ Page({
       finally { this.setData({ busy: '' }); }
     }, fail: () => { this.setData({ busy: '' }); wx.showToast({ title: '订阅没有完成', icon: 'none' }); } });
   },
-});
+}));

@@ -1,6 +1,7 @@
 const { api, isMock } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { withShare } = require('../../../services/share');
 
 function money(fen) {
   if (Number(fen) < 0) return '面议';
@@ -106,7 +107,7 @@ function paymentToast(state, mocked, appliedTitle) {
   return { title: '支付已受理，权益到账中，请稍后刷新', icon: 'none' };
 }
 
-Page({
+Page(withShare({
   data: baseData({
     loading: true, showLogin: false, authed: false, period: 'month', current: null, usage: null,
     subscription: null, options: [], periodTabs: [], showPeriodSwitch: false,
@@ -357,4 +358,4 @@ Page({
       this.setData({ busy: '' });
     }
   },
-});
+}));

@@ -5,6 +5,7 @@ const host = require('../host');
 const api = require('../api');
 const { POLL_INTERVAL_MS } = require('../config');
 const model = require('../model');
+const { withShare } = require('../../../services/share');
 const { mediaDimensions, formatResolution, cloneCostText, voiceChoices, cloneCostRows } = model;
 
 const STEPS = [
@@ -33,7 +34,7 @@ function initialTraining(mode) {
   };
 }
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     steps: STEPS,
     mode: 'avatar',
@@ -859,4 +860,4 @@ Page({
   },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.loadNotificationTemplate(); this.loadVoices(); },
-});
+}));

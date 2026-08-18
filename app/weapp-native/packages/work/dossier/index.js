@@ -1,6 +1,7 @@
 const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { withShare } = require('../../../services/share');
 
 function normalizeReport(report) {
   if (!report) return null;
@@ -18,7 +19,7 @@ function normalizeReport(report) {
   };
 }
 
-Page({
+Page(withShare({
   data: baseData({ report: null, loading: false, ready: false, loadError: false, showLogin: false }),
   onLoad() {
     this._loading = false;
@@ -64,4 +65,4 @@ Page({
     if (this.data.loading) return;
     wx.showModal({ title: '刷新完整履历', content: '将重新执笔生成一份履历（会消耗一次额度），覆盖当前这份。确定刷新？', confirmText: '刷新', cancelText: '再想想', success: (result) => { if (result.confirm) this.generate(false); } });
   },
-});
+}));
