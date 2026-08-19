@@ -3,8 +3,9 @@
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad pouch">
-      <view class="pouch-back" bindtap="back"><native-icon name="back" tone="neutral" size="18"></native-icon><text>返回执行</text></view>
-      <tab-header title="锦囊" kicker="军师替你出的妙计" glyph="计"></tab-header>
+      <!-- 锦囊主体已内联进今日页尾，这页是它的档案柜，所以返回落回今日。 -->
+      <view class="pouch-back" bindtap="back"><native-icon name="back" tone="neutral" size="18"></native-icon><text>返回今日</text></view>
+      <tab-header title="锦囊" kicker="做过的都在这" glyph="计"></tab-header>
 
       <!-- 游客态：锦囊装的是你自己的成品，游客本来只能看到一排空架子。
            与图籍同一口径（个人私产页要登录）；主线仍留给游客——问策本地开场、战局有游客引导。 -->
@@ -18,74 +19,72 @@
 
       <block wx:else>
       <view wx:if="{{loadFailed}}" class="pch-retry card" bindtap="retry">
-        <text class="pch-retry-t">作品没读出来，网络不畅或服务端在忙</text>
+        <text class="pch-retry-t">有作品没读出来，网络不畅或服务端在忙</text>
         <text class="pch-retry-go">重试</text>
       </view>
 
-      <!-- ① 最近做的：跨来源混排（方案/海报/成片），按时间倒序最多 10 张。整卡即复出动词。
-           标题单行截断、卡宽固定：长标题不许把卡撑变形（product-ui-completeness）。 -->
-      <block wx:if="{{recent.length}}">
-        <text class="section-label">最 近 做 的</text>
-        <scroll-view scroll-x enhanced show-scrollbar="false" class="pch-flow"><view class="pch-track">
-          <view wx:for="{{recent}}" wx:key="key" class="pch-work card" data-index="{{index}}" bindtap="openWork">
-            <view class="pch-w-thumb">
-              <image class="pch-w-img" src="{{item.thumb}}" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onThumbError"></image>
-              <text class="pch-w-tag {{item.typeClass}}">{{item.typeLabel}}</text>
-            </view>
-            <text class="pch-w-t">{{item.title}}</text>
-            <view class="pch-w-foot">
-              <text class="pch-w-from">出自 · {{item.from}}</text>
-              <view class="pch-w-verb"><text>{{item.verb}}</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="11"></native-icon></view>
-            </view>
-          </view>
-        </view></scroll-view>
-      </block>
-      <!-- 取数中：给横滑流两张骨架卡。三条作品通道里 /video/works 是服务端到 aidrama 的同步代理
-           （上游预算 15–60s，见 index.js load 注释），首次进 tab 就是这一态——不能是一屏纯白。 -->
-      <block wx:elif="{{loading}}">
-        <text class="section-label">最 近 做 的</text>
-        <view class="pch-flow"><view class="pch-track">
-          <view wx:for="{{[1,2]}}" wx:key="*this" class="pch-work card pch-sk">
+      <!-- 检索：搜索 + 带计数的类型筛选。都在端上本地过滤，不重新取数。
+           搜索框样式与问策页 council-search 同源（连图标都用它那枚 target）。 -->
+      <view class="pch-search">
+        <native-icon name="target" tone="neutral" size="14"></native-icon>
+        <input class="pch-input" value="{{query}}" placeholder="搜标题、出处 · 翻出做过的东西" bindinput="inputQuery" />
+        <view wx:if="{{query}}" class="pch-clear" bindtap="clearQuery"><native-icon name="close" tone="neutral" size="12"></native-icon></view>
+      </view>
+      <view class="pch-seg">
+        <view wx:for="{{tabs}}" wx:key="key" class="pch-seg-item {{typeIndex===index?'on':''}}" data-index="{{index}}" bindtap="selectType">{{item.text}}</view>
+      </view>
+
+      <!-- 取数中：给一排骨架卡。三条通道里 /video/works 是服务端到 aidrama 的同步代理
+           （上游预算 15–60s），首次进来就是这一态——不能是一屏纯白。 -->
+      <block wx:if="{{loading && !groups.length}}">
+        <view class="pch-wall">
+          <view wx:for="{{[1,2,3,4]}}" wx:key="*this" class="pch-work card pch-sk">
             <view class="pch-w-thumb"></view>
             <view class="pch-sk-line"></view>
             <view class="pch-sk-line short"></view>
           </view>
-        </view></view>
+        </view>
       </block>
-      <!-- 空态（游客或全无作品）：不催登录，只把人指回战局领军令。
-           取数失败时不出这张卡——上面已经有重试条，一边说「读不出来」一边说「还没有作品」是自相矛盾。 -->
-      <view wx:elif="{{!loadFailed}}" class="pouch-empty card">
-        <text class="pe-t serif">还没有作品</text>
-        <text class="pe-d">去执行领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
-        <view class="pe-go" bindtap="goExecution"><text>去执行领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
-      </view>
 
-      <!-- ② 手艺：一门手艺一格。固定子应用三格 + 创意 agents 动态格（上新自动多一格）。 -->
-      <text class="section-label">手 艺</text>
-      <!-- 首次取数时 crafts 还是空数组：给四格骨架，不留一片空白让人以为页面坏了。 -->
-      <view wx:if="{{loading && !crafts.length}}" class="pch-grid">
-        <view wx:for="{{[1,2,3,4]}}" wx:key="*this" class="pch-craft card pch-sk">
-          <view class="pch-art"></view>
-          <view class="pch-sk-line"></view>
-          <view class="pch-sk-block"></view>
-          <view class="pch-sk-line short"></view>
+      <block wx:else>
+        <block wx:for="{{groups}}" wx:key="key" wx:for-item="group" wx:for-index="gidx">
+          <text class="pch-glabel">{{group.label}}</text>
+          <view class="pch-wall">
+            <view wx:for="{{group.items}}" wx:key="key" class="pch-work card" data-group="{{gidx}}" data-item="{{index}}" bindtap="openWork">
+              <view class="pch-w-thumb">
+                <image class="pch-w-img" src="{{item.thumb}}" mode="aspectFill" lazy-load data-group="{{gidx}}" data-item="{{index}}" binderror="onThumbError"></image>
+                <text class="pch-w-tag {{item.typeClass}}">{{item.typeLabel}}</text>
+              </view>
+              <text class="pch-w-t">{{item.title}}</text>
+              <view class="pch-w-foot">
+                <text class="pch-w-from">{{item.from}} · {{item.time}}</text>
+                <view class="pch-w-verb"><text>{{item.verb}}</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="11"></native-icon></view>
+              </view>
+            </view>
+          </view>
+        </block>
+
+        <view wx:if="{{hiddenCount}}" class="pch-more card" bindtap="expand">
+          <native-icon name="clock" tone="neutral" size="16"></native-icon>
+          <text class="pch-more-t">更早的 {{hiddenCount}} 件 · 按时间往下翻</text>
+          <native-icon name="chevron" tone="neutral" size="14"></native-icon>
         </view>
-      </view>
-      <view wx:else class="pch-grid">
-        <view wx:for="{{crafts}}" wx:key="key" class="pch-craft card {{item.locked?'pch-off':''}}" data-index="{{index}}" bindtap="openCraft">
-          <!-- 插画取不到就收起 image，留纸底占位（onCraftArtError）——不留破图也不留白框。 -->
-          <view class="pch-art"><image wx:if="{{item.art}}" class="pch-art-img" src="{{item.art}}" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onCraftArtError"></image></view>
-          <text class="pch-c-name serif">{{item.name}}</text>
-          <text class="pch-c-role">{{item.roleLine}}</text>
-          <text wx:if="{{authed || item.locked}}" class="pch-c-meta {{item.worksRoute?'pch-c-meta-link':''}}" data-index="{{index}}" catchtap="openWorks">{{item.metaLine}}</text>
+
+        <!-- 空态分两种：筛出来的空 ≠ 一件都没有。读失败时两种都不出（上面已有重试条）。 -->
+        <view wx:if="{{empty && filtered && !loadFailed}}" class="pouch-empty card">
+          <text class="pe-t serif">没有对上的作品</text>
+          <text class="pe-d">换个词，或者把筛选清掉再看一遍。</text>
+          <view class="pe-go" bindtap="resetFilters"><text>清掉筛选</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
         </view>
-      </view>
+        <view wx:elif="{{empty && !filtered && !loadFailed}}" class="pouch-empty card">
+          <text class="pe-t serif">还没有作品</text>
+          <text class="pe-d">今日页最下面那段就是锦囊：挑一门手艺开工，方案、海报、成片做出第一件，就归到这里。</text>
+          <view class="pe-go" bindtap="goExecution"><text>去今日的锦囊段开工</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
+        </view>
+      </block>
 
       </block>
     </view>
   </scroll-view>
-  <!-- 启用层：未启用的创意军师在这里付费启用（卡面不标价，价格只在这一刻出现），
-       启用后直接进这位军师的对话。组件自己管 setOverlay。 -->
-  <agent-unlock agent="{{unlockAgent}}" source="pouch" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
   <login-sheet open="{{showLogin}}" reason="purchase" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

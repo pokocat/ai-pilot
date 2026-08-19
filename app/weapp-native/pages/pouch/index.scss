@@ -1,20 +1,13 @@
-/* 本页不 @use 任何页面级 scss：.card / .pad 来自 app.scss 全局，唯一借用的 .section-label
-   照抄在下面（原样一份，改样式时与 src/pages/home/index.scss 那份对齐即可）。
-   曾经 @use 了战局 + 点兵两份（392 + 488 行），本页实际命中 1 个选择器——纯 wxss 死重。 */
-.section-label {
-  display: block; margin-bottom: 4px;
-  color: var(--green);
-  font-size: 13px; font-weight: 600; letter-spacing: .18em; line-height: 1.35;
-}
+/* 本页不 @use 任何页面级 scss：.card / .pad 来自 app.scss 全局，借用的两处（段控、搜索框）
+   照抄在下面并注明出处——曾经 @use 了战局 + 点兵两份（392 + 488 行），本页实际命中 1 个选择器，
+   纯 wxss 死重。改样式时与出处对齐即可。 */
 
-/* 锦囊 · 作品页。
-   骨架只有全局的 .card / .pad 与本文件自带的 .section-label；手艺格与作品流是本页自己的东西，pch- 前缀。
-
-   识别靠插画（src/assets/craft/*.jpg，与生成头像同一条资产路子），不靠彩色卡体——
-   一页里同时出现四五门手艺时，彩色卡体会把整页打成拼贴画。卡体一律暖纸白卡。
+/* 锦囊 · 跨手艺档案（IA 第四刀，2026-08-19）。
+   手艺宫格已搬到今日页尾的锦囊段，这里只剩一件事：按时间翻做过的每一件。
+   结构：返回条 → 页头 → 搜索 + 类型筛选 → 时间分组的两列作品墙 → 更早的 N 件。
 
    尺寸铁律（product-ui-completeness · long content）：卡片宽高全部写死，
-   标题单行截断、角色行两行截断——文案再长都不许把卡撑变形或溢出容器。 */
+   标题单行截断、出处行单行截断——文案再长都不许把卡撑变形或溢出容器。 */
 
 /* —— 游客态一屏：说清「这是你的私产、登录后才有」，不摆空架子 —— */
 .pouch-guest { display: flex; flex-direction: column; gap: 10px; padding: 30px 20px; }
@@ -29,7 +22,7 @@
 .pouch-back { width:max-content; min-height:44px; margin:-6px 0 2px; display:flex; align-items:center; gap:5px; color:var(--ink-2); font-size:13px; font-weight:600; }
 .pad.pouch { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
 
-/* —— 失败重试条：三条通道全塌才出现，只塌一条时各格显示「—」不打扰 —— */
+/* —— 失败重试条：任一通道没读出来都出现，别让人以为那一类作品是真的没有 —— */
 .pch-retry {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: 12px; padding: 12px 14px;
@@ -37,13 +30,50 @@
 .pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
 
-/* —— ① 最近做的：横滑作品流 —— */
-.pouch .pch-flow { width: 100%; margin: 6px 0 var(--rhythm-block); white-space: nowrap; }
-.pouch .pch-track { display: inline-flex; gap: 10px; padding-bottom: 6px; }
+/* —— 搜索：与问策页 .council-search 同一配方（src/pages/sessions/index.scss）——
+   本站没有放大镜图标，问策那枚用的就是 target，这里保持一致，不为一个搜索框新造图标。 */
+.pch-search {
+  display: flex; align-items: center; gap: 9px;
+  height: 46px; padding: 0 15px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, .94);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 6px 18px rgba(42, 36, 20, .04);
+}
+.pch-input { flex: 1; min-width: 0; height: 46px; font-size: 14px; font-weight: 500; color: var(--ink); }
+.pch-clear { position: relative; flex-shrink: 0; padding: 4px; }
+/* 透明外扩命中区 → ≥44px（清除按钮细小，扩大误触更友好，与 .cs-clear 同一处理）。 */
+.pch-clear::after { content: ''; position: absolute; top: -13px; bottom: -13px; left: -13px; right: -9px; }
+
+/* —— 类型筛选：与点兵 .exec-seg 同一配方（src/pages/studio/index.scss）：软底 + 白块选中 —— */
+.pch-seg {
+  display: flex; gap: 6px; padding: 5px; margin: 14px 0 20px;
+  border-radius: 18px; background: #EFEEE8;
+}
+.pch-seg-item {
+  flex: 1; height: 40px; border-radius: 15px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3); font-size: 14px; font-weight: 600;
+}
+.pch-seg-item.on {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 7px 18px rgba(42, 35, 24, .08);
+}
+
+/* —— 时间分组标签：比 .section-label 弱一级，它标的是刻度不是章节 —— */
+.pch-glabel {
+  display: block; margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: 11.5px; font-weight: 600; letter-spacing: .18em; line-height: 1.35;
+}
+
+/* —— 两列作品墙 —— */
+.pch-wall { display: flex; flex-wrap: wrap; justify-content: space-between; margin-bottom: 18px; }
 .pch-work {
-  width: 176px; box-sizing: border-box; padding: 9px 9px 11px;
-  display: flex; flex-direction: column; align-items: stretch;
-  white-space: normal;
+  width: 48.5%; box-sizing: border-box;
+  margin-bottom: 11px; padding: 9px 9px 11px;
+  display: flex; flex-direction: column;
 }
 .pch-work:active { opacity: .82; }
 /* 缩略图：真实成品图优先（海报签名图 / 成片抽帧），取不到落回插画（js onThumbError）。 */
@@ -84,73 +114,25 @@
 }
 
 /* —— 取数骨架 ——
-   三条作品通道里 /video/works 是服务端到 aidrama 的同步代理（上游预算 15–60s），
-   首次进 tab 必然停在这一态。此前这里什么都不画，整页只剩两行小标题——看着像卡死。
+   /video/works 是服务端到 aidrama 的同步代理（上游预算 15–60s），首次进来必然停在这一态。
    骨架用同一套卡体尺寸，数据回来时不跳版。 */
 .pch-sk { pointer-events: none; }
-.pch-sk .pch-w-thumb, .pch-sk .pch-art { background: var(--surface-2, #F1EFE8); }
+.pch-sk .pch-w-thumb { background: var(--surface-2, #F1EFE8); }
 .pch-sk-line {
   height: 11px; margin-top: 10px; border-radius: 6px;
   background: var(--surface-2, #F1EFE8);
   animation: pch-sk-pulse 1.4s ease-in-out infinite;
 }
 .pch-sk-line.short { width: 58%; margin-top: 7px; }
-/* 对齐 .pch-c-role 的固定两行高（34px）：骨架与真卡等高，数据回来不跳版。 */
-.pch-sk-block {
-  height: 34px; margin-top: 4px; border-radius: 6px;
-  background: var(--surface-2, #F1EFE8);
-  animation: pch-sk-pulse 1.4s ease-in-out infinite;
-}
 @keyframes pch-sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
-/* —— 空态：不催登录，只指回战局 —— */
+/* —— 更早的 N 件 —— */
+.pch-more { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-bottom: 12px; padding: 0 16px; }
+.pch-more:active { opacity: .85; }
+.pch-more-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
+/* —— 空态：筛出来的空与一件都没有，是两句不同的话 —— */
 .pouch-empty { display: flex; flex-direction: column; gap: 8px; margin-bottom: var(--rhythm-block); padding: 22px 18px; }
 .pouch-empty .pe-t { font-size: 18px; font-weight: 600; }
 .pouch-empty .pe-d { font-size: 13px; color: var(--ink-2); line-height: 1.7; }
-.pouch-empty .pe-go { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--accent); font-size: 13px; font-weight: 600; }
-
-/* —— ② 手艺：两列宫格，一门手艺一格 —— */
-.pch-grid {
-  margin-top: 10px;
-  display: flex; flex-wrap: wrap; justify-content: space-between;
-}
-.pch-craft {
-  width: 48.5%; box-sizing: border-box;
-  margin-bottom: 11px; padding: 10px 10px 12px;
-  display: flex; flex-direction: column;
-}
-.pch-craft:active { opacity: .82; }
-/* 插画贴片：整宽 4:3，圆角收口 + 发丝线，让插画自带的纸底读成「有意为之的贴片」而不是脏底。 */
-.pch-art {
-  width: 100%; height: 92px;
-  border-radius: 9px; overflow: hidden;
-  border: 1px solid var(--line-2);
-  background: var(--surface-2, #F1EFE8);
-}
-.pch-art-img { width: 100%; height: 100%; display: block; }
-.pch-c-name {
-  display: block; margin-top: 9px;
-  font-size: 15px; font-weight: 600; color: var(--ink); line-height: 1.3;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* 角色行固定两行高：一行的和两行的卡并排时底边仍然齐平。 */
-.pch-c-role {
-  display: block; margin-top: 4px; height: 34px;
-  font-size: 11.5px; color: var(--ink-3); line-height: 1.45;
-  overflow: hidden;
-}
-.pch-c-meta {
-  display: block; margin-top: 7px;
-  font-size: 11.5px; font-weight: 600; color: var(--accent); line-height: 1.3;
-}
-/* 作品数那行是独立点击区（主体点了做新的，这行点了进作品库）——加下划线让"这里还能点"看得见，
-   否则同一张卡上两个落点完全无从区分。没有 worksRoute 的格子不带这个类，样式一字不变。 */
-.pch-c-meta-link { text-decoration: underline; text-underline-offset: 2px; }
-
-/* 置灰格：不显示价格、不放开通按钮——教育归军师，本页不卖。
-   插画同步去饱和，让「还没点亮」一眼可辨，但结构与正常格完全一致。 */
-.pch-craft.pch-off { border-style: dashed; border-color: var(--line-strong); }
-.pch-craft.pch-off .pch-art-img { filter: grayscale(1); opacity: .5; }
-.pch-craft.pch-off .pch-c-name { color: var(--ink-2); }
-.pch-craft.pch-off .pch-c-role { color: #B4B0A5; }
-.pch-craft.pch-off .pch-c-meta { color: var(--ink-3); }
+.pouch-empty .pe-go { display: flex; align-items: center; gap: 4px; min-height: 44px; color: var(--accent); font-size: 13px; font-weight: 600; }

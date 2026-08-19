@@ -1,6 +1,6 @@
 <view class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
-  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll exec-scroll" scroll-top="{{scrollTop}}" scroll-with-animation bindscroll="onScroll">
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll exec-scroll" scroll-top="{{scrollTop}}" scroll-into-view="{{scrollAnchor}}" scroll-with-animation bindscroll="onScroll">
     <view class="native-nav-inset"></view>
     <view class="pad execution exec-page">
       <tab-header title="今日" kicker="今天该做的都在这" glyph="今"></tab-header>
@@ -45,11 +45,16 @@
             <view wx:for="{{leftoverWeapons}}" wx:key="id" class="rx-item card" data-id="{{item.id}}" bindtap="openPrescription"><view class="rx-main"><text class="rx-for">为「{{item.problem}}」</text><text class="rx-play">{{item.playbook}}</text></view><view class="rx-cta"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>军师配了兵器</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
             <view wx:if="{{orders.length}}" class="order-add-row" bindtap="addOrderByModal"><native-icon name="plus" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>手动加一条今天的军令</text></view>
 
-            <view class="works-head"><text class="works-title serif">今天出的活</text><text class="works-note">只按今日成品汇总，不归到某条军令</text></view>
-            <view wx:if="{{worksStatus==='error'}}" class="works-retry card" bindtap="retryWorks"><text>{{worksError}}</text><text class="wr-go">重试</text></view>
-            <view wx:elif="{{worksStatus==='loading'}}" class="works-loading"><view wx:for="{{[1,2]}}" wx:key="*this" class="work-skeleton card"></view></view>
-            <scroll-view wx:elif="{{todayWorks.length}}" scroll-x enhanced show-scrollbar="false" class="today-works"><view class="today-works-track"><view wx:for="{{todayWorks}}" wx:key="id" class="today-work card" data-index="{{index}}" bindtap="openWork"><image src="{{item.thumb}}" class="today-work-img" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onWorkThumbError"></image><view class="today-work-foot"><text class="today-work-title">{{item.title}}</text><text class="today-work-again">再来一张</text></view></view></view></scroll-view>
-            <view wx:else class="works-empty"><text>今天还没有新成品。用军令里的兵器做出第一件，会收在这里。</text></view>
+            <!-- 今天出的活收成一行：页尾锦囊段已经摆了作品缩略图，这里再摆一排就是同一批东西出现两次。
+                 点这行滚到锦囊段，不跳页。 -->
+            <view wx:if="{{worksStatus==='error'}}" class="today-sum card" bindtap="retryWorks"><text class="ts-t">今天的成品没读出来</text><text class="ts-go">重试</text></view>
+            <view wx:elif="{{worksStatus==='loading'}}" class="today-sum card"><text class="ts-t ts-muted">正在汇总今天的成品…</text></view>
+            <view wx:else class="today-sum card" bindtap="scrollToPouch">
+              <text class="ts-t {{todayEmpty?'ts-muted':''}}">{{todaySummary}}</text>
+              <text wx:if="{{todayPartial}}" class="ts-partial">{{todayPartial}}</text>
+              <text class="ts-go">到锦囊段</text>
+              <native-icon name="chevron" tone="accent" color-key="{{colorKey}}" size="14"></native-icon>
+            </view>
 
             <view class="result-entry card" bindtap="openReview"><view class="result-mark"><native-icon name="chart" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="result-copy"><text class="result-title serif">今日经营结果</text><text class="result-desc">{{backfill?('线索 '+backfill.leads+' · 咨询 '+backfill.consults+' · 成交 '+backfill.deals):'有结果再记，不要求每天填满'}}</text></view><text class="result-state {{backfill?'ok':''}}">{{backfill?'已记录':'记一下'}}</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
           </block>
@@ -61,7 +66,44 @@
           </block>
 
           <view class="review-entry card" bindtap="openReview"><view class="re-b"><text class="re-t serif">{{streak?('今晚复盘 · 连续 '+streak+' 天'):'今晚复盘'}}</text><text class="re-s">军令 + 数据都在，复盘决定明日军令</text></view><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view>
-          <view class="pouch-entry card" bindtap="openPouch"><view class="pouch-mark"><native-icon name="pouch" tone="accent" color-key="{{colorKey}}" size="22"></native-icon></view><view class="pouch-copy"><view class="pouch-title-row"><text class="pouch-title serif">锦囊</text><text wx:if="{{pouchMovedHint}}" class="pouch-moved">锦囊搬到这了</text></view><text class="pouch-desc">出过的成品、会用的手艺，都收在锦囊里</text></view><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view>
+          <!-- 锦囊段（2026-08-19 起不再是子页）。写在两个段控 block 之外＝「今天」「近七日」都在，
+               位置继承原来那张锦囊卡；一门手艺一行，上半开工、下半是这门手艺出过的东西。 -->
+          <view class="pouch-sec" id="pouch-sec">
+            <view class="pouch-sec-head">
+              <text class="section-label">锦 囊</text>
+              <text wx:if="{{pouchMovedHint}}" class="pouch-moved">锦囊搬到这了</text>
+            </view>
+            <view wx:if="{{worksStatus==='error'}}" class="pch-retry card" bindtap="retryWorks"><text class="pch-retry-t">{{worksError}}</text><text class="pch-retry-go">重试</text></view>
+            <block wx:elif="{{worksStatus==='loading' && !crafts.length}}">
+              <view wx:for="{{[1,2]}}" wx:key="*this" class="craft-row card craft-sk"><view class="cr-top"><view class="cr-art"></view><view class="cr-b"><view class="csk-line"></view><view class="csk-line short"></view></view></view></view>
+            </block>
+            <block wx:else>
+              <view wx:for="{{crafts}}" wx:key="key" class="craft-row card {{item.locked?'craft-off':''}}" data-index="{{index}}" bindtap="openCraft">
+                <view class="cr-top">
+                  <view class="cr-art"><image wx:if="{{item.art}}" class="cr-art-img" src="{{item.art}}" mode="aspectFill" lazy-load data-index="{{index}}" binderror="onCraftArtError"></image></view>
+                  <view class="cr-b">
+                    <text class="cr-name serif">{{item.name}}</text>
+                    <text class="cr-role">{{item.roleLine}}</text>
+                  </view>
+                  <view class="cr-go {{item.locked?'cr-go-ghost':''}}"><text>{{item.makeVerb}}</text></view>
+                </view>
+                <block wx:if="{{item.worksText || item.hint}}">
+                  <view class="cr-split"></view>
+                  <view wx:if="{{item.worksText}}" class="cr-works" data-index="{{index}}" catchtap="openCraftWorks">
+                    <view wx:for="{{item.works}}" wx:for-item="work" wx:for-index="widx" wx:key="key" class="cr-mini"><image class="cr-mini-img" src="{{work.thumb}}" mode="aspectFill" lazy-load data-index="{{index}}" data-work="{{widx}}" binderror="onCraftWorkError"></image></view>
+                    <text class="cr-works-t">{{item.worksText}}</text>
+                    <native-icon name="arrow" tone="neutral" size="14"></native-icon>
+                  </view>
+                  <view wx:else class="cr-hint"><text>{{item.hint}}</text></view>
+                </block>
+              </view>
+              <view class="pouch-find card" bindtap="openArchive">
+                <native-icon name="target" tone="neutral" size="14"></native-icon>
+                <text class="pf-t">{{archiveText}}</text>
+                <native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon>
+              </view>
+            </block>
+          </view>
         </block>
       </block>
       <view class="tabbar-space"></view>
@@ -84,6 +126,7 @@
   </scroll-view><view class="sheet-foot"><view class="fs-close" bindtap="closeReview"><text>收起</text></view></view></view></view>
 
   <view wx:if="{{goalEdit}}" class="goal-editor"><view class="ge-head"><view class="ge-copy"><text class="gs-title serif">{{goalEdit.label}}目标</text><text class="gs-hint">一句话目标 + 关键指标，复盘时按这条对照。</text></view><text class="ge-close" bindtap="closeGoalEdit">取消</text></view><input class="gs-input native-goal-input" value="{{goalDraft}}" maxlength="200" placeholder="如：营收翻倍，复购率 30%" focus="true" always-embed="true" adjust-position="true" cursor-spacing="20" bindinput="inputGoal" bindconfirm="saveGoal"/><view class="ge-save {{savingGoal?'busy':''}}" bindtap="saveGoal"><text>{{savingGoal?'保存中…':'保存目标'}}</text></view></view>
+  <agent-unlock agent="{{unlockAgent}}" source="execution" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
   <coach-marks></coach-marks>
 </view>

@@ -9,7 +9,7 @@ const STEPS = [
   // 都在右上方向，不误导。别写成只描述其中一种形态的话术。
   { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '有事直接说，总军师在这等你。换专业军师、翻旧对话都在右上角；结论会汇回主线判断。' },
   { route: '/pages/home/index', title: '战局 · 先看判断', text: '这里看主要矛盾、三势和现在不能做什么；判断定了，去今日把它变成动作。' },
-  { route: '/pages/execution/index', title: '今日 · 把判断做成结果', text: '军令在这打卡；军师配的兵器、出过的成品，从页底锦囊进。' },
+  { route: '/pages/execution/index', title: '今日 · 把判断做成结果', text: '军令在这打卡；军师配的兵器挂在军令上。页底那段锦囊就是你会的手艺和出过的成品。' },
   { route: '/pages/thinktank/index', title: '图籍 · 军师断事的依据', text: '资料和数据源都收在这。图籍越厚，军师断事越准。' },
   { route: '/pages/profile/index', title: '主公 · 你自己', text: '档案、算力、服务老师都在这里打理。往后有事，随时唤军师。' },
 ];

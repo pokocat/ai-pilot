@@ -26,15 +26,55 @@
 .task-verbs{display:flex;align-items:center;gap:10px;margin-top:8px}.task-verb{display:flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;color:var(--accent)}
 .done-more{display:flex;align-items:center;justify-content:center;gap:4px;min-height:38px;font-size:12px;color:var(--ink-3)}
 .rx-item{display:flex;align-items:center;gap:8px;padding:11px 13px;border:1px solid transparent;border-radius:var(--r-sm);background:var(--accent-soft)}.rx-main{flex:1;min-width:0}.rx-for{display:block;margin-bottom:3px;font-size:12px;color:var(--accent)}.rx-play{display:block;font-size:14px;font-weight:600;color:var(--accent-ink)}.rx-cta{display:flex;align-items:center;gap:3px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--accent)}
-.works-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-top:7px}.works-title{font-size:16px;font-weight:600;color:var(--ink)}.works-note{font-size:10.5px;color:var(--ink-3);text-align:right}
-.works-retry{font-size:12.5px;color:var(--ink-2)}.works-loading{display:flex;gap:10px}.work-skeleton{width:142px;height:112px;animation:execPulse 1.3s ease-in-out infinite;background:var(--surface-2)}
-.today-works{width:100%;white-space:nowrap}.today-works-track{display:inline-flex;gap:10px;padding-bottom:4px}.today-work{width:148px;padding:8px;box-sizing:border-box;white-space:normal}.today-work-img{display:block;width:132px;height:86px;border-radius:10px;background:var(--surface-2)}.today-work-foot{margin-top:7px}.today-work-title{display:block;font-size:12.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.today-work-again{display:block;margin-top:4px;font-size:11px;color:var(--accent)}
-.works-empty{padding:13px 14px;border:1px dashed var(--line-strong);border-radius:13px;font-size:12px;line-height:1.6;color:var(--ink-3)}
+/* 今日成品汇总行：一行说完今天出了什么，点了滚到页尾锦囊段。
+   原来那排 148px 横滑卡撤了——页尾锦囊段已经摆着作品缩略图，同一页两处缩略图读起来像同一批东西摆了两遍。 */
+.today-sum{display:flex;align-items:center;gap:10px;min-height:48px;padding:0 14px}
+.today-sum:active{opacity:.85}
+.ts-t{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ts-t.ts-muted{font-weight:500;color:var(--ink-3)}
+/* 某一路没读出来时点名说明：不混进「今天还没出东西」，也不让总数装作是全的。 */
+.ts-partial{flex-shrink:0;font-size:11px;font-weight:600;color:var(--warn)}
+.ts-go{flex-shrink:0;font-size:12px;font-weight:600;color:var(--accent)}
 .week-card{padding:13px 14px}.wk-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.wk-k{font-size:9.5px;letter-spacing:.4em;color:var(--ink-3)}.wk-sum{font-size:11.5px;font-weight:600;color:var(--accent)}.wk-strip{display:flex;justify-content:space-between;margin-top:12px}.wk-cell{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px}.wk-wd,.wk-num{font-size:10px;color:var(--ink-3)}.wk-cell.today .wk-wd,.wk-cell.today .wk-num{color:var(--accent);font-weight:700}.wk-dot{width:20px;height:20px;border-radius:50%;box-sizing:border-box;border:1.5px solid var(--line-strong)}.wk-full{background:var(--accent);border-color:var(--accent)}.wk-part{border-color:var(--accent);background:linear-gradient(90deg,var(--accent) 50%,transparent 50%)}.wk-idle{border-color:var(--accent)}.wk-none{border-style:dashed}.wk-cell.today .wk-dot{box-shadow:0 0 0 3px var(--accent-soft)}
 .week-metrics{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-top:11px;font-size:10.5px;line-height:1.55;color:var(--ink-3)}.week-metrics>text:first-child{flex:1}.review-streak{flex-shrink:0;font-weight:600;color:var(--accent)}
 .review-entry{display:flex;align-items:center;gap:10px;padding:15px 16px}.review-entry .re-b{flex:1;min-width:0}.review-entry .re-t{display:block;font-size:15.5px;font-weight:600;color:var(--ink)}.review-entry .re-s{display:block;margin-top:3px;font-size:12px;color:var(--ink-3)}
 .result-entry{display:flex;align-items:center;gap:10px;padding:12px 14px}.result-mark{width:36px;height:36px;flex:0 0 36px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft)}.result-copy{flex:1;min-width:0}.result-title{display:block;font-size:14px;font-weight:600;color:var(--ink)}.result-desc{display:block;margin-top:2px;font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-state{flex-shrink:0;font-size:11.5px;font-weight:600;color:var(--ink-3)}.result-state.ok{color:var(--accent)}
-.pouch-entry{display:flex;align-items:center;gap:12px;padding:14px 15px}.pouch-mark{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--accent-soft)}.pouch-copy{flex:1;min-width:0}.pouch-title-row{display:flex;align-items:center;gap:8px}.pouch-title{font-size:16px;font-weight:600}.pouch-moved{padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:600}.pouch-desc{display:block;margin-top:3px;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* —— 锦囊段（2026-08-19 起内联，不再是子页）——
+   一门手艺一行：上半格「这是什么 + 开工」，下半格「它出过的东西」。
+   两个落点上下分家，各自 ≥44px：旧宫格把它们挤在一张卡上、落点还随「有没有作品」反转，
+   用户根本猜不到点下去去哪。行宽固定、名字单行截断、角色行固定两行高——文案再长不撑变形。 */
+.pouch-sec{display:flex;flex-direction:column}
+.pouch-sec-head{display:flex;align-items:center;gap:8px;margin:4px 2px 0}
+.pouch-moved{padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:600}
+.craft-row{margin-top:12px;padding:12px}
+.craft-row:active{opacity:.85}
+.cr-top{display:flex;align-items:center;gap:10px}
+.cr-art{width:64px;height:64px;flex:0 0 64px;border-radius:12px;overflow:hidden;border:1px solid var(--line-2);background:var(--surface-2)}
+.cr-art-img{display:block;width:100%;height:100%}
+.cr-b{flex:1;min-width:0}
+.cr-name{display:block;font-size:16px;font-weight:600;color:var(--ink);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-role{display:block;margin-top:4px;height:34px;overflow:hidden;font-size:11.5px;line-height:1.45;color:var(--ink-3)}
+.cr-go{flex:0 0 auto;height:44px;padding:0 14px;border-radius:14px;display:flex;align-items:center;background:var(--accent-soft);color:var(--accent-ink);font-size:13px;font-weight:600}
+/* 未启用：幽灵按钮 + 置灰插画。行上不标价、不放开通按钮——教育归军师，本段不卖。 */
+.cr-go-ghost{background:var(--surface);border:1px solid var(--line-strong);color:var(--ink-2)}
+.cr-split{height:1px;margin-top:11px;background:var(--line)}
+.cr-works{display:flex;align-items:center;gap:8px;min-height:44px}
+.cr-mini{width:38px;height:38px;flex:0 0 38px;border-radius:8px;overflow:hidden;border:1px solid var(--line-2);background:var(--surface-2)}
+.cr-mini-img{display:block;width:100%;height:100%}
+.cr-works-t{flex:1;min-width:0;font-size:12px;font-weight:600;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-hint{display:flex;align-items:center;min-height:44px;font-size:11.5px;line-height:1.5;color:var(--ink-3)}
+.craft-off{border-style:dashed;border-color:var(--line-strong)}
+.craft-off .cr-art-img{filter:grayscale(1);opacity:.5}
+.craft-off .cr-name{color:var(--ink-2)}
+.craft-off .cr-role{color:#B4B0A5}
+.craft-sk{pointer-events:none}
+.csk-line{height:12px;margin-top:9px;border-radius:6px;background:var(--surface-2);animation:execPulse 1.3s ease-in-out infinite}
+.csk-line.short{width:52%}
+.craft-sk .cr-b{align-self:stretch}
+/* 段末：跨手艺按时间翻的档案页（锦囊唯一剩下的子页）。 */
+.pouch-find{display:flex;align-items:center;gap:10px;min-height:56px;margin-top:12px;padding:0 16px}
+.pouch-find:active{opacity:.85}
+.pf-t{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--ink-2)}
 .force-sheet-mask{position:fixed;inset:0;z-index:260;background:rgba(18,24,22,.46);display:flex;align-items:flex-end}.force-sheet{width:100%;max-height:calc(86vh - var(--review-keyboard, 0px));margin-bottom:var(--review-keyboard, 0px);box-sizing:border-box;padding:10px 20px calc(18px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:var(--bg);display:flex;flex-direction:column;transition:max-height .16s ease,margin-bottom .16s ease}.force-sheet-grip{width:40px;height:4px;margin:0 auto 14px;border-radius:2px;background:var(--line-strong);flex-shrink:0}.force-sheet .fs-body{flex:1;min-height:0;max-height:58vh}.sheet-foot{display:flex;padding-top:10px;flex-shrink:0}.sheet-foot .fs-close{flex:1}.native-goal-input{height:46px;min-height:46px;line-height:46px}.native-result-input{height:40px;min-height:40px;line-height:40px}.ge-save,.tf-btn,.task.done .task-check{background:var(--accent);border-color:var(--accent)}.tf-k{color:var(--accent)}.fc-op.on{color:#fff;border-color:var(--accent);background:var(--accent)}
 .review-load{padding:22px 16px;text-align:center;font-size:13px;color:var(--ink-3)}
 .review-daily-fill{margin-bottom:10px}.df-head>view:first-child{flex:1;min-width:0}.df-note{display:block;margin-top:3px;font-size:10.5px;line-height:1.45;color:var(--ink-3)}
@@ -43,6 +83,5 @@
 .viewport-medium .exec-page,
 .viewport-expanded .exec-page { gap: 14px; }
 .viewport-expanded .task { padding: 18px 20px; }
-.viewport-expanded .today-work { width: 188px; }
-.viewport-expanded .today-work-img { width: 172px; height: 108px; }
+.viewport-expanded .cr-art { width: 80px; height: 80px; flex-basis: 80px; }
 .viewport-expanded .week-card { padding: 18px 20px; }

@@ -29,7 +29,8 @@ const MENU_GROUPS = [
 const GUEST_GROUPS = [
   { title: '服务', rows: [
     { icon: 'spark', label: '方案与价格', route: '/packages/work/plans/index' },
-    { icon: 'grid', label: '军师的手艺 · 锦囊', route: '/pages/pouch/index' },
+    // 2026-08-19 起手艺搬去今日页尾的锦囊段，这页只剩作品档案，标题跟着改（别再承诺这里有手艺）。
+    { icon: 'image', label: '锦囊 · 军师替你出的成品', route: '/pages/pouch/index' },
   ] },
   { title: '规则与隐私', rows: [
     { icon: 'doc', label: '用户协议', route: '/packages/main/legal/index?doc=agreement' },

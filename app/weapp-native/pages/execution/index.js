@@ -1,10 +1,21 @@
-// 执行 tab：军令、打卡、回填、复盘的日频工作台。锦囊只以任务兵器、今日战果、页底入口伴随出现。
+// 今日 tab：军令、打卡、回填、复盘的日频工作台，页尾接锦囊段。
+//
+// 2026-08-19 IA 第四刀（B + E3）：锦囊不再是子页。
+//   · 页尾的锦囊卡换成锦囊段本体——一门手艺一行，上半「做一张 / 做一条 / 写一份」，
+//     下半是这门手艺出过的东西（三张缩略图 + 出过 N 张 ›）。两个落点上下分家。
+//   · 段的位置继承原来那张锦囊卡：写在两个段控 block 之外，「今天」和「近七日」都在——
+//     这不是新规矩，复盘入口一直也是这么挂的。
+//   · 原来那排「今天出的活」148px 横滑卡收成一行汇总，点了滚到锦囊段：
+//     同一页上不该出现两处作品缩略图（相隔约 600px，读起来像同一批东西摆了两遍）。
+//   · 跨手艺按时间翻的那份清单留在 pages/pouch（唯一剩下的锦囊子页），入口是段末那行。
+// 数据与置灰口径全部走 services/pouch-data，不在本页复制一份。
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo, consumeExecutionIntent } = require('../../services/nav');
 const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 const { commitBattle } = require('../../services/battle-commit');
 const worksCache = require('../../services/works-cache');
+const pouchData = require('../../services/pouch-data');
 const mockProfile = require('../../services/mockProfile');
 
 const POUCH_MOVED_KEY = 'junshi.execution.pouch-moved.v1';
@@ -43,10 +54,32 @@ function goalRows(goals) { const value = goals && typeof goals === 'object' ? go
 function pickPendingDecision(result) { const items = result && Array.isArray(result.items) ? result.items : []; return items.find((item) => item && (item.status === 'pending' || item.verified === false)) || null; }
 function activePrescriptions(result) { const items = result && Array.isArray(result.items) ? result.items : []; return items.filter((item) => item && item.id && item.status !== 'dismissed' && item.status !== 'activated'); }
 function safeMovedHint() { try { return wx.getStorageSync(POUCH_MOVED_KEY) !== '1'; } catch (_) { return true; } }
-function todayPosterWorks(payload) {
-  return (payload && Array.isArray(payload.items) ? payload.items : []).filter((row) => row && row.status === 'succeeded' && dateKey(new Date(at(row.completedAt || row.createdAt))) === today()).map((row) => ({
-    id: String(row.jobId || ''), title: String(row.headline || '今日海报'), thumb: String(row.poster && row.poster.previewUrl || '/assets/craft/poster.jpg'), art: '/assets/craft/poster.jpg',
-  })).slice(0, 8);
+/**
+ * 今日成品汇总行的文案。
+ *
+ * 旧版只数海报（横滑卡也只摆海报）。汇总行既然要写「今天出了 N 件」，那这个 N 必须是全的，
+ * 否则出了成片的那天会当着用户的面少报。所以只有三条通道**全都有数**时才报总数；
+ * 成片还在路上（慢通道未落地）或某一路读失败时，只逐类列出已知的，不给总数。
+ */
+const TYPE_LABEL = { poster: '海报', clip: '成片', report: '方案' };
+function todaySummary(feed) {
+  const parts = []; let total = 0; let complete = true;
+  for (const type of ['poster', 'clip', 'report']) {
+    const rows = type === 'poster' ? feed.posters : type === 'clip' ? feed.clips : feed.reports;
+    if (!rows) { complete = false; continue; }
+    const count = rows.filter((row) => dateKey(new Date(row.updatedAt)) === today()).length;
+    if (!count) continue;
+    total += count;
+    parts.push(`${TYPE_LABEL[type]} ${count}`);
+  }
+  const failed = feed.failed.map((type) => TYPE_LABEL[type]).join(' / ');
+  let text;
+  if (total && complete) text = `今天出了 ${total} 件 · ${parts.join(' · ')}`;
+  else if (total) text = `今天出的活 · ${parts.join(' · ')}`;
+  else if (complete) text = '今天还没出东西 · 去锦囊段开工';
+  else if (failed) text = '今天出的活';
+  else text = '正在汇总今天的成品…';
+  return { text, partial: failed ? `${failed}没读出来` : '', empty: complete && !total };
 }
 
 Page({
@@ -57,7 +90,8 @@ Page({
     orderDone: 0, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
     weekGroups: [], weekStrip: [], weekDone: 0, weekTotal: 0, streak: 0,
     backfill: null, savingBackfill: false, reminders: [], reviewOpen: false,
-    todayWorks: [], battleForces: [], pendingDecision: null, verifying: false,
+    todaySummary: '', todayPartial: '', todayEmpty: false, crafts: [], archiveText: '跨手艺翻找 · 全部作品按时间排', unlockAgent: null, scrollAnchor: '',
+    battleForces: [], pendingDecision: null, verifying: false,
     bizItems: [], bizSaved: false, bizEditing: false, savingBiz: false, reviewKeyboardHeight: 0, reviewAnchor: '',
     goalRows: goalRows(null), goalEdit: null, goalDraft: '', savingGoal: false,
   }),
@@ -78,7 +112,8 @@ Page({
     store.loadReviewBadge().then(() => { const next = store.snapshot(); this.setData({ reviewDue: next.reviewDue }); syncTabBar(this, 2); }).catch(() => {});
     api.track('execution_enter', { segment: segment ? 'week' : 'today', reviewDue: state.reviewDue });
     this.loadCore();
-    if (state.authed && segment === 0) this.loadTodayWorks();
+    // 锦囊段固定在两个段控栏，取数与 segment 无关。
+    if (state.authed) this.loadPouch();
   },
   onPageScroll() {},
   onScroll(event) { this._scrollBySegment[this.data.segment] = Number(event.detail && event.detail.scrollTop) || 0; },
@@ -86,17 +121,16 @@ Page({
     const segment = Number(event.currentTarget.dataset.index) === 1 ? 1 : 0;
     if (segment === this.data.segment) return;
     this.setData({ segment, scrollTop: this._scrollBySegment[segment] || 0 });
-    if (segment === 0 && this.data.authed && this.data.worksStatus === 'idle') this.loadTodayWorks();
   },
-  switchMockProfile() { if (!this.data.isMock) return; mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); worksCache.invalidate(); this.loadCore({ force: true }); this.loadTodayWorks({ force: true }); }); },
+  switchMockProfile() { if (!this.data.isMock) return; mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); worksCache.invalidate(); this.loadCore({ force: true }); this.loadPouch({ force: true }); }); },
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadCore({ force: true }); this.loadTodayWorks({ force: true }); },
+  loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadCore({ force: true }); this.loadPouch({ force: true }); },
   askLogin() { this.requireLogin(); },
 
   async loadCore() {
     if (this.data.coreStatus === 'loading') return;
-    if (!store.isAuthed()) { this.setData({ authed: false, coreStatus: 'idle', coreError: '', orders: [], todayWorks: [] }); return; }
+    if (!store.isAuthed()) { this.setData({ authed: false, coreStatus: 'idle', coreError: '', orders: [], crafts: [], todaySummary: '' }); return; }
     this.setData({ coreStatus: 'loading', coreError: '' });
     const [meResult, casefileResult, reviewsResult, prescriptionsResult] = await Promise.allSettled([
       store.loadMe(), api.casefile(), api.reviews(), api.prescriptions(),
@@ -126,27 +160,147 @@ Page({
       goalRows: goalRows(dossier && dossier.goals),
     });
     this.applyOrderView();
-    setTimeout(() => this.observePouchEntry(), 0);
   },
   retryCore() { this.loadCore({ force: true }); },
-  async loadTodayWorks(options) {
+  /**
+   * 锦囊段 + 今日汇总行的取数。
+   *
+   * 与 loadCore 完全解耦：三条作品通道里 /video/works 是服务端到 aidrama 的同步代理
+   * （上游预算 15–60s），今日 tab 是全站最高频的页面，绝不能让军令等它。
+   * 任何一路塌了也只塌那一行的计数（'—'），不整段报错。
+   */
+  async loadPouch(options) {
     if (!store.isAuthed() || this.data.worksStatus === 'loading') return;
     this.setData({ worksStatus: 'loading', worksError: '' });
-    try { this.setData({ todayWorks: todayPosterWorks(await worksCache.loadPosters(options)), worksStatus: 'ready' }); }
-    catch (_) { this.setData({ worksStatus: 'error', worksError: '今日战果没读出来' }); }
+    // 快通道：海报 + 方案 + 军师目录。成片（12s 预算的 aidrama 代理）走 loadClipChannel 另补，
+    // 首屏的汇总行不吊在它上面。
+    const [feedResult, agentsResult] = await Promise.allSettled([
+      pouchData.loadFeed(Object.assign({}, options, { skipClips: true })),
+      store.loadAgents(),
+    ]);
+    const feed = feedResult.status === 'fulfilled' ? feedResult.value : null;
+    if (!feed || feed.failed.length >= 2) {
+      this.setData({ worksStatus: 'error', worksError: '锦囊没读出来，网络不畅或服务端在忙' });
+      return;
+    }
+    const agents = agentsResult.status === 'fulfilled' && Array.isArray(agentsResult.value)
+      ? agentsResult.value : store.snapshot().agents;
+    this._agents = agents;
+    // 原始 agent 留一份索引给启用层用（价格只在 agent-unlock 那一刻出现，不进行数据）。
+    this._agentsByKey = Object.fromEntries((agents || []).filter((item) => item && item.key).map((item) => [String(item.key), item]));
+    this._feed = feed;
+    this.renderPouch();
+    setTimeout(() => this.observePouchSection(), 0);
+    this.loadClipChannel(options);
   },
-  retryWorks() { this.loadTodayWorks({ force: true }); },
-  onWorkThumbError(event) { const index = Number(event.currentTarget.dataset.index); const item = this.data.todayWorks[index]; if (item && item.thumb !== item.art) this.setData({ [`todayWorks[${index}].thumb`]: item.art }); },
-  openWork(event) { const item = this.data.todayWorks[Number(event.currentTarget.dataset.index)]; if (item && item.id) navTo(`/packages/work/posterJob/index?jobId=${encodeURIComponent(item.id)}`); },
-  openPouch() { try { wx.setStorageSync(POUCH_MOVED_KEY, '1'); } catch (_) { /* noop */ } this.setData({ pouchMovedHint: false }); api.track('pouch_entry_click', { entry: 'pouch_card', segment: this.data.segment ? 'week' : 'today' }); navTo('/pages/pouch/index'); },
-  observePouchEntry() {
+
+  /**
+   * 慢通道：成片。落地后把「快出片」那行的作品带补上、汇总行升级成带总数的说法。
+   * 失败只影响这一行（写「没读出来 · 重试」），不动已经渲染好的其余部分。
+   */
+  async loadClipChannel(options) {
+    if (this._clipInFlight) return;
+    this._clipInFlight = true;
+    const clips = await pouchData.loadClips(options);
+    this._clipInFlight = false;
+    if (!this._feed) return;
+    this._feed = pouchData.applyClips(this._feed, clips);
+    this.renderPouch();
+  },
+
+  /** 把当前 feed 落成页面数据。快慢两条通道各自落地一次，渲染口径只有这一处。 */
+  renderPouch() {
+    const feed = this._feed;
+    if (!feed) return;
+    const summary = todaySummary(feed);
+    // 有一路没读到（或还没到）就不报总数——「12 件」少算了一类比不给数字更糟。
+    const complete = !feed.failed.length && !feed.pending.length;
+    const total = complete ? ['poster', 'clip', 'report'].reduce((sum, type) => sum + (feed.counts[type] || 0), 0) : null;
+    this.setData({
+      worksStatus: 'ready', worksError: '',
+      todaySummary: summary.text, todayPartial: summary.partial, todayEmpty: summary.empty,
+      crafts: pouchData.buildCraftRows(this._agents, feed),
+      archiveText: total == null ? '跨手艺翻找 · 全部作品按时间排' : `跨手艺翻找 · ${total} 件全都按时间排`,
+    });
+  },
+  retryWorks() { this.loadPouch({ force: true }); },
+
+  /** 手艺插画取不到时收起 image，留纸底占位——不留破图也不留白框。 */
+  onCraftArtError(event) {
+    const index = Number(event.currentTarget.dataset.index);
+    const item = this.data.crafts[index];
+    if (!item || !item.art) return;
+    this.setData({ [`crafts[${index}].art`]: '' });
+  },
+  onCraftWorkError(event) {
+    const { index, work } = event.currentTarget.dataset;
+    const row = this.data.crafts[Number(index)];
+    const item = row && row.works[Number(work)];
+    if (!item || item.thumb === item.art) return;
+    this.setData({ [`crafts[${index}].works[${work}].thumb`]: item.art });
+  },
+
+  /** 汇总行：点了滚到页尾锦囊段（同一页内，不跳转）。 */
+  scrollToPouch() {
+    api.track('pouch_entry_click', { entry: 'today_summary', segment: this.data.segment ? 'week' : 'today' });
+    this.setData({ scrollAnchor: 'pouch-sec' });
+    setTimeout(() => this.setData({ scrollAnchor: '' }), 400);
+  },
+
+  /**
+   * 手艺行上半格：已启用的直接开工；未启用的开启用层（价格只在这一刻出现，行上永不标价），
+   * 启用成功后由 agentUnlocked 带进这位军师的对话——第一次仍然是军师带着做。
+   */
+  openCraft(event) {
+    const item = this.data.crafts[Number(event.currentTarget.dataset.index)];
+    if (!item) return;
+    this.dismissMovedHint();
+    if (item.locked && item.agentKey) {
+      if (!this.requireLogin()) return;
+      const agent = this._agentsByKey && this._agentsByKey[item.agentKey];
+      if (agent) { this.setData({ unlockAgent: agent }); return; }
+      // 目录没取到这位军师（/agents 挂了）：locked 行没有落点，点了不能没反应。
+      wx.showToast({ title: '军师目录没读到，下拉重试一次', icon: 'none' });
+      return;
+    }
+    api.track('pouch_entry_click', { entry: 'craft_make', craft: item.key });
+    if (item.makeRoute) navTo(item.makeRoute);
+  },
+  /** 手艺行下半格：进这门手艺的作品库（catchtap，不冒泡给 openCraft）。 */
+  openCraftWorks(event) {
+    const item = this.data.crafts[Number(event.currentTarget.dataset.index)];
+    if (!item) return;
+    if (!item.worksRoute) { this.openCraft(event); return; }
+    this.dismissMovedHint();
+    api.track('pouch_entry_click', { entry: 'craft_works', craft: item.key });
+    navTo(item.worksRoute);
+  },
+  /** 段末那行：跨手艺按时间翻的档案页（锦囊唯一剩下的子页）。 */
+  openArchive() {
+    this.dismissMovedHint();
+    api.track('pouch_entry_click', { entry: 'archive', segment: this.data.segment ? 'week' : 'today' });
+    navTo('/pages/pouch/index');
+  },
+  dismissMovedHint() {
+    if (!this.data.pouchMovedHint) return;
+    try { wx.setStorageSync(POUCH_MOVED_KEY, '1'); } catch (_) { /* noop */ }
+    this.setData({ pouchMovedHint: false });
+  },
+  closeUnlock() { this.setData({ unlockAgent: null }); },
+  agentUnlocked(event) {
+    const agent = event.detail && event.detail.agent;
+    this.setData({ unlockAgent: null });
+    this.loadPouch({ force: true });
+    if (agent && agent.key) navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(agent.key)}&continue=1`);
+  },
+  observePouchSection() {
     if (this._pouchEntryTracked || typeof wx.createIntersectionObserver !== 'function') return;
     if (this._pouchObserver) this._pouchObserver.disconnect();
     this._pouchObserver = wx.createIntersectionObserver(this);
-    this._pouchObserver.relativeToViewport().observe('.pouch-entry', (entry) => {
+    this._pouchObserver.relativeToViewport().observe('.pouch-sec', (entry) => {
       if (!entry || Number(entry.intersectionRatio) <= 0 || this._pouchEntryTracked) return;
       this._pouchEntryTracked = true;
-      api.track('pouch_entry_view', { segment: this.data.segment ? 'week' : 'today', movedHint: this.data.pouchMovedHint });
+      api.track('pouch_entry_view', { entry: 'pouch_section', segment: this.data.segment ? 'week' : 'today', movedHint: this.data.pouchMovedHint });
       if (this._pouchObserver) { this._pouchObserver.disconnect(); this._pouchObserver = null; }
     });
   },

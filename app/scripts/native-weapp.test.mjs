@@ -1323,60 +1323,60 @@ test('IA 回归后：战局只判断，军令主链路在执行，锦囊降普�
   assert.match(executionWxml, /做完了多少/);
   assert.match(executionWxml, /bindtap="openReminders"/);
 
-  // 手艺格在锦囊：创意 agents 动态格 + 已启用判定 + 置灰格能真正走到启用。
-  assert.match(pouch, /text\(agent\.type\) === 'creative'/);
-  assert.match(pouch, /Boolean\(agent\.owned\) \|\| text\(agent\.billing\) !== 'unlock'/, '已启用判定');
-  assert.match(pouch, /\/packages\/work\/gallery\/index/);
-  // 2026-08-12：置灰格原本只跳问策导览，结果创意军师全端无处启用（付费链断在这里）。
-  // 现在点击开 agent-unlock，启用成功后由 agentUnlocked 带进这位军师的对话——
-  // 第一次仍由军师带着做，但路不再是死的。
-  assert.match(pouch, /this\.setData\(\{ unlockAgent: agent \}\)/, '置灰格必须能开启用层');
-  assert.match(pouch, /if \(!this\.requireLogin\(\)\) return;[\s\S]{0,200}unlockAgent/, '启用是扣费动作，先过登录门');
-  assert.match(pouch, /agentUnlocked\(event\)[\s\S]*?agentKey=\$\{encodeURIComponent\(agent\.key\)\}&continue=1/, '启用后进该军师对话');
-  assert.match(pouchWxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.json'), 'utf8')).usingComponents['agent-unlock'], '/components/agent-unlock/index');
-  // 卡面仍然不许出现价格：价格只在 agent-unlock 那一刻出现（组件自己渲染）。
-  assert.doesNotMatch(pouchWxml, /costText|item\.price|\bx\{\{/, '手艺卡不得渲染价格（分发铁律：货架不标价）');
-  assert.doesNotMatch(pouch, /costText|priceText/, '卡面 data 不得带价格字段');
-
-  // 2026-08-13「锦囊是能力大全」：已启用的手艺格点了要能**一步开工**，不再先绕作品库。
-  // 改动前的实况是三个问题叠在一起：① 固定格恒 locked:false，海报设计师没启用也能点，
-  // 点进去是个空作品库；② 作品库空态的按钮又 switchTab 回锦囊，零作品用户在这里打转出不去；
-  // ③「海报快印」和「海报设计师」并排两格，同一件事两个名字两个落点。
-  // 2026-08-13 二次修订：海报格落到**海报设计师的对话**，不是空白需求单 ——
+  // 2026-08-19 IA 第四刀（B + E3）：手艺搬进今日页尾的锦囊段，锦囊页只剩跨手艺档案。
+  // 数据与置灰口径只有一份 —— services/pouch-data，两页都不许各自长一套。
+  const pouchData = fs.readFileSync(path.join(sourceRoot, 'services/pouch-data.js'), 'utf8');
+  assert.match(pouchData, /text\(agent\.type\) === 'creative'/, '创意 agents 动态成行');
+  assert.match(pouchData, /Boolean\(agent\.owned\) \|\| text\(agent\.billing\) !== 'unlock'/, '已启用判定');
+  assert.match(pouchData, /worksRoute: '\/packages\/work\/gallery\/index'/, '海报的作品带落作品库');
+  // 2026-08-13 二次修订：海报开工落到**海报设计师的对话**，不是空白需求单 ——
   // 一张海报要成立至少得知道「为什么出、给谁看」，那两件事只能问出来；空表单等于把用户
   // 找军师的理由原样退回给他。需求单仍在，由成果卡带着预填进去。
-  assert.match(pouch, /route: '\/packages\/main\/chat\/index\?agentKey=poster&continue=1'/,
-    '海报格落到军师对话，不是空白需求单');
-  assert.doesNotMatch(pouch, /route: '\/packages\/work\/poster\/index'/, '手艺格不许直接甩空表单');
-  assert.match(pouch, /packages\/work\/posterJob\/index\?jobId=/,
-    '「再来一张」落到那张海报的详情页（改文字/换风格都带上下文）');
-  assert.match(pouch, /worksRoute: '\/packages\/work\/gallery\/index'/, '作品库仍在手艺格表里');
-  // 2026-08-14 真机走查：卡上写着「看 1 件作品」，点下去却进了聊天窗。主路径必须通向
-  // 卡面正在承诺的那件事——有作品就先给作品库，别让人找不到已经生成的资产。
-  assert.match(pouch, /const hasWorks = counts\[app\.countKey\] > 0;/, '落点按有无作品分');
-  assert.match(pouch, /route: worksRoute \|\| app\.route,/, '有作品时整卡进作品库');
-  assert.match(pouch, /const unlocked = !app\.agentKey\s*\n\s*\|\| hasWorks\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
-    '带 agentKey 的固定格跟着那位军师的启用状态置灰，但有成品就一律算已启用');
-  // 2026-08-14 走查：同一屏里「最近做的」摆着海报作品、写着「出自 · 海报快印」，下面那一格
-  // 却置灰写「还没一起用过」，点下去还弹付费启用层。自己已有的资产不许被收费闸挡在外面。
-  assert.match(pouch, /hasWorks/, '有成品必须参与已启用判定');
-  assert.ok(pouch.indexOf('const hasWorks') < pouch.indexOf('const unlocked'),
+  assert.match(pouchData, /makeRoute: '\/packages\/main\/chat\/index\?agentKey=poster&continue=1'/,
+    '海报开工落到军师对话，不是空白需求单');
+  assert.doesNotMatch(pouchData, /makeRoute: '\/packages\/work\/poster\/index'/, '手艺行不许直接甩空表单');
+  assert.match(pouchData, /packages\/work\/posterJob\/index\?jobId=/,
+    '「再来一张」落到那张海报的详情页（改文字/换方向都带上下文）');
+  // 2026-08-14 走查：自己已有的资产不许被收费闸挡在外面——有成品即视为已经一起用过。
+  assert.match(pouchData, /const hasWorks = count > 0;/, '有成品必须参与已启用判定');
+  assert.match(pouchData, /const unlocked = !app\.agentKey\s*\n\s*\|\| hasWorks\s*\n\s*\|\| Boolean\(agent && \(agent\.owned \|\| text\(agent\.billing\) !== 'unlock'\)\)/,
+    '带 agentKey 的手艺跟着那位军师的启用状态置灰，但有成品就一律算已启用');
+  assert.ok(pouchData.indexOf('const hasWorks') < pouchData.indexOf('const unlocked'),
     'hasWorks 必须先于 unlocked 求值，否则置灰判定读不到作品数');
-  // 2026-08-14 走查：三条作品通道里 /video/works 是到 aidrama 的同步代理（上游预算 15–60s），
-  // 首次进 tab 必然停在取数态。此前这一态整页只剩两行小标题、一片空白，看着像卡死。
-  assert.match(pouchWxml, /wx:elif="\{\{loading\}\}"[\s\S]{0,400}pch-sk/, '取数中作品流要有骨架');
-  assert.match(pouchWxml, /wx:if="\{\{loading && !crafts\.length\}\}"[\s\S]{0,300}pch-sk/, '取数中手艺格要有骨架');
-  assert.match(pouchWxml, /binderror="onCraftArtError"/, '手艺插画要有缺图兜底');
-  assert.match(pouch, /onCraftArtError\(event\)/, '缺图兜底的 handler 要在');
-  // 作品库两列网格：.gl-tile 同时带 .card（1px 边）和 8px padding，全局没有 border-box 复位，
-  // 少了这一行就是 48.5% + 18px = 191.6pt，两格 383.3 > 容器 358 → 换行塌成单列（走查量到的实况）。
-  const galleryShared = fs.readFileSync(path.join(appRoot, 'src/packages/work/gallery/index.scss'), 'utf8');
-  assert.match(galleryShared, /\.gl-tile \{ box-sizing: border-box;/, '两列网格必须 border-box，否则塌成单列');
-  assert.match(pouch, /covered\.has\(text\(agent\.key\)\)/, '被固定格覆盖的军师不许再出一格');
-  assert.match(pouchWxml, /catchtap="openWorks"/, '作品数那行是独立点击区，不能冒泡给整卡');
   // 目录读不到时**不许**当成已启用：放行会让人点进确认页、提交时才撞 403，那时已经在扣费路径上。
-  assert.match(pouch, /Boolean\(agent && \(agent\.owned/, '查不到 agent 时按未启用处理');
+  assert.match(pouchData, /Boolean\(agent && \(agent\.owned/, '查不到 agent 时按未启用处理');
+  assert.match(pouchData, /covered\.has\(text\(agent\.key\)\)/, '被固定行覆盖的军师不许再出一行');
+  assert.doesNotMatch(pouchData, /costText|priceText/, '手艺行数据不得带价格字段');
+
+  // 置灰行必须能真正走到启用（2026-08-12：否则创意军师全端无处启用，付费链断在这里）。
+  assert.match(execution, /this\.setData\(\{ unlockAgent: agent \}\)/, '置灰行必须能开启用层');
+  assert.match(execution, /if \(!this\.requireLogin\(\)\) return;[\s\S]{0,200}unlockAgent/, '启用是扣费动作，先过登录门');
+  assert.match(execution, /agentUnlocked\(event\)[\s\S]*?agentKey=\$\{encodeURIComponent\(agent\.key\)\}&continue=1/, '启用后进该军师对话');
+  assert.match(executionWxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sourceRoot, 'pages/execution/index.json'), 'utf8')).usingComponents['agent-unlock'], '/components/agent-unlock/index');
+  // 卡面仍然不许出现价格：价格只在 agent-unlock 那一刻出现（组件自己渲染）。
+  assert.doesNotMatch(executionWxml, /costText|item\.price/, '手艺行不得渲染价格（分发铁律：货架不标价）');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.json'), 'utf8')).usingComponents['agent-unlock'], undefined, '档案页没有启用层，它不卖东西');
+
+  // 两个落点上下分家：上半开工、下半进这门手艺的作品库。旧宫格把两者挤在一张卡上、
+  // 落点还随「有没有作品」反转，用户根本猜不到点下去去哪（2026-08 走查主诉）。
+  assert.match(executionWxml, /class="cr-go/, '手艺行上半格是开工按钮');
+  assert.match(executionWxml, /catchtap="openCraftWorks"/, '作品带是独立点击区，不冒泡给整行');
+  assert.match(executionWxml, /binderror="onCraftArtError"/, '手艺插画要有缺图兜底');
+  assert.match(execution, /onCraftArtError\(event\)/, '缺图兜底的 handler 要在');
+  assert.match(executionWxml, /wx:elif="\{\{worksStatus==='loading' && !crafts\.length\}\}"[\s\S]{0,320}craft-sk/, '取数中手艺行要有骨架');
+  // 锦囊段写在两个段控 block 之外＝今天 / 近七日都在（复盘入口一直也是这么挂的）。
+  const segTodayEnd = executionWxml.indexOf('<block wx:else>', executionWxml.indexOf('segment===0'));
+  assert.ok(executionWxml.indexOf('id="pouch-sec"') > segTodayEnd, '锦囊段不得被关进「今天」那一栏');
+
+  // 档案页：搜索 + 类型筛选 + 时间分组，且不许再长出第二套手艺。
+  assert.match(pouch, /pouchData\.loadFeed/, '档案页与今日页共用同一份取数');
+  assert.match(pouch, /function bucketOf\(updatedAt\)/, '按时间分组');
+  assert.match(pouchWxml, /bindinput="inputQuery"/, '档案页要能搜');
+  assert.match(pouchWxml, /bindtap="selectType"/, '档案页要能按类型筛');
+  assert.doesNotMatch(pouch, /CRAFT_APPS|buildCraftRows/, '手艺不许在档案页复活');
+  assert.doesNotMatch(pouchWxml, /agent-unlock/, '档案页不卖东西');
+  assert.match(pouchWxml, /wx:if="\{\{loading && !groups\.length\}\}"[\s\S]{0,400}pch-sk/, '取数中作品墙要有骨架');
 
   // 日 / 周两段是打卡机制的两半：日计划做今天，周计划看连续性。删掉任一半都会削弱「别断」。
   assert.match(execution, /segments: \['今天', '近七日'\]/, '今日 tab 内必须保留同维度的今天/近七日两段，避免 tab 与段名重名');
@@ -1409,13 +1409,19 @@ test('执行 tab 守住独立状态机、锦囊兼容与冷启动复盘红点', 
   const coach = read(sourceRoot, 'services/coach.js');
 
   assert.match(execution, /loadCore\(\)/, '执行核心有独立状态机');
-  assert.match(execution, /loadTodayWorks\(options\)/, '今日战果有独立状态机');
+  assert.match(execution, /loadPouch\(options\)/, '锦囊段有独立状态机，不跟军令共用');
+  // 汇总行在首屏，绝不能吊在成片代理上（端上 12s 预算）：快通道先出海报 + 方案，成片另补。
+  assert.match(execution, /skipClips: true/, '首屏快通道必须跳过成片');
+  assert.match(execution, /loadClipChannel\(options\)/, '成片走慢通道单独补');
+  assert.match(execution, /const complete = !feed\.failed\.length && !feed\.pending\.length/, '有一路没到就不许报总数');
   assert.doesNotMatch(execution, /api\.videoWorks\(/, '日频执行页严禁调用慢成片列表');
-  assert.match(execution, /worksCache\.loadPosters\(options\)/, '今日战果只复用海报缓存');
+  assert.doesNotMatch(execution, /worksCache\.load(Posters|Clips|Reports)/, '取数口径只在 services/pouch-data，页面不直连缓存');
   assert.match(executionWxml, /worksStatus==='error'[\s\S]{0,180}bindtap="retryWorks"/, '战果失败必须给局部重试');
-  assert.ok(executionWxml.indexOf("worksStatus==='error'") < executionWxml.indexOf('wx:else class="works-empty"'), '失败判据必须先于真空态');
+  assert.ok(executionWxml.indexOf("worksStatus==='error'") < executionWxml.indexOf('bindtap="scrollToPouch"'), '失败判据必须先于真空态');
+  assert.match(executionWxml, /bindtap="scrollToPouch"/, '汇总行点了滚到页尾锦囊段，不跳页');
+  assert.doesNotMatch(executionWxml, /today-works|today-work-img/, '同一页不得再出现第二排作品缩略图');
   assert.match(executionWxml, /reviewDue[\s\S]{0,180}今晚复盘还没做/, '21 点复盘提醒在今日段顶部可见');
-  assert.match(executionWxml, /pouchMovedHint[\s\S]{0,120}锦囊搬到这了/, '锦囊迁移提示只挂入口卡');
+  assert.match(executionWxml, /pouchMovedHint[\s\S]{0,120}锦囊搬到这了/, '锦囊迁移提示挂在段头');
 
   // 经营结果需要进入复盘真值，但不能在日频主流里常驻一张三栏报表。
   const reviewSheetAt = executionWxml.indexOf('class="force-sheet-mask"');
@@ -1447,9 +1453,10 @@ test('执行 tab 守住独立状态机、锦囊兼容与冷启动复盘红点', 
   assert.match(cache, /const TTL_MS = 90000/, '作品缓存统一 90 秒 TTL');
   assert.match(cache, /const scope = String\(getToken\(\) \|\| 'guest'\)/, '模块缓存必须按当前登录身份隔离，切账号不得复用上一账号作品');
   assert.match(cache, /slot\.scope !== scope \|\| slot\.inFlight !== request/, '旧账号慢请求回包不得覆盖新账号缓存槽');
-  assert.match(pouch, /worksCache\.loadPosters/);
-  assert.match(pouch, /worksCache\.loadClips/);
-  assert.match(pouch, /worksCache\.loadReports/);
+  const pouchDataSrc = read(sourceRoot, 'services/pouch-data.js');
+  assert.match(pouchDataSrc, /worksCache\.loadPosters/);
+  assert.match(pouchDataSrc, /worksCache\.loadClips/);
+  assert.match(pouchDataSrc, /worksCache\.loadReports/);
   assert.match(pouch, /mockProfile\.switchProfile\([\s\S]*?worksCache\.invalidate\(\)/, 'mock 档案切换必须清作品缓存，不能沿用同 token 的上一档案');
   assert.doesNotMatch(pouch, /syncTabBar|this\._loadedAt/, '普通页锦囊不得保留 tab 身份或页面实例缓存');
   assert.doesNotMatch(pouchWxml, /coach-marks|native-bottom-fade|tabbar-space/, '普通页锦囊不得保留 tab 专属 UI');
@@ -2787,4 +2794,79 @@ test('保存成片走军师同源下载并检查下载状态、相册权限与�
   assert.match(work, /Number\(res\.statusCode\)\s*!==\s*200/);
   assert.match(work, /onProgressUpdate/);
   assert.match(work, /saveVideoToPhotosAlbum/);
+});
+
+test('锦囊数据三态：读到 / 读失败 / 还没取，三处都不许混为一谈', async () => {
+  // 这三态是本模块存在的理由：把「读失败」说成「你还没有作品」、或者把「还没取到」
+  // 算进「今天出了 N 件」，都是当着用户的面说假话。纯文本断言看不出这个，所以真跑一遍。
+  const source = read(sourceRoot, 'services/pouch-data.js');
+  const poster = (jobId, completedAt) => ({ jobId, headline: '门店海报', status: 'succeeded', completedAt, poster: { previewUrl: 'https://x/p.png' } });
+  const report = (id) => ({ id, title: '拓客方案', updatedAt: '2026-08-18T10:00:00Z', agentName: '王参谋' });
+  const clip = (id) => ({ id, title: '开业 15 秒', status: 'done', generatedAt: '2026-08-18T09:00:00Z' });
+  function load(cache) {
+    const sandbox = {
+      module: { exports: {} },
+      require: (name) => (name === './store'
+        ? { isAuthed: () => true, snapshot: () => ({ agents: [] }) }
+        : cache),
+    };
+    sandbox.exports = sandbox.module.exports;
+    vm.runInNewContext(source, sandbox, { filename: 'services/pouch-data.js' });
+    return sandbox.module.exports;
+  }
+  const ok = {
+    loadPosters: async () => ({ items: [poster('p1', '2026-08-18T12:00:00Z')] }),
+    loadClips: async () => [clip('c1')],
+    loadReports: async () => [report('r1'), report('r2')],
+  };
+
+  // ① 快通道：跳过成片 → 成片是 undefined（还没取），不是 0，也不算失败。
+  const fast = load(ok);
+  const fastFeed = await fast.loadFeed({ skipClips: true });
+  assert.equal(fastFeed.counts.clip, undefined, '没取的通道不许当成 0');
+  assert.equal(fastFeed.failed.length, 0, '没取 ≠ 失败');
+  assert.equal(fastFeed.pending.join(','), 'clip');
+  const clipRow = fast.buildCraftRows([], fastFeed).find((row) => row.key === 'app-clip');
+  assert.equal(clipRow.worksText, '', '成片还没取到时不许写任何计数');
+  assert.equal(clipRow.hint, '', '成片还没取到时不许说「还没出过东西」');
+
+  // ② 慢通道回来：合进同一份 feed，pending 清空、计数落地。
+  const merged = fast.applyClips(fastFeed, await fast.loadClips());
+  assert.equal(merged.counts.clip, 1);
+  assert.equal(merged.pending.length, 0);
+  assert.equal(fast.buildCraftRows([], merged).find((row) => row.key === 'app-clip').worksText, '出过 1 条');
+
+  // ③ 读失败：写「没读出来 · 重试」，绝不写 0，也不写「还没出过东西」。
+  const broken = load(Object.assign({}, ok, { loadClips: async () => { throw new Error('upstream 504'); } }));
+  const brokenFeed = await broken.loadFeed();
+  assert.equal(brokenFeed.counts.clip, null);
+  assert.equal(brokenFeed.failed.join(','), 'clip');
+  const brokenRow = broken.buildCraftRows([], brokenFeed).find((row) => row.key === 'app-clip');
+  assert.equal(brokenRow.worksText, '没读出来 · 重试');
+  assert.equal(brokenRow.hint, '');
+
+  // ④ 真的一件都没有：这时候才说「还没出过东西」，且不给作品带落点（点进去是空页）。
+  const emptyCache = { loadPosters: async () => ({ items: [] }), loadClips: async () => [], loadReports: async () => [] };
+  const empty = load(emptyCache);
+  const emptyRow = empty.buildCraftRows([], await empty.loadFeed()).find((row) => row.key === 'app-report');
+  assert.match(emptyRow.hint, /还没出过东西/);
+  assert.equal(emptyRow.worksRoute, '', '零作品不许给作品库落点');
+
+  // ⑤ 置灰与铁律：海报军师未启用且零成品 → 置灰交回军师；有成品则一律算已启用。
+  const advisor = [{ key: 'poster', name: '海报设计师', type: 'creative', billing: 'unlock', owned: false }];
+  const locked = load(emptyCache);
+  const lockedRow = locked.buildCraftRows(advisor, await locked.loadFeed()).find((row) => row.key === 'app-poster');
+  assert.equal(lockedRow.locked, true);
+  assert.equal(lockedRow.makeRoute, '', '置灰行没有直达落点，只能开启用层');
+  assert.equal(lockedRow.makeVerb, '军师带一次');
+  assert.equal(Object.keys(lockedRow).some((key) => /price|cost|billing/i.test(key)), false, '行数据不得带价格字段');
+  const owned = load(ok);
+  assert.equal(owned.buildCraftRows(advisor, await owned.loadFeed()).find((row) => row.key === 'app-poster').locked, false,
+    '有成品就不许被收费闸挡在外面');
+
+  // ⑥ 混排按时间倒序。
+  const mixer = load(ok);
+  const works = mixer.mergeWorks(await mixer.loadFeed());
+  assert.equal(works.length, 4);
+  assert.ok(works[0].updatedAt >= works[works.length - 1].updatedAt, '混排必须按时间倒序');
 });

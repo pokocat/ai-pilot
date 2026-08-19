@@ -6,7 +6,8 @@
 // 角标数据同样只有一个来源：`store.snapshot().unread`（syncUnread 聚合全部会话未读）。
 
 // 2026-08-18 IA 回归：战局只做判断；军令/打卡/回填/复盘回到独立执行 tab。
-// 锦囊保留完整页面但降为执行页内普通入口，muster（打勾名册）用于日常执行点检。
+// muster（打勾名册）用于日常执行点检。
+// 2026-08-19：锦囊主体内联进今日页尾（手艺行 + 作品带），只留一个跨手艺档案子页 pages/pouch。
 const TABS = [
   { path: '/pages/sessions/index', icon: 'counsel', text: '问策' },
   { path: '/pages/home/index', icon: 'sandtable', text: '战局' },
