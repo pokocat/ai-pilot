@@ -432,7 +432,10 @@ test('非字符串邀请码也要留痕（inviteCode:123 不能被悄悄当成�
   assert.deepEqual(await outcomesOf(r.body.token), ['unknown_code'], '带了码就要能查到，哪怕类型不对');
 });
 
-test('注销链首只删失效直边并重算路径：A→B→C→D 删 A 后 B→C、C→D 仍保留', async () => {
+test('注销只抹个人字段：A→B→C→D 删 A 后整条关系链与三级路径一行不动', async () => {
+  // 2026-08-19 改口径：原先注销会删掉「本人的上级边 + 直接指向本人的边」并重算后代路径。
+  // 那是错的——邀请关系是**邀请人的**账本，下级注销不该让上级业绩缩水、更不该截断三级链条。
+  // 而且 Referral 里只有内部 cuid / 邀请码 / 时间戳，user 一删它天然就是去标识化的。
   const a = await register();
   const b = await register({ inviteCode: await inviteCodeOf(a) });
   const c = await register({ inviteCode: await inviteCodeOf(b) });
@@ -440,18 +443,28 @@ test('注销链首只删失效直边并重算路径：A→B→C→D 删 A 后 B�
 
   const del = await api('DELETE', '/api/me', { token: a });
   assert.equal(del.status, 200, `注销应成功，实际 ${del.status} ${JSON.stringify(del.body)}`);
-  assert.equal(await prisma.referral.findUnique({ where: { userId: b } }), null, '直接指向已注销 A 的边必须删除');
+
+  const edgeB = await prisma.referral.findUniqueOrThrow({ where: { userId: b } });
+  assert.equal(edgeB.referrerId, a, '指向已注销 A 的边必须保留：那是 A 的邀请业绩');
   const edgeC = await prisma.referral.findUniqueOrThrow({ where: { userId: c } });
   assert.equal(edgeC.referrerId, b);
-  assert.equal(edgeC.lv2, null, 'B 的上级已删除，C 的祖级投影应清空');
+  assert.equal(edgeC.lv2, a, '三级路径不因上级注销而截断');
   const edgeD = await prisma.referral.findUniqueOrThrow({ where: { userId: d } });
-  assert.equal(edgeD.referrerId, c, '仍存在的后代直邀边不能被 lv3 命中误删');
+  assert.equal(edgeD.referrerId, c);
   assert.equal(edgeD.lv2, b);
-  assert.equal(edgeD.lv3, null);
-  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: a } }), 0, '涉及注销者的 IP/UA 留痕不得保留');
+  assert.equal(edgeD.lv3, a, 'lv3 同样保留');
+
+  // 归因记录整行保留，只有 IP / UA 被抹掉（隐私政策承诺「期满后删除或匿名化」）。
+  const attrs = await prisma.referralAttribution.findMany({ where: { referrerId: a } });
+  assert.ok(attrs.length > 0, '归因历史必须保留，否则邀请人无从解释客户是怎么来的');
+  for (const row of attrs) {
+    assert.equal(row.clientIp, null, 'clientIp 是网络标识符，注销后必须抹掉');
+    assert.equal(row.userAgent, null, 'userAgent 是设备标识符，注销后必须抹掉');
+    assert.ok(row.inviteCode && row.outcome, '邀请码与 outcome 要留着，归因链路才完整');
+  }
 });
 
-test('多人租户注销分支同样清理邀请关系与归因', async () => {
+test('多人租户注销分支口径一致：关系边保留，只抹 IP/UA', async () => {
   const inviter = await register();
   const tenantId = (await prisma.user.findUniqueOrThrow({ where: { id: inviter } })).tenantId;
   await prisma.user.create({
@@ -460,8 +473,12 @@ test('多人租户注销分支同样清理邀请关系与归因', async () => {
   const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
   const del = await api('DELETE', '/api/me', { token: inviter });
   assert.equal(del.status, 200);
-  assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0);
-  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: inviter } }), 0);
+  // 两条分支必须同一口径：租户还在与否，都不改变「关系链保留、只抹个人字段」这件事。
+  const edge = await prisma.referral.findUniqueOrThrow({ where: { userId: invitee } });
+  assert.equal(edge.referrerId, inviter, '多人租户下同样保留邀请边');
+  const attrs = await prisma.referralAttribution.findMany({ where: { referrerId: inviter } });
+  assert.ok(attrs.length > 0, '归因历史保留');
+  assert.ok(attrs.every((r) => r.clientIp === null && r.userAgent === null), 'IP/UA 必须抹掉');
 });
 
 // ── 邀请漏斗第四段：付费开通 → ActivationEvent(source='invite')（2026-08-18 接上写入方）───────
