@@ -8,6 +8,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
+import { scanDataErasureJobs } from '../src/services/accountDeletion.ts';
 import { bindOnRegister, isInviteCodeShape, referralConfig, ReferralAlreadyBound, traceOutsideTransaction } from '../src/services/referral.ts';
 import { verifyReferralCapture } from '../src/services/referralCapture.ts';
 import { markPaidAndApply, settleInviteActivations, pendingInviteActivations } from '../src/services/wechatPay.ts';
@@ -432,6 +433,21 @@ test('非字符串邀请码也要留痕（inviteCode:123 不能被悄悄当成�
   assert.deepEqual(await outcomesOf(r.body.token), ['unknown_code'], '带了码就要能查到，哪怕类型不对');
 });
 
+/**
+ * 注销后驱动到期清理。
+ *
+ * 注销是**保留期模型**：`DELETE /me` 只停用账号并登记 DataErasureJob（至少 30 天后才到期），
+ * PII 清理发生在到期任务里。所以这两条用例必须显式把 purgeAfter / nextAttemptAt 拨到过去再跑
+ * scan——否则它们测的只是「接口返回 200」，IP/UA 到底抹没抹根本看不出来。
+ * 拨时间的手法与 test/accountDeletion.test.ts 一致，两处别各写一套。
+ */
+async function drivePurge(userId: string): Promise<void> {
+  const job = await prisma.dataErasureJob.findUniqueOrThrow({ where: { subjectUserId: userId } });
+  await prisma.dataErasureJob.update({ where: { id: job.id }, data: { nextAttemptAt: new Date(Date.now() - 1000) } });
+  await prisma.user.update({ where: { id: userId }, data: { purgeAfter: new Date(Date.now() - 1000) } });
+  await scanDataErasureJobs();
+}
+
 test('注销只抹个人字段：A→B→C→D 删 A 后整条关系链与三级路径一行不动', async () => {
   // 2026-08-19 改口径：原先注销会删掉「本人的上级边 + 直接指向本人的边」并重算后代路径。
   // 那是错的——邀请关系是**邀请人的**账本，下级注销不该让上级业绩缩水、更不该截断三级链条。
@@ -443,6 +459,7 @@ test('注销只抹个人字段：A→B→C→D 删 A 后整条关系链与三级
 
   const del = await api('DELETE', '/api/me', { token: a });
   assert.equal(del.status, 200, `注销应成功，实际 ${del.status} ${JSON.stringify(del.body)}`);
+  await drivePurge(a); // 保留期模型：清理在到期任务里，不在 DELETE 响应里
 
   const edgeB = await prisma.referral.findUniqueOrThrow({ where: { userId: b } });
   assert.equal(edgeB.referrerId, a, '指向已注销 A 的边必须保留：那是 A 的邀请业绩');
@@ -473,6 +490,7 @@ test('多人租户注销分支口径一致：关系边保留，只抹 IP/UA', as
   const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
   const del = await api('DELETE', '/api/me', { token: inviter });
   assert.equal(del.status, 200);
+  await drivePurge(inviter);
   // 两条分支必须同一口径：租户还在与否，都不改变「关系链保留、只抹个人字段」这件事。
   const edge = await prisma.referral.findUniqueOrThrow({ where: { userId: invitee } });
   assert.equal(edge.referrerId, inviter, '多人租户下同样保留邀请边');

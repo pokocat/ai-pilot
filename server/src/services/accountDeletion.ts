@@ -10,6 +10,15 @@ import { aidramaDeleteOwnerData } from './video/aidramaGateway.js';
  * 注销数据政策的机器可读清单。新增含 userId/tenantId 的业务模型时，覆盖测试会强制要求在这里归类。
  * delete：保留期结束后删除账号专属内容；shared：多人租户保留、独占租户删除；retain：到期后仅留法务/安全所需的去标识记录。
  */
+/**
+ * 注销数据政策分类。`test/accountDeletion.test.ts` 遍历 DMMF 强制校验：任何带 userId/tenantId
+ * 的新表都必须先在这里归类，漏登记就红——这条守卫很值钱，它正是这样抓到邀请关系三张表的。
+ *
+ * `Referral` / `ReferralAttribution` / `InviteActivationOutbox` 归 **retain**（去标识保留）：
+ * 邀请关系是**邀请人的**账本，下级注销不该让上级业绩缩水、也不该截断三级路径；且这三张表里
+ * 只有内部 cuid / 邀请码 / 时间戳，`user` 一删就天然去标识化。真正属个人数据的只有归因留痕的
+ * clientIp / userAgent，由 `scrubUserReferralPii` 置 null（见其注释）。
+ */
 export const ACCOUNT_DELETION_POLICY = {
   delete: [
     'UserJourney', 'Prescription', 'BrandKit', 'BizMetricWeekly', 'UserAgent',
@@ -23,7 +32,7 @@ export const ACCOUNT_DELETION_POLICY = {
     'VideoCreditHold', 'VideoCloneHold', 'VideoStoragePack', 'ReportHtml',
   ],
   shared: ['Profile', 'GraphEntity', 'GraphRelation'],
-  retain: ['ClientEvent', 'PaymentOrder', 'SubscriptionContract', 'TokenUsage', 'LlmTrace', 'AuditLog', 'ModerationLog'],
+  retain: ['ClientEvent', 'PaymentOrder', 'SubscriptionContract', 'TokenUsage', 'LlmTrace', 'AuditLog', 'ModerationLog', 'Referral', 'ReferralAttribution', 'InviteActivationOutbox'],
   identity: ['User', 'Tenant'],
 } as const;
 
