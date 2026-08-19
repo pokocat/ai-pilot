@@ -19,6 +19,9 @@
 // storage key 跟随本仓惯例（`junshi.userId` / `junshi.color` 同族，点号分段）。
 const KEY = 'junshi.invite';
 const AT_KEY = 'junshi.inviteAt';
+const TOKEN_KEY = 'junshi.inviteToken';
+const SOURCE_KEY = 'junshi.inviteSource';
+let capturePromise = null;
 
 // 与服务端 `server/src/services/community.ts` 的 Crockford base32 字母表同源：
 // "JS" + 4 位，去掉易混的 I/L/O/U。大小写敏感——服务端生成的一定是大写。
@@ -30,6 +33,26 @@ function isInviteCode(value) {
 
 function safeGet(key) {
   try { return wx.getStorageSync(key) || ''; } catch (_) { return ''; }
+}
+
+function requestCapture(code, source) {
+  let captureCall;
+  try { captureCall = require('./api').api.captureReferral(code, source); } catch (_) { captureCall = null; }
+  const pending = Promise.resolve(captureCall)
+    .then((result) => {
+      // 请求返回前用户可能又点了另一张分享卡；旧响应绝不能覆盖末次触点。
+      if (currentInviteCode() !== code || safeGet(SOURCE_KEY) !== source) return null;
+      if (result && typeof result.token === 'string' && result.token) {
+        wx.setStorageSync(TOKEN_KEY, result.token);
+        const serverAt = Date.parse(result.capturedAt || '');
+        if (Number.isFinite(serverAt) && serverAt > 0) wx.setStorageSync(AT_KEY, serverAt);
+      }
+      return result || null;
+    })
+    .catch(() => null)
+    .finally(() => { if (capturePromise === pending) capturePromise = null; });
+  capturePromise = pending;
+  return pending;
 }
 
 /**
@@ -141,6 +164,7 @@ function captureInvite(options, opts) {
   // 通道：query = 分享卡 `?ic=`；scene = 小程序码（海报）。埋点只报这一个枚举，不报码本身
   // ——邀请码是可以反查到人的，埋点库没有必要存它（服务端在绑定时点已经完整留痕了 attribution）。
   let channel = code ? 'query' : '';
+  let referralSource = code && query.src === 'timeline' ? 'share_timeline' : 'share_friend';
   if (!code && typeof query.scene === 'string') {
     // scene 由微信按 URL 编码回传；解码失败绝不能让启动流程抛出去。
     let scene = '';
@@ -148,18 +172,23 @@ function captureInvite(options, opts) {
     // scene 可能是裸邀请码，也可能是 `ic:JSxxxx` 这种带前缀的形态（海报小程序码用后者，
     // 给将来的多用途 scene 留出命名空间）。
     const candidate = scene.indexOf('ic:') === 0 ? scene.slice(3) : scene;
-    if (isInviteCode(candidate)) { code = candidate; channel = 'scene'; }
+    if (isInviteCode(candidate)) { code = candidate; channel = 'scene'; referralSource = 'poster_qr'; }
   }
   if (!code) return '';
+  // 冷启动紧邻回响不是新落地：不要重写 storage、更不要清掉刚签回来的 token。
+  if (echo && echo.code === code && (() => { const d = Date.now() - echo.at; return d >= 0 && d <= ECHO_WINDOW_MS; })()) return code;
   try {
     wx.setStorageSync(KEY, code);
     wx.setStorageSync(AT_KEY, Date.now());
+    wx.setStorageSync(SOURCE_KEY, referralSource);
+    wx.removeStorageSync(TOKEN_KEY);
   } catch (_) { /* 存不下就这一跳不计归因，不影响任何功能 */ }
   // **每次真落地都报**，包括「小程序已在后台、又点了一张分享卡」那次 onShow——重复进入本身
   // 就是漏斗要看的数据（同一个人被同一张卡拉回来几次），去重交给取数侧，不在端上偷偷合并。
   // 唯一的例外是上面那次冷启动回响：同一份启动参数被微信投递了两次，不是两次落地。
   // 同码 + 在时效内 + 是紧邻的下一次（标记在函数开头已被取走），三者齐了才认作回响。
-  if (echo && echo.code === code && (() => { const d = Date.now() - echo.at; return d >= 0 && d <= ECHO_WINDOW_MS; })()) return code;
+  // 归因窗口的起点由服务端在这次真实落地时签发；客户端本地 Date.now 只作展示/兼容，不再参与建边。
+  requestCapture(code, referralSource);
   // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
   const dispatched = trackLanding(channel);
   // onLaunch 那一路记下**已投递**的落地码与时刻，供紧随其后的首次 onShow 抵消。
@@ -189,8 +218,30 @@ function capturedAt() {
 function inviteParams() {
   const code = currentInviteCode();
   if (!code) return {};
-  const at = capturedAt();
-  return at ? { inviteCode: code, inviteCodeAt: at } : { inviteCode: code };
+  const token = safeGet(TOKEN_KEY);
+  return token ? { inviteCode: code, referralToken: token } : { inviteCode: code };
+}
+
+/** 登录前短等正在飞的捕获请求；超时仍照常登录并保留 raw code，绝不让归因服务阻断登录。 */
+async function inviteParamsReady(timeoutMs) {
+  const code = currentInviteCode();
+  let pending = capturePromise;
+  // 首次落地签名请求可能已经因弱网失败并结束。no_timestamp 登录会保留 raw code，
+  // 下一次登录必须主动重新换签名凭证；否则 capturePromise 已清空后只会永远重复交裸码。
+  if (!pending && code && !safeGet(TOKEN_KEY)) {
+    const storedSource = safeGet(SOURCE_KEY);
+    const source = storedSource === 'share_timeline' || storedSource === 'poster_qr'
+      ? storedSource
+      : 'share_friend';
+    pending = requestCapture(code, source);
+  }
+  if (pending) {
+    await Promise.race([
+      pending,
+      new Promise((resolve) => setTimeout(resolve, Number(timeoutMs) > 0 ? Number(timeoutMs) : 1500)),
+    ]);
+  }
+  return inviteParams();
 }
 
 /**
@@ -202,7 +253,12 @@ function clearInvite() {
   try {
     wx.removeStorageSync(KEY);
     wx.removeStorageSync(AT_KEY);
+    wx.removeStorageSync(TOKEN_KEY);
+    wx.removeStorageSync(SOURCE_KEY);
   } catch (_) { /* noop */ }
 }
 
-module.exports = { KEY, AT_KEY, SHAPE, isInviteCode, captureInvite, currentInviteCode, capturedAt, inviteParams, clearInvite };
+module.exports = {
+  KEY, AT_KEY, TOKEN_KEY, SOURCE_KEY, SHAPE, isInviteCode, captureInvite,
+  currentInviteCode, capturedAt, inviteParams, inviteParamsReady, clearInvite,
+};

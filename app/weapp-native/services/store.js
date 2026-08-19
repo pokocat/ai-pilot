@@ -136,13 +136,14 @@ async function loadMe() {
 
 async function afterLogin(result) {
   setToken(result.token);
-  // 邀请码是一次性归因凭证，**真实登录**成功后即弃：不清的话每次登录都重复上报同一个码，
-  // 服务端每次落一条 already_bound 归因日志，把风控视图（按 IP 看聚集）弄脏。
+  // 邀请码通常在**真实登录**成功后即弃；但 no_timestamp / config_unavailable 是服务端明确的
+  // 可恢复结果，必须保留，下一次登录携带新签名凭证才有机会完成首次注册时失败的绑定。
   //
   // 但断网时 login-sheet 会造一个 `local-<手机号>` 的**本地假登录**（见其 NETWORK_ERROR 分支），
   // 那次并没有真的建号。如果这里照样清码，用户网络恢复后真正注册时码已经没了，
   // 归因永久丢失——分享带来的新用户恰恰最容易在弱网下注册，这条路径不能漏。
-  if (!String(result.token || '').startsWith('local-')) clearInvite();
+  const retryableReferral = result.referralOutcome === 'no_timestamp' || result.referralOutcome === 'config_unavailable';
+  if (!String(result.token || '').startsWith('local-') && !retryableReferral) clearInvite();
   state.onboarded = Boolean(result.onboarded);
   state.onboardingKnown = true;
   wx.setStorageSync(ONBOARDED_KEY, state.onboarded ? '1' : '');

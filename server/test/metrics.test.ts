@@ -3,9 +3,9 @@
 //
 // 锁住三件事：
 //   ① 鉴权：未配 METRICS_TOKEN 时整个端点关闭（404）；配了但 token 不对 → 401。
-//      这条特别重要——生产开了 trustProxy，req.ip 来自 X-Forwarded-File 可伪造，
-//      真实 TCP 对端又恒为 Nginx 的 127.0.0.1，所以 IP 白名单在这个拓扑下根本不成立，
-//      共享密钥是唯一的门。一旦有人把它退化成「内网直接放行」，这里就会红。
+//      这条特别重要——生产 req.ip 虽由可信代理链解析，但代理层级/CIDR 会随部署拓扑变化，
+//      IP 不是稳定的应用鉴权身份；共享密钥才是跨拓扑不漂移的门。
+//      一旦有人把它退化成「内网直接放行」，这里就会红。
 //   ② 输出是合法 Prometheus 文本，且包含压测/告警要用的那几组指标名。
 //   ③ 不泄漏任何密钥：即使端点池里放了带 apiKey/baseUrl 的端点，也不能出现在输出里。
 import { test, describe, beforeEach, afterEach } from 'node:test';

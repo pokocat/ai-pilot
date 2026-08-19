@@ -73,6 +73,20 @@ export interface InviteActivationTarget {
   tenantId: string; userId: string; itemType: 'sku' | 'plan'; itemKey: string;
 }
 
+/** 与权益发放同事务写入；因此支付一旦提交成功，补记意图就不会因进程退出而丢失。 */
+export async function enqueueInviteActivation(
+  db: Prisma.TransactionClient,
+  outTradeNo: string,
+  target: InviteActivationTarget,
+): Promise<void> {
+  await db.inviteActivationOutbox.upsert({
+    where: { outTradeNo },
+    create: { outTradeNo, ...target },
+    // 重复通知可补建历史订单的 outbox；已完成行保留 completedAt，不会重新制造事件。
+    update: { ...target },
+  });
+}
+
 export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recorded' | 'failed';
 
 /**
@@ -96,8 +110,8 @@ export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recor
  *
  * 漏斗那一段问的是「被邀请来的人里有多少**转化成了付费用户**」——是**人**的口径，不是订单口径：
  * 同一个人续费、加购、再买一个 SKU 都不该再进一次分子。所以按 userId 去重，已有 invite 行就直接返回。
- * 这一条同时兜住三种重复：① 同一订单重复回调——重投**刻意**照样派发一次补记（`markPaidAndApply`
- * 的 already_applied 分支，为的是给首次那次失败留下补上的机会），这道去重就是它的安全网；
+ * 这一条同时兜住三种重复：① 同一订单重复回调或 outbox 重试（`markPaidAndApply` 的
+ * already_applied 分支也会幂等补建历史 outbox），这道去重就是它的安全网；
  * ② 同一用户先后两笔订单；③ 同一用户两笔订单**并发**到账——ActivationEvent 上没有唯一约束，
  * check-then-insert 必须自己串行化，故进来先取 `activation:invite:{userId}` 事务级 advisory lock
  * （与 credits.ts / tokenQuota.ts 的按用户加锁同一套路，命名空间独立，不与支付侧的锁互相牵连）。
@@ -108,15 +122,15 @@ export type InviteActivationResult = 'recorded' | 'no_referrer' | 'already_recor
  * 塞进 `markPaidAndApply` 的事务里，「查 Referral 时抖一下」就会连带回滚已经算成功的入账，
  * 而且 `.catch(() => {})` 也救不回来——后续语句同样会失败（这个坑 referral.ts 的 P2002 分支踩过一次）。
  * 所以它在入账事务**提交之后**才跑，自带一个只包「判推荐人 + 落一行」的小事务，
- * 任何异常在函数内部就地吞掉并记 warn，返回 'failed'。**漏一条统计远好过让一笔真钱卡在未入账。**
+ * 任何异常在函数内部就地吞掉并记 warn，返回 'failed'，由持久化 outbox 退避重试。
  * 查不到 Referral 就当没有推荐人（'no_referrer'），不重试、不报警。
  *
  * 「事务外」还不够，调用方**也不许 await 它**（2026-08-18 订正）：这个小事务不是「两条查询」——
  * BEGIN + advisory lock + 查 Referral 就已经 2 条 SQL（无推荐人到此结束），有推荐人再加查重（3 条）、
  * 首次写入再加 insert（4 条），外加 COMMIT。真钱早已入账，可连接池拥塞或 advisory lock 排队时
- * 这几条照样能把支付回调的响应拖过微信的超时，换来一次重复回调。故 `markPaidAndApply` 派发出去就走
- * （见那里的 dispatchInviteActivation）；丢掉的那条统计由微信重投补——重投也会派发一次补记，
- * 而本函数幂等，重复调用只会返回 'already_recorded'。
+ * 这几条照样能把支付回调的响应拖过微信的超时，换来一次重复回调。故 `markPaidAndApply` 只在主事务
+ * 内落 outbox，提交后派发出去就走；scheduler 扫描未完成行，本函数幂等，重复调用只会返回
+ * 'already_recorded'。
  */
 export async function recordInviteActivation(target: InviteActivationTarget): Promise<InviteActivationResult> {
   try {
@@ -137,4 +151,56 @@ export async function recordInviteActivation(target: InviteActivationTarget): Pr
     console.warn(`[activation] invite 归因补记失败 userId=${target.userId} item=${target.itemType}:${target.itemKey}: ${(err as Error).message}`);
     return 'failed';
   }
+}
+
+/**
+ * 抢占并处理一条持久化补记。抢占租约 60 秒：并发 scheduler/回调只有一方执行；进程中途退出后会自动重试。
+ */
+export async function processInviteActivationOutbox(outTradeNo: string): Promise<InviteActivationResult | 'not_due'> {
+  const at = new Date();
+  const claimed = await prisma.inviteActivationOutbox.updateMany({
+    where: { outTradeNo, completedAt: null, nextAttemptAt: { lte: at } },
+    data: { attempts: { increment: 1 }, nextAttemptAt: new Date(at.getTime() + 60_000) },
+  });
+  if (claimed.count !== 1) return 'not_due';
+  const row = await prisma.inviteActivationOutbox.findUnique({ where: { outTradeNo } });
+  if (!row || row.completedAt) return 'not_due';
+  const target: InviteActivationTarget = {
+    tenantId: row.tenantId,
+    userId: row.userId,
+    itemType: row.itemType === 'sku' ? 'sku' : 'plan',
+    itemKey: row.itemKey,
+  };
+  const result = await recordInviteActivation(target);
+  if (result !== 'failed') {
+    // 账号注销/测试清理可能与事务外 worker 同时发生。行已被清掉时视为无需再写，
+    // 不要让一个已完成的 best-effort 统计任务制造未处理异常。
+    await prisma.inviteActivationOutbox.updateMany({
+      where: { outTradeNo, completedAt: null },
+      data: { completedAt: new Date(), lastError: null },
+    });
+  } else {
+    const delay = Math.min(6 * 3600_000, 30_000 * 2 ** Math.min(row.attempts, 8));
+    await prisma.inviteActivationOutbox.updateMany({
+      where: { outTradeNo, completedAt: null },
+      data: { lastError: 'record_invite_activation_failed', nextAttemptAt: new Date(Date.now() + delay) },
+    });
+  }
+  return result;
+}
+
+/** scheduler 扫描入口；单轮有界，失败行由 nextAttemptAt 退避。 */
+export async function scanInviteActivationOutbox(limit = 100): Promise<{ scanned: number; completed: number }> {
+  const rows = await prisma.inviteActivationOutbox.findMany({
+    where: { completedAt: null, nextAttemptAt: { lte: new Date() } },
+    select: { outTradeNo: true },
+    orderBy: { nextAttemptAt: 'asc' },
+    take: Math.max(1, Math.min(500, limit)),
+  });
+  let completed = 0;
+  for (const row of rows) {
+    const result = await processInviteActivationOutbox(row.outTradeNo);
+    if (result !== 'failed' && result !== 'not_due') completed += 1;
+  }
+  return { scanned: rows.length, completed };
 }

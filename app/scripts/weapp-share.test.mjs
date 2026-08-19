@@ -240,7 +240,9 @@ function stubApiTrack(mode = 'ok') {
   const Module = cjsRequire('node:module');
   const original = Module.prototype.require;
   const calls = [];
+  const captureCalls = [];
   let failedOnce = false;
+  let captureFailedOnce = false;
   Module.prototype.require = function patched(id) {
     if (id === './api') {
       if (mode === 'require') throw new Error('桩：api 模块加载失败');
@@ -249,11 +251,18 @@ function stubApiTrack(mode = 'ok') {
         if (mode === 'nosend-once' && !failedOnce) { failedOnce = true; return false; }
         calls.push({ name, props });
         return true;
+      }, captureReferral: (code, source) => {
+        captureCalls.push({ code, source });
+        if (mode === 'capture-fail-once' && !captureFailedOnce) {
+          captureFailedOnce = true;
+          return Promise.reject(new Error('temporary network failure'));
+        }
+        return Promise.resolve({ token: `signed-${code}-${source}`, capturedAt: new Date().toISOString() });
       } } };
     }
     return original.apply(this, arguments);
   };
-  return { calls, restore() { Module.prototype.require = original; } };
+  return { calls, captureCalls, restore() { Module.prototype.require = original; } };
 }
 
 /** 桩一个最小 wx storage（invite.js 只用这三个同步接口）。 */
@@ -330,8 +339,8 @@ test('分享回调实际执行：必须带真图（留空会让微信截当前�
 
 test('分享回调实际执行：有码带 ?ic=、无码退回无参、朋友圈只回 query 不回 path', () => {
   const withCode = loadShare({ inviteCode: 'JS2K7P' });
-  assert.equal(withCode.friendMixin.onShareAppMessage().path, `${withCode.LANDING}?ic=JS2K7P`);
-  assert.equal(withCode.timelineMixin.onShareTimeline().query, 'ic=JS2K7P');
+  assert.equal(withCode.friendMixin.onShareAppMessage().path, `${withCode.LANDING}?ic=JS2K7P&src=friend`);
+  assert.equal(withCode.timelineMixin.onShareTimeline().query, 'ic=JS2K7P&src=timeline');
   assert.equal(withCode.timelineMixin.onShareTimeline().path, undefined, '朋友圈给 path 是无效的（微信固定回当前页）');
 
   const noCode = loadShare(null);
@@ -384,13 +393,49 @@ test('邀请码捕获实际执行：query 与 scene 两路都认，脏值不写�
   // decodeURIComponent 会对孤立的 % 抛错——绝不能让启动流程崩掉
   assert.doesNotThrow(() => mod.captureInvite({ query: { scene: '%E0%A4%A' } }));
 
-  // 登录参数：有码带两个字段，清掉后什么都不带
+  // 没有签发成功前只带 raw code（服务端只留诊断、不建边），清掉后什么都不带。
   const params = mod.inviteParams();
   assert.equal(params.inviteCode, before);
-  assert.ok(typeof params.inviteCodeAt === 'number');
+  assert.equal(params.referralToken, undefined);
   mod.clearInvite();
   assert.deepEqual(mod.inviteParams(), {}, '清码后请求体不得出现 undefined 字段');
   assert.equal(Object.keys(store).length, 0, 'storage 应被清空');
+});
+
+test('捕获凭证使用服务端签名并保留来源：朋友圈/海报不再被硬记为好友分享', async () => {
+  const stub = stubApiTrack();
+  try {
+    const { mod } = loadInvite();
+    mod.captureInvite({ query: { ic: 'JS2K7P', src: 'timeline' } });
+    await mod.inviteParamsReady();
+    assert.deepEqual(stub.captureCalls[0], { code: 'JS2K7P', source: 'share_timeline' });
+    assert.deepEqual(mod.inviteParams(), {
+      inviteCode: 'JS2K7P', referralToken: 'signed-JS2K7P-share_timeline',
+    });
+
+    mod.captureInvite({ query: { scene: 'ic%3AJSWXYZ' } });
+    await mod.inviteParamsReady();
+    assert.deepEqual(stub.captureCalls[1], { code: 'JSWXYZ', source: 'poster_qr' });
+  } finally { stub.restore(); }
+});
+
+test('首次捕获签名失败后，下一次登录会用保留的码主动重签，不会永远重复 no_timestamp', async () => {
+  const stub = stubApiTrack('capture-fail-once');
+  try {
+    const { mod } = loadInvite();
+    mod.captureInvite({ query: { ic: 'JS2K7P', src: 'timeline' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(mod.inviteParams(), { inviteCode: 'JS2K7P' }, '首次失败后保留 raw code');
+
+    const params = await mod.inviteParamsReady();
+    assert.deepEqual(stub.captureCalls, [
+      { code: 'JS2K7P', source: 'share_timeline' },
+      { code: 'JS2K7P', source: 'share_timeline' },
+    ]);
+    assert.deepEqual(params, {
+      inviteCode: 'JS2K7P', referralToken: 'signed-JS2K7P-share_timeline',
+    });
+  } finally { stub.restore(); }
 });
 
 test('页面自定义分享回调漏了 imageUrl 时，withShare 必须兜上默认图', () => {
@@ -454,9 +499,9 @@ test('分享曝光埋点：两个通道各报一条 share_expose，且回调返�
 
     // 埋点不得改变返回值（微信是同步取走这个对象的）
     assert.equal(friend.title, share.currentPoster().title);
-    assert.equal(friend.path, `${share.LANDING}?ic=JS2K7P`);
+    assert.equal(friend.path, `${share.LANDING}?ic=JS2K7P&src=friend`);
     assert.equal(friend.imageUrl, share.CARD_FRIEND);
-    assert.equal(timeline.query, 'ic=JS2K7P');
+    assert.equal(timeline.query, 'ic=JS2K7P&src=timeline');
     assert.equal(timeline.imageUrl, share.CARD_TIMELINE);
   } finally { stub.restore(); }
 });
@@ -481,7 +526,7 @@ test('分享曝光埋点：页面自定义的分享回调同样上报，且恰�
 test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调都不抛错且返回值仍然正确', () => {
   for (const mode of ['throw', 'require']) {
     const share = loadShare({ inviteCode: 'JS2K7P' });
-    const expected = { title: share.currentPoster().title, path: `${share.LANDING}?ic=JS2K7P`, image: share.CARD_FRIEND };
+    const expected = { title: share.currentPoster().title, path: `${share.LANDING}?ic=JS2K7P&src=friend`, image: share.CARD_FRIEND };
     const stub = stubApiTrack(mode);
     try {
       const page = share.withShare({}, { timeline: true });

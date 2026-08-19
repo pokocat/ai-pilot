@@ -2011,6 +2011,24 @@ model ActivationEvent {
   @@map("activation_event")
 }
 
+/// 支付事务内持久化的邀请开通补记 outbox。支付响应不等待统计写入；进程重启后由 scheduler 继续重试。
+model InviteActivationOutbox {
+  outTradeNo    String    @id
+  tenantId      String
+  userId        String
+  itemType      String
+  itemKey       String
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?   @db.Text
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([completedAt, nextAttemptAt])
+  @@map("invite_activation_outbox")
+}
+
 /// 邀请关系（一人一行 = 单推荐人公理）。
 ///
 /// 三条公理：① **单推荐人**——`userId` 主键即保证，且绑定后不可变更；② **无环**——绑定前沿

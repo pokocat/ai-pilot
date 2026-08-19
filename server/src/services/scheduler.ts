@@ -10,6 +10,7 @@ import { now, dateKey, hourOf, dayStart } from './clock.js';
 import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import { scanPrescriptionFollowups } from './prescription.js';
 import { sweepPendingOrders, sweepPendingRefunds } from './wechatPay.js';
+import { scanInviteActivationOutbox } from './activation.js';
 import { expireStalePendingSubscriptions, reconcilePapayOrders, reconcilePendingSubscriptions, scanAutoRenewals, scanPendingSubscriptionCancellations } from './wechatPapay.js';
 import {
   hasSentWechatNotificationToday,
@@ -348,6 +349,7 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   const pendingSubscriptions = await reconcilePendingSubscriptions();
   const cancellations = await scanPendingSubscriptionCancellations();
   const staleSubscriptions = await expireStalePendingSubscriptions();
+  const inviteOutbox = await scanInviteActivationOutbox();
   if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
   if (refunds.scanned) console.log(`[scheduler] refund sweep: completed=${refunds.completed} (scanned ${refunds.scanned})`);
   if (subscriptions.scanned) console.log(`[scheduler] auto-renew: submitted=${subscriptions.submitted} failed=${subscriptions.failed} (scanned ${subscriptions.scanned})`);
@@ -355,4 +357,5 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   if (pendingSubscriptions.scanned) console.log(`[scheduler] papay contract reconcile: activated=${pendingSubscriptions.activated} closed=${pendingSubscriptions.closed} (scanned ${pendingSubscriptions.scanned})`);
   if (cancellations.scanned) console.log(`[scheduler] papay cancellations: cancelled=${cancellations.cancelled} (scanned ${cancellations.scanned})`);
   if (staleSubscriptions) console.log(`[scheduler] papay pending subscriptions expired: ${staleSubscriptions}`);
+  if (inviteOutbox.scanned) console.log(`[scheduler] invite activation outbox: completed=${inviteOutbox.completed} (scanned ${inviteOutbox.scanned})`);
 } });

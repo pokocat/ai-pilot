@@ -157,17 +157,19 @@ calendar、mingpan）是 **Taro 运行时的注册开关，对原生产物无效
 
 ### 3.3 ② 归因面
 
-- 分享 path 统一 `?ic=<inviteCode>`（参数名短，给 scene 留余量）；码取 `store` 里 `/me` 已有的
+- 好友分享 path 统一 `?ic=<inviteCode>&src=friend`，朋友圈 query 用 `src=timeline`，scene 归为 `poster_qr`；码取 `store` 里 `/me` 已有的
   `inviteCode`（**零新增请求**）；**取不到就发无参路径**。
 - `app.js` 的 `onLaunch(options)` / `onShow(options)` 调 `captureInvite(options)`：
   读 `query.ic`，再读 `scene`（解码失败不得中断启动），**按形状校验**（`/^JS[0-9A-HJKMNP-TV-Z]{4}$/`，
-  与 `community.ts` 的 Crockford 字母表同源），存 storage 并**记下捕获时间**。
+  与 `community.ts` 的 Crockford 字母表同源），存 storage 后调用 `POST /auth/referral-capture` 换服务端签名 token；
+  捕获时间与来源只认 token 内的服务端事实，客户端 `Date.now()` 不参与建边。
 - **归因窗口 30 天**：军师的 `inviteCode` 是**永久码**（不像公社 7 天轮换），不设窗口会出现
   「半年前点过一次分享的人今天注册，归给早已忘记这件事的推荐人」。窗口值归运营后台。
 - 绑定时机：**注册那一刻**（`loginOrRegisterByPhone` 里 `isNew === true`）。已注册用户登录时**不追认**
   ——存量互相刷是最容易被薅的口子。
-- 前端把码带上去只需改两处：`services/api.js` 的 `login` / `wechatPhoneLogin` 加参数，
-  `login-sheet/index.js` 两条路径读 storage 传入。**88 个页面零改动。**
+- 前端统一由 `services/api.js` 的 `login` / `wechatPhoneLogin` 短等捕获请求并带 `inviteCode + referralToken`，
+  `login-sheet` 与 88 个引用页面零改动；`no_timestamp|config_unavailable` 时保留本地凭证，后续只允许
+  “首次注册已留同一码可恢复失败”的账号重试，普通老账号不追认。
 - 码解析失败（不存在 / 是自己 / 超窗口）：**照常注册，落归因失败记录**，绝不阻断登录。
 
 ### 3.4 ③ 关系面：数据存满三级，激励口径只看一级（评论①已定）
@@ -210,8 +212,8 @@ model ReferralAttribution {
 
 - **既然存满三级，无环检查就要按 ai-society 的完整版做**：绑定前沿 `referrerId` 递归上溯到根，
   途中撞见本人即拒绝，hop 上限兜底。物化路径只存 3 级，靠它查环会漏深环。
-- 绑定服务 `services/referral.ts`：`bindOnRegister({ tx, user, inviteCode, source, ip, ua })`，
-  **与建号同事务**（`createUserWithTenant` 已是 `$transaction`，直接搭车），失败只记日志不回滚注册。
+- 绑定服务 `services/referral.ts`：`bindOnRegister({ tx, user, inviteCode, capturedAt, source, ip, ua })`，
+  在建号提交后另开小事务（Postgres 事务内任一写失败会把建号一起回滚，不能“搭车”）；失败留痕但不回滚注册。
 - lv2/lv3 取法照搬：读邀请人自己那行的 lv1/lv2 平移即可，无需递归。
 
 ### 3.5 ④ 激励面：本期不做，只留栏位（评论③已定）
@@ -221,7 +223,7 @@ model ReferralAttribution {
 1. **运营后台配置栏位**（`FeatureFlag.payload`，与告警阈值同套路）：预留 key ——
    `referral.rewardInviter`（邀请人奖励，形态+数值）、`referral.rewardInvitee`（被邀人）、
    `referral.rewardOnPaid`（好友首付费）、`referral.dailyCap`（每日封顶）、
-   `referral.ladder`（阶梯规则，见 §6 公理 4 的说明）；**归因窗口天数已独立成 `referral-window.window`**（`PATCH /admin/flags/:id` 是整块覆盖写 payload，与奖励键共用一个 flag 会互相抹掉；读取时新键优先、回退旧 `referral.window` 兼容搬迁前的存量配置）。
+   `referral.ladder`（阶梯规则，见 §6 公理 4 的说明）；**归因窗口天数已独立成 `referral-window.window`**（当初拆开是因为 `PATCH /admin/flags/:id` 整块覆盖写 payload，与奖励键共用一个 flag 会互相抹掉；**该覆盖写已于 2026-08-18 改成合并写 `mergeFeatureFlagPayload`**，两个 flag id 的安排保留不变；读取时新键优先、回退旧 `referral.window` 兼容搬迁前的存量配置）。
    全部后台可改，代码不留常量、不 seed。
 2. **幂等挂点**：奖励将来走 `idempotencyKey`（`credits.ts` 的 `appendCreditDelta` 已支持），
    key 形如 `referral:{referrerId}:{newUserId}:{stage}`；开通侧挂已经幂等的 `markPaidAndApply`

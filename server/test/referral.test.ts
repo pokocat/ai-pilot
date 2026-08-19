@@ -9,9 +9,10 @@ import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone, anyPlanId } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { bindOnRegister, isInviteCodeShape, referralConfig, ReferralAlreadyBound, traceOutsideTransaction } from '../src/services/referral.ts';
+import { verifyReferralCapture } from '../src/services/referralCapture.ts';
 import { markPaidAndApply, settleInviteActivations, pendingInviteActivations } from '../src/services/wechatPay.ts';
 import { applyPlanPurchase } from '../src/services/purchase.ts';
-import { parseAttribution } from '../src/services/activation.ts';
+import { parseAttribution, processInviteActivationOutbox, scanInviteActivationOutbox } from '../src/services/activation.ts';
 
 before(async () => {
   await getApp();
@@ -24,10 +25,18 @@ after(async () => {
 });
 
 /** 注册一个新账号（可带邀请码），返回 userId。 */
-async function register(opts: { inviteCode?: string; inviteCodeAt?: number } = {}): Promise<string> {
+async function captureToken(inviteCode: string, source: 'share_friend' | 'share_timeline' | 'poster_qr' = 'share_friend'): Promise<string> {
+  const r = await api<{ token: string }>('POST', '/api/auth/referral-capture', { body: { inviteCode, source } });
+  assert.equal(r.status, 200, `捕获凭证应签发成功，实际 ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body.token;
+}
+
+async function register(opts: { inviteCode?: string; withCapture?: boolean; source?: 'share_friend' | 'share_timeline' | 'poster_qr' } = {}): Promise<string> {
   const body: Record<string, unknown> = { phone: uniquePhone(), name: '测试老板' };
-  if (opts.inviteCode !== undefined) body.inviteCode = opts.inviteCode;
-  if (opts.inviteCodeAt !== undefined) body.inviteCodeAt = opts.inviteCodeAt;
+  if (opts.inviteCode !== undefined) {
+    body.inviteCode = opts.inviteCode;
+    if (opts.withCapture !== false) body.referralToken = await captureToken(opts.inviteCode, opts.source);
+  }
   const r = await api<{ token: string }>('POST', '/api/auth/login', { body });
   assert.equal(r.status, 200, `注册应成功，实际 ${r.status} ${JSON.stringify(r.body)}`);
   return r.body.token;
@@ -60,10 +69,25 @@ test('邀请码形状校验：只认 "JS"+4 位 Crockford（去掉 I/L/O/U），
   assert.ok(!isInviteCodeShape(undefined), 'undefined 不认');
 });
 
+test('生产缺签名密钥时验签 fail-closed：脏 referralToken 不能把登录链打成 5xx', () => {
+  const oldNodeEnv = process.env.NODE_ENV;
+  const oldSecret = process.env.APP_JWT_SECRET;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.APP_JWT_SECRET;
+    assert.equal(verifyReferralCapture('e30.'), null);
+  } finally {
+    if (oldNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = oldNodeEnv;
+    if (oldSecret === undefined) delete process.env.APP_JWT_SECRET;
+    else process.env.APP_JWT_SECRET = oldSecret;
+  }
+});
+
 test('短信登录通道：新号带码注册即建边，物化路径 lv1=邀请人、lv2/lv3 为空，并落 bound 留痕', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
 
   const edge = await prisma.referral.findUnique({ where: { userId: invitee } });
   assert.ok(edge, '应建立邀请关系');
@@ -84,7 +108,7 @@ test('微信一键通道：同一份归因参数在 /auth/wechat-phone 上同样
   // 后者在接口 500 时也会绿，等于什么都没验到。这里要证明的是：多带两个归因字段
   // 不改变这个入口的既有行为（该入口在测试环境走不到微信服务，两次都会失败在同一处）。
   const withCode = await api('POST', '/api/auth/wechat-phone', {
-    body: { phoneCode: 'test-phone-code', loginCode: 'test-login-code', inviteCode: code, inviteCodeAt: Date.now() },
+    body: { phoneCode: 'test-phone-code', loginCode: 'test-login-code', inviteCode: code, referralToken: await captureToken(code) },
   });
   const without = await api('POST', '/api/auth/wechat-phone', {
     body: { phoneCode: 'test-phone-code', loginCode: 'test-login-code' },
@@ -97,7 +121,7 @@ test('自邀拒绝：拿自己的码注册不可能发生，但拿自己的码�
   const user = await register();
   const code = await inviteCodeOf(user);
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: user } })).tenantId;
-  const outcome = await bindOnRegister({ db: prisma, userId: user, tenantId: tenant, inviteCode: code, inviteCodeAt: Date.now() });
+  const outcome = await bindOnRegister({ db: prisma, userId: user, tenantId: tenant, inviteCode: code, capturedAt: Date.now() });
   assert.equal(outcome, 'self');
   assert.equal(await prisma.referral.count({ where: { userId: user } }), 0, '自邀不得建边');
   assert.ok((await outcomesOf(user)).includes('self'), 'self 必须留痕');
@@ -108,10 +132,10 @@ test('重复绑定拒绝：已有推荐人的用户再带别人的码，返回 a
   const second = await register();
   const firstCode = await inviteCodeOf(first);
   const secondCode = await inviteCodeOf(second);
-  const invitee = await register({ inviteCode: firstCode, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: firstCode });
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: invitee } })).tenantId;
 
-  const outcome = await bindOnRegister({ db: prisma, userId: invitee, tenantId: tenant, inviteCode: secondCode, inviteCodeAt: Date.now() });
+  const outcome = await bindOnRegister({ db: prisma, userId: invitee, tenantId: tenant, inviteCode: secondCode, capturedAt: Date.now() });
   assert.equal(outcome, 'already_bound');
   const edge = await prisma.referral.findUniqueOrThrow({ where: { userId: invitee } });
   assert.equal(edge.referrerId, first, '单推荐人公理：绑定后不可变更');
@@ -119,7 +143,7 @@ test('重复绑定拒绝：已有推荐人的用户再带别人的码，返回 a
 });
 
 test('不存在的码：注册照常成功（绝不阻断），并留痕 unknown_code、不建边', async () => {
-  const invitee = await register({ inviteCode: 'JSZZZZ', inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: 'JSZZZZ' });
   assert.ok(invitee, '注册必须成功——归因失败不得阻断建号');
   assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0);
   assert.deepEqual(await outcomesOf(invitee), ['unknown_code']);
@@ -161,7 +185,9 @@ test('超归因窗口：捕获时刻早于窗口（默认 30 天）→ expired�
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
   const longAgo = Date.now() - 31 * 86_400_000;
-  const invitee = await register({ inviteCode: code, inviteCodeAt: longAgo });
+  const invitee = await register();
+  const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: invitee } })).tenantId;
+  assert.equal(await bindOnRegister({ db: prisma, userId: invitee, tenantId: tenant, inviteCode: code, capturedAt: longAgo }), 'expired');
   assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0, '过窗口不建边');
   assert.deepEqual(await outcomesOf(invitee), ['expired']);
 });
@@ -195,9 +221,9 @@ test('窗口天数读运营配置而不是写死：配 60 天读到 60，脏值/
 
 test('物化路径平移：三级链上第三代的 lv1/lv2/lv3 依次是父、祖、曾祖', async () => {
   const a = await register();
-  const b = await register({ inviteCode: await inviteCodeOf(a), inviteCodeAt: Date.now() });
-  const c = await register({ inviteCode: await inviteCodeOf(b), inviteCodeAt: Date.now() });
-  const d = await register({ inviteCode: await inviteCodeOf(c), inviteCodeAt: Date.now() });
+  const b = await register({ inviteCode: await inviteCodeOf(a) });
+  const c = await register({ inviteCode: await inviteCodeOf(b) });
+  const d = await register({ inviteCode: await inviteCodeOf(c) });
 
   const edgeC = await prisma.referral.findUniqueOrThrow({ where: { userId: c } });
   assert.equal(edgeC.lv1, b);
@@ -212,14 +238,14 @@ test('物化路径平移：三级链上第三代的 lv1/lv2/lv3 依次是父、�
 
 test('深环拒绝：A→B→C→D 链上，A 拿 D 的码绑定必须被拒（物化只存三级，判环必须递归上溯）', async () => {
   const a = await register();
-  const b = await register({ inviteCode: await inviteCodeOf(a), inviteCodeAt: Date.now() });
-  const c = await register({ inviteCode: await inviteCodeOf(b), inviteCodeAt: Date.now() });
-  const d = await register({ inviteCode: await inviteCodeOf(c), inviteCodeAt: Date.now() });
+  const b = await register({ inviteCode: await inviteCodeOf(a) });
+  const c = await register({ inviteCode: await inviteCodeOf(b) });
+  const d = await register({ inviteCode: await inviteCodeOf(c) });
 
   // A 此时没有推荐人。若判环只比 lv1/lv2/lv3，A 会成功绑到 D 上，形成 A→D→C→B→A 的环。
   const dCode = await inviteCodeOf(d);
   const tenantA = (await prisma.user.findUniqueOrThrow({ where: { id: a } })).tenantId;
-  const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: dCode, inviteCodeAt: Date.now() });
+  const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: dCode, capturedAt: Date.now() });
   // 断言**具体** outcome：只写 `!== 'bound'` 的话，实现哪天错成 unknown_code 也照样绿，
   // 那就掩盖了「环没被识别出来、只是恰好因为别的原因没建边」这种情况。
   assert.equal(outcome, 'cycle', '成环必须被识别为 cycle（与自邀 self 分开，排查方向不同）');
@@ -230,8 +256,8 @@ test('深环拒绝：A→B→C→D 链上，A 拿 D 的码绑定必须被拒（�
 test('/me.referral 读数：直邀数与已开通数分开算（过期套餐不计入），上级姓名如实回填', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const active = await register({ inviteCode: code, inviteCodeAt: Date.now() });
-  const expired = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const active = await register({ inviteCode: code });
+  const expired = await register({ inviteCode: code });
 
   // 不依赖「注册时会不会自动开通套餐」这种环境细节（它随 TEST_DEFAULT_PLAN_NAME 变化），
   // 显式把两个直邀摆成一个有效、一个已过期，这样断言的是**口径**而不是环境。
@@ -272,7 +298,7 @@ test('已注册用户登录不追认推荐人：老号再带码登录，不建�
   const userId = first.body.token;
 
   const again = await api<{ token: string }>('POST', '/api/auth/login', {
-    body: { phone, name: '老用户', inviteCode: code, inviteCodeAt: Date.now() },
+    body: { phone, name: '老用户', inviteCode: code, referralToken: await captureToken(code) },
   });
   assert.equal(again.status, 200);
   assert.equal(again.body.token, userId, '仍是同一个账号');
@@ -285,7 +311,7 @@ test('并发绑定走生产形态（事务内）：只建一条边，且两条�
   const code = await inviteCodeOf(inviter);
   const target = await register();
   const tenant = (await prisma.user.findUniqueOrThrow({ where: { id: target } })).tenantId;
-  const args = { userId: target, tenantId: tenant, inviteCode: code, inviteCodeAt: Date.now() };
+  const args = { userId: target, tenantId: tenant, inviteCode: code, capturedAt: Date.now() };
 
   // **用 prisma.$transaction 包**——生产里 bindReferralAfterRegister 就是这么调的。
   // 之前这条用例传裸 prisma，压根没覆盖「事务内主键冲突」这条真实分支。
@@ -350,6 +376,54 @@ test('脏时间戳不得成为绕过归因窗口的后门（合法码 + inviteCo
   }
 });
 
+test('客户端伪造未来 inviteCodeAt 也不能绕窗口：没有服务端签名 token 就只落 no_timestamp', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const r = await api<{ token: string; referralOutcome?: string }>('POST', '/api/auth/login', {
+    body: { phone: uniquePhone(), name: '未来时间', inviteCode: code, inviteCodeAt: Date.now() + 365 * 86_400_000 },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.referralOutcome, 'no_timestamp');
+  assert.equal(await prisma.referral.count({ where: { userId: r.body.token } }), 0);
+});
+
+test('首次注册因缺 token 失败后可用同一码签名凭证恢复；普通老账号仍不可补绑', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const phone = uniquePhone();
+  const first = await api<{ token: string; referralOutcome?: string }>('POST', '/api/auth/login', {
+    body: { phone, name: '可恢复注册', inviteCode: code },
+  });
+  assert.equal(first.body.referralOutcome, 'no_timestamp');
+  const second = await api<{ token: string; referralOutcome?: string }>('POST', '/api/auth/login', {
+    body: { phone, name: '可恢复注册', inviteCode: code, referralToken: await captureToken(code) },
+  });
+  assert.equal(second.body.token, first.body.token);
+  assert.equal(second.body.referralOutcome, 'bound');
+  assert.equal((await prisma.referral.findUniqueOrThrow({ where: { userId: first.body.token } })).referrerId, inviter);
+  assert.deepEqual(await outcomesOf(first.body.token), ['no_timestamp', 'bound']);
+});
+
+test('签名捕获凭证保留真实来源，且伪造 X-Forwarded-For 首段不会直接写入归因', async () => {
+  const inviter = await register();
+  const code = await inviteCodeOf(inviter);
+  const token = await captureToken(code, 'share_timeline');
+  const app = await getApp();
+  const phone = uniquePhone();
+  const res = await app.inject({
+    method: 'POST', url: '/api/auth/login',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.77, 203.0.113.66' },
+    payload: { phone, name: '来源验证', inviteCode: code, referralToken: token },
+  });
+  assert.equal(res.statusCode, 200);
+  const userId = res.json().token as string;
+  const edge = await prisma.referral.findUniqueOrThrow({ where: { userId } });
+  const trace = await prisma.referralAttribution.findFirstOrThrow({ where: { newUserId: userId, outcome: 'bound' } });
+  assert.equal(edge.source, 'share_timeline');
+  assert.equal(trace.source, 'share_timeline');
+  assert.equal(trace.clientIp, '203.0.113.66', '应取可信代理链解析出的最近公网地址，而不是客户端伪造的第一段');
+});
+
 test('非字符串邀请码也要留痕（inviteCode:123 不能被悄悄当成没传）', async () => {
   const r = await api<{ token: string }>('POST', '/api/auth/login', {
     body: { phone: uniquePhone(), name: '数字码', inviteCode: 123, inviteCodeAt: Date.now() },
@@ -358,20 +432,36 @@ test('非字符串邀请码也要留痕（inviteCode:123 不能被悄悄当成�
   assert.deepEqual(await outcomesOf(r.body.token), ['unknown_code'], '带了码就要能查到，哪怕类型不对');
 });
 
-test('注销账号连带清掉关系链与归因（含「我作为别人上级」的那些边）', async () => {
-  const inviter = await register();
-  const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
-  assert.equal(await prisma.referral.count({ where: { lv1: inviter } }), 1);
+test('注销链首只删失效直边并重算路径：A→B→C→D 删 A 后 B→C、C→D 仍保留', async () => {
+  const a = await register();
+  const b = await register({ inviteCode: await inviteCodeOf(a) });
+  const c = await register({ inviteCode: await inviteCodeOf(b) });
+  const d = await register({ inviteCode: await inviteCodeOf(c) });
 
-  const del = await api('DELETE', '/api/me', { token: inviter });
+  const del = await api('DELETE', '/api/me', { token: a });
   assert.equal(del.status, 200, `注销应成功，实际 ${del.status} ${JSON.stringify(del.body)}`);
+  assert.equal(await prisma.referral.findUnique({ where: { userId: b } }), null, '直接指向已注销 A 的边必须删除');
+  const edgeC = await prisma.referral.findUniqueOrThrow({ where: { userId: c } });
+  assert.equal(edgeC.referrerId, b);
+  assert.equal(edgeC.lv2, null, 'B 的上级已删除，C 的祖级投影应清空');
+  const edgeD = await prisma.referral.findUniqueOrThrow({ where: { userId: d } });
+  assert.equal(edgeD.referrerId, c, '仍存在的后代直邀边不能被 lv3 命中误删');
+  assert.equal(edgeD.lv2, b);
+  assert.equal(edgeD.lv3, null);
+  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: a } }), 0, '涉及注销者的 IP/UA 留痕不得保留');
+});
 
-  // 上级注销后：指向他的边必须消失，否则被邀人的 lv1 会指向一个不存在的账号，
-  // 而带 IP·UA 的归因记录也不该在注销后继续留库。
-  assert.equal(await prisma.referral.count({ where: { lv1: inviter } }), 0, '以注销者为上级的边必须删掉');
+test('多人租户注销分支同样清理邀请关系与归因', async () => {
+  const inviter = await register();
+  const tenantId = (await prisma.user.findUniqueOrThrow({ where: { id: inviter } })).tenantId;
+  await prisma.user.create({
+    data: { tenantId, phone: uniquePhone(), name: '同租户成员', role: 'member', benmingColor: 'green' },
+  });
+  const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
+  const del = await api('DELETE', '/api/me', { token: inviter });
+  assert.equal(del.status, 200);
   assert.equal(await prisma.referral.count({ where: { userId: invitee } }), 0);
-  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: inviter } }), 0, '归因记录不得留存');
+  assert.equal(await prisma.referralAttribution.count({ where: { referrerId: inviter } }), 0);
 });
 
 // ── 邀请漏斗第四段：付费开通 → ActivationEvent(source='invite')（2026-08-18 接上写入方）───────
@@ -410,7 +500,7 @@ async function payPlanOrder(userId: string, outTradeNo: string, attrSource = 'pr
 test('有推荐人的用户付费开通：落一条 source=invite，且原本的位子归因（处方位）一条不少', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
   assert.ok(await prisma.referral.findUnique({ where: { userId: invitee } }), '前置：关系必须已建边');
 
   const r = await payPlanOrder(invitee, 'ot_invite_funnel_1', 'prescription');
@@ -436,7 +526,7 @@ test('没有推荐人的用户付费开通：只有位子归因，绝不落 invi
 test('invite 归因按人去重：重复回调、第二笔订单、并发两笔都只留一条', async () => {
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
 
   // ① 同一订单重复回调：被 appliedAt 幂等挡在入账之前，自然也不会重复归因。
   await payPlanOrder(invitee, 'ot_invite_dedup_1', 'catalog');
@@ -476,7 +566,7 @@ test('补记绝不挡在支付响应前面：markPaidAndApply 返回的那一刻
   // 谁把 await 加回去，计数就会是 0，这条当场变红。
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
 
   await settleInviteActivations(); // 先把前面用例派发的补记排空，计数才是干净的
   assert.equal(pendingInviteActivations(), 0, '前置：此刻不该有在飞的补记');
@@ -498,19 +588,16 @@ test('重投要能补上首次漏掉的 invite 行：already_applied 分支也�
   // 不去打桩注入一次 DB 失败（要 mock prisma，脆且不像线上），而是**照那个终态造局**：
   // 订单已入账（appliedAt 已设）+ 该用户有 Referral + 但没有 invite 行 —— 与「首次补记失败」
   // 之后的库状态一模一样。然后重投同一笔回调，看它能不能补上。
-  const invitee = await register();
+  const inviter = await register();
+  const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
   await payPlanOrder(invitee, 'ot_invite_retry_1', 'catalog');
   await settleInviteActivations();
-  assert.deepEqual(await activationSources(invitee), { catalog: 1 }, '前置：入账时还没有推荐人，本不该有 invite 行');
-
-  // 造出「关系已存在、invite 行缺失」的那一刻（= 首次补记失败后的库状态）
-  const inviter = await register();
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: invitee } });
-  await prisma.referral.create({
-    data: {
-      userId: invitee, tenantId: user.tenantId, referrerId: inviter, lv1: inviter,
-      inviteCode: await inviteCodeOf(inviter), source: 'share_friend',
-    },
+  assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 });
+  // 造出「支付/权益已提交且 outbox 意图仍在，但 invite 写入尚未成功」的持久状态。
+  await prisma.activationEvent.deleteMany({ where: { userId: invitee, source: 'invite' } });
+  await prisma.inviteActivationOutbox.update({
+    where: { outTradeNo: 'ot_invite_retry_1' },
+    data: { completedAt: null, nextAttemptAt: new Date(0), lastError: 'simulated_crash' },
   });
 
   const again = await markPaidAndApply({ outTradeNo: 'ot_invite_retry_1', tradeState: 'SUCCESS', rawJson: {} });
@@ -526,12 +613,29 @@ test('重投要能补上首次漏掉的 invite 行：already_applied 分支也�
   assert.deepEqual(await activationSources(invitee), { catalog: 1, invite: 1 }, '重投再多也不许出现第二条 invite');
 });
 
+test('持久化 outbox 可由 scheduler 扫描恢复，进程退出不依赖微信再次重投', async () => {
+  const inviter = await register();
+  const invitee = await register({ inviteCode: await inviteCodeOf(inviter) });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: invitee } });
+  await prisma.inviteActivationOutbox.create({
+    data: {
+      outTradeNo: 'ot_invite_scheduler_recovery', tenantId: user.tenantId, userId: invitee,
+      itemType: 'plan', itemKey: await anyPlanId(), nextAttemptAt: new Date(0),
+    },
+  });
+  const scanned = await scanInviteActivationOutbox();
+  assert.ok(scanned.scanned >= 1);
+  assert.equal(await prisma.activationEvent.count({ where: { userId: invitee, source: 'invite' } }), 1);
+  assert.ok((await prisma.inviteActivationOutbox.findUniqueOrThrow({ where: { outTradeNo: 'ot_invite_scheduler_recovery' } })).completedAt);
+  assert.equal(await processInviteActivationOutbox('ot_invite_scheduler_recovery'), 'not_due', '完成行不得重复处理');
+});
+
 test('非付费开通不进邀请漏斗：applyPlanPurchase（注册自动开通 / 演示 / 运营手工）不落 invite', async () => {
   // 这条钉住 ④ 的挂点选择。挂 applyPlanPurchase 会让「开着注册自动开通时，被邀人注册当场就算首开通」，
   // 「注册 → 首开通」永远 100%，漏斗直接失去意义。
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
   const user = await prisma.user.findUniqueOrThrow({ where: { id: invitee } });
   const plan = await prisma.plan.findUniqueOrThrow({ where: { id: await anyPlanId() } });
 
@@ -545,7 +649,7 @@ test('端上不许自称 invite：请求体里的 source=invite 一律回落 cat
 
   const inviter = await register();
   const code = await inviteCodeOf(inviter);
-  const invitee = await register({ inviteCode: code, inviteCodeAt: Date.now() });
+  const invitee = await register({ inviteCode: code });
   await payPlanOrder(invitee, 'ot_invite_forge_1', 'invite');
   await settleInviteActivations();
   // 伪造的那条被打回 catalog；invite 行仍由服务端按 Referral 判定后另落一条。
@@ -553,8 +657,9 @@ test('端上不许自称 invite：请求体里的 source=invite 一律回落 cat
 });
 
 test('归因窗口与奖励配置分属两个 flag：改窗口不得抹掉奖励配置', async () => {
-  // PATCH /admin/flags/:id 是整块覆盖 payload（setFeatureFlagPayload 用 update: { payload }），
-  // 所以两者共用一个 id 时，运营改窗口会静默清掉奖励配置。这条用例把「分开」钉住。
+  // 两者分属两个 flag id（当初为躲 PATCH /admin/flags/:id 的整块覆盖写而拆开；那条已改成合并写，
+  // 见 test/featureFlagPayload.test.ts）。这条用例把「分开」这个结构钉住：读取侧各读各的 flag，
+  // 改窗口不碰奖励键——不依赖写入侧是覆盖还是合并。
   await prisma.featureFlag.upsert({
     where: { id: 'referral' },
     update: { payload: { rewardInviter: { kind: 'credits', amount: 5 } } as never },
@@ -577,7 +682,7 @@ test('归因窗口与奖励配置分属两个 flag：改窗口不得抹掉奖励
 });
 
 test('配置键搬迁的存量兼容：只有旧键 referral.window 时也要生效，不得静默回落默认', async () => {
-  // 窗口原本与奖励键同住 `referral` payload，后来为躲「整块覆盖写」搬到 `referral-window`。
+  // 窗口原本与奖励键同住 `referral` payload，当初为躲「整块覆盖写」搬到 `referral-window`。
   // 若升级后只读新键，运营早先设的 7 天会静默变成默认 30 天——20 天前的码就从「过期」
   // 变成建立一条不可变更的关系，事后改不回来。这条用例钉住回退。
   await prisma.featureFlag.upsert({

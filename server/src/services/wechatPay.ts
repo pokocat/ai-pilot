@@ -16,7 +16,10 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant, skuPackAmount } from './purchase.js';
 import { revokeQuotaPack } from './tokenQuota.js';
-import { parseAttribution, recordActivation, recordInviteActivation, type InviteActivationTarget } from './activation.js';
+import {
+  enqueueInviteActivation, parseAttribution, processInviteActivationOutbox, recordActivation,
+  type InviteActivationTarget,
+} from './activation.js';
 import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
@@ -637,14 +640,12 @@ interface OrderSnapshot {
 let inviteActivationTail: Promise<unknown> = Promise.resolve();
 let inviteActivationInflight = 0;
 
-function dispatchInviteActivation(target: InviteActivationTarget): void {
+function dispatchInviteActivation(outTradeNo: string): void {
   inviteActivationInflight += 1;
-  // recordInviteActivation 内部吞掉全部异常、从不 reject（见其注释）。这层 catch 是防「将来有人
-  // 在它里面加了一句会抛的代码」时留下 unhandledRejection —— 不 await 的 promise 一旦 reject，
-  // Node 会直接终止进程，那就把支付回调进程赔进去了，比丢一条统计严重得多。
-  const started = recordInviteActivation(target)
+  // 处理的是已经随支付提交的持久化 outbox；这里即使异常/进程退出，scheduler 仍会续跑。
+  const started = processInviteActivationOutbox(outTradeNo)
     .catch((err: unknown) => {
-      console.warn(`[pay] invite 归因补记异常逃逸 userId=${target.userId} item=${target.itemType}:${target.itemKey}: ${(err as Error)?.message}`);
+      console.warn(`[pay] invite 归因 outbox 处理异常 outTradeNo=${outTradeNo}: ${(err as Error)?.message}`);
     })
     .finally(() => { inviteActivationInflight -= 1; });
   inviteActivationTail = Promise.all([inviteActivationTail, started]).then(() => undefined);
@@ -692,18 +693,14 @@ export async function markPaidAndApply(parsed: {
   // markPaidAndApply 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，且已有
   // outTradeNo advisory lock + appliedAt 幂等锚点），所以 invite 判定就贴着既有的 recordActivation 走。
   //
-  // **绝不 await**（2026-08-18 订正，codex 审出的阻断 2）：旧写法把补记挡在支付回调返回 200 之前，
+  // **绝不 await**（2026-08-19 已加持久化 outbox）：旧写法把补记挡在支付回调返回 200 之前，
   // 违了「绝不阻断支付主链路」这条铁律。它不是「两条查询」——那个说法也是错的：这段小事务实际是
   // BEGIN + advisory lock + 查 Referral（到此 2 条 SQL，无推荐人就结束）+ 查重（3 条）+ 首次还要
   // insert（4 条）+ COMMIT。主支付事务此刻**已经提交**、真钱已入账，可连接池打满或 advisory lock
   // 排队时这几条 SQL 照样能卡住，`routes/pay.ts` 就来不及应答，微信超时后重投——为一条统计
-  // 换来一次重复回调，账算不过来。所以派发出去就走，失败面为零（recordInviteActivation 内部吞掉
-  // 全部异常，dispatchInviteActivation 再兜一层防 unhandledRejection）。
-  //
-  // 「不 await 会不会在进程被回收时丢掉这条统计」——会，但那本来就是可接受损失（漏一条统计远好过
-  // 让一笔真钱卡在未入账）；而且现在**重投能补**：`already_applied` 分支也派发一次补记（阻断 3），
-  // 微信的重试本身就是重试入口，不必自己扛住这一次。
-  if (result.invite) dispatchInviteActivation(result.invite);
+  // 换来一次重复回调，账算不过来。现在支付事务只写一行 InviteActivationOutbox，提交后派发处理；
+  // 进程随即退出也由 scheduler 续扫，不再把微信重投当唯一重试机制。
+  if (result.inviteOutTradeNo) dispatchInviteActivation(result.inviteOutTradeNo);
   // 显式收窄返回值：`invite` 带着 userId / tenantId，只在本函数内部用。有路由是把这个结果对象
   // 直接往响应体里放的形状（`{ ok, applied, reason }`），别让内部字段哪天顺着某个 `return r` 漏出去。
   return { applied: result.applied, reason: result.reason };
@@ -712,7 +709,7 @@ export async function markPaidAndApply(parsed: {
 async function markPaidAndApplyTx(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   amountTotal?: number; appId?: string; mchId?: string;
-}, source: string): Promise<{ applied: boolean; reason?: string; invite?: InviteActivationTarget }> {
+}, source: string): Promise<{ applied: boolean; reason?: string; inviteOutTradeNo?: string }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
@@ -720,15 +717,12 @@ async function markPaidAndApplyTx(parsed: {
     const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
     if (!order) return { applied: false, reason: 'order_not_found' };
     if (order.appliedAt || order.status === 'applied') {
-      // 已发放，权益一步都不再动（appliedAt 是「恰好一次」的终态锚点）；但 invite 归因**照样派发一次**
-      // （2026-08-18，codex 审出的阻断 3）。要修的洞是：首次回调设了 appliedAt、随后那次补记里
-      // 「查 Referral / insert」短暂失败被吞成 'failed'，本次仍回成功；旧写法在这条分支上直接返回，
-      // 后续重投也就再也不会调补记，那个用户**永远**缺 source='invite'，漏斗持续少算。
-      // 微信的重投是天然的重试入口，补记本身幂等（advisory lock + 查重，已存在只回 'already_recorded'），
-      // 所以这里重复派发是安全的、且不会拖慢响应——它跟成功分支一样是**不 await** 的后台派发。
+      // 已发放，权益一步都不再动（appliedAt 是「恰好一次」的终态锚点）；但历史订单可能还没有
+      // outbox，因此重复通知仍幂等 upsert 一行并异步处理。新订单则复用原行，不会重复制造事件。
       // 退款单（status='refunded' 但 appliedAt 仍在）也照补：ActivationEvent 不随退款回收，
       // 「首次补记成功后再退款」的终态本来就留着这一行，不为它再造第二套口径。
-      return { applied: false, reason: 'already_applied', invite: inviteTargetOf(order) };
+      await enqueueInviteActivation(tx, order.outTradeNo, inviteTargetOf(order));
+      return { applied: false, reason: 'already_applied', inviteOutTradeNo: order.outTradeNo };
     }
     // 不同订单也必须按用户串行化，否则两笔同时到账会各自读取同一份旧套餐状态，造成时长覆盖。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${order.userId}`}))`;
@@ -779,7 +773,7 @@ async function markPaidAndApplyTx(parsed: {
     const snapshot = (order.snapshotJson ?? null) as OrderSnapshot | null;
     const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
     // 邀请漏斗第四段要用的最小信息，在事务里攒好、事务提交后再判推荐人（理由见 markPaidAndApply）。
-    let invite: InviteActivationTarget | undefined;
+    let invite: InviteActivationTarget;
     if (order.skuKey) {
       // V7-12：单次付费商品 → 发放对应权益（模块启用/一次性服务/空间加档）。
       const skuRow = snapshot?.kind === 'sku' && snapshot.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
@@ -818,6 +812,8 @@ async function markPaidAndApplyTx(parsed: {
       invite = { tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id };
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
+    // outbox 与权益/终态同事务提交：响应 200 后即使进程立刻退出，scheduler 也能补完 invite 统计。
+    await enqueueInviteActivation(tx, order.outTradeNo, invite);
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
     // 委托代扣订单到账后，以**实际发放后的**权益到期日作为下一周期锚点：到期前 24h 提交申请，
     // 对齐微信自动续费「通知后 24 小时扣费」。签约回调与支付回调无先后保证，因此这里允许
@@ -846,7 +842,7 @@ async function markPaidAndApplyTx(parsed: {
     // 它单独计一条 junshi_pay_mock_total，测试期的量仍然可见。
     if (isMockOrder(order)) notePayMock('applied');
     else notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount);
-    return { applied: true, invite };
+    return { applied: true, inviteOutTradeNo: order.outTradeNo };
   });
 }
 

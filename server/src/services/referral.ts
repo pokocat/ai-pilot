@@ -9,7 +9,9 @@ import { featureFlagPayload } from './featureFlag.js';
 import { isExpired } from './planTime.js';
 import { now } from './clock.js';
 import { INVITE_ALPHABET } from './community.js';
-import type { ReferralSummary } from '../../../shared/contracts';
+import type {
+  ReferralBindingOutcome, ReferralSource as ContractReferralSource, ReferralSummary,
+} from '../../../shared/contracts';
 
 /**
  * 邀请码形状。**字母表直接引用生成侧的 `INVITE_ALPHABET`**（services/community.ts），
@@ -27,34 +29,12 @@ export function isInviteCodeShape(value: unknown): value is string {
  * `cycle` 与 `self` 刻意分开：都拒绝建边，但运营看到 `self` 会以为用户在拿自己的码，
  * 而 `cycle` 说明对方在自己的下级链上（多半是脏数据或人工补绑造成），两者的排查方向完全不同。
  */
-export type ReferralOutcome =
-  | 'bound'
-  | 'self'
-  | 'cycle'
-  | 'unknown_code'
-  | 'expired'
-  | 'already_bound'
-  /**
-   * 运营配置读取失败，本次**不建边**。
-   *
-   * 为什么不回落默认值硬绑：关系一旦建立就不可变更。配置是 7 天、而故障时按 30 天算，
-   * 就会建出一条本不该存在的永久关系，事后告警也改不回来（反向同理：配置 60 天却按 30 天判过期）。
-   * 「这次不绑」是可恢复的——用户再点一次分享、或运营按这条留痕人工补绑都行。
-   */
-  | 'config_unavailable'
-  /**
-   * 带了码但**没有可信的捕获时间**（客户端没带、或带了个脏值被拒），本次不建边。
-   *
-   * 不能像早先那样「没时间戳就按不过期处理」——那条路径会让
-   * `inviteCode=合法 + inviteCodeAt="abc"` 绕过归因窗口，直接建出一条不可变更的永久关系。
-   * 正常客户端一定会带（services/invite.js 的 inviteParams 有码必带时间），
-   * 所以走到这里说明请求本身不可信；用户重新点一次分享即可恢复。
-   * 运营人工补绑（source='manual'）不受此限。
-   */
-  | 'no_timestamp';
+export type ReferralOutcome = ReferralBindingOutcome;
+
+/** 运营配置读取失败或捕获凭证暂不可用时不建边；登录侧只允许有本次注册失败留痕的账号重试。 */
 
 /** 建边来源。前端分享通道 + 海报扫码 + 运营人工补绑。 */
-export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual';
+export type ReferralSource = ContractReferralSource;
 
 // ── 运营配置（本期只有 window 真正生效，其余是给「后定的奖励机制」预留的栏位）────────────
 //
@@ -68,11 +48,13 @@ export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | '
 /**
  * 归因窗口与奖励配置**刻意分两个 flag id**。
  *
- * 原因：`PATCH /admin/flags/:id` 走 `setFeatureFlagPayload(id, { [payloadKey]: v })`，
- * 而那个函数是 `update: { payload }` —— **整块覆盖**，不是合并。
- * 两个数值挤在同一个 payload 里时，运营在后台改「邀请归因窗口」就会把奖励配置整片抹掉。
- * 今天所有奖励键都还是 null，看不出问题；等奖励机制真上线，那就是一次静默的配置丢失。
- * （同一条约束也是 routes/adminReferral.ts 的风控阈值单独用 `referral-risk` 的原因。）
+ * 当初拆开的原因：`PATCH /admin/flags/:id` 的 number 分支曾是整块 payload 覆盖写，运营在后台改
+ * 「邀请归因窗口」会把同 payload 的奖励配置整片抹掉（奖励键当时全是 null，所以看不出来）。
+ * 那条已于 2026-08-18 修掉——number / arms 分支改走 `mergeFeatureFlagPayload`，只覆盖自己那个键，
+ * 守卫见 test/featureFlagPayload.test.ts。
+ * 现在**仍分两个 id**：一个 flag 一个语义（窗口是归因规则、奖励是发放规则），运营后台各自一行、
+ * 审计各自一条，比挤在一个 payload 里清楚。搬迁前的存量旧键 `referral.window` 仍按下方回退兼容。
+ * （routes/adminReferral.ts 的风控阈值单独用 `referral-risk` 同理。）
  */
 export const REFERRAL_WINDOW_FLAG = 'referral-window';
 /** 奖励配置（本期全部占位不生效，键见 ReferralConfig）。 */
@@ -115,7 +97,7 @@ export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<Re
   let raw: Record<string, unknown> | null;
   let rewards: Record<string, unknown> | null;
   try {
-    // 两个 flag 各读一次（见上方 REFERRAL_WINDOW_FLAG 的注释：payload 是整块覆盖写的）。
+    // 两个 flag 各读一次（分两个 id 的理由见上方 REFERRAL_WINDOW_FLAG 的注释）。
     raw = (await featureFlagPayload(REFERRAL_WINDOW_FLAG, opts)) as Record<string, unknown> | null;
     rewards = (await featureFlagPayload(REFERRAL_REWARD_FLAG, opts)) as Record<string, unknown> | null;
   } catch (err) {
@@ -125,7 +107,7 @@ export async function referralConfig(opts: { fresh?: boolean } = {}): Promise<Re
   // 窗口取值顺序：新键 → **旧键回退** → 代码默认。
   //
   // 旧键回退不是多余的谨慎：窗口原本就住在 `referral` 这个 payload 里（与奖励键同住），
-  // 是后来为了躲开「整块覆盖写」才搬到 `referral-window` 的。如果运营在搬迁前已经把窗口
+  // 是当初为了躲开「整块覆盖写」才搬到 `referral-window` 的。如果运营在搬迁前已经把窗口
   // 调成过 7 天，而升级后只读新键，就会静默回落 30 天——于是 20 天前捕获的码从「过期」
   // 变成建立一条**不可变更**的关系，关系与漏斗口径一起写错，事后无法修正。
   // 回退时打 warn 提示把值搬到新键（搬完这段可以删，删之前先确认线上旧键已无 window）。
@@ -192,8 +174,8 @@ export interface BindArgs {
   userId: string;
   tenantId: string;
   inviteCode: string;
-  /** 客户端捕获该码的时刻（ms epoch）。缺失按「不过期」处理，见下方注释。 */
-  inviteCodeAt?: number;
+  /** 服务端签名捕获凭证里的时刻（ms epoch）；绝不能直接取客户端请求体自报值。 */
+  capturedAt?: number;
   source?: ReferralSource;
   clientIp?: string | null;
   userAgent?: string | null;
@@ -212,7 +194,7 @@ export interface BindArgs {
  * 并发主键冲突会抛 `ReferralAlreadyBound`，那条留痕只能由调用方在事务外补。
  */
 export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
-  const { db, userId, tenantId, inviteCode, inviteCodeAt, clientIp, userAgent } = args;
+  const { db, userId, tenantId, inviteCode, capturedAt, clientIp, userAgent } = args;
   const source: ReferralSource = args.source ?? 'share_friend';
 
   const trace = async (outcome: ReferralOutcome, referrerId: string | null) => {
@@ -244,8 +226,11 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
   if (!referrer) return trace('unknown_code', null);
   if (referrer.id === userId) return trace('self', referrer.id);
 
-  // 归因窗口：客户端上报捕获时刻，窗口天数归运营配置。
-  const hasTrustedAt = typeof inviteCodeAt === 'number' && Number.isInteger(inviteCodeAt) && inviteCodeAt > 0;
+  // 归因窗口：时间只能来自服务端签名捕获凭证，窗口天数归运营配置。这里再校验一次未来时间，
+  // 即使调用方误把客户端字段接进来，也不能用未来时间绕过窗口。
+  const at = now();
+  const hasTrustedAt = typeof capturedAt === 'number' && Number.isSafeInteger(capturedAt)
+    && capturedAt > 0 && capturedAt <= at.getTime() + 5 * 60_000;
   // 没有可信时间戳就不建边（运营人工补绑除外）：判不了新鲜度就不要建一条改不回来的关系。
   if (!hasTrustedAt && source !== 'manual') return trace('no_timestamp', referrer.id);
   if (hasTrustedAt) {
@@ -256,10 +241,10 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
       if (err instanceof ReferralConfigUnavailable) return trace('config_unavailable', referrer.id);
       throw err;
     }
-    const deadline = new Date(inviteCodeAt + windowDays * 86_400_000);  // eslint-disable-line
+    const deadline = new Date(capturedAt + windowDays * 86_400_000);  // eslint-disable-line
     // 用 clock.now() 而不是 new Date()：沙箱靠 x-test-now 头快进时间做离线验证，
     // 直接 new Date() 会让这条判定与 planGate / getPlanStatus 用的时钟不一致。
-    if (isExpired(deadline, now())) return trace('expired', referrer.id);
+    if (isExpired(deadline, at)) return trace('expired', referrer.id);
   }
 
   if (await wouldFormCycle(db, userId, referrer.id)) {
@@ -375,4 +360,32 @@ export async function traceOutsideTransaction(args: {
   } catch (err) {
     console.error(`[referral] 事务外补留痕失败（${args.outcome}）: ${(err as Error).message}`);
   }
+}
+
+/**
+ * 注销用户时清理邀请数据，但保留仍然有效的后代直邀边。
+ *
+ * 例：A→B→C→D，删 A 只删除 B→A 这条直接边；B→C、C→D 仍有效。删除直接指向 A 的行后，
+ * 用剩余直接边重新投影受影响行的 lv2/lv3。此前直接 delete lv2/lv3 命中的行会把整条后代链删光。
+ */
+export async function removeUserReferralData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.inviteActivationOutbox.deleteMany({ where: { userId } });
+  await tx.referralAttribution.deleteMany({
+    where: { OR: [{ newUserId: userId }, { referrerId: userId }] },
+  });
+  // 本人的上级边 + 直接指向本人的边无法继续存在；更深后代的直接推荐人仍在，不能删。
+  await tx.referral.deleteMany({ where: { OR: [{ userId }, { referrerId: userId }] } });
+  await tx.$executeRaw`
+    UPDATE referral AS r
+    SET lv1 = r."referrerId",
+        lv2 = (SELECT p1."referrerId" FROM referral AS p1 WHERE p1."userId" = r."referrerId"),
+        lv3 = (
+          SELECT p2."referrerId"
+          FROM referral AS p2
+          WHERE p2."userId" = (
+            SELECT p1."referrerId" FROM referral AS p1 WHERE p1."userId" = r."referrerId"
+          )
+        )
+    WHERE r.lv2 = ${userId} OR r.lv3 = ${userId}
+  `;
 }

@@ -10,7 +10,7 @@ import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
-import { referralSummary } from '../services/referral.js';
+import { referralSummary, removeUserReferralData } from '../services/referral.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
@@ -218,6 +218,8 @@ export async function metaRoutes(app: FastifyInstance) {
     await recordAudit({ userId: user.id, action: 'user.account.delete', payload: { tenantId } }).catch(() => {});
     const others = await prisma.user.count({ where: { tenantId, id: { not: user.id } } });
     await prisma.$transaction(async (tx) => {
+      // 两个分支都必须清理邀请隐私与关系；仅删除本人/直指本人的边，后代链按剩余直邀边重算。
+      await removeUserReferralData(tx, user.id);
       if (others === 0) {
         // 独占租户：按外键顺序清空该租户全部业务数据
         await tx.deliverable.deleteMany({ where: { tenantId } });
@@ -227,12 +229,6 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.session.deleteMany({ where: { tenantId } });
         await tx.memory.deleteMany({ where: { tenantId } });
         await tx.project.deleteMany({ where: { tenantId } });
-        // 邀请关系与归因：凡涉及本人的行全部删掉——不只是「我的上级」，也包括
-        // 「我作为别人上级」的那些边（它们的 referrerId / lv1~lv3 里写着我的 userId）。
-        // 留着会有两个后果：① 带 IP·UA 的归因记录在注销后仍永久留库，违反注销口径；
-        // ② 别人的 directCount 会继续把已注销账号数进去，读数与事实不符。
-        await tx.referral.deleteMany({ where: { OR: [{ userId: user.id }, { referrerId: user.id }, { lv1: user.id }, { lv2: user.id }, { lv3: user.id }] } });
-        await tx.referralAttribution.deleteMany({ where: { OR: [{ newUserId: user.id }, { referrerId: user.id }] } });
         await tx.creditLedger.deleteMany({ where: { tenantId } });
         await tx.tokenUsage.deleteMany({ where: { tenantId } });
         await tx.tokenWallet.deleteMany({ where: { tenantId } });
