@@ -349,6 +349,8 @@ export interface Me {
   ai: AiInfo;
   understanding?: ClientUnderstanding;
   inviteCode?: string;             // V7-13：邀请码（惰性生成）
+  /** 我的邀请读数；`null` = 本次没读到（与「读到了但是 0」区分开），字段缺失 = 旧服务端。 */
+  referral?: ReferralSummary | null;
   service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
   features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
   capabilities?: { attachments: AttachmentCapabilities }; // 运行时权威上限；旧服务端缺失时客户端保守兜底
@@ -369,7 +371,7 @@ export interface FeatureFlags {
   conversationContinuity?: boolean; // 总军师跨 24h 仍续接同一 Session；false 时回退为新 Session + 交接包
 }
 
-export interface LoginRequest { phone: string; name?: string; code?: string; }
+export interface LoginRequest extends LoginAttribution { phone: string; name?: string; code?: string; }
 export interface AliasSuggestionResult { name: string; source: string; }
 /** 更新身份（称呼 + 公司/品牌名 + 头像）：首登建档 / 完善资料 / 设置页 */
 export interface UpdateIdentityRequest { name?: string; company?: string; avatarUrl?: string; }
@@ -379,6 +381,8 @@ export interface SmsSendRequest { phone: string; scene?: 'login' | 'bind'; }
  *  二选一：phoneCode=微信一键(getPhoneNumber 的 code)；或 phone+code=短信验证码兜底。 */
 export interface BindPhoneRequest { phoneCode?: string; phone?: string; code?: string; }
 export interface BindPhoneResult { ok: boolean; phone: string; wechatLinked: boolean; }
+/** 注销只在本地数据、公开链接及异步外部清理任务都已登记后返回成功。 */
+export interface AccountDeletionResult { ok: true; erasureJobId: string; retentionUntil: string; }
 /** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
 export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
 /** 微信快捷登录（POST /auth/wechat-login）：只放行**已关联**手机号账号的 openid/unionid。
@@ -386,7 +390,7 @@ export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devC
  *  （/auth/wechat-phone 会把这次 openid 绑到手机号账号上），之后才能用它快捷复登。 */
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 /** 本机号一键登录（POST /auth/wechat-phone）：phoneCode=getPhoneNumber 的 code；loginCode=wx.login 的 code（可选，用于关联 openid）。 */
-export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
+export interface WechatPhoneLoginRequest extends LoginAttribution { phoneCode: string; loginCode?: string; name?: string; }
 /**
  * 手机号快捷登录的身份解析结果。
  *
@@ -409,6 +413,61 @@ export interface LoginResult {
   user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
   /** 仅手机号快捷登录需要；旧客户端忽略即可。wechat_relinked 是登录成功后的非阻断提醒。 */
   phoneBinding?: LoginPhoneBinding;
+  /**
+   * 本次登录携带邀请归因时的服务端处理结果。`no_timestamp` / `config_unavailable` 可重试，
+   * 客户端必须保留本地邀请凭证；其余结果均为终态，可清理本地凭证。未携带邀请参数时不返回。
+   */
+  referralOutcome?: ReferralBindingOutcome;
+}
+
+/**
+ * 登录请求可带的邀请归因入参（三条建号通道通用：`/auth/login`、`/auth/wechat-phone`、`/auth/carrier-onetap`）。
+ *
+ * 两个字段都**可选**：用户不是从分享进来时不带。`referralToken` 由公开的
+ * `POST /auth/referral-capture` 在落地时按服务端时钟签发，登录链只信它携带的捕获时间与来源；
+ * `inviteCode` 只用于无 token/验签失败时留下 `no_timestamp` 诊断与后续受限恢复，不能单独建关系。
+ * **脏参数一律不让登录失败**（分享链路不能因为一个参数把用户拦在门外），但也**不等于当没传**：
+ *   · 压根没带 → 不归因、不留痕；
+ *   · 带了但形状/类型不对（含 `inviteCode: 123`）→ 仍落一条 `unknown_code` 归因记录，
+ *     否则用户问「我填了邀请码怎么没算给他」时运营手上没有任何凭据；
+ *   · token 缺失、验签失败或与邀请码不一致 → 落 `no_timestamp` 且**不建关系**：客户端自报时间
+ *     不能作为不可变关系的凭据。
+ */
+export interface LoginAttribution {
+  inviteCode?: string;
+  referralToken?: string;
+}
+
+export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual';
+export type ReferralBindingOutcome =
+  | 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired'
+  | 'already_bound' | 'config_unavailable' | 'no_timestamp';
+
+/** 游客落地时换取服务端签名捕获凭证；manual 只允许服务端内部使用。 */
+export interface ReferralCaptureRequest {
+  inviteCode: string;
+  source: Exclude<ReferralSource, 'manual'>;
+}
+export interface ReferralCaptureResult {
+  token: string;
+  capturedAt: string;
+}
+
+/**
+ * 「我的邀请」读数（挂 `/me.referral`）。
+ *
+ * `directCount` 只数**直接邀请**（关系链虽然物化存了三级，但对用户呈现与激励口径只看一级）。
+ * `activatedCount` = 直邀里已开通且未过期套餐的人数，口径与 `services/planGate.ts` 同源。
+ * `boundAt` / `referrerName` 描述「我是谁邀来的」，没有上级时为 null。
+ * 整个字段可能为 `null`：表示**这次没读到**（接口异常），与「读到了但是 0」必须能区分开——
+ * 把读失败画成 0 会让人以为奖励没到账（本仓 allSettled 静默兜底踩过这个坑）。
+ */
+export interface ReferralSummary {
+  inviteCode: string;
+  directCount: number;
+  activatedCount: number;
+  boundAt: string | null;
+  referrerName: string | null;
 }
 
 /* ────────────── 建档 ────────────── */
@@ -1141,7 +1200,13 @@ export type ClientEventName =
   | 'wence_enter' | 'proactive_show' | 'chip_tap' | 'hint_tap'
   | 'first_message_send' | 'drawer_open' | 'attach_open' | 'tab_switch'
   | 'execution_enter' | 'order_complete' | 'backfill_save' | 'review_start'
-  | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click';
+  | 'pouch_entry_view' | 'pouch_entry_click' | 'weapon_click'
+  // 邀请漏斗前两段（2026-08-18）。后两段不占事件名：注册段从 `ReferralAttribution`（每次带码进线一行，
+  // outcome **八种**：bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp）算，首开通段从 `ActivationEvent(source='invite')` 算——那两件事服务端本来就有账本，
+  // 再补一份客户端埋点只会出现「端上报了、库里没有」的对不上账。
+  // share_expose：用户点开「转发给朋友」/「分享到朋友圈」时由 services/share.js 上报（props: channel + 当日素材序号）。
+  // invite_landing：带码落地时由 services/invite.js 在捕获成功处上报（props: channel=query|scene），游客态照发。
+  | 'share_expose' | 'invite_landing';
 /** POST /events 请求体：鉴权可选（游客也上报，userId 空）。props 序列化后限 2KB，超限截断。 */
 export interface ClientEventRequest { name: ClientEventName; props?: Record<string, unknown> }
 export interface ClientEventResult { ok: true }
@@ -1806,7 +1871,14 @@ export interface AdminPrescriptionFunnelRow {
   toolKey: string; toolType: string;
   proposed: number; seen: number; clicked: number; activated: number; used: number; verified: number; dismissed: number;
 }
-/** 开通侧：ActivationEvent 按来源分组计数（prescription | catalog | market）。 */
+/**
+ * 开通侧：ActivationEvent 按来源分组计数。
+ *
+ * 取值 `prescription | catalog | market | invite`，但**这四桶不是一组互斥枚举、不能相加**：
+ * 前三个回答「从哪个位子成交的」（值由下单请求带入，互斥）；`invite` 回答「这个人是被谁带来的」
+ * （由服务端按 `Referral` 判定，在付费入账后**另落一行**，按人去重 = 首次付费开通）。
+ * 一次开通完全可能同时出现在 `catalog` 和 `invite` 两桶里。要总开通数请数人/订单，别把桶求和。
+ */
 export interface AdminActivationSourceRow { source: string; count: number; }
 /** 漏斗响应：处方侧六态聚合 + 开通侧来源计数，一次返回两块。 */
 export interface AdminPrescriptionFunnel {
@@ -2836,3 +2908,122 @@ export interface ClipCaptureRequirements {
 }
 export interface ClipConsentResult { id: string; status: 'submitted' | 'verified' | 'rejected'; accepted: boolean; verified: boolean; }
 export interface ClipAuditEntry { id: string; createdAt?: string; createdText?: string; scope?: string; action?: string; status: string; }
+
+/* ────────────── 运营后台「邀请增长」三视图（P3，全只读） ──────────────
+   一份数据三个投影（方案 §4.3）：① 本体 Schema 说明图（静态类图 + overview 的真实行数）；
+   ② 邀请关系树（吃 Referral 的物化路径 lv1/lv2/lv3，从左到右分层）；
+   ③ 风控二部图（IP ↔ 新号，来自 ReferralAttribution.clientIp）。
+   ④ 转化漏斗本期不做：曝光/落地两段依赖 P2 埋点，开通来源已在「处方漏斗」页。
+   **公理 5「风控预警不阻断」**：这组契约里没有任何写操作——不提供封禁/拉黑/停发奖。 */
+
+/** 租户筛选项（两张表都有 tenantId；只列真的有邀请边的租户）。 */
+export interface AdminReferralTenantOption { tenantId: string; name: string; edges: number }
+/** 通用「分类 → 计数」行（归因结果分布 / 建边来源分布）。 */
+export interface AdminReferralCount { key: string; count: number }
+
+export interface AdminReferralOverview {
+  days: number;
+  /** null = 全租户 */
+  tenantId: string | null;
+  /** Referral 行数（全量；关系是永久的，没有时间窗） */
+  edgesTotal: number;
+  /** 窗口内新建的关系数（boundAt 在窗口内） */
+  edgesInWindow: number;
+  /** 窗口内的归因留痕条数（含失败留痕——失败也留痕是这张表的设计意图） */
+  attributionsInWindow: number;
+  /** 已生成邀请码的用户数（User.inviteCode 惰性生成，故这不等于注册用户数） */
+  codedUsers: number;
+  /** bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp */
+  byOutcome: AdminReferralCount[];
+  /** share_friend / share_timeline / poster_qr / manual */
+  bySource: AdminReferralCount[];
+  tenants: AdminReferralTenantOption[];
+}
+
+export interface AdminReferralTreeNode {
+  userId: string;
+  name: string | null;
+  /** 同样按审计口径掩码——树上同时挂着风控红环，与风控屏属同一关联面。 */
+  phone: string | null;
+  /** 直邀人数 = 节点大小编码。**任意深度都准**（从全量 groupBy 取，不是从本次子树数出来的） */
+  directCount: number;
+  /** 颜色编码：activated=已开通付费（口径同 planGate），registered=仅注册 */
+  status: 'activated' | 'registered';
+  /** 风控标记：该新号落在超阈值的 IP 聚集组里。与 status 正交——预警不阻断，关系照常有效 */
+  risk: boolean;
+  /** 0=根（邀请人自己），1/2/3 = L1/L2/L3 */
+  depth: number;
+  /** 这条边的建立时刻与来源（根节点为 null，因为根不是本树里的一条边） */
+  boundAt: string | null;
+  source: string | null;
+  children: AdminReferralTreeNode[];
+}
+
+export interface AdminReferralTree {
+  tenantId: string | null;
+  /** 展示的根节点数上限；roots 是「直邀最多的前 N 人」，是投影不是全景 */
+  rootLimit: number;
+  /** 作用域内的邀请人总数（有直邀的人数），用于说明 roots 只是其中一部分 */
+  inviterTotal: number;
+  /** 作用域内的关系边总数 */
+  edgeTotal: number;
+  /** 树上「风控标记」着色所依据的 IP 聚集窗口天数（树本身全量，风控有窗口） */
+  riskWindowDays: number;
+  /** 边数触顶被截断：页面必须如实说明，不能让人以为这就是全部 */
+  truncated: boolean;
+  roots: AdminReferralTreeNode[];
+}
+
+export interface AdminReferralRiskMember {
+  userId: string;
+  name: string | null;
+  /** **已按审计口径掩码**（`services/audit.ts` 的 `maskAuditPhone`，形如 `138****1234`），不是完整号码。 */
+  phone: string | null;
+  inviteCode: string;
+  outcome: string;
+  createdAt: string;
+  // userAgent 刻意不下发：前端一处不展示，而把 IP + 用户 id + 手机号 + 设备指纹一起端到
+  // 所有后台账号面前，是没有必要的隐私扩散（2026-08-18 复核移除）。
+}
+
+export interface AdminReferralRiskGroup {
+  clientIp: string;
+  /** 去重后的新号数 = 聚集度，与阈值比的就是它 */
+  userCount: number;
+  /** 该 IP 的归因记录条数（含建号失败的留痕，那些没有 newUserId、不计入 userCount） */
+  attributionCount: number;
+  /** 涉及的邀请码数：1 = 单码批量进线（最像刷号）；多码更可能是共享出口 IP */
+  codeCount: number;
+  /** 涉及的码主数 */
+  referrerCount: number;
+  firstAt: string;
+  lastAt: string;
+  /** 已展开的新号（可能少于 userCount：一组最多展开 40 个） */
+  members: AdminReferralRiskMember[];
+}
+
+export interface AdminReferralRisk {
+  days: number;
+  tenantId: string | null;
+  /** 聚集阈值（去重新号数 ≥ 该值才入列），来自运营配置，不写死在代码里 */
+  threshold: number;
+  /** false = 运营还没配，用的是代码兜底默认值（页面要如实说明） */
+  configured: boolean;
+  /** 阈值所在的功能开关 id，页面据此把运营指到「配置 · 功能开关」那一屏 */
+  flagKey: string;
+  /** 窗口内出现过的 IP 数——让「扫过 N 个 IP 但没有聚集」与「一条数据都没有」分得开 */
+  scannedIps: number;
+  /** 带 IP 的归因记录数（IP 列是后加的，老记录没有，不参与判定） */
+  scannedAttributions: number;
+  /** 被标记的新号总数（**本次返回的**组内去重后；同一人可能出现在两个 IP 上，故不是各组相加） */
+  flaggedUsers: number;
+  /**
+   * 超阈值组的**总数**（未截断）。`groupTotal > groups.length` 即本页被截断。
+   *
+   * 必须有这个数：响应只回前 N 组，不透出总数就是**静默截断**——运营会以为「一共就这么多组」，
+   * 而风控视图唯一的价值就是看见聚集。页面据此说明「共 N 组、本页返回 M 组、另有 K 组未返回」，
+   * 并点明下方清单、被标记新号计数、树上红环三处都只覆盖返回的这 M 组。
+   */
+  groupTotal: number;
+  groups: AdminReferralRiskGroup[];
+}

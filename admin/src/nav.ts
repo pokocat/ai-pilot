@@ -18,11 +18,12 @@
 // 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
 // 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
 
-/** 24 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 25 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
-  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence';
+  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
+  | 'referral';
 
 export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'observe' | 'catalog' | 'settings';
 
@@ -69,6 +70,9 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'funnel', label: '处方漏斗', hint: '处方六态转化与开通来源归因', icon: 'target', group: 'revenue', aliases: ['转化', '漏斗', 'funnel', '处方', '归因'] },
   { key: 'usage', label: '钻石消耗', hint: '权益点发放与消耗汇总', icon: 'crown', group: 'revenue', aliases: ['权益点', '钻石', '积分', 'credit', '消耗'] },
   { key: 'tokens', label: 'Token 成本', hint: '按模型 / 用户看 token 与真实成本', icon: 'trend', group: 'revenue', aliases: ['成本', 'token', '用量', '模型成本'] },
+  // 归「经营」而不是「观测」：三个视图全只读，符合本组「只读的归观测/经营」原则，且运营看它的动线
+  // 就在订单/漏斗旁边（谁带来的人、带来的人开通了没）。本组由此 5 项，仍在「单组不超过 8 项」内。
+  { key: 'referral', label: '邀请增长', hint: '本体 Schema / 邀请关系树 / IP 风控关联（只读）', icon: 'target', group: 'revenue', aliases: ['邀请', '裂变', '关系链', '推荐', '风控', '邀请码', '邀请树', 'referral', 'invite', '拉新', '刷号', 'ip'] },
 
   // —— 智能体 ——
   { key: 'agent', label: '顾问', hint: '上下架、定价、提示词调教与版本发布', icon: 'agent', group: 'studio', aliases: ['智能体', 'agent', '提示词', 'prompt', '上架', '定价', '调教'] },

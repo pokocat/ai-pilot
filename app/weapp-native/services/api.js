@@ -2,6 +2,7 @@ const mock = require('./mock');
 const { request, upload } = require('./request');
 const { getToken } = require('./token');
 const { getApiBaseUrl, getImpersonationBaseUrl, useMockApi } = require('./runtime-mode');
+const { inviteParamsReady } = require('./invite');
 
 const isMock = () => useMockApi();
 const query = (value) => encodeURIComponent(value == null ? '' : String(value));
@@ -25,11 +26,19 @@ const api = {
   deleteSession: (id) => isMock() ? mock.deleteSession(id) : request(`/sessions/${query(id)}`, { method: 'DELETE' }),
   search: (q) => isMock() ? mock.search(q) : request(`/search?q=${query(q)}`),
   sendSmsCode: (phone, scene) => isMock() ? mock.sendSmsCode(phone, scene) : request('/auth/sms/send', { method: 'POST', data: { phone, scene } }),
-  login: (phone, code) => isMock() ? mock.login(phone) : request('/auth/login', { method: 'POST', data: { phone, code } }),
+  // 游客落地换服务端签名捕获凭证；mock 包不外呼真实服务，真实会话才启用。
+  captureReferral: (inviteCode, source) => isMock()
+    ? Promise.resolve(null)
+    : request('/auth/referral-capture', { method: 'POST', data: { inviteCode, source }, isolatedAuth: true }),
+  // 登录请求统一短等 inviteParamsReady()，带上签名归因凭证（没码时返回空对象）。
+  // 放在这一层而不是让每个调用方自己传：login-sheet 被 88 个页面引用，调用方零改动。
+  login: (phone, code) => isMock()
+    ? mock.login(phone)
+    : inviteParamsReady().then((params) => request('/auth/login', { method: 'POST', data: Object.assign({ phone, code }, params) })),
   wechatLogin: (code) => isMock() ? mock.wechatLogin(code) : request('/auth/wechat-login', { method: 'POST', data: { code } }),
   wechatPhoneLogin: (phoneCode, loginCode) => isMock()
     ? mock.wechatPhoneLogin(phoneCode)
-    : request('/auth/wechat-phone', { method: 'POST', data: { phoneCode, loginCode } }),
+    : inviteParamsReady().then((params) => request('/auth/wechat-phone', { method: 'POST', data: Object.assign({ phoneCode, loginCode }, params) })),
   me: () => isMock() ? mock.me() : request('/me'),
   verifyImpersonation: (token) => request('/me', {
     token,
@@ -206,6 +215,10 @@ const api = {
   /**
    * 客户端埋点（POST /events）：fire-and-forget，失败**完全静默**——不 toast、不 reject、不阻塞主流程。
    *
+   * @returns {boolean} 有没有**交给 wx**。true = 请求已发起（服务端收没收到这里查不到、也不该等）；
+   *   false = 压根没发出去（无 name / `wx.request` 当场抛）。调用方若要据此做判断，
+   *   只能理解成「已投递」而非「上报成功」。
+   *
    * ★ 刻意不走 request()：那条路径上「带 token 的 401」会 clearToken + 触发全局 onAuthLost
    * （清登录态 + 「登录态已失效」提示 + reLaunch 回问策）。埋点是背景动作，绝不能因为一条统计请求
    * 把用户从正在打字的对话里踢出去；token 失效时宁可丢事件，也不许打断用户。
@@ -213,8 +226,8 @@ const api = {
    */
   track: (name, props) => {
     try {
-      if (!name) return;
-      if (isMock()) { mock.track(name, props); return; }
+      if (!name) return false;
+      if (isMock()) { mock.track(name, props); return true; }
       const token = getToken();
       wx.request({
         url: `${getApiBaseUrl()}/events`,
@@ -225,7 +238,15 @@ const api = {
         success() { /* 埋点没有回执可用 */ },
         fail() { /* 静默：断网/超时都不该被用户看见 */ },
       });
-    } catch (_) { /* 连 wx.request 都抛了也不许冒泡 */ }
+      return true;
+    } catch (_) {
+      // 连 wx.request 都当场抛了（宿主没有 wx / 参数被拒）：这一跳**根本没发出去**。
+      // 仍然不冒泡（埋点绝不打断调用方），但要**如实回 false**——
+      // 调用方靠这个值判断「这条到底发没发」。此前这里吞掉异常又不回值，
+      // 于是 invite.js 的「只有确实发出去才置冷启动抑制标记」永远拿到 true，
+      // 抑制了一条本该发生的落地，净结果零条（2026-08-18 第七轮复核）。
+      return false;
+    }
   },
 };
 

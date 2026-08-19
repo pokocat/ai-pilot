@@ -18,13 +18,33 @@ import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
+import { smsLoginEnabled, wechatLoginEnabled } from '../services/authConfig.js';
+import {
+  bindOnRegister, ReferralAlreadyBound, traceOutsideTransaction,
+  type ReferralOutcome, type ReferralSource,
+} from '../services/referral.js';
+import { issueReferralCapture, verifyReferralCapture } from '../services/referralCapture.js';
 import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
+// 邀请归因入参（三条建号通道共用）：捕获时间与来源只能来自服务端签名 referralToken。
+// inviteCode 仍原样收下：token 缺失/损坏时要留 no_timestamp 诊断，但绝不能信客户端自报时间。
+// 脏归因参数不应把登录拦成 400，因此都由 attributionOf 宽容解析。
+const attributionShape = {
+  inviteCode: z.unknown().optional(),
+  referralToken: z.unknown().optional(),
+};
+
+const referralCaptureSchema = z.object({
+  inviteCode: z.string().trim(),
+  source: z.enum(['share_friend', 'share_timeline', 'poster_qr']),
+});
+
 const loginSchema = z.object({
   phone: phoneRule,
   name: z.string().trim().min(1).max(20).optional(),
   code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确').optional(), // 短信验证码；按场景可选/必填
+  ...attributionShape,
 });
 const smsSendSchema = z.object({
   phone: phoneRule,
@@ -44,12 +64,43 @@ const wechatPhoneSchema = z.object({
   phoneCode: z.string().trim().min(1, '缺少手机号 code'), // getPhoneNumber 返回的一次性 code
   loginCode: z.string().trim().min(1).optional(),         // wx.login 的 code，可选：用于顺带关联 openid
   name: z.string().trim().min(1).max(20).optional(),
+  ...attributionShape,
 });
 
-/** 取客户端 IP（优先 X-Forwarded-For 首段）。 */
+/** 只取 Fastify 在 trustProxy 配置下解析出的可信 IP；绝不直接信客户端可伪造的 X-Forwarded-For 首段。 */
 function clientIp(req: FastifyRequest): string {
-  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
-  return xff || req.ip;
+  return req.ip;
+}
+
+/** 邀请归因入参 + 风控原料（IP / UA）。形状不合法的码直接丢掉，返回 undefined = 本次不归因。 */
+interface RegisterAttribution {
+  inviteCode: string;
+  /** 只来自 referralToken 验签结果；缺失会落 no_timestamp 并拒绝建边。 */
+  capturedAt?: number;
+  source: ReferralSource;
+  clientIp: string;
+  userAgent: string;
+}
+
+function attributionOf(req: FastifyRequest, data: { inviteCode?: unknown; referralToken?: unknown }): RegisterAttribution | undefined {
+  const rawCode = data.inviteCode;
+  const capture = verifyReferralCapture(data.referralToken);
+  // token 本身携带邀请码；新客户端即使请求拼装时漏了冗余 inviteCode，也能按已验签事实归因。
+  if ((rawCode === undefined || rawCode === null || rawCode === '') && !capture) return undefined;
+  // ② 带了但不是字符串（例如 inviteCode: 123）→ 也要往下走留一条 unknown_code，
+  //    不能悄悄当成没带。转成字符串并截断，防止超长串把归因表撑大。
+  const inviteCode = rawCode === undefined || rawCode === null || rawCode === ''
+    ? capture!.code
+    : (typeof rawCode === 'string' ? rawCode.trim() : String(rawCode)).slice(0, 64);
+  // 只有 token 与请求中的码一致才采用签名事实；客户端自报 inviteCodeAt 即便仍在旧请求里也会被 zod 丢弃。
+  const trustedCapture = capture?.code === inviteCode ? capture : null;
+  return {
+    inviteCode,
+    capturedAt: trustedCapture?.capturedAt,
+    source: trustedCapture?.source ?? 'share_friend',
+    clientIp: clientIp(req),
+    userAgent: String(req.headers['user-agent'] ?? '').slice(0, 500),
+  };
 }
 
 type AuthUser = {
@@ -62,6 +113,8 @@ type AuthUser = {
   wechatOpenId?: string | null;
   wechatUnionId?: string | null;
   wechatLinkedAt?: Date | null;
+  deletedAt?: Date | null;
+  purgeAfter?: Date | null;
   createdAt: Date;
 };
 
@@ -149,7 +202,9 @@ function loginResult(
   isNew: boolean,
   onboarded: boolean,
   phoneBinding?: LoginPhoneBinding,
+  referralOutcome?: ReferralOutcome,
 ): LoginResult {
+  assertAccountActive(user);
   return {
     token: signUserToken(user.id), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
     isNew,
@@ -163,19 +218,111 @@ function loginResult(
       wechatLinked: !!user.wechatOpenId,
     },
     ...(phoneBinding ? { phoneBinding } : {}),
+    ...(referralOutcome ? { referralOutcome } : {}),
   };
 }
 
+function assertAccountActive(user: AuthUser): void {
+  if (!user.deletedAt) return;
+  throw Object.assign(new Error('账号已进入注销保留期，如需恢复请联系客服'), {
+    statusCode: 423,
+    code: 'ACCOUNT_DELETION_PENDING',
+  });
+}
+
 /** 按手机号登录或注册（短信登录 / 微信一键登录 / 未来运营商一键登录共用）。 */
-async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ user: AuthUser; isNew: boolean }> {
+async function loginOrRegisterByPhone(
+  phone: string,
+  name?: string,
+  attribution?: RegisterAttribution,
+): Promise<{ user: AuthUser; isNew: boolean; referralOutcome?: ReferralOutcome }> {
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing) {
+    assertAccountActive(existing);
     await recordAudit({ tenantId: existing.tenantId, userId: existing.id, action: 'auth.login', payload: phoneAudit(phone) });
-    return { user: existing, isNew: false };
+    return { user: existing, isNew: false, referralOutcome: await retryReferralIfEligible(existing, attribution) };
   }
   // 不编造称呼/公司：未填留空，由首登建档采集。
   const user = await createUserWithTenant({ phone, name: name?.trim() || '', auditAction: 'auth.register', auditPayload: phoneAudit(phone) });
-  return { user, isNew: true };
+  const referralOutcome = await bindReferralAfterRegister(user, attribution);
+  return { user, isNew: true, referralOutcome };
+}
+
+/**
+ * 老用户仍不允许事后填码；唯一例外是「这个账号首次注册时已带同一码，但因捕获凭证/配置暂不可用而失败」。
+ * 这条留痕是恢复资格，避免第一次建号成功后后续登录永远跳过绑定，同时不开放存量账号补绑口子。
+ */
+async function retryReferralIfEligible(user: AuthUser, attribution?: RegisterAttribution): Promise<ReferralOutcome | undefined> {
+  if (!attribution) return undefined;
+  if (await prisma.referral.findUnique({ where: { userId: user.id }, select: { userId: true } })) return 'already_bound';
+  const recoverable = await prisma.referralAttribution.findFirst({
+    where: {
+      newUserId: user.id,
+      inviteCode: attribution.inviteCode,
+      outcome: { in: ['no_timestamp', 'config_unavailable'] },
+    },
+    select: { id: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!recoverable) return undefined;
+  return bindReferralAfterRegister(user, attribution);
+}
+
+/**
+ * 注册成功后绑定推荐人。
+ *
+ * **为什么不放进 createUserWithTenant 的事务里**：Postgres 事务中任何一条语句失败就把整个事务
+ * 置为 aborted，之后的语句一律报错。那样「绑定失败绝不能影响注册」就是做不到的——
+ * try/catch 只能抓到 JS 异常，事务本身已经废了，租户与用户会一起回滚。
+ * 所以这里放在注册**之后**单独跑，失败只落一行日志：账号一定建成，关系可以事后按
+ * referral_attribution 的留痕人工补绑。这是刻意的取舍，别为了「原子」把它挪回事务里。
+ */
+async function bindReferralAfterRegister(user: AuthUser, attribution?: RegisterAttribution): Promise<ReferralOutcome | undefined> {
+  if (!attribution) return undefined;
+  try {
+    // 关系与归因两次写**必须同事务**：否则会出现「建了边但归因行写失败」——
+    // 关系在、留痕不在，运营查不出这条边是怎么来的。
+    // 这个事务**不含建号**（见上方注释：Postgres 事务一旦有语句失败即 aborted，
+    // 把建号裹进来就无法做到「绑定失败不影响注册」）。
+    return await prisma.$transaction((tx) => bindOnRegister({
+      db: tx,
+      userId: user.id,
+      tenantId: user.tenantId,
+      inviteCode: attribution.inviteCode,
+      capturedAt: attribution.capturedAt,
+      source: attribution.source,
+      clientIp: attribution.clientIp,
+      userAgent: attribution.userAgent,
+    }));
+  } catch (err) {
+    // 并发主键冲突：事务已失败，留痕只能在事务外补（见 referral.ts 的注释）。
+    if (err instanceof ReferralAlreadyBound) {
+      await traceOutsideTransaction({
+        tenantId: user.tenantId,
+        userId: user.id,
+        inviteCode: attribution.inviteCode,
+        source: attribution.source,
+        outcome: 'already_bound',
+        referrerId: err.referrerId,
+        clientIp: attribution.clientIp,
+        userAgent: attribution.userAgent,
+      });
+      return 'already_bound';
+    }
+    console.error('[referral] 绑定推荐人失败（注册已成功，不回滚）:', (err as Error).message);
+    // 绑定整体失败时也补一条留痕：至少让「有人带着这个码进来过」这件事可查，
+    // 否则账号建成了、关系没有、日志只在服务器上，运营侧完全是个黑洞。
+    await traceOutsideTransaction({
+      tenantId: user.tenantId,
+      userId: user.id,
+      inviteCode: attribution.inviteCode,
+      source: attribution.source,
+      outcome: 'config_unavailable',
+      clientIp: attribution.clientIp,
+      userAgent: attribution.userAgent,
+    });
+    return 'config_unavailable';
+  }
 }
 
 function isUniqueConflict(error: unknown): boolean {
@@ -270,10 +417,27 @@ export async function authRoutes(app: FastifyInstance) {
     source: '古典武侠/军事花名',
   }));
 
+  // 游客落地即换取服务端时钟签名凭证。接口不要求账号态，故单独限频；只签形状合法的邀请码，
+  // 不在这里查询归属人，避免公开接口泄露邀请码是否存在（真正绑定仍由 bindOnRegister 判定）。
+  app.post('/auth/referral-capture', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const parsed = referralCaptureSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: '邀请参数不正确', code: 'BAD_REFERRAL_CAPTURE' });
+    try {
+      const captured = issueReferralCapture(parsed.data.inviteCode, parsed.data.source);
+      return { token: captured.token, capturedAt: captured.capturedAt.toISOString() };
+    } catch (error) {
+      const err = error as { statusCode?: number; code?: string; message?: string };
+      return reply.code(err.statusCode ?? 400).send({ error: err.message ?? '邀请参数不正确', code: err.code ?? 'BAD_REFERRAL_CAPTURE' });
+    }
+  });
+
   // 发送短信验证码：限频 + 落库（哈希）+ 发送。console 演示口径会把验证码随响应回传（devCode）。
   // 按 IP 收紧：SMS 发送是成本+轰炸型接口。既有 sms.ts 已按手机号限频（60s 冷却 + 5 条/小时），
   // 这里再叠一层按 IP 的频控，挡「换号池、同 IP 批量轰炸」。（rate-limit 未注册的测试环境此 config 被忽略。）
   app.post('/auth/sms/send', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
+    if (!smsLoginEnabled()) {
+      return reply.code(503).send({ error: '短信登录暂不可用，请使用手机号快捷登录', code: 'SMS_LOGIN_DISABLED' });
+    }
     const parsed = smsSendSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.sms.send_attempt', {
@@ -313,6 +477,9 @@ export async function authRoutes(app: FastifyInstance) {
   // 免费注册防薅：登录/注册按 IP 频控（唯一门槛此前只有「一手机号一账号」，无 IP/设备频控 → 号池可批量薅
   // 免费钻石+额度，见售卖前体检 P1）。20 次/10 分钟对 NAT 后正常多用户仍宽松，但挡住脚本化批量建号。
   app.post('/auth/login', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    if (!smsLoginEnabled()) {
+      return reply.code(503).send({ error: '短信登录暂不可用，请使用手机号快捷登录', code: 'SMS_LOGIN_DISABLED' });
+    }
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.login.attempt', {
@@ -354,7 +521,7 @@ export async function authRoutes(app: FastifyInstance) {
       }
     }
 
-    const { user, isNew } = await loginOrRegisterByPhone(phone, name);
+    const { user, isNew, referralOutcome } = await loginOrRegisterByPhone(phone, name, attributionOf(req, parsed.data));
     await recordAuthAttempt(req, 'auth.login.attempt', {
       ok: true,
       statusCode: 200,
@@ -363,10 +530,13 @@ export async function authRoutes(app: FastifyInstance) {
       smsRequired: env.smsRequireCode,
       isNew,
     }, user);
-    return loginResult(user, isNew, await onboardedOf(user));
+    return loginResult(user, isNew, await onboardedOf(user), undefined, referralOutcome);
   });
 
   app.post('/auth/wechat-login', async (req, reply) => {
+    if (!wechatLoginEnabled()) {
+      return reply.code(503).send({ error: '手机号快捷登录暂不可用，请使用短信验证码登录', code: 'WECHAT_LOGIN_DISABLED' });
+    }
     const parsed = wechatLoginSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
@@ -396,6 +566,7 @@ export async function authRoutes(app: FastifyInstance) {
         });
         return reply.code(404).send({ error: '当前快捷登录尚未关联账号，请先用手机号登录', code: 'PHONE_LOGIN_REQUIRED' });
       }
+      assertAccountActive(user);
 
       if (!user.wechatOpenId || (wx.unionid && !user.wechatUnionId)) {
         user = await prisma.user.update({
@@ -434,6 +605,9 @@ export async function authRoutes(app: FastifyInstance) {
   // 本机号一键登录（手机号唯一身份键的正门）：phoneCode 换手机号 → 按手机号定位/新建账号；
   // 可选 loginCode 换到的 openid/unionid 一律强制绑到该账号（原挂别处先解绑，留审计）。
   app.post('/auth/wechat-phone', async (req, reply) => {
+    if (!wechatLoginEnabled()) {
+      return reply.code(503).send({ error: '手机号快捷登录暂不可用，请使用短信验证码登录', code: 'WECHAT_LOGIN_DISABLED' });
+    }
     const parsed = wechatPhoneSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
@@ -457,9 +631,12 @@ export async function authRoutes(app: FastifyInstance) {
       let user: AuthUser;
       let isNew: boolean;
       let binding: LoginPhoneBinding;
+      let referralOutcome: ReferralOutcome | undefined;
+      const attribution = attributionOf(req, parsed.data);
 
       /** 手机号已定位到账号：登录它，并把本次微信身份强制绑上来。 */
       const loginAndLink = async (target: AuthUser): Promise<{ user: AuthUser; binding: LoginPhoneBinding }> => {
+        assertAccountActive(target);
         if (!openid) return { user: target, binding: phoneBinding('matched', target.phone, phone) };
         const linked = await forceLinkWechatIdentity(target, openid, unionid);
         return { user: linked.user, binding: phoneBinding(linked.moved ? 'wechat_relinked' : 'matched', linked.user.phone, phone) };
@@ -467,13 +644,16 @@ export async function authRoutes(app: FastifyInstance) {
 
       const byPhone = await prisma.user.findUnique({ where: { phone } });
       if (byPhone) {
+        assertAccountActive(byPhone);
         isNew = false;
         ({ user, binding } = await loginAndLink(byPhone));
+        referralOutcome = await retryReferralIfEligible(user, attribution);
       } else {
         const byWechat = openid
           ? await prisma.user.findFirst({ where: { OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])] } })
           : null;
         if (byWechat && byWechat.phone.startsWith('wx_')) {
+          assertAccountActive(byWechat);
           // 历史纯微信占位账号（wx_<openid>）首次补上真实手机号：保留老数据，不新建账号。
           // 这是「登录动作里改 phone」的唯一例外，其余换号一律走 /auth/bind-phone 显式验证。
           isNew = false;
@@ -487,10 +667,11 @@ export async function authRoutes(app: FastifyInstance) {
             if (!raced) throw error;
             ({ user, binding } = await loginAndLink(raced));
           }
+          referralOutcome = await retryReferralIfEligible(user, attribution);
         } else {
           // 手机号没账号 → 以手机号建号。即便本次 openid 原挂在别的真实号账号上，
           // 也是建这个手机号的新账号、把微信身份迁过来（手机号才是身份键）。
-          ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
+          ({ user, isNew, referralOutcome } = await loginOrRegisterByPhone(phone, parsed.data.name, attribution));
           ({ user, binding } = await loginAndLink(user));
         }
       }
@@ -507,7 +688,7 @@ export async function authRoutes(app: FastifyInstance) {
         phoneBindingStatus: binding.status,
         accountPhoneMasked: binding.accountPhoneMasked,
       }, user);
-      return loginResult(user, isNew, await onboardedOf(user), binding);
+      return loginResult(user, isNew, await onboardedOf(user), binding, referralOutcome);
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
@@ -584,10 +765,15 @@ export async function authRoutes(app: FastifyInstance) {
   //   const phone = await verifyCarrierToken(parsed.data.provider, parsed.data.token);
   //   const { user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name);
   //   return loginResult(user, isNew, await onboardedOf(user));
+  // 归因字段现在就收下（契约与另两条通道一致），但本入口仍返回 501：
+  //   接通 SDK 时把上面注释里的那行改成
+  //   `await loginOrRegisterByPhone(phone, parsed.data.name, attributionOf(req, parsed.data))`
+  //   即可获得与短信 / 微信一键完全相同的归因行为，不需要再动 referral 那一层。
   const carrierSchema = z.object({
     provider: z.enum(['cmcc', 'cucc', 'ctcc', 'aliyun', 'jiguang']).optional(),
     token: z.string().trim().min(1, '缺少运营商 token'),
     name: z.string().trim().min(1).max(20).optional(),
+    ...attributionShape,
   });
   app.post('/auth/carrier-onetap', async (req, reply) => {
     const parsed = carrierSchema.safeParse(req.body);

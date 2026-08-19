@@ -4,6 +4,7 @@ const store = require('../../../services/store');
 const { navTo } = require('../../../services/nav');
 const { baseData } = require('../../../services/page');
 const { COLORS, colorByKey, colorIndex, isColorKey } = require('../../../services/colors');
+const { withShare } = require('../../../services/share');
 
 function colorState(key) {
   const color = colorByKey(key);
@@ -16,7 +17,7 @@ function colorState(key) {
   };
 }
 
-Page({
+Page(withShare({
   data: baseData({
     name: '',
     company: '',
@@ -262,16 +263,16 @@ Page({
 
   deleteAccount() {
     wx.showModal({
-      title: '删除账号',
-      content: '账号、案卷、资料与历史方案将永久删除且无法恢复。确认继续？',
-      confirmText: '删除账号',
+      title: '注销账号',
+      content: '注销后账号和公开分享会立即停用，个人数据将隔离保留至少 30 天。保留期内如需处理申诉或恢复，请联系客服；到期后将删除或匿名化，依法需要留存的记录除外。',
+      confirmText: '继续注销',
       confirmColor: '#9C4A38',
       success: (first) => {
         if (!first.confirm) return;
         wx.showModal({
           title: '最后确认',
-          content: '此操作不可恢复。再次确认删除全部账号数据。',
-          confirmText: '永久删除',
+          content: '确认停用账号并进入至少 30 天的注销保留期？',
+          confirmText: '确认注销',
           confirmColor: '#9C4A38',
           success: async (second) => {
             if (!second.confirm) return;
@@ -279,12 +280,13 @@ Page({
               await api.deleteAccount();
               store.resetAuth();
               wx.reLaunch({ url: '/pages/sessions/index' });
+              wx.showToast({ title: '账号已进入注销保留期', icon: 'none' });
             } catch (error) {
-              store.handleApiError(error, { fallbackTitle: error.message || '删除失败' });
+              store.handleApiError(error, { fallbackTitle: error.message || '注销失败' });
             }
           },
         });
       },
     });
   },
-});
+}));

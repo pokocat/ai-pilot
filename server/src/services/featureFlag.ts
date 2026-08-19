@@ -60,9 +60,41 @@ export async function setFeatureFlag(key: string, enabled: boolean): Promise<voi
   cache.delete(key);
 }
 
-/** 设开关的 payload（分级/数值配置），立即清 payload 缓存。enabled 保持既有（新建默认开）。 */
+/**
+ * 设开关的 payload（分级/数值配置），立即清 payload 缓存。enabled 保持既有（新建默认开）。
+ *
+ * **整块覆盖写**：payload 里没出现的键会被删掉。只有「调用方手里是整块配置」时才用它——
+ * 典型是 artifactPricing.updateArtifactPrices / creative config / video pricing：它们自己先读全量、
+ * 合并 patch、再整块落库，并且**靠不写某个键来表达「删掉它、回退默认」**（见 delete entry[variant]）。
+ * 只拿着「一个键的新值」就写的调用方一律走 {@link mergeFeatureFlagPayload}，否则会静默抹掉同一
+ * payload 上别人的键。
+ */
 export async function setFeatureFlagPayload(key: string, payload: Prisma.InputJsonValue): Promise<void> {
   await prisma.featureFlag.upsert({ where: { id: key }, update: { payload }, create: { id: key, payload } });
+  payloadCache.delete(key);
+}
+
+/**
+ * 合并写开关 payload：只覆盖 patch 带的顶层键，payload 上其余键原样保留。立即清 payload 缓存。
+ *
+ * 存在理由：运营后台「功能开关」页的 number / arms 分支只知道自己那一个键的新值。若走整块覆盖写，
+ * 同一 flag payload 上的其他键（如 referral 的奖励配置 rewardInviter/dailyCap/ladder）会在运营改完
+ * 一个数值后被静默清空——今天那些键还是 null，等奖励机制真上线就是一次查不出来的配置丢失。
+ *
+ * 用单条 jsonb `||` 的 upsert 做，不走「先读后写」：两个运营同时保存不同键也不会互相覆盖。
+ * 旧值不是 JSON 对象时（历史上写过标量/数组）按空对象起算，避免 `||` 退化成数组拼接。
+ * 与 setFeatureFlagPayload 一样：行不存在时新建，enabled 取库默认（true）——需要控制 enabled 的
+ * 调用方要自己显式再写一次（见 creative/config.ts 里那条注释记的事故）。
+ */
+export async function mergeFeatureFlagPayload(key: string, patch: Prisma.InputJsonObject): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO feature_flag (id, payload, "updatedAt")
+    VALUES (${key}, ${JSON.stringify(patch)}::jsonb, now() AT TIME ZONE 'UTC')
+    ON CONFLICT (id) DO UPDATE SET
+      payload = CASE WHEN jsonb_typeof(feature_flag.payload) = 'object' THEN feature_flag.payload ELSE '{}'::jsonb END
+                || excluded.payload,
+      "updatedAt" = now() AT TIME ZONE 'UTC'
+  `;
   payloadCache.delete(key);
 }
 

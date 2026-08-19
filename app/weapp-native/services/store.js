@@ -4,6 +4,7 @@ const { setAuthLostHandler } = require('./request');
 const { DEFAULT_AGENTS } = require('./mock');
 const { isColorKey } = require('./colors');
 const { apiErrorPresentation } = require('./api-error');
+const { clearInvite } = require('./invite');
 
 const COLOR_KEY = 'junshi.color';
 const ONBOARDED_KEY = 'junshi.onboarded';
@@ -135,6 +136,14 @@ async function loadMe() {
 
 async function afterLogin(result) {
   setToken(result.token);
+  // 邀请码通常在**真实登录**成功后即弃；但 no_timestamp / config_unavailable 是服务端明确的
+  // 可恢复结果，必须保留，下一次登录携带新签名凭证才有机会完成首次注册时失败的绑定。
+  //
+  // 但断网时 login-sheet 会造一个 `local-<手机号>` 的**本地假登录**（见其 NETWORK_ERROR 分支），
+  // 那次并没有真的建号。如果这里照样清码，用户网络恢复后真正注册时码已经没了，
+  // 归因永久丢失——分享带来的新用户恰恰最容易在弱网下注册，这条路径不能漏。
+  const retryableReferral = result.referralOutcome === 'no_timestamp' || result.referralOutcome === 'config_unavailable';
+  if (!String(result.token || '').startsWith('local-') && !retryableReferral) clearInvite();
   state.onboarded = Boolean(result.onboarded);
   state.onboardingKnown = true;
   wx.setStorageSync(ONBOARDED_KEY, state.onboarded ? '1' : '');

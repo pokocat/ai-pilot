@@ -10,6 +10,7 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { withShare } = require('../../../services/share');
 
 const PLACEHOLDER = {
   keyword: '关键',
@@ -19,7 +20,7 @@ const PLACEHOLDER = {
   signature: '集体为实体发声',
 };
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     projectId: '',
     loading: true,
@@ -159,4 +160,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

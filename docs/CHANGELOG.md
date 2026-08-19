@@ -6,11 +6,48 @@
 
 ## 变更日志
 
+### 2026-08-19 · 安全与可靠性审查缺陷集中修复 · 影响面：账号注销、生产鉴权、过载保护、视频计费、报告/上传、依赖、scheduler、Graph、运行时基线
+
+- 账号注销改为“立即停用与撤销公开分享 + 至少 30 天隔离保留 + 到期清除/匿名化”：无套餐账号可注销，旧 token 与重新登录立即失效；统一清理任务覆盖本地敏感表、OSS/PDF 与 AIStar owner 数据，订单/同意记录按审计政策去标识保留；并发重复注销幂等复用同一清理任务；H5、原生端、mock 与隐私政策已统一保留期口径，不再误称请求成功时已永久删除全部数据。
+- production 鉴权改为 fail-fast：强制高强度 JWT、只认 JWT、至少一个完整登录通道；短信通道必须真实验码，生产支付硬化回归也改用签名 JWT，避免旧裸 token 在鉴权层被正确拒绝后误报支付断言失败。未捕获异常与未处理 Promise rejection 都改为限时优雅关闭并非零退出；入口过载计数在响应、错误与客户端断连上统一一次性释放。
+- H5 流式与自定义下载统一进入全局 401 竞态处理；视频提交增加 `unknown` 模糊状态和按 `clientRequestId` 上游查单/同号重试，禁止超时即退款；成片代理增加上游超时、响应体上限与客户端断连取消。
+- 报告 diff 增加正文/章节/矩阵预算并在超限时退化为线性比较；用户文档解析迁入资源受限 worker，移除存在已知漏洞的 `xlsx`，XLSX/PPTX 增加结构与解压预算，旧 `.xls` 明确拒绝。
+- scheduler 增加 PostgreSQL advisory lock 多实例选主，视频模糊提交/克隆卡死对账也移入选主任务，不再由每个 API 实例重复扫描上游；知识图谱写入按租户串行且跨项目实体可见，并发关系替换保持唯一有效边。Node 统一固定 24.x；三端依赖升级，Taro 内置 Swiper 回补上游官方安全修复并以 postinstall/test 锁定。
+### 2026-08-19 · 注销不再删邀请关系链，只抹个人字段 · 影响面：注销清理、关系链账本、两条注销用例
+
+原实现（08-18）在注销时删掉「本人的上级边 + 直接指向本人的边」并用一条 raw SQL 重算后代的
+lv2/lv3。**那个口径是错的**，改为只抹个人可识别字段：
+
+- **邀请关系是邀请人的账本**：A 邀请了 B，B 注销跟 A 的业绩无关。删边等于让 A 的直邀数/已开通数
+  凭空缩水，还会截断 A→B→C 的三级链条（C 的 lv2 变 null）。
+- **`Referral` 表里没有个人可识别数据**：只有内部 cuid、邀请码、时间戳。`user` 行一删，那些 cuid
+  就是无意义标识符，**它天然已经去标识化**，不需要任何处理——所以整表一行不动，重算 lv2/lv3 的
+  raw SQL 整段删除（不删边就不用补路径，逻辑反而更简单）。
+- **与本仓既有口径对齐**：账本类（paymentOrder / subscriptionContract / tokenUsage / clientEvent /
+  auditLog / moderationLog）一律去标识保留，只有个人内容（reportHtml / profile / userAgent）才删。
+  原实现对 referral 用「全删」与这套规矩不一致。
+- **唯一处理的是 `ReferralAttribution.clientIp` / `userAgent`**：网络与设备标识符，属个人数据，
+  隐私政策承诺「期满后删除或匿名化」。置 null 而**不删行**——邀请码、outcome、时间、双方 id 全留，
+  归因历史完整。业务零损失：这两个字段只服务风控视图的「同 IP 批量注册」，那是实时判断，
+  30 天前的 IP 对风控已无价值。`InviteActivationOutbox` 同样保留（无个人数据）。
+- 函数随语义改名 `removeUserReferralData` → `scrubUserReferralPii`。
+- 两条注销用例方向反转（原来断言「边必须删除」）：现在断言关系链与三级路径一行不动、归因行保留、
+  只有 IP/UA 为 null。实测双向变异均红：scrub 变空操作 → 报「clientIp 必须抹掉」；退回删边 → 报
+  关系链断裂。
+
 ### 2026-08-19 · 生产发布增加 schema 保守旁路 · 影响面：生产部署脚本、数据库安全门
 
 - 线上只读核对发现 `generation_job.priority` 为历史额外列（`0=209`、`9=6`），当前生产归档与代码均不读取它；本次不删除、不接受数据损失。
 - `scripts/deploy-prod.sh` 增加显式 `SKIP_DB_PUSH=1`，仅供确认本次无数据库变更的代码热修复保留线上额外 schema，常规 schema 变更仍必须走 Prisma 预检。
 - 生产后端已发布 `1d4469d` 并通过公网 health/监控 smoke；原生小程序 `0.2.45` 已按生产 API 与构建身份校验后上传微信开发版，包体 2,346,872 B。
+
+### 2026-08-19 · 修复邀请归因的客户端伪造、代理 IP、失败不可恢复、注销误删后代链与支付补记易失问题 · 影响面：邀请捕获/登录契约、小程序分享来源、账号注销、支付激活 outbox、Prisma schema 与回归测试
+
+- 新增公开 `POST /auth/referral-capture`：按服务端时钟签发 HMAC 捕获凭证，登录只信 token 内的 `capturedAt/source`，旧 `inviteCodeAt` 即使伪造未来时间也不能建边；验签在生产密钥暂缺时 fail-closed 为不可归因而不阻断登录。归因 IP 改读 Fastify 的可信代理解析结果，不再直接取可伪造的 XFF 首段。
+- `LoginResult.referralOutcome` 明确可恢复结果；小程序对 `no_timestamp|config_unavailable` 保留邀请码，上次签名请求已失败时在下一次登录前自动重签；服务端仅允许“首次注册已有同一码失败留痕”的账号重试，普通存量账号仍禁止追认。好友/朋友圈/海报分别写 `share_friend/share_timeline/poster_qr`，不再全部硬记好友分享。
+- 注销账号在独占与多人租户分支都调用同一清理函数：只删除本人边和直接指向本人的失效边，保留仍有效的后代直邀关系并重算 lv2/lv3；涉及本人的归因留痕与邀请激活 outbox 同步删除。
+- 新增 `InviteActivationOutbox`：支付权益事务内持久化补记意图，提交后异步处理，`pay-reconcile-sweep` 定时续扫并退避；进程在支付响应后退出也不会永久漏掉 `ActivationEvent(source='invite')`，重复通知与并发仍幂等。
+- 回归新增服务端签名/未来时间/XFF/失败恢复/来源区分/两条注销分支/链路重算/outbox 重启恢复，以及小程序捕获 token 与来源断言；目标测试、构建和全量校验见本次交付记录。
 
 ### 2026-08-18 · 快出片声音训练模型切换为 2.0 · 影响面：军师 BFF → AIStar 声音训练、直传与旧 multipart 兼容链路
 
@@ -30,6 +67,122 @@
 - 尾号 9999 用户截图经生产/预发双库审计确认：生产账号套餐、余额、288 条消息、209 条记忆与 76 份资料均完整；异常来自设备打开了指向 `https://wxapi.aibuzz.cn/api_preprod` 的开发版 `0.2.46`，并在预发库新建同手机号空账号，不是生产数据丢失。
 - 已用正式发布闸门先 dry-run、再上传开发版 `0.2.47`：构建身份 `native-weapp / server / https://wxapi.aibuzz.cn/api / e9c5edd`，AppID `wx810ebe6dfef8e75f`，DevTools 上传成功，包体 2,413,152 B。
 - 本次仅替换微信后台开发版，尚未转体验版、提交审核或正式发布；包含同一失效 token 并发 401 只执行一次退出/跳转的客户端修复。
+
+### 2026-08-18 · 修掉功能开关 payload 的整块覆盖写（运营改一个数值会静默抹掉同 flag 的其他配置）· 影响面：`server/src/services/featureFlag.ts`、`server/src/routes/admin.ts`（number / arms 两个分支）、`server/test/featureFlagPayload.test.ts`（新）、`services/referral.ts` 与 `routes/adminReferral.ts` 的注释订正
+
+**问题**：`PATCH /admin/flags/:id` 的 number 分支写 `setFeatureFlagPayload(id, { [payloadKey]: v })`，而那个函数是 `prisma.featureFlag.upsert({ update: { payload } })`——**整块替换 payload 列**，不是合并。A/B 权重分支（`{ arms }`）同形。于是同一个 flag 的 payload 上只要有第二个键，运营在「功能开关」页改任一数值就会把其余键静默清空。最贴近的一处是 `services/referral.ts` 在 `referral` payload 上预留的五个奖励键（`rewardInviter` / `rewardInvitee` / `rewardOnPaid` / `dailyCap` / `ladder`）：今天全是 null，所以线上看不出任何异常——**等奖励机制真上线，第一次改归因窗口就是一次查不出来的配置丢失**。这类 bug 的代价全在未来，所以趁没人踩先修。
+
+**修法**：新增 `mergeFeatureFlagPayload(key, patch)`，只覆盖 patch 带的顶层键。实现是**一条 `jsonb ||` 的 upsert**而不是「先读后写」——两个运营同时保存不同键也不会互相覆盖（先读后写在这里会丢更新）；旧值不是 JSON 对象（历史脏数据写过标量/数组）时按空对象起算，避免 `||` 退化成数组拼接；`updatedAt` 显式写 `now() AT TIME ZONE 'UTC'`，raw SQL 绕过了 Prisma 的 `@updatedAt`，不这么写会按会话时区落库、跟其他行差一个时区。`admin.ts` 的 number 与 arms 两个分支改走它。
+
+**`setFeatureFlagPayload` 刻意保留整块覆盖语义**，没有「顺手统一」：`artifactPricing.updateArtifactPrices` 靠「不写某个键 = 删掉它 = 回退默认」来清掉一个已配的规格价（`delete entry[variant]`），`creative/config.ts`、`video/pricing.ts`、`video/storagePlan.ts` 同样是自己先读全量再整块落库。把它改成合并，运营就再也删不掉一个配错的价。两种语义各自的适用场景写进了函数注释，并**都在测试里钉住**——任一边被统一掉就红。
+
+**测试**：新增 `server/test/featureFlagPayload.test.ts`（8 例）：合并保键 / 写完立刻读到（payload 缓存已清）/ 行不存在时新建且 enabled 取库默认 / 脏数据旧值不抛 / 并发写不同键两边都留住 / `setFeatureFlagPayload` 仍整块覆盖 / 路由 number 与 arms 两个分支不再抹掉同 payload 其他键。已验证反向红：把两处调用换回 `setFeatureFlagPayload`，那两条路由用例即失败。
+
+**`referral-window` / `referral-risk` 继续各占一个 flag id**：当初拆开就是为了躲这条 bug，但修完也不合回去——一个 flag 一个数，运营后台各自一行、审计各自一条，语义本就更清楚。相关注释已订正为「当初为躲整块覆盖写而拆开，该行为已修掉」，不再把它描述成现行行为。
+
+### 2026-08-18 · 运营后台「邀请增长」三视图（本体 Schema / 邀请关系树 / IP 风控二部图）· 影响面：`admin/src/views/referral.tsx`（新）、`admin/src/nav.ts`、`admin/src/api.ts`、`admin/src/styles/admin.css`、`server/src/routes/adminReferral.ts`（新）、`routes/admin.ts` 开关目录、`app.ts` 注册、契约新增、AGENTS §9.0/§9.1/§13
+
+**为什么要做**：`Referral` 的物化路径 `lv1/lv2/lv3` 从第一天就写全，理由就是「运营侧的邀请关系树要看完整链路」——但在此之前运营侧**一个视图都没有**，那三列冗余字段谁也用不上；`ReferralAttribution.clientIp/userAgent` 同理，采了却没人看。这次把三个投影落到后台，那些列才第一次兑现价值。
+
+**视图选型（这是本次主要的判断，不是审美偏好）**：
+
+- **① 本体 Schema 用 UML 类图，刻意不用力导向图**。这一屏回答「模型长什么样」，读者要看的是字段与基数；力导向图实例一多就是毛球，且每次刷新布局都不一样，没有稳定的阅读逻辑。类框与连线写死几何（说明的是模型，不随数据变），**唯一动态的是行数**——一张说明图旁边不给真实行数，读者无法判断「这些表到底有没有在跑」。另外把归因结果分布也放在这屏：`unknown_code` / `expired` / `already_bound` 这些**失败留痕**本来就是这张表存在的理由（推荐人问「我的客户为什么没归到我」时的唯一凭据），不给出来等于白采。
+- **② 邀请关系树用从左到右的层级树**。邀请关系天然有方向（谁邀谁）和层级（L1→L2→L3），树布局可预测、可折叠、可下钻。布局选的是**「每个可见节点占一行 + 直角折线」**而不是父节点居中的 tidy tree：后者展开一个节点会整屏重排、上下文跳掉，前者只在下面插入行；而且一行一个节点**天然不会重叠**（同一行不可能有两个节点），这一点是量出来的——全展开后逐个 `getBBox()` 比过，文本两两不相交、也不压节点。编码：半径=直邀人数（sqrt 压缩，免得大 V 把小节点压成看不见的点），底色=开通状态，**红环=风控标记且与底色正交**（一个已付费用户同样可能被标记，压成同一维会丢信息）。
+- **③ 风控用 IP ↔ 新号二部图**。正常用户分散在各自 IP、一个 IP 一两个人；刷号聚集成一个 IP 连一串新号的扇形——扇形宽窄一眼可比，散点或表格都做不到。
+- **④ 转化漏斗本期不做，只留位**。原因不是没时间：曝光/落地两段要读 `ClientEvent`，而它至今**只写不查、没有聚合读端点**；开通来源那一段本来就在「处方漏斗」页（按 `ActivationEvent.source` 分组）。在这里再造一个漏斗必然与那页口径打架，所以第四个 tab 只放说明并指向那一页，同时写明 `invite` 桶与 `prescription/catalog/market` 三桶**重叠不可相加**。
+
+**零图表依赖怎么守**：`admin` 的 dependencies 只有 react/react-dom，三张图全手写 SVG。约束是**颜色一律在 `admin.css` 的 `.rf-*` 组件类里用 token 定义，`.tsx` 里只算几何**（x/y/r/width）——`lint:ui` 会阻断 `:root` 外的 hex，而且这样三张图的配色只有一处可改。踩到并修掉的两个具体坑：① 最后一列右侧没留够标签宽度时，**L3 的元信息会被 viewBox 直接裁掉**（现在由 `T_TAIL` 兜住，并用 `getBBox()` 断言无越界）；② 树节点原来第三行放「下级超出三级视野」，行距只有 38px，实测与下一行标签相撞，已压进元信息同一行。宽图统一裹在 `.rf-scroll` 里自己横滚，实测四个 tab 在 375px 宽下 `documentElement.scrollWidth === clientWidth`（页面主体不横滚）。
+
+**端点为什么单独成文件**：`routes/adminReferral.ts` 自挂**同一把** `requireAdmin`（口径与 `admin.ts` 一字不差，没有新发明）。理由是 `admin.ts` 已 2900+ 行，而三个投影各自要做一次成形；前端刚把 2841 行的 App.tsx 拆成 `views/`，没道理在服务端把同一笔债重开一次。
+
+**取数形状（避免 N+1 是硬要求）**：树接口用**物化路径一条 `OR`（`lv1/lv2/lv3` 各有索引）一次取全三级子树**，配合一次 `groupBy(lv1)`（给出任意深度都准的直邀数——第三级节点的下级不在本次结果里，但它的直邀数在这张表里，所以树末端**不会谎报成 0**，而是显式标「下级超出三级视野」）+ 一次 `findMany` 补名字/套餐，全程 4 条查询、没有逐层展开的回头请求。风控接口把聚集判定**整体下推到 SQL**：一条 `GROUP BY clientIp HAVING COUNT(DISTINCT newUserId) >= 阈值` 直接出组（同一条里带出 `group_total`），名单用 `DISTINCT ON (clientIp,newUserId)` 取每人最早那条、再 `ROW_NUMBER() OVER (PARTITION BY clientIp)` 按组限量。~~原先是「`groupBy(clientIp)` 拿候选 → 只对候选拉明细、在内存里按 `newUserId` 去重」~~——那个写法配着全局 `take: 5000` 会让某个 IP 的重复旧留痕把另一个真实聚集组**整组挤没**，页面显示「没有聚集」（第三轮复核判为阻断：风控视图唯一的价值就是看见聚集）。**行级上限已彻底删除**，截断只发生在组数上且如实透出 `groupTotal`。
+
+**阈值归运营，不写死**：聚集阈值是功能开关 `referral-risk` 的 `payload.ipMin`（默认 5，区间 2~200，单位「个新号/IP」），区间与默认值由 `routes/adminReferral.ts` 导出、`FEATURE_FLAG_CATALOG` 引用，「开关页能改的范围」与「视图判定用的范围」是同一份。**刻意另立一个 flag id 而不是复用 `referral` 的 payload**：`PATCH /admin/flags/:id` 的 number 分支当时是 `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，两个数值挤同一个 flag，运营改完归因窗口就会把阈值抹掉（**该覆盖写已于同日修掉，见本文顶部条目**；两个 flag id 的安排保留不变）。读阈值走 `{ fresh: true }` 绕过 60s 缓存（运营改完当场要能验证，否则会以为改动没生效）。
+
+**读失败不许伪装成空**：三个端点里没有任何兜底 catch，配置或查询失败一律 5xx 交给 `useResource`/`ViewState` 渲染成「加载失败 + 重试」。空态则给**显式零计数**——风控还回 `scannedIps`，让「近 30 天扫过 214 个 IP、没有一个达标」与「一条数据都没有」在界面上是两句不同的话（前者是正常形态，后者才要去查链路）。
+
+**口径同源**：「已开通付费」复用 `planGate` 的判定（有 `planId` 且 `isExpired(planExpiresAt, now())` 为假，时钟走 `clock.now()` 而非 `new Date()`），与「我的邀请」的 `activatedCount`、与套餐页是同一个答案，套餐到期会如实回落成「仅注册」；树上的风控标记与二部图用**同一批超阈值 IP 组**，两屏不会各说一套。**公理 5「风控预警不阻断」**：这一页没有任何封禁/拉黑/停发奖动作，端点也只有 GET（用例直接钉住 POST/PATCH/DELETE 一律 404）。
+
+**验证**：`admin` 的 `npm run lint:ui` 与 `npx tsc -b` 全绿；server `npx tsc --noEmit` 零错误、`npm test` **1877/1877 全绿**（含本次新增的 14 例）；新增 `server/test/adminReferralViews.test.ts` 14 例（无凭证 401 / 已登录非管理员 403、物化路径 A→B→C→D 分层为 depth 1/2/3 且第三级不再展开、节点大小=直邀数、状态着色含到期回落、租户可筛、只回超阈值组且改运营配置就改结果、按去重新号数算聚集、树与二部图同源、风控端点无写方法、空作用域 200 + 显式零计数、查询打断回 5xx 不伪装成空）。三张图另用桩数据在真实构建里逐个量过（`getBBox()` 断言不裁切/不重叠、375px 下页面不横滚）。**一条环境坑记下来**：开发机若 shell 里导出了 `TEST_DEFAULT_PLAN_NAME`（本机是「入门版」），新注册用户会自动开通套餐，断言「仅注册」的用例必须显式把 `planId` 清掉，否则在有 / 没有该变量的两台机器上一红一绿。
+
+### 2026-08-18 · 邀请漏斗四段接上写入方（`ActivationEvent.source='invite'` 终于有人写了）· 影响面：契约 `ClientEventName`、`routes/wence.ts` 埋点白名单、`services/activation.ts`、`services/wechatPay.ts` 支付收口、原生小程序 share/invite、admin 开通来源读数口径、AGENTS §7.2/§7.6/§8.1/§13
+
+**为什么要做**：08-18 那一批把 `invite` 加进了 `ACTIVATION_SOURCES`，也写下了「漏斗四段」的方案，但**四段一段都没接**：`share_expose` / `invite_landing` 两个事件不存在，`ActivationEvent.source='invite'` 有枚举值却**没有任何写入方**。结果是「分享 → 落地 → 注册 → 首开通」这条链在库里断成两截，运营问「邀请到底带来了多少开通」时算不出来——不是数字不好看，是根本没有数字。
+
+**这次的四段口径（三段落库、一段复用既有账本）**：
+
+- ① `share_expose`（新事件名）：用户点开「转发给朋友」/「分享到朋友圈」时报。落点刻意在 `services/share.js` 的 `withShare` **wrapper** 里，不在两个 mixin 里——那 4 个成果型分享页（速诊 / 命盘 / 天时日历 / 成片）是**整体覆盖** mixin 的，埋在 mixin 里它们一条都不报，而它们恰好是最活跃的几页（这正是上一轮 `imageUrl` 兜底踩过的同一个坑的另一面）；埋在 wrapper 里则 54 页统一一条、且不可能双报。props 只有 `channel`（`friend`/`timeline`）与 `poster`（当日素材序号），**不带页面路径 / 页面内容 / 邀请码**：带上页面就等于把「谁在账本页点了转发」写进埋点库，与「分享内容与页面解耦」自相矛盾。
+- ② `invite_landing`（新事件名）：`captureInvite` 捕获成功即报，props 只有 `channel`（`query`=分享卡 / `scene`=小程序码）。**每次捕获都报**，含 `onShow` 那次重复进入——同一个人被同一张卡拉回来几次本身就是漏斗要看的数据，端上不偷偷合并。这条几乎全是**游客**上报（点开卡的人此刻还没有账号），正是漏斗分母的来源，`POST /events` 鉴权可选恰好为它而设。
+- ③ 注册段**不占事件名**：从 `ReferralAttribution` 算（每次带码进线一行，**八种** outcome 全留痕：bound / self / cycle / unknown_code / expired / already_bound / config_unavailable / no_timestamp——按文档只聚合六种会漏掉后两类「判不了所以没建关系」的进线）。再补一份客户端埋点只会造出「端上报了、库里没有」的对不上账，服务端账本比端上准。
+- ④ 首开通段：新增 `services/activation.ts` 的 `recordInviteActivation`，在**付费入账成功后**判该用户有无推荐人（查 `Referral`），有则落一条 `source='invite'`。
+
+**④ 为什么挂 `markPaidAndApply` 而不是 `applyPlanPurchase`**（这是本次唯一需要判断的挂点问题）：`applyPlanPurchase` 还被三条**非付费**路径共用——注册测试期自动开通（`routes/auth.ts`，`source='test_default_grant'`）、演示购买（`routes/plans.ts`）、运营手工开通（`routes/admin.ts`）。挂那里有两个方向都错：正向会把免费白发算成邀请开通，**开着注册自动开通时被邀人「注册当场即首开通」，「注册 → 首开通」这一段永远 100%**，漏斗直接失去意义；反向那条路径跑在建号事务内，而关系绑定是建号提交**之后**才另开小事务做的，那一刻 `Referral` 还不存在、查推荐人必然为空，连该记的也记不到。`markPaidAndApply` 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，已有 `outTradeNo` advisory lock + `appliedAt` 幂等锚点），所以 invite 判定就贴着既有的 `recordActivation` 走。
+
+**`source` 冲突怎么判的（写错会让运营后台处方位开通数凭空变少）**：`prescription/catalog/market` 回答的是「从哪个位子成交的」，值来自下单请求、随 `PaymentOrder.attrSource` 存档；`invite` 回答「这个人是被谁带来的」——**两个维度，不是一组互斥枚举**（被邀请来的人照样可能从处方位下单）。所以选择**再落一行**、绝不覆盖。代价必须明说：按 source 分组的各桶从此**重叠、不可相加**，这条口径就地写在读数侧 `admin/src/views/revenue.tsx`，那格也标成「邀请（重叠口径）」，免得有人把几个数字加起来当总开通数。推荐人 id 刻意**不冗余进 `refId`**——`Referral` 是不可变更账本（userId 主键 = 单推荐人），按 userId join 一步就得，冗余一份只会漂移。
+
+**顺手堵了一个能被端上刷的口子**：`parseAttribution` 原本照 `ACTIVATION_SOURCES` 全量放行，也就是说任何客户端在下单请求里写 `source:'invite'` 就能凭空给邀请漏斗刷开通数（而且会被下面的「一人一条」去重当成真的、把真实那条挤掉）。现在前端可声明的来源收窄为三项，`invite` 一律回落 `catalog`——**它是服务端按账本判定的事实，端上说了不算**。
+
+**幂等与「绝不阻断」的实现方式**：invite 行**按人去重**（一人最多一条 = 首次付费开通，因为漏斗问的是人数不是订单数：续费、加购、买第二个 SKU 都不该再进分子），靠 `activation:invite:{userId}` 事务级 advisory lock 串行化 check-then-insert（`ActivationEvent` 上没有唯一约束，不上锁的话同一用户两笔订单并发到账会双写）。整段跑在支付事务**提交之后**、自带小事务、内部吞掉全部异常（永不 reject，只记 warn）。**塞进支付事务里是错的**：Postgres 事务内任一语句失败即整体 aborted，`.catch(() => {})` 也救不回来（`services/referral.ts` 的 P2002 分支已经踩过一次），一次 DB 抖动就能回滚一笔已经算成功的入账——漏一条统计远好过让一笔真钱卡在未入账。选择 `await` 而不是像到账订阅消息那样 fire-and-forget，是因为它只有~~两条本地查询且永不抛，await 既不增加失败面又免得进程被回收时丢统计~~——**这个判断在第四轮复核里被否掉了**：它实际是 BEGIN + advisory lock + 查 Referral + 查重 + insert + COMMIT，连接池拥塞或锁等待时会把支付回调卡到微信超时重投（丢一条统计远好过让一笔真钱卡着重投）。**已改为不 await**：生产路径 fire-and-forget，另留 `pendingInviteActivations()` 把「响应确实没等补记」钉成断言，并加一层 catch 兜住 unhandledRejection（不 await 的 promise 一旦 reject，Node 会终止进程 = 把支付回调进程赔进去）。「进程回收时丢统计」这个代价现在由重投兜：`already_applied` 分支也会派发一次补记。
+
+**端上两条埋点如何做到不拖累分享与启动**：都走既有的 `api.track`（裸 `wx.request` + 空回调，失败完全静默，**刻意不走 `request()`**——那条路上「带 token 的 401」会触发全局 `onAuthLost`，一条统计请求把正在打字的用户踢出对话）。`onShareAppMessage` / `onShareTimeline` 的返回值是微信**同步**取走的，所以埋点不 await、整段 try 住，**连 `require('./api')` 都在 try 里**（share.js 被 54 页在模块顶层引入，加载链断了不能连带把分享弄哑）。`invite.js` 里是**函数体内懒 require**：`services/api.js` 顶层就 `require('./invite')`（登录统一带邀请码），顶部引用直接成环——CJS 环不报错，但先加载的一侧拿到**半初始化**的 exports，症状是静默变哑，属最难查的一类。
+
+**验证**：server `npm test` **1877/1877 全绿**（`test/referral.test.ts` 新增 5 例：有推荐人开通落 invite 且位子归因一条不少 / 无推荐人不落 invite / 重复回调+第二笔订单+并发两笔都只留一条 / `applyPlanPurchase` 三条非付费路径不落 invite（这条钉住挂点选择）/ 端上伪造 `source:'invite'` 回落 catalog）；`app/scripts/weapp-share.test.mjs` 从 19 例增到 **25 例**（两通道各报一条且返回值一字不变、自定义分享页也上报且不双报、`track` 抛与 `require` 抛两种极端下回调都不抛错且 title/path/imageUrl 全对、落地埋点重复进入照报且脏码不报、埋点炸了 `captureInvite` 照常返回码并写 storage、**事件名必须同时在契约与服务端白名单里**）；`native-weapp.test.mjs` 90/90、两端 `tsc --noEmit` 零错误、原生构建通过。
+
+**残留（已记 §13）**：四段埋点齐了，但**漏斗还没有取数口**——`ClientEvent` 至今只写不查、没有任何读端点，前两段目前只能直接查库；要在后台看漏斗得先补一个按 `name + createdAt` 的聚合查询（`ClientEvent` 只有 `@@index([name, createdAt])`/`@@index([userId])`，想按 props 里的 `channel` 下钻要么加索引要么先物化）。`ClientEvent` 也仍无留存策略，而这两条事件放量后会是最大的写入源（游客照发、每次 onShow 重复进入都报），应与清理/分区任务一并规划。
+
+### 2026-08-18 · 全站可转发 + 邀请关系链（只记关系不发奖）· 影响面：原生小程序全部页面、server 注册链路、Prisma 新增两表、契约、AGENTS §5/§7/§10
+
+**为什么以前不能转发**：不是被谁禁掉的，是微信规则——页面不实现 `onShareAppMessage`，右上角 ··· 里的「转发给朋友」就置灰。改动前 54 个原生页面只有 4 个实现了（天时日历 / 命盘 / 速诊 / 快拍成片），5 个主 Tab 一个都没有，所以用户在主界面看到的转发永远点不动；`onShareTimeline` 全站为零，「分享到朋友圈」菜单项根本不出现。另外 `app/src/**/index.config.ts` 里那三处 `enableShareAppMessage: true` 是 **Taro 的注册开关、对原生产物无效**，看到它以为已经开了是个真实误判点。而且原来那 4 处返回的是裸 path、`app.js` 的 `onLaunch()` 连 `options` 都没接，所以即便转发出去也记不下谁带来了谁。
+
+**这次的产品口径（用户拍板，见 `docs/[OPUS5]WEAPP_SHARE_REFERRAL_PLAN_2026-08-18.md` v2 §7）**：① 全站可分享，但分享内容与页面**解耦**——固定内置海报素材（图 + 文案）按日轮动，落地页统一；② 关系链**数据存满三级**，激励与呈现口径**只看一级**；③ **奖励机制后定**，本期只记关系 + 预留运营配置栏位；④ 文案切**真实经营痛点**，不用「宜攻宜守」这类盘面黑话（对真实经商的人没有代入感）。
+
+**前端**：新增 `weapp-native/services/share.js`（`withShare` 用 `Object.assign` 而非 `Behavior`——页面级 behaviors 的生命周期合并语义随基础库版本漂移，而分享回调漏挂是**静默失效**：按钮变灰但不报错，review 看不出来）与 `services/invite.js`（捕获 + 形状校验 + 末次触点覆盖）。54 页全挂，三种 require 深度逐个核对（写错是运行时才炸）。落地页定为 `/pages/sessions/index`，**刻意不用速诊页**：它 `onLoad` 就 `setData({ showLogin: true })`，陌生访客点开分享卡第一屏会是登录弹层，既伤转化也踩 2026-08-05 整改口径。朋友圈按 9 页白名单开（其余只开转发），因为 `onShareTimeline` 的落地页被微信强制为当前页、只能带 query 改不了 path，私密页开朋友圈就是把陌生人丢在账本或登录门上。素材按**本地自然日**确定性轮动（禁随机；不用 `Date.now()/86400000`，那个按 UTC 切日会在东八区早上 8 点换素材）。原有 4 个成果型分享页保留自己的实现，只把 path 包上 `pathWithCode()`。
+
+**后端**：新增 `Referral`（`userId` 主键 = 单推荐人公理）+ `ReferralAttribution`（**五种 outcome 全留痕**：`bound|self|unknown_code|expired|already_bound`，带 IP/UA 作风控原料）。判环**沿 `referrerId` 递归上溯**而不是只比物化的三级——A→B→C→D 链上 A 拿 D 的码时，只比 lv1/lv2/lv3 会漏判并建出环（测试里专门造了这条深链）。归因窗口读运营配置（`FeatureFlag.referral.window`，缺省 30 天，越界/脏值回落默认），奖励类栏位（`rewardInviter`/`rewardInvitee`/`rewardOnPaid`/`dailyCap`/`ladder`）**只占位不生效**，代码里不留任何业务数值。`ActivationEvent.source` 加 `invite`（服务 D-1 漏斗，与发奖无关）。`/me.referral` 读失败回 `null` 而不是零值对象，前端据此显示「—」，与「真的还没邀到人」区分开。
+
+**两个必须记下的技术取舍**：① **绑定放在建号事务之外**——方案原本写「与建号同事务但绑定失败不回滚注册」，这两件事在 Postgres 下**互斥**：事务里任何一条语句失败就把整个事务置为 aborted，`try/catch` 只抓到 JS 异常、租户与用户仍会一起回滚。所以关系绑定放在注册成功之后单独跑，失败只落一行日志（账号一定建成，关系可按 attribution 留痕人工补绑），**别为了「原子」把它挪回事务里**。② **已注册用户登录不追认推荐人**（存量用户互相填码是最容易被薅的口子），只有 `isNew === true` 才绑。
+
+**顺带修了 3 处过期断言**（`app/scripts/native-weapp.test.mjs`，都是本次改动的必然结果、不是实现 bug）：全站页面包进 `Page(withShare({...}))` 后收尾由 `});` 变 `}));`（credits 页文件尾断言）、`onLaunch()` 变 `onLaunch(options)` 且体内多了注释（字体断言的形参与窗口）、成片页 path 经 `pathWithCode()` 包装（成片转发落地页断言）。三条断言的**意图都没变**，只更新匹配式并写清原因。
+
+**验证**：server `npm test` **1851/1851 全绿**（含新增 `test/referral.test.ts` 12 例：五种 outcome、深环、窗口配置回落、物化路径平移、脏码不打断登录、老用户不追认、`/me` 读数），app 侧 `scripts/*.test.mjs` 201 例 + `src/**` 97 例全绿（含新增 `weapp-share.test.mjs` 11 例，最值钱的一条是**从 `app.json` 遍历**断言 54 页零漏挂，新增页面忘挂会红），原生构建通过。**已知**：`app` 的 `tsc` 有 1 个既有错误（`src/services/wechatSubscribe.ts` 缺 `clip` 场景），来自主仓一处未提交 WIP，与本次无关、未动。
+
+**codex-cli 结对复核（同日，两侧各一轮）判定「不能合」，据此又改了这些**——记下来是因为其中几条正是「看起来对、真机才炸」的类型：
+
+- **素材图留空 = 隐私事故**：原实现「图为空就不下发 imageUrl、让微信截图兜底」，而微信截的是**当前页**——从账本 / 档案 / 订单页转发，缩略图直接把个人经营数据带出去。现固定用两张品牌底图（`app/src/assets/share/`，2.6KB/2.2KB，随 `src/assets` 拷进产物），并加了「必须带 `/assets/share/` 图且文件真实存在」的行为级断言。
+- **朋友圈白名单从 9 页收到 3 页**：自审先发现 5 页（速诊 / 作品廊 / 生态市场 / 图籍及详情）`onLoad` 就对游客弹登录，与「转发落地页刻意不用速诊」自相矛盾；codex 又指出成片页与资料详情依赖 `workId`/`id`，朋友圈只能带 query、回不去。最终只留问策 / 命盘 / 天时日历，并把「白名单必须游客友好」钉成守卫。
+- **速诊自己的分享落回了会弹登录的页面**：它保留成果型标题，但 `path` 改成统一公开页；`calendar`/`mingpan` 落自己的页（`onShow` 不弹登录）、成片落快拍入口，四页的落地目标现在逐个钉死在测试里。
+- **断网假登录会清掉邀请码**：`login-sheet` 在 `NETWORK_ERROR` 时造 `local-<手机号>` 的本地假登录，原来照样触发清码，网络恢复后真注册已经没码了——分享来的新用户恰恰最容易在弱网下注册。现在只有真实 token 才清。
+- **素材轮动不是严格逐日**：`年*372+月*31+日` 在 2/29→3/1 只差 3，对 4 套素材取模会撞成同一套。改用本地年月日构造 UTC 零点算天数，严格 +1 且不受时区影响。
+- **无环检查是 fail-open 的**（注释写着「到顶保守拒绝」，代码却 `return false` 放行）：跑满 hop 上限现在一律**拒绝**；上限从 10000 降到 64（这段递归跑在注册路径上，每跳一次一条查询，真有环时上万次查询会把注册拖成超时）。成环也从复用 `self` 改为独立的 `cycle` outcome——运营看到 `self` 会以为用户在拿自己的码，排查方向完全不同。
+- **脏归因参数会把登录打成 400**：`inviteCodeAt: "abc"` / 负数 / `inviteCode: 123` 原本直接被 zod 拒掉。改为 `.catch(undefined)` 兜住任何脏值；同时**带了码但形状非法现在也留痕**（`unknown_code`），否则用户说「我填了码怎么没算给他」时运营手上没凭据。
+- **建边与留痕未同事务**：两次独立写会出现「有关系、没归因行」。现在收进一个**不含建号**的小事务；并发主键冲突（P2002）翻译成 `already_bound` 如实留痕，而不是抛给上层记日志。
+- **`ReferralAttribution` 缺 `tenantId`**（与 schema 顶部「所有业务表均含 tenantId」冲突，这批含 IP/UA 的记录无法按租户限定）→ 已补字段与索引。
+- **过期与已开通判定改用 `services/clock.ts` 的 `now()`**，与 `planGate`/`getPlanStatus` 同一把时钟，沙箱 `x-test-now` 快进时口径才一致。邀请码字母表改为直接引用生成侧的 `INVITE_ALPHABET`，避免两处各改一份、造出「合法但永远归不了因」的码。
+- **配置读失败不再静默**：仍回落默认值（把归因可用性绑死在配置读取上代价更大），但必须打一行 warn——否则「运营改了没生效」与「压根没读到」在线上长得一模一样。
+
+**第二轮复核又抓出一处假闭环（同日修）**：mixin 自己返回了固定图，但那 4 个成果型分享页
+（速诊 / 命盘 / 天时日历 / 成片）的 `onShareAppMessage` 是**整体覆盖** mixin 的，它们没写 `imageUrl`
+——于是这几页转发时微信照旧截当前页，命盘、成片这类页面等于把个人内容贴进聊天窗。
+而第一轮新增的行为级断言只执行了 mixin，没执行页面自己的回调，所以「全绿」是假的。
+修法**不是逐页补图**（那样以后新增自定义分享页还会再漏），而是在 `withShare` 里统一兜：
+页面回调返回的对象缺 `imageUrl` 就补品牌底图，自带图则不覆盖，回调返回空也不抛。
+对应加了两条断言（兜底生效 + 4 页确实经 `withShare` 包装），并实测「把兜底那行删掉就会红」。
+
+**第三轮复核（针对前两个提交 + d3f2ca5）又出 7 条阻断，其中三条是修复自己引入的**——记全是因为这批最能说明「改对一半更危险」：
+
+- **fail-closed 反而误伤合法用户**：上一轮把无环检查改成「跑满上限即拒绝」，但链长**恰好等于**上限时，游标其实已经走到链顶（干净），代码却照样 `return true`，把第 65 代正常用户记成成环、还留一条假 cycle 告警。改为循环后判 `cursor !== null`。
+- **`.catch(undefined)` 成了绕过归因窗口的后门**：为了「脏参数不打断登录」给 zod 加了 catch，结果把两种情况混成「没传」——`inviteCode: 123` 连 `unknown_code` 都不留痕；更糟的是合法码配 `inviteCodeAt: "abc"` 时时间戳被抹掉，随后走进「没时间戳按不过期」的分支，**建出一条不可变更的永久关系**。现在 zod 用 `z.unknown()` 原样收下，由 `attributionOf` 区分三态；缺/脏时间戳落新 outcome `no_timestamp` 并**拒绝建边**（运营人工补绑 `source='manual'` 不受限）。
+- **P2002 之后在同一事务里 trace 是写不进去的**：Postgres 唯一约束一失败，整个事务即进入失败态，后续 attribution insert 同样失败并被整体回滚——留痕反而丢了。而上一轮的并发用例传的是裸 `prisma` 不是生产用的 `tx`，所以「通过」是假的。现在 P2002 抛 `ReferralAlreadyBound`，由调用方在**事务外**补留痕；用例改成用 `prisma.$transaction` 跑并接受两种合法时序。
+- **配置读失败回落默认值会造成不可逆错误**（这条我上一轮判断错了，采纳 codex 的意见）：配置是 7 天、故障时按 30 天算，就会建出一条本不该存在的**永久**关系，事后告警也改不回来。现在读取失败抛 `ReferralConfigUnavailable`，落 `config_unavailable` 并跳过本次绑定——注册照常成功，「这次不绑」是可恢复的（用户再点一次分享，或运营按留痕补绑）。
+- **归因窗口其实没有运营入口**：文档写着「归运营后台」，但 `referral` 不在 `FEATURE_FLAG_CATALOG` 里，`PATCH /admin/flags/referral` 返回 `FLAG_NOT_FOUND`，只能直接改库。已登记为「邀请归因窗口」数值项（1~365 天，默认 30）。
+- **注销与测试清理漏了两张新表**：被邀人注销后，带 IP·UA 的归因记录仍永久留库，且邀请人的 `directCount` 会继续把已注销账号数进去（违反注销接口「彻底删除账号及其数据」的口径）。`DELETE /me` 现在连带删除**所有涉及本人**的关系边（含「我作为别人上级」的那些，它们的 `referrerId`/`lv1~lv3` 里写着我的 id）与归因行；`prisma/resetBusinessData.ts` 也补上这两张表，否则测试之间互相污染。
+- **文档与代码冲突**（本仓判定为缺陷）：AGENTS 还写着旧的 `年*372+月*31+日` 与「素材图为空」，契约还写着「非法码当没传」，服务注释还写着「调用方传建号事务」——三处都已订正为实际实现。
+
+**验证**：server `npm test` **1858/1858 全绿**，新增用例专盯这批漏洞：缺时间戳不建边、五种脏时间戳都不得建关系（`no_timestamp` 留痕）、`inviteCode: 123` 仍留 `unknown_code`、并发走事务形态只建一条边且两条路径都有留痕、注销后关系与归因都清干净。
+
+**保留的分歧与残留**：① codex 建议「配置读失败应让绑定失败」，未采纳——配置一抖动就全站归因失效，代价大于收益，改为回落+告警；② hop 上限的边界用例（造 65 级链）未测，成本过高，代码改成 fail-closed 后风险已收敛；③ 同手机号并发注册可能 500 是**既有**行为（`loginOrRegisterByPhone` 本就没有 P2002 兜底），不在本次范围，已记 §13。
+
+**复核后验证**：server `npm test` **1854/1854 全绿**（新增脏参数矩阵、并发绑定、cycle 具体 outcome、过期套餐不计入 activatedCount 等断言）；app `scripts/*.test.mjs` **207 例全绿**（`weapp-share.test.mjs` 从 11 例增到 17 例，含 6 条**行为级**断言：真正 require 模块执行分享回调与邀请捕获）。三条关键守卫都实测过「改坏就会红」：清空素材图 → 报「素材缺图」；速诊落地页改回自己页 → 报「必须落到统一公开页」；轮动改回手算式 → 报「2/29 → 3/1 不是相邻一天」。
 
 ### 2026-08-18 · 修复「今日」Tab 并发 401 导致连续闪退式跳转 · 影响面：原生小程序、H5 登录态失效处理
 

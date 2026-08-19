@@ -16,6 +16,7 @@ const pouchData = require('../../services/pouch-data');
 const worksCache = require('../../services/works-cache');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
+const { withShare } = require('../../services/share');
 
 /** 首屏先给 8 件，其余收在「更早的 N 件」后面——档案页会越长越长，不能一次全渲染。 */
 const FIRST_PAGE = 8;
@@ -60,7 +61,7 @@ function groupWorks(works) {
   return order.filter((key) => buckets.has(key)).map((key) => buckets.get(key));
 }
 
-Page({
+Page(withShare({
   data: baseData({
     authed: false, loading: false, loadFailed: false, showLogin: false,
     query: '', typeIndex: 0, tabs: TYPE_TABS.map((tab) => Object.assign({ text: tab.label }, tab)),
@@ -168,4 +169,4 @@ Page({
     gotoExecution('today');
   },
   goExecution() { gotoExecution('today'); },
-});
+}));

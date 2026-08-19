@@ -10,11 +10,14 @@ import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
+import { referralSummary } from '../services/referral.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
+import { eraseAccount } from '../services/accountDeletion.js';
+import type { AccountDeletionResult } from '../../../shared/contracts';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -72,6 +75,15 @@ export async function metaRoutes(app: FastifyInstance) {
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
     const inviteCode = await ensureInviteCode(user.id).catch(() => undefined); // V7-13：邀请码（惰性生成）
+    // 我的邀请读数（直邀数 / 已开通数 / 我的上级）。
+    // 读失败一律回 null 而不是零值对象：前端据此显示「—」，与「真的还没邀到人（0）」区分开——
+    // 把读失败画成 0 会让人以为自己邀的人没被记上（allSettled 静默兜底踩过这个坑）。
+    const referral = inviteCode
+      ? await referralSummary(user.id, inviteCode).catch((err) => {
+          req.log?.warn?.(`[referral] summary 读取失败: ${(err as Error).message}`);
+          return null;
+        })
+      : null;
     const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     // P0-2：命理总开关下发前端（合规开关直读 DB，不吃 60s 缓存窗口）——前端据此隐藏全部命理入口
     const fortune = await isFeatureEnabled('fortune');
@@ -109,6 +121,7 @@ export async function metaRoutes(app: FastifyInstance) {
       ai: await providerInfo(),
       understanding,
       inviteCode,
+      referral,
       service,
       features: { fortune, wenceForm, conversationContinuity },
       capabilities: { attachments: ATTACHMENT_CAPABILITIES },
@@ -199,51 +212,9 @@ export async function metaRoutes(app: FastifyInstance) {
     return { ok: true, avatarUrl };
   });
 
-  // 注销账号（合规：彻底删除账号及其数据）。本应用 1 用户 ≈ 1 租户，独占租户时连同租户数据一并清除。
-  app.delete('/me', async (req) => {
+  // 注销账号：立即停用身份与公开链接；本地及外部数据由保留期到期后的可重试任务清理/匿名化。
+  app.delete('/me', async (req): Promise<AccountDeletionResult> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const tenantId = user.tenantId;
-    // 删除前先记一条 null-租户审计（不会被下面按租户清除）
-    await recordAudit({ userId: user.id, action: 'user.account.delete', payload: { tenantId } }).catch(() => {});
-    const others = await prisma.user.count({ where: { tenantId, id: { not: user.id } } });
-    await prisma.$transaction(async (tx) => {
-      if (others === 0) {
-        // 独占租户：按外键顺序清空该租户全部业务数据
-        await tx.deliverable.deleteMany({ where: { tenantId } });
-        await tx.message.deleteMany({ where: { session: { tenantId } } });
-        await tx.reportDoc.deleteMany({ where: { tenantId } }); // 级联 reportVersion
-        await tx.knowledgeItem.deleteMany({ where: { tenantId } }); // 级联 knowledgeChunk
-        await tx.session.deleteMany({ where: { tenantId } });
-        await tx.memory.deleteMany({ where: { tenantId } });
-        await tx.project.deleteMany({ where: { tenantId } });
-        await tx.creditLedger.deleteMany({ where: { tenantId } });
-        await tx.tokenUsage.deleteMany({ where: { tenantId } });
-        await tx.tokenWallet.deleteMany({ where: { tenantId } });
-        await tx.monthlyCreditGrant.deleteMany({ where: { tenantId } });
-        await tx.tokenQuotaAdjustment.deleteMany({ where: { tenantId } });
-        await tx.planEntitlement.deleteMany({ where: { tenantId } });
-        await tx.skuEntitlement.deleteMany({ where: { tenantId } });
-        await tx.profile.deleteMany({ where: { tenantId } });
-        await tx.auditLog.deleteMany({ where: { tenantId } });
-        await tx.userAgent.deleteMany({ where: { userId: user.id } });
-        await tx.user.delete({ where: { id: user.id } });
-        await tx.tenant.delete({ where: { id: tenantId } });
-      } else {
-        // 多人租户：仅删除该用户自身相关数据
-        await tx.userAgent.deleteMany({ where: { userId: user.id } });
-        await tx.creditLedger.deleteMany({ where: { userId: user.id } });
-        await tx.tokenUsage.deleteMany({ where: { userId: user.id } });
-        await tx.tokenWallet.deleteMany({ where: { userId: user.id } });
-        await tx.monthlyCreditGrant.deleteMany({ where: { userId: user.id } });
-        await tx.tokenQuotaAdjustment.deleteMany({ where: { userId: user.id } });
-        await tx.planEntitlement.deleteMany({ where: { userId: user.id } });
-        await tx.skuEntitlement.deleteMany({ where: { userId: user.id } });
-        await tx.deliverable.deleteMany({ where: { userId: user.id } });
-        await tx.session.deleteMany({ where: { userId: user.id } });
-        await tx.memory.deleteMany({ where: { userId: user.id } });
-        await tx.user.delete({ where: { id: user.id } });
-      }
-    });
-    return { ok: true };
+    return eraseAccount(user.id);
   });
 }

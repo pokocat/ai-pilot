@@ -21,6 +21,8 @@ import logo from './assets/logo.png';
 import { OverviewView } from './views/overview';
 import { UsersView, UserDetailPanel } from './views/users';
 import { PaymentsView, FunnelView, UsageView, TokenUsageView } from './views/revenue';
+// 邀请增长三视图单独成文件（手写 SVG 体量大，且 revenue.tsx 正被并行改动）——见该文件头注释。
+import { ReferralView } from './views/referral';
 import { ObservabilityView, ModerationView, AuditView } from './views/observe';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
@@ -166,6 +168,7 @@ export default function App() {
               {key === 'usage' && <UsageView />}
               {key === 'payments' && <PaymentsView toast={showToast} isSuper={isOwner} onFindUser={findUser} />}
               {key === 'funnel' && <FunnelView />}
+              {key === 'referral' && <ReferralView />}
               {key === 'tokens' && <TokenUsageView onOpenUser={openUser} />}
               {key === 'trace' && <ObservabilityView />}
               {key === 'say' && <SayingsView toast={showToast} />}

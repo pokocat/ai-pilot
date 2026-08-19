@@ -16,7 +16,10 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant, skuPackAmount } from './purchase.js';
 import { revokeQuotaPack } from './tokenQuota.js';
-import { parseAttribution, recordActivation } from './activation.js';
+import {
+  enqueueInviteActivation, parseAttribution, processInviteActivationOutbox, recordActivation,
+  type InviteActivationTarget,
+} from './activation.js';
 import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
@@ -626,6 +629,49 @@ interface OrderSnapshot {
   quote?: { quoteFingerprint?: string; remainingValue?: number; chargeAmount?: number; relation?: string };
 }
 
+/**
+ * 已派发、可能还没落地的 invite 归因补记。**生产路径从不 await 它**（见 markPaidAndApply 的注释），
+ * 这两个句柄只为「测试能确定性地等到补记完成」而存在：
+ *   · `settleInviteActivations()` 等到目前派发出去的全部补记落地；
+ *   · `pendingInviteActivations()` 报还在飞的条数，用来把「支付响应没有 await 补记」钉成断言
+ *     （回调 resolve 的那一刻计数必须 > 0——微任务队列里 DB 往返不可能已经完成）。
+ * 尾链每次都 `.then(() => undefined)` 收掉结果，避免把历次结果数组一路串起来常驻内存。
+ */
+let inviteActivationTail: Promise<unknown> = Promise.resolve();
+let inviteActivationInflight = 0;
+
+function dispatchInviteActivation(outTradeNo: string): void {
+  inviteActivationInflight += 1;
+  // 处理的是已经随支付提交的持久化 outbox；这里即使异常/进程退出，scheduler 仍会续跑。
+  const started = processInviteActivationOutbox(outTradeNo)
+    .catch((err: unknown) => {
+      console.warn(`[pay] invite 归因 outbox 处理异常 outTradeNo=${outTradeNo}: ${(err as Error)?.message}`);
+    })
+    .finally(() => { inviteActivationInflight -= 1; });
+  inviteActivationTail = Promise.all([inviteActivationTail, started]).then(() => undefined);
+}
+
+/** 测试用：等到已派发的 invite 归因补记全部落地。生产路径**不得**调用（那就等于把 await 加回来了）。 */
+export function settleInviteActivations(): Promise<unknown> {
+  return inviteActivationTail;
+}
+
+/** 测试用：还在飞的 invite 归因补记条数。 */
+export function pendingInviteActivations(): number {
+  return inviteActivationInflight;
+}
+
+/**
+ * 从订单行推出 invite 归因所需的最小信息。itemKey 与入账路径同源：SKU 单认 skuKey、套餐单认 planId
+ * （schema 上二选一，SKU 单的 planId 是空串）。重投分支没有再解一遍条款快照，直接读订单行即可
+ * ——两者本来就是同一个值（快照里的 sku.key / plan.id 就是下单时写进订单的那个）。
+ */
+function inviteTargetOf(order: { tenantId: string; userId: string; planId: string; skuKey: string | null }): InviteActivationTarget {
+  return order.skuKey
+    ? { tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: order.skuKey }
+    : { tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: order.planId };
+}
+
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   /** 解密报文/查单结果中的订单金额（分）、appid、mchid：提供即校验，与本单不一致绝不入账（防串单/伪造）。 */
@@ -634,20 +680,50 @@ export async function markPaidAndApply(parsed: {
   const result = await markPaidAndApplyTx(parsed, source);
   // 支付成功订阅消息（P2）：入账后事务外 fire-and-forget，失败绝不影响入账结果。
   if (result.applied) void notifyPaymentApplied(parsed.outTradeNo).catch(() => {});
-  return result;
+  // 邀请漏斗第四段（2026-08-18）：付费开通成功 → 若该用户有推荐人，补一条 source='invite' 的
+  // ActivationEvent。**挂在这里而不是 applyPlanPurchase**，两条硬理由：
+  //   ① applyPlanPurchase 还被三条**非付费**路径共用——注册测试期自动开通（routes/auth.ts，
+  //      `source='test_default_grant'`，且就在建号事务里）、演示购买（routes/plans.ts `demo_purchase`）、
+  //      运营手工开通（routes/admin.ts `admin_grant`）。挂那里等于把「免费白发」也算成邀请开通：
+  //      开着注册自动开通时，被邀请来的人**注册当场**就落一条 invite 开通，
+  //      「注册 → 首开通」这一段永远 100%，漏斗直接失去意义。
+  //   ② 那三条路径里最早的一条（注册自动开通）跑在建号事务内，而关系绑定是建号提交**之后**
+  //      另开小事务做的（见 auth.ts 的 bindReferralAfterRegister），那一刻 Referral 还不存在，
+  //      查推荐人必然为空——挂那里连该记的也记不到。
+  // markPaidAndApply 是真金入账的唯一收口（plan 与 sku 两条分支都在它里面，且已有
+  // outTradeNo advisory lock + appliedAt 幂等锚点），所以 invite 判定就贴着既有的 recordActivation 走。
+  //
+  // **绝不 await**（2026-08-19 已加持久化 outbox）：旧写法把补记挡在支付回调返回 200 之前，
+  // 违了「绝不阻断支付主链路」这条铁律。它不是「两条查询」——那个说法也是错的：这段小事务实际是
+  // BEGIN + advisory lock + 查 Referral（到此 2 条 SQL，无推荐人就结束）+ 查重（3 条）+ 首次还要
+  // insert（4 条）+ COMMIT。主支付事务此刻**已经提交**、真钱已入账，可连接池打满或 advisory lock
+  // 排队时这几条 SQL 照样能卡住，`routes/pay.ts` 就来不及应答，微信超时后重投——为一条统计
+  // 换来一次重复回调，账算不过来。现在支付事务只写一行 InviteActivationOutbox，提交后派发处理；
+  // 进程随即退出也由 scheduler 续扫，不再把微信重投当唯一重试机制。
+  if (result.inviteOutTradeNo) dispatchInviteActivation(result.inviteOutTradeNo);
+  // 显式收窄返回值：`invite` 带着 userId / tenantId，只在本函数内部用。有路由是把这个结果对象
+  // 直接往响应体里放的形状（`{ ok, applied, reason }`），别让内部字段哪天顺着某个 `return r` 漏出去。
+  return { applied: result.applied, reason: result.reason };
 }
 
 async function markPaidAndApplyTx(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   amountTotal?: number; appId?: string; mchId?: string;
-}, source: string): Promise<{ applied: boolean; reason?: string }> {
+}, source: string): Promise<{ applied: boolean; reason?: string; inviteOutTradeNo?: string }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
 
     const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
     if (!order) return { applied: false, reason: 'order_not_found' };
-    if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+    if (order.appliedAt || order.status === 'applied') {
+      // 已发放，权益一步都不再动（appliedAt 是「恰好一次」的终态锚点）；但历史订单可能还没有
+      // outbox，因此重复通知仍幂等 upsert 一行并异步处理。新订单则复用原行，不会重复制造事件。
+      // 退款单（status='refunded' 但 appliedAt 仍在）也照补：ActivationEvent 不随退款回收，
+      // 「首次补记成功后再退款」的终态本来就留着这一行，不为它再造第二套口径。
+      await enqueueInviteActivation(tx, order.outTradeNo, inviteTargetOf(order));
+      return { applied: false, reason: 'already_applied', inviteOutTradeNo: order.outTradeNo };
+    }
     // 不同订单也必须按用户串行化，否则两笔同时到账会各自读取同一份旧套餐状态，造成时长覆盖。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${order.userId}`}))`;
 
@@ -683,6 +759,8 @@ async function markPaidAndApplyTx(parsed: {
       where: { outTradeNo: parsed.outTradeNo, status: { in: ['created', 'paid'] }, appliedAt: null },
       data: { status: 'paid', paidAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
     });
+    // 这条 already_applied 与上面那条不同，**刻意不派发** invite 补记：抢不到 claim 说明这一刻另有
+    // 一条路径正在发放（或订单已被退款/关闭改了 status），由抢到的那一侧负责派发，这里跟着派只是重复。
     if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
 
     // 流水/审计里的支付方式标签。mock 单必须自带「测试模拟」字样：这条 reason 会出现在用户的
@@ -694,6 +772,8 @@ async function markPaidAndApplyTx(parsed: {
     // 历史无快照订单回退读当前配置（行为与旧版一致）。
     const snapshot = (order.snapshotJson ?? null) as OrderSnapshot | null;
     const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
+    // 邀请漏斗第四段要用的最小信息，在事务里攒好、事务提交后再判推荐人（理由见 markPaidAndApply）。
+    let invite: InviteActivationTarget;
     if (order.skuKey) {
       // V7-12：单次付费商品 → 发放对应权益（模块启用/一次性服务/空间加档）。
       const skuRow = snapshot?.kind === 'sku' && snapshot.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
@@ -709,6 +789,7 @@ async function markPaidAndApplyTx(parsed: {
       );
       // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key, source: attrSource, refId: attrRefId }, tx).catch(() => {});
+      invite = { tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key };
     } else {
       // 无快照的存量订单才回读套餐：此时只能按「入账这一刻」解析成交价（快照才是准确的下单时条件）。
       const planRow = snapshot?.kind === 'plan' && snapshot.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
@@ -728,8 +809,11 @@ async function markPaidAndApplyTx(parsed: {
       );
       // 套餐订单归因（P2）：与 SKU 同口径落 ActivationEvent，供多来源漏斗报表。
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id, source: attrSource, refId: attrRefId }, tx).catch(() => {});
+      invite = { tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id };
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
+    // outbox 与权益/终态同事务提交：响应 200 后即使进程立刻退出，scheduler 也能补完 invite 统计。
+    await enqueueInviteActivation(tx, order.outTradeNo, invite);
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
     // 委托代扣订单到账后，以**实际发放后的**权益到期日作为下一周期锚点：到期前 24h 提交申请，
     // 对齐微信自动续费「通知后 24 小时扣费」。签约回调与支付回调无先后保证，因此这里允许
@@ -758,7 +842,7 @@ async function markPaidAndApplyTx(parsed: {
     // 它单独计一条 junshi_pay_mock_total，测试期的量仍然可见。
     if (isMockOrder(order)) notePayMock('applied');
     else notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount);
-    return { applied: true };
+    return { applied: true, inviteOutTradeNo: order.outTradeNo };
   });
 }
 

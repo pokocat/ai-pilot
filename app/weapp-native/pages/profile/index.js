@@ -4,6 +4,7 @@ const { navTo } = require('../../services/nav');
 const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
+const { withShare } = require('../../services/share');
 
 const MENU_GROUPS = [
   { title: '档案', rows: [
@@ -59,7 +60,7 @@ function buildMenuGroups(completeness, missingCount, fortuneOn) {
   return groups;
 }
 
-Page({
+Page(withShare({
   data: baseData({
     showLogin: false, authed: false, loading: false, loadFailed: false, sheet: '', name: '老板', nameInitial: '主', company: '你的经营案卷',
     planName: '尚未开通', phoneDisplay: '未绑定', inviteCode: '—', avatarUrl: '', creditBalance: 0, usagePercent: 0,
@@ -168,4 +169,4 @@ Page({
       wx.reLaunch({ url: '/pages/sessions/index' });
     } });
   },
-});
+}));

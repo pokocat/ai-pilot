@@ -2,6 +2,7 @@ import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import { streamClosedWithoutVerdict } from './liveGenCore';
+import { throwUnauthorizedForRequest } from './api';
 import type { GenRequest, ChatReply, Deliverable, DeliverableSection, GenerationPhase, GenerationStatus, ImageGenerationProgress } from '../../../shared/contracts';
 
 // 错误分两类，收尾语义不同：'disconnect' 是链路被掐断（小程序切后台被杀请求 / 网络抖动），
@@ -155,7 +156,8 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
  */
 export async function generateStream(body: GenRequest, h: StreamHandlers, control?: StreamControl): Promise<boolean> {
   const url = `${getApiBaseUrl()}/generate`;
-  const header = { 'Content-Type': 'application/json', 'x-user-id': getToken() };
+  const tokenAtRequest = getToken();
+  const header = { 'Content-Type': 'application/json', 'x-user-id': tokenAtRequest };
   // B2：aborted 标记贯穿两端；被主动中断时静默收尾，不走 onError（避免留下「网络失败」气泡）。
   let aborted = false;
 
@@ -165,6 +167,11 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
     let res: Response;
     try { res = await fetch(url, { method: 'POST', headers: header, body: JSON.stringify(body), signal: ac?.signal }); }
     catch { if (aborted) return false; h.onError?.(NETWORK_HINT, 'disconnect'); return false; }
+    if (res.status === 401) {
+      let data: unknown;
+      try { data = await res.clone().json(); } catch { data = undefined; }
+      throwUnauthorizedForRequest(tokenAtRequest, data);
+    }
     if (!res.ok || !res.body) {
       const error = await responseErrorInfo(res);
       h.onError?.(error.message, 'fatal', error.code, error.statusCode);

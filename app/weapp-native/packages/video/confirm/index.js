@@ -5,8 +5,9 @@
 const host = require('../host');
 const api = require('../api');
 const model = require('../model');
+const { withShare } = require('../../../services/share');
 
-Page({
+Page(withShare({
   data: host.hostBaseData({
     projectId: '',
     loading: true,
@@ -194,4 +195,4 @@ Page({
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
-});
+}));

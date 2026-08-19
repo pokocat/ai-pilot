@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const canvas = require('./canvas');
+const { withShare } = require('../../../services/share');
 
 const shichen = [
   ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
@@ -29,7 +30,7 @@ function paint(context, width, height, content) {
   context.setFillStyle('#F1F7F3'); context.fillRect(x, height - 210, max, 108); context.setTextAlign('center'); context.setFillStyle('#969BA1'); context.setFontSize(22); context.fillText('想要完整的天势 × 战略诊断？', width / 2, height - 164); context.setFillStyle('#1E5A43'); context.setFontSize(30); context.fillText('找军师参谋部', width / 2, height - 126); context.setFillStyle('#B4B8BE'); context.setFontSize(20); context.fillText('命理为文化视角的经营参考，不构成决策依据', width / 2, height - 44);
 }
 
-Page({
+Page(withShare({
   data: baseData({ shichen, name: '', calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', consent: false, valid: false, busy: false, imgPath: '', disabled: false, showLogin: false }),
   onLoad() {
     const snapshot = store.snapshot();
@@ -60,4 +61,4 @@ Page({
   },
   shareImage() { canvas.share(this.data.imgPath); },
   saveImage() { canvas.save(this.data.imgPath); },
-});
+}));

@@ -128,8 +128,8 @@ export default function Settings() {
   const deleteAccount = () =>
     Taro.showModal({
       title: '注销账号',
-      content: '注销将永久删除你的账号、对话、方案库与全部数据，且不可恢复。确定继续？',
-      confirmText: '永久注销',
+      content: '注销后账号和公开分享会立即停用，个人数据将隔离保留至少 30 天。保留期内如需处理申诉或恢复，请联系客服；到期后将删除或匿名化，依法需要留存的记录除外。确定继续？',
+      confirmText: '确认注销',
       confirmColor: '#9C4A38', // = var(--danger)，showModal 仅接受 hex
     }).then(async (r) => {
       if (!r.confirm) return;
@@ -137,7 +137,7 @@ export default function Settings() {
         await api.deleteAccount();
         store.logout();
         Taro.reLaunch({ url: '/pages/sessions/index' });
-        Taro.showToast({ title: '账号已注销', icon: 'none' });
+        Taro.showToast({ title: '账号已进入注销保留期', icon: 'none' });
       } catch (e) {
         s.handleApiError(e, { fallbackTitle: '注销失败，请重试' });
       }

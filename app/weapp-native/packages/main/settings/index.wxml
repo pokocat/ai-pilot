@@ -69,7 +69,7 @@
       </view>
 
       <button class="logout-btn" bindtap="logout"><native-icon name="lock" tone="red" size="15"></native-icon><text>退出登录</text></button>
-      <button class="delete-btn" bindtap="deleteAccount">删除账号与全部数据</button>
+      <button class="delete-btn" bindtap="deleteAccount">注销账号</button>
       <view class="settings-bottom"></view>
     </view>
   </scroll-view>

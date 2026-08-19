@@ -46,6 +46,7 @@ import { payRoutes } from './routes/pay.js';
 import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
+import { adminReferralRoutes } from './routes/adminReferral.js';
 import { videoRoutes } from './routes/video.js';
 import { registerHttpAudit } from './services/audit.js';
 import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
@@ -56,9 +57,9 @@ import { planGateState, PlanRequiredError } from './services/planGate.js';
 import { PlanExpiredError } from './services/tokenQuota.js';
 import {
   startEventLoopMonitor, noteRequestStart, noteRequestEnd, noteRequestAborted,
-  gateEnter, gateLeave, gateInFlightNow, noteOverloadRejected,
   noteHttpTiming, notePlanGateBlocked,
 } from './services/metrics.js';
+import { registerOverloadGate } from './services/overloadGate.js';
 
 /**
  * 反代信任配置（压测 P0-0）。
@@ -161,19 +162,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   if (maxInFlight > 0 && !isAiTestMode()) {
     const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream')
       || url.startsWith('/api/video/');
-    app.addHook('onRequest', async (req, reply) => {
-      if (isLongRunning(req.url) || req.url.startsWith('/api/health') || req.url.startsWith('/api/metrics')) return;
-      if (gateInFlightNow() >= maxInFlight) {
-        noteOverloadRejected();
-        reply.header('Retry-After', '1');
-        return reply.code(503).send({ error: '服务繁忙，请稍后重试', code: 'SERVER_BUSY' });
-      }
-      gateEnter();
-      (req as typeof req & { __counted?: boolean }).__counted = true;
-    });
-    const done = (req: { __counted?: boolean }) => { if (req.__counted) { req.__counted = false; gateLeave(); } };
-    app.addHook('onResponse', async (req) => done(req as typeof req & { __counted?: boolean }));
-    app.addHook('onError', async (req) => done(req as typeof req & { __counted?: boolean }));
+    registerOverloadGate(app, maxInFlight, (url) => isLongRunning(url)
+      || url.startsWith('/api/health') || url.startsWith('/api/metrics'));
   }
 
   // 指标采集（压测方案 S-b / 优化计划 P1-2）：与过载闸分开计数——闸门那份刻意不含长耗时 LLM 路径
@@ -235,15 +225,18 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       'PUT /api/profile',
       'POST /api/quickscan',
     ]);
+    // 注销是法定退出能力，不属于商业写权限；无套餐与已过期账号都必须可用。
+    const ALLOW_WITHOUT_PLAN = new Set(['DELETE /api/me']);
     app.addHook('onRequest', async (req, reply) => {
       if (!WRITE_METHODS.has(req.method)) return;
       if (!req.url.startsWith('/api/')) return;
       if (ALLOW_PREFIX.some((p) => req.url.startsWith(p))) return;
       const userId = verifyUserToken(req.headers['x-user-id'] as string | undefined);
       if (!userId) return;
+      const path = req.url.split('?', 1)[0];
+      if (ALLOW_WITHOUT_PLAN.has(`${req.method} ${path}`)) return;
       const state = await planGateState(userId);
       if (state === 'none') {
-        const path = req.url.split('?', 1)[0];
         if (ALLOW_NONE_ONLY.has(`${req.method} ${path}`)) return;
         notePlanGateBlocked('none');
         const e = new PlanRequiredError();
@@ -302,6 +295,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
+  // 运营后台「邀请增长」三视图的只读聚合。单独封装（自挂同一把 requireAdmin）而不是塞进
+  // adminRoutes：admin.ts 已 2900+ 行，三个投影各自要做一次成形，详见该文件头注释。
+  await app.register(adminReferralRoutes, { prefix: '/api' });
 
   // 创作任务 worker（海报成品图）：DB 队列 + FOR UPDATE SKIP LOCKED 抢占，2s 轮询。
   // test 环境内部直接 return（测试用 tickCreativeWorker 手动驱动）。功能开关在每轮 tick 里判

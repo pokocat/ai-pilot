@@ -8,12 +8,21 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { listHints, resolveGuestForm } from '../services/wence.js';
 
-/** 埋点事件白名单（对齐 shared/contracts.d.ts 的 ClientEventName）。非白名单 400，不写库。 */
-const EVENT_NAMES = new Set([
+/**
+ * 埋点事件白名单（对齐 shared/contracts.d.ts 的 ClientEventName）。非白名单 400，不写库。
+ *
+ * **导出是为了让守卫测试拿到真集合**：`app/scripts/weapp-share.test.mjs` 早先用全文正则匹配
+ * 事件名，从这个集合里删掉一项、只要文件里还留着提到它的注释，测试照样全绿，而线上已经在 400
+ * ——端上的 `api.track` fail 是空实现，事件静默消失。那条守卫现在解析下面这个数组字面量本身。
+ */
+export const EVENT_NAMES = new Set([
   'wence_enter', 'proactive_show', 'chip_tap', 'hint_tap',
   'first_message_send', 'drawer_open', 'attach_open', 'tab_switch',
   'execution_enter', 'order_complete', 'backfill_save', 'review_start',
   'pouch_entry_view', 'pouch_entry_click', 'weapon_click',
+  // 邀请漏斗前两段（分享曝光 / 带码落地）。**这两条几乎全是游客上报**——分享是登录用户发的，
+  // 点开分享卡的那个人此刻还没有账号，正是漏斗分母的来源，所以必须走这条鉴权可选的路由。
+  'share_expose', 'invite_landing',
 ]);
 
 /** props 序列化上限：2KB。超限只留截断标记 + 前 2KB 原文，绝不整条丢弃（漏斗分母不能因为脏 props 缺口）。 */

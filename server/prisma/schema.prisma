@@ -238,6 +238,8 @@ model User {
   inviteCode      String?   @unique // V7-13：邀请码（首次读取惰性生成 = "JS"+4 位 base32，跨用户唯一）
   createdAt       DateTime  @default(now())
   wechatLinkedAt  DateTime?
+  deletedAt       DateTime? // 注销申请时间；非空即禁止登录和业务访问，但保留数据到 purgeAfter
+  purgeAfter      DateTime? // 隔离期结束后才允许物理清理（默认 30 天，可由 ACCOUNT_DELETION_RETENTION_DAYS 配置）
 
   tenant              Tenant                  @relation(fields: [tenantId], references: [id])
   plan                Plan?                   @relation(fields: [planId], references: [id])
@@ -1257,12 +1259,34 @@ model ToolCallLog {
 model ReportHtml {
   id        String   @id @default(cuid())
   tenantId  String?
+  userId    String?
   title     String
   html      String   @db.Text
+  revokedAt DateTime? // 注销隔离期内保留正文，但公开入口立即 404
   createdAt DateTime @default(now())
 
   @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
   @@map("report_html")
+}
+
+/// 账号注销的可重试外部清理任务。成功后清空对象 key 与上游 owner，只保留无个人信息的完成凭据。
+model DataErasureJob {
+  id              String    @id @default(cuid())
+  subjectHash     String
+  subjectUserId   String?   @unique // 仅隔离期/清理中保留；完成后清空；同时防重复注销任务
+  objectKeys      Json
+  externalOwnerId String?
+  status          String    @default("retained") // retained | pending | processing | completed
+  attempts        Int       @default(0)
+  lastError       String?   @db.Text
+  nextAttemptAt   DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@map("data_erasure_job")
 }
 
 /// 运营自助技能库：自定义 HTTP 工具。agent 通过 skillsConfig.tools 按 key 勾选启用。
@@ -1993,15 +2017,96 @@ model ActivationEvent {
   id        String   @id @default(cuid())
   tenantId  String
   userId    String
-  itemType  String // 'agent' | 'sku'
-  itemKey   String // agentKey 或 skuKey
-  source    String // 'prescription' | 'catalog' | 'market'
-  refId     String? // source=prescription 时的 prescriptionId
+  itemType  String // 'agent' | 'sku' | 'plan'
+  itemKey   String // agentKey / skuKey / planId
+  /// 'prescription' | 'catalog' | 'market' | 'invite'
+  ///
+  /// 前三个是**同一个问题的互斥答案**（从哪个位子成交的），值由下单请求带入；
+  /// `invite` 是**另一个维度**（这个人是被谁带来的），由服务端按 `Referral` 判定，
+  /// 在付费入账后**另落一行**（见 services/activation.ts 的 recordInviteActivation）。
+  /// 因此按 source 分组计数时，invite 桶与另外三桶**重叠，不可相加**。
+  /// invite 行按用户去重（一人最多一条 = 首次付费开通），服务的是邀请漏斗最后一段。
+  source    String
+  refId     String? // source=prescription 时的 prescriptionId（invite 行不冗余存推荐人，按 userId join Referral 即得）
   createdAt DateTime @default(now())
 
   @@index([tenantId, itemType, itemKey])
   @@index([source, createdAt])
   @@map("activation_event")
+}
+
+/// 支付事务内持久化的邀请开通补记 outbox。支付响应不等待统计写入；进程重启后由 scheduler 继续重试。
+model InviteActivationOutbox {
+  outTradeNo    String    @id
+  tenantId      String
+  userId        String
+  itemType      String
+  itemKey       String
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?   @db.Text
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([completedAt, nextAttemptAt])
+  @@map("invite_activation_outbox")
+}
+
+/// 邀请关系（一人一行 = 单推荐人公理）。
+///
+/// 三条公理：① **单推荐人**——`userId` 主键即保证，且绑定后不可变更；② **无环**——绑定前沿
+/// `referrerId` 递归上溯，途中撞见本人即拒绝（物化路径只存三级，靠它查环会漏更深的环，
+/// 所以判环必须递归而不是只比一层）；③ **深度**——物化路径 lv1/lv2/lv3 **从第一天就写全**，
+/// 因为运营侧的邀请关系树要能看到完整链路；但对用户的呈现与将来的激励口径**只看一级**
+/// （多级 + 利益是微信审核最敏感的形状）。lv2/lv3 由邀请人自己那行平移得到，不递归。
+model Referral {
+  userId     String   @id // 被邀人；主键 = 一人只有一个推荐人
+  tenantId   String
+  referrerId String // 直接邀请人 = lv1
+  lv1        String // = referrerId（物化路径冗余一份，查询免 join/递归）
+  lv2        String? // 邀请人的邀请人
+  lv3        String? // 再上一级
+  inviteCode String // 建边时用的那个码（码是永久码，留档便于对账）
+  source     String // 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual'
+  boundAt    DateTime @default(now())
+
+  @@index([lv1])
+  @@index([lv2])
+  @@index([lv3])
+  @@index([tenantId])
+  @@map("referral")
+}
+
+/// 邀请归因日志：**每次带码进线都落一行，成功与失败都留痕**。
+///
+/// 为什么失败也要落：码过期/被轮换/码主异常时如果静默丢弃，推荐人就无从解释
+/// 「我的客户为什么没归到我」，运营也没有任何可查的凭据（ai-society 在这件事上补过一次）。
+/// clientIp / userAgent 是风控视图（按 IP 看新号聚集）的原料——注册侧本来就在采集这两样。
+model ReferralAttribution {
+  id         String   @id @default(cuid())
+  /// 进线新号所属租户。**必须有**：运营查询 / 导出 / 清理这批含 IP·UA 的归因记录时
+  /// 要能按租户限定范围，否则只能全表扫（与本仓多租户行级隔离铁律冲突）。
+  /// 码主的租户不记在这里——一条归因描述的是「谁进来了」，归属跟着新号走。
+  tenantId   String
+  inviteCode String
+  source     String
+  newUserId  String? // 进线的新用户；建号失败时可能为空
+  referrerId String? // 解析出的码主；unknown_code 时为空
+  outcome    String // 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired' | 'already_bound' | 'config_unavailable' | 'no_timestamp'
+  clientIp   String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([referrerId, createdAt])
+  @@index([clientIp])
+  @@index([outcome, createdAt])
+  @@index([tenantId, createdAt])
+  /// 后台风控默认查「全部租户」，那条 `GROUP BY clientIp` 只按窗口过滤，
+  /// 用不上 `(tenantId, createdAt)`（前导列不匹配）。归因表是事件流、只增不减，
+  /// 放量后没有这条索引就得全表扫。复合 `(createdAt, clientIp)` 让窗口过滤与分组键都走索引。
+  @@index([createdAt, clientIp])
+  @@map("referral_attribution")
 }
 
 /// D-3-7：生态工具注册表（数字人代播/短剧等外部小程序跳转位）。id = toolKey，可开方白名单 = enabled agents ∪ enabled EcoTool。
@@ -2127,7 +2232,7 @@ model VideoCreditHold {
   clientRequestId String
   upstreamJobId   String?   @unique
   credits         Int
-  status          String    @default("submitting") // submitting | submitted | notifying | settled | refunded
+  status          String    @default("submitting") // submitting | unknown | submitted | notifying | settled | refunded
   // notifying 是出片完成通知的**原子认领态**：clip-render-notification 把 submitted 抢成 notifying，
   // 并发的另一轮扫描就抢不到，同一单只推一次。认领后立刻结算，所以它只是个短暂中间态。
   // refunded 是终点，任何路径都不许把它写回 settled（见 services/video/credits.ts）。
@@ -2148,7 +2253,7 @@ model VideoCreditHold {
 /// 为什么不复用 VideoCreditHold：① 克隆没有 projectId（那里是必填）；② 出片的锚点 upstreamJobId
 /// 是唯一的，而重训声音**复用同一个 voiceId**，加唯一约束会让第二次重训直接建不出 hold。
 model VideoCloneHold {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
   userId          String
   /// voiceCreate | voiceRetrain | avatarVideo | avatarImage —— 与 services/video/pricing.ts 的档位一一对应
@@ -2159,12 +2264,12 @@ model VideoCloneHold {
   targetKind      String
   /// 上游返回的 avatarId / voiceId；建单成功后回填。为空 = 还没提交成功，归超时清扫器处理
   targetId        String?
-  status          String   @default("submitting") // submitting | submitted | settled | refunded
+  status          String    @default("submitting") // submitting | submitted | settled | refunded
   lastTrainStatus String?
-  chargedAt       DateTime @default(now())
+  chargedAt       DateTime  @default(now())
   refundedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([userId, clientRequestId])
   @@index([userId, createdAt])

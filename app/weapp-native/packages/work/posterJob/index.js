@@ -5,6 +5,7 @@ const {
   LIMITS, STAGES, progressText, absoluteCreativeUrl, posterAsset, isInFlight,
   normalizeJob, normalizeStatus, newIdempotencyKey, clearPosterPendingByJob, fetchPosterFile,
 } = require('../poster/creative');
+const { withShare } = require('../../../services/share');
 
 const POLL_FAST_MS = 1200;
 const POLL_SLOW_MS = 3000;
@@ -37,7 +38,7 @@ function wxAsync(name, options) {
   });
 }
 
-Page({
+Page(withShare({
   data: baseData({
     jobId: '', loading: true, loadErr: '', showLogin: false, job: null,
     inFlight: false, succeeded: false, failed: false, cancelled: false, timedOut: false,
@@ -388,4 +389,4 @@ Page({
       },
     });
   },
-});
+}));

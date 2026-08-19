@@ -2,10 +2,10 @@
 //
 // 鉴权：**必须配 METRICS_TOKEN 才开放**，未配则整个端点返回 404。
 //
-// 为什么不能退化成「只允许内网 IP」：生产 Nginx 是反代，且 app.ts 按 P0-0 开了 trustProxy，
-// 于是 ① req.ip 取自 X-Forwarded-For，客户端可以随手伪造；② 真实 TCP 对端恒为 127.0.0.1
-// （Nginx 自己），public 流量与本机 curl 完全无法区分。所以 IP 白名单在这个拓扑下形同虚设，
-// 只有共享密钥是真的门。另外建议在 Nginx 侧也不要把 /api/metrics 暴露到公网（双保险）。
+// 为什么不能退化成「只允许某个请求 IP」：默认 trustProxy='loopback' 配合 Nginx
+// `$proxy_add_x_forwarded_for` 会让 req.ip 解析为可信链上的真实客户端地址（而不是可伪造的 XFF 首段），
+// 但代理层级/CIDR 会随 ALB、容器网络和运维拓扑变化，IP 不是稳定的应用鉴权身份。
+// 共享密钥才是跨拓扑不漂移的门；Nginx 侧也建议不把 /api/metrics 暴露到公网（双保险）。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { renderMetrics } from '../services/metrics.js';

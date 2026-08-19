@@ -19,13 +19,13 @@ function reportTitle(title: string | null, html: string): string {
 export async function reportShareRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/r/:id', async (req, reply) => {
     const row = await prisma.reportHtml.findUnique({ where: { id: req.params.id } });
-    if (!row || row.title === '每日战报') return reply.code(404).type('text/html; charset=utf-8').send(NOT_FOUND_HTML);
+    if (!row || row.revokedAt || row.title === '每日战报') return reply.code(404).type('text/html; charset=utf-8').send(NOT_FOUND_HTML);
     return reply.type('text/html; charset=utf-8').send(row.html);
   });
 
   app.get<{ Params: { id: string } }>('/r/:id/pdf', async (req, reply) => {
     const row = await prisma.reportHtml.findUnique({ where: { id: req.params.id } });
-    if (!row || row.title === '每日战报') return reply.code(404).type('text/html; charset=utf-8').send(NOT_FOUND_HTML);
+    if (!row || row.revokedAt || row.title === '每日战报') return reply.code(404).type('text/html; charset=utf-8').send(NOT_FOUND_HTML);
 
     const key = reportPdfKey(row.id);
     let pdf: Buffer | null = null;

@@ -12,6 +12,7 @@ const { chatCore, useStreamRenderer } = require('../../chat-core/behavior');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 const { GUEST_PRELUDE, FALLBACK_HINTS } = require('../../data/wence-defaults');
+const { withShare } = require('../../services/share');
 
 const ALIASES = { general: '玄衡', strat: '观澜', growth: '青衍', ip: '鸣璋', ops: '照微', org: '云枢', intel: '察远', fund: '泓策', model: '构衡', brand: '声澜' };
 const CORE = {
@@ -96,7 +97,7 @@ function safeGet(key) { try { return wx.getStorageSync(key) || ''; } catch (_) {
 function safeSet(key, value) { try { wx.setStorageSync(key, value); } catch (_) { /* storage 满/禁用都不该影响主流程 */ } }
 function localHints() { return FALLBACK_HINTS.map((text, index) => ({ id: `local-${index + 1}`, text })); }
 
-Page({
+Page(withShare({
   behaviors: [chatCore],
   data: baseData({
     // 形态初值取本地缓存（默认 control = 零改动现状）：/me 回来之前先按上次的样子画，
@@ -597,4 +598,4 @@ Page({
       entry: entry || 'keyboard',
     });
   },
-});
+}, { timeline: true }));

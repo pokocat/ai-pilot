@@ -1,5 +1,5 @@
 const MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024;
-const SUPPORTED_DOCUMENT_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'html', 'htm', 'txt'];
+const SUPPORTED_DOCUMENT_EXT = ['pdf', 'doc', 'docx', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'html', 'htm', 'txt'];
 
 function fileExtension(name) {
   return String(name || '').split('.').pop().toLowerCase();

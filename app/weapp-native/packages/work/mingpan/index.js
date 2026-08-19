@@ -2,6 +2,7 @@ const { api } = require('../../../services/api');
 const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
+const { withShare, pathWithCode } = require('../../../services/share');
 
 const shichen = [
   ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
@@ -30,7 +31,7 @@ function normalizeReport(report) {
   return { ...report, columns, dmMeta, wuxing, ziwei, yinzheng, tiaoHouText: report.bazi.tiaoHou && ((report.bazi.tiaoHou.gods || []).length || (report.bazi.tiaoHou.elements || []).length) ? `${(report.bazi.tiaoHou.gods || []).join('、')}${(report.bazi.tiaoHou.elements || []).length ? `（${report.bazi.tiaoHou.elements.join('、')}）` : ''}` : '' };
 }
 
-Page({
+Page(withShare({
   data: baseData({ authed: false, report: null, needBazi: false, loaded: false, disabled: false, showForm: false, editing: false, showLogin: false, activePalace: null, shichen, calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', valid: false, busy: false, scrollIntoView: '', seal: '绿' }),
   onShow() {
     const snapshot = store.snapshot(); const authed = store.isAuthed(); this.setData({ authed, themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, seal: sealByColor[snapshot.colorKey] || '绿' });
@@ -38,7 +39,7 @@ Page({
     store.loadMe().then(() => { const me = store.snapshot().me; const disabled = Boolean(me && me.features && me.features.fortune === false); this.setData({ disabled }); if (!disabled) this.loadReport(); });
   },
   onUnload() { if (typeof store.setOverlay === 'function') store.setOverlay(false, 'mp-palace'); },
-  onShareAppMessage() { return { title: '我的命盘报告 · 八字紫微综合印证', path: '/packages/work/mingpan/index' }; },
+  onShareAppMessage() { return { title: '我的命盘报告 · 八字紫微综合印证', path: pathWithCode('/packages/work/mingpan/index') }; },
   back() { if (getCurrentPages().length > 1) wx.navigateBack(); else wx.switchTab({ url: '/pages/profile/index', fail: () => wx.reLaunch({ url: '/pages/profile/index' }) }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadReport(); },
@@ -78,4 +79,4 @@ Page({
   closePalace() { if (typeof store.setOverlay === 'function') store.setOverlay(false, 'mp-palace'); this.setData({ activePalace: null }); },
   stop() {},
   toggleBasis(event) { const key = event.currentTarget.dataset.key; this.setData({ [`report.yinzheng.${key}.open`]: !this.data.report.yinzheng[key].open }); },
-});
+}, { timeline: true }));

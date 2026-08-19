@@ -6,6 +6,7 @@ const {
   LIMITS, normalizeStatus, normalizeRecommendation, newIdempotencyKey, posterScope, readPosterPending,
   markPosterPending, attachPosterJob,
 } = require('./creative');
+const { withShare } = require('../../../services/share');
 
 const ROLE_LABEL = { portrait: '人像', logo: 'Logo', qr: '二维码' };
 // 每个素材槽一句用途说明：说清「传了会被怎么用」，而不是只摆一个空框让人猜。
@@ -84,7 +85,7 @@ function parsePicked(result) {
   return { path: (file && (file.tempFilePath || file.path)) || (result && result.tempFilePaths && result.tempFilePaths[0]) || '', size: Number(file && file.size || 0) };
 }
 
-Page({
+Page(withShare({
   data: baseData({
     loading: true, loadErr: '', disabled: false, showLogin: false, unlockAgent: null,
     sessionId: '', messageId: '', reason: '', price: null,
@@ -556,4 +557,4 @@ Page({
   },
 
   goCredits() { navTo('/packages/work/credits/index'); },
-});
+}));

@@ -201,8 +201,24 @@ import type {
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   PosterDirectionKey,
   AdminClonePricing, AdminClonePricingUpdate,
+  AdminReferralOverview, AdminReferralTree, AdminReferralRisk,
+  AdminReferralRiskGroup, AdminReferralRiskMember, AdminReferralTenantOption,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
+// —— 邀请增长三视图（P3，全只读；风控只预警不阻断，故没有任何写方法）——
+export type {
+  AdminReferralOverview, AdminReferralTree, AdminReferralTreeNode, AdminReferralRisk,
+  AdminReferralRiskGroup, AdminReferralRiskMember, AdminReferralTenantOption, AdminReferralCount,
+} from '../../shared/contracts';
+/* 风控响应的两处契约待补（服务端 routes/adminReferral.ts 里有同一份局部声明，contracts.d.ts
+   已在契约里收口）：`groupTotal` 已加（不给总数就是静默截断，页面会说谎）、`userAgent` 已删
+   （前端一处不展示，下发等于白白扩散设备指纹）。`phone` 类型不变但语义收窄：
+   服务端已按审计口径掩码（138****1234），不再有完整号码。 */
+// 契约已收口（2026-08-18）：`groupTotal` 已加、`userAgent` 已删，这三个 View 别名不再修形，
+// 保留只为少改视图里的引用点。
+export type AdminReferralRiskMemberView = AdminReferralRiskMember;
+export type AdminReferralRiskGroupView = AdminReferralRiskGroup;
+export type AdminReferralRiskView = AdminReferralRisk;
 // —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
 export type { AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
@@ -222,6 +238,16 @@ export type { AdminClonePricing, AdminClonePricingUpdate } from '../../shared/co
 // —— 附身登录（impersonation，owner-only）——
 export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
+
+/** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
+function referralQs(q: { days?: number; tenantId?: string; roots?: number }): string {
+  const p = new URLSearchParams();
+  if (q.days) p.set('days', String(q.days));
+  if (q.roots) p.set('roots', String(q.roots));
+  if (q.tenantId) p.set('tenantId', q.tenantId);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -326,6 +352,19 @@ export const api = {
   deleteSku: (key: string) => req<{ ok: boolean }>(`/admin/skus/${encodeURIComponent(key)}`, 'DELETE'),
   // —— D-1/WO-12 处方多来源漏斗（六态聚合 + 开通来源计数）——
   prescriptionFunnel: (days = 30) => req<AdminPrescriptionFunnel>(`/admin/prescriptions/funnel?days=${days}`),
+  // —— 邀请增长三视图（P3）：一份数据三个投影，全只读 ——
+  // 阈值不在前端算：风控聚集阈值归运营配置（FeatureFlag），服务端读出来一并回传。
+  referralOverview: (q: { days?: number; tenantId?: string } = {}) =>
+    req<AdminReferralOverview>(`/admin/referral/overview${referralQs(q)}`),
+  // `days` 在树上只作用于**红环**（同 IP 聚集窗口），不筛边——关系是永久的，树始终是全量。
+  // 传它的唯一理由是让红环与「风控关联」屏此刻的窗口同源（见 server/src/routes/adminReferral.ts）。
+  referralTree: (q: { days?: number; tenantId?: string; roots?: number } = {}) =>
+    req<AdminReferralTree>(`/admin/referral/tree${referralQs(q)}`),
+  referralRisk: (q: { days?: number; tenantId?: string } = {}) =>
+    req<AdminReferralRiskView>(`/admin/referral/risk${referralQs(q)}`),
+  // 租户筛选项单独取：四个 tab 都要用，且不随天数窗口/当前租户变化 —— 绑在 overview 上会让
+  // 每次切 tab、换窗口都重跑一遍全量计数，也让「筛选项读失败」被伪装成「没有租户」。
+  referralTenants: () => req<AdminReferralTenantOption[]>('/admin/referral/tenants'),
   // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
   ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
   createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),

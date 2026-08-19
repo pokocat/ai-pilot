@@ -8,6 +8,7 @@
 import Taro from '@tarojs/taro';
 import {
   api,
+  throwUnauthorizedForRequest,
   type CreativeStatusResult, type PosterTier, type PosterDirectionOption, type PosterTemplateOption,
 } from './api';
 import { getApiBaseUrl } from './runtimeMode';
@@ -150,7 +151,9 @@ export async function fetchPosterFile(url?: string): Promise<string> {
     fs.writeFileSync(path, base64, 'base64');
     return path;
   }
-  const res = await Taro.downloadFile({ url: u, header: { 'x-user-id': getToken() } });
+  const tokenAtRequest = getToken();
+  const res = await Taro.downloadFile({ url: u, header: { 'x-user-id': tokenAtRequest } });
+  if (res.statusCode === 401) throwUnauthorizedForRequest(tokenAtRequest);
   if (res.statusCode !== 200 || !res.tempFilePath) throw new Error('成品图下载失败');
   return res.tempFilePath;
 }

@@ -1531,14 +1531,16 @@ describe('TC-X 身份与账号注销', () => {
     assert.deepEqual(knowledgeUsed, [], '访谈模式不应声明使用旧资料');
   });
 
-  test('X4 注销账号 → 删除数据，原 token 失效', async () => {
+  test('X4 注销账号 → 立即停用并进入保留期，原 token 失效', async () => {
     const t = await login(uniquePhone());
     await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
     const after = await api('GET', '/api/me', { token: t });
     assert.equal(after.status, 401, '注销后原登录态应失效');
-    assert.equal(await prisma.user.count({ where: { id: t } }), 0, '用户记录应被删除');
+    assert.ok(del.body.retentionUntil, '注销结果应明确数据保留截止时间');
+    const retained = await prisma.user.findUnique({ where: { id: t } });
+    assert.ok(retained?.deletedAt && retained.purgeAfter, '用户记录应隔离保留，等待到期清除');
   });
 });
 
@@ -1576,14 +1578,14 @@ describe('TC-Y Token 用量计量', () => {
     await deleteEndpoint(priced);
   });
 
-  test('Y3 注销账号连带清除其 token 用量（外键安全）', async () => {
+  test('Y3 注销保留期内保留 token 用量，供审计与恢复', async () => {
     const t = await login(uniquePhone(), 'Token丙');
     const tenantId = await tenantOf(t);
     await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 100, outputTokens: 50, cachedInput: 0 } });
     assert.equal(await prisma.tokenUsage.count({ where: { userId: t } }), 1);
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
-    assert.equal(await prisma.tokenUsage.count({ where: { tenantId } }), 0, '注销后该租户 token 流水应清空');
+    assert.equal(await prisma.tokenUsage.count({ where: { userId: t } }), 1, '保留期内不得提前删除 token 流水');
   });
 
   test('Y4 嵌入/重排计入「检索基建」用量，与用户产出 totals/byModel 区分', async () => {
@@ -1788,14 +1790,15 @@ describe('TC-Z 月度 Token 额度', () => {
     assert.ok(Array.isArray(cr.body.items));
   });
 
-  test('Z4 注销连带清除 token_wallet（外键安全）', async () => {
+  test('Z4 注销保留期内保留 token_wallet，账号入口已停用', async () => {
     const t = await login(uniquePhone(), '额度丁');
     const tenantId = await tenantOf(t);
     await setQuotaAnchored(tenantId, t, 1000);
     assert.equal(await prisma.tokenWallet.count({ where: { userId: t } }), 1);
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
-    assert.equal(await prisma.tokenWallet.count({ where: { tenantId } }), 0, '注销后租户额度账户应清空');
+    assert.equal(await prisma.tokenWallet.count({ where: { userId: t } }), 1, '保留期内额度账户应随账号隔离保留');
+    assert.equal((await api('GET', '/api/me', { token: t })).status, 401);
   });
 });
 

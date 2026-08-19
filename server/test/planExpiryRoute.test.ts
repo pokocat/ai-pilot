@@ -6,6 +6,7 @@ import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 import { setQuota, getQuotaState, RESERVE_TOKENS } from '../src/services/tokenQuota.js';
 import { configurePurpose, __wipeAiV2 } from '../src/services/aiV2Admin.js';
+import { signUserToken } from '../src/services/userToken.js';
 
 const tenantOf = async (token: string) => (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
 
@@ -150,16 +151,28 @@ test('生产硬化：支付未配 + 非演示环境 → 付费套餐 /purchase �
   // 运营临时活动档等场景——测试自建一个验证该路径未被误伤。
   const free = await prisma.plan.create({ data: { name: '临时活动档', price: 0, period: 'month', creditsPerMonth: 5, tokenQuotaPerMonth: 10_000, agentCount: 3, featuresJson: [], sort: 99 } });
 
-  const prev = process.env.NODE_ENV;
+  const previous = {
+    nodeEnv: process.env.NODE_ENV,
+    jwtSecret: process.env.APP_JWT_SECRET,
+    jwtRequired: process.env.APP_JWT_REQUIRED,
+  };
   process.env.NODE_ENV = 'production'; // 模拟生产：demoPurchaseEnabled() → false
+  process.env.APP_JWT_SECRET = 'test-only-production-jwt-secret-32-bytes';
+  process.env.APP_JWT_REQUIRED = 'true';
+  const productionToken = signUserToken(token);
   try {
-    const blocked = await api('POST', `/api/plans/${paid.id}/purchase`, { token });
+    const blocked = await api('POST', `/api/plans/${paid.id}/purchase`, { token: productionToken });
     assert.equal(blocked.status, 402);
     assert.equal(blocked.body.code, 'PAYMENT_COMING_SOON', '付费套餐在生产不免费发放');
-    const okFree = await api('POST', `/api/plans/${free.id}/purchase`, { token });
+    const okFree = await api('POST', `/api/plans/${free.id}/purchase`, { token: productionToken });
     assert.equal(okFree.status, 200, '免费套餐不受限');
   } finally {
-    process.env.NODE_ENV = prev;
+    if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous.nodeEnv;
+    if (previous.jwtSecret === undefined) delete process.env.APP_JWT_SECRET;
+    else process.env.APP_JWT_SECRET = previous.jwtSecret;
+    if (previous.jwtRequired === undefined) delete process.env.APP_JWT_REQUIRED;
+    else process.env.APP_JWT_REQUIRED = previous.jwtRequired;
   }
   // 恢复测试环境后（demoPurchaseEnabled=true）→ 付费套餐演示发放仍放行
   const okPaid = await api('POST', `/api/plans/${paid.id}/purchase`, { token });

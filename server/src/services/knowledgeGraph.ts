@@ -11,16 +11,15 @@ function norm(name: string): string {
 export interface Triple { subject: string; predicate: string; object: string }
 
 /** 实体去重 upsert（按 tenant+归一名+type 唯一）。返回实体 id。 */
-async function upsertEntity(tenantId: string, projectId: string | null, name: string, type: string): Promise<string> {
+async function upsertEntity(tx: Prisma.TransactionClient, tenantId: string, projectId: string | null, name: string, type: string): Promise<string> {
   const normName = norm(name);
-  const existing = await prisma.graphEntity.findUnique({
+  const entity = await tx.graphEntity.upsert({
     where: { tenantId_normName_type: { tenantId, normName, type } },
+    create: { tenantId, projectId, name: name.trim(), normName, type },
+    update: {},
+    select: { id: true },
   });
-  if (existing) return existing.id;
-  const created = await prisma.graphEntity.create({
-    data: { tenantId, projectId, name: name.trim(), normName, type },
-  });
-  return created.id;
+  return entity.id;
 }
 
 export interface UpsertGraphResult { entities: number; relations: number; superseded: number }
@@ -40,31 +39,40 @@ export async function upsertTriples(
   let relCount = 0, superseded = 0;
   const entityIds = new Set<string>();
 
-  for (const t of triples) {
-    if (!t.subject?.trim() || !t.predicate?.trim() || !t.object?.trim()) continue;
-    const subjectId = await upsertEntity(tenantId, projectId, t.subject, typeOf(t.subject));
-    const objectId = await upsertEntity(tenantId, projectId, t.object, typeOf(t.object));
-    entityIds.add(subjectId); entityIds.add(objectId);
+  await prisma.$transaction(async (tx) => {
+    // 图谱写入量远低于业务请求；按租户串行化可同时保证实体 upsert 与关系替换的原子性，
+    // 也避免两条反向三元组按不同顺序加多把锁时发生死锁。
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`graph-tenant:${tenantId}`}))::text AS locked`;
+    for (const t of triples) {
+      if (!t.subject?.trim() || !t.predicate?.trim() || !t.object?.trim()) continue;
+      const predicate = t.predicate.trim();
+      const subjectId = await upsertEntity(tx, tenantId, projectId, t.subject, typeOf(t.subject));
+      const objectId = await upsertEntity(tx, tenantId, projectId, t.object, typeOf(t.object));
+      entityIds.add(subjectId); entityIds.add(objectId);
 
-    // 当前有效的同主谓关系
-    const actives = await prisma.graphRelation.findMany({
-      where: { tenantId, subjectId, predicate: t.predicate.trim(), validTo: null, invalidatedAt: null },
-    });
-    // 已存在指向同 object 的有效关系 → 幂等跳过
-    if (actives.some((a) => a.objectId === objectId)) continue;
-    // 指向不同 object 的旧关系 → 软失效（被新事实推翻）
-    for (const a of actives) {
-      await prisma.graphRelation.update({ where: { id: a.id }, data: { validTo: validFrom, invalidatedAt: new Date() } });
-      superseded++;
+      // 同租户、主语、谓词串行化：防止并发请求同时看到「无有效边」并各自插入。
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`graph:${tenantId}:${subjectId}:${predicate}`}))::text AS locked`;
+      const actives = await tx.graphRelation.findMany({
+        where: { tenantId, subjectId, predicate, validTo: null, invalidatedAt: null },
+      });
+      if (actives.some((a) => a.objectId === objectId && a.projectId === projectId)) continue;
+      const replaced = actives.filter((a) => a.projectId === projectId && a.objectId !== objectId);
+      if (replaced.length) {
+        await tx.graphRelation.updateMany({
+          where: { id: { in: replaced.map((a) => a.id) } },
+          data: { validTo: validFrom, invalidatedAt: new Date() },
+        });
+        superseded += replaced.length;
+      }
+      await tx.graphRelation.create({
+        data: {
+          tenantId, projectId, subjectId, predicate, objectId,
+          validFrom, source: opts.source ?? 'conversation', sourceId: opts.sourceId ?? null,
+        },
+      });
+      relCount++;
     }
-    await prisma.graphRelation.create({
-      data: {
-        tenantId, projectId, subjectId, predicate: t.predicate.trim(), objectId,
-        validFrom, source: opts.source ?? 'conversation', sourceId: opts.sourceId ?? null,
-      },
-    });
-    relCount++;
-  }
+  });
   return { entities: entityIds.size, relations: relCount, superseded };
 }
 
@@ -136,8 +144,17 @@ export async function queryRelations(
 /** 实体列表（运营/调试用）。 */
 export async function listEntities(tenantId: string, projectId?: string | null, limit = 100) {
   const rows = await prisma.graphEntity.findMany({
-    where: { tenantId, ...(projectId ? { projectId } : {}) },
+    where: {
+      tenantId,
+      ...(projectId ? {
+        OR: [
+          { projectId },
+          { subjectOf: { some: { projectId } } },
+          { objectOf: { some: { projectId } } },
+        ],
+      } : {}),
+    },
     orderBy: { createdAt: 'desc' }, take: Math.min(500, limit),
   });
-  return rows.map((e) => ({ id: e.id, name: e.name, type: e.type, projectId: e.projectId, createdAt: e.createdAt.toISOString() }));
+  return rows.map((e) => ({ id: e.id, name: e.name, type: e.type, projectId: projectId ?? e.projectId, createdAt: e.createdAt.toISOString() }));
 }

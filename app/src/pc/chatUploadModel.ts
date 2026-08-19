@@ -1,6 +1,6 @@
 import { checkUpload } from '../services/uploadGuard';
 
-export const CHAT_UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'] as const;
+export const CHAT_UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'] as const;
 export const CHAT_UPLOAD_MAX_COUNT = 9;
 export const CHAT_UPLOAD_MAX_BATCH_BYTES = 60 * 1024 * 1024;
 

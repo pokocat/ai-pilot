@@ -2,12 +2,13 @@ const { api } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { navTo, gotoExecution } = require('../../../services/nav');
+const { withShare } = require('../../../services/share');
 
 const STEP_ROLES = ['准备', '处理', '回写'];
 const ACTION_LABEL = { upload: '去图籍上传', backfill: '回填面板', review: '发起复盘', topics: '锦囊手艺', none: '去执行' };
 const ACTION_HINT = { upload: '上传后进入智库待整理区，再回写到军师判断。', backfill: '记录线索、咨询、成交，提交后进入今日复盘。', review: '填入完成数据，今晚复盘并调整明日军令。', topics: '去锦囊挑一门手艺，把这条军令落成成品。', none: '按步骤推进这条军令，完成后回执行页打卡。' };
 
-Page({
+Page(withShare({
   data: baseData({ loading: true, failed: false, order: null, no: 1, steps: [], metrics: [], actionLabel: '', actionHint: '', showLogin: false }),
   onLoad(options) { this._id = options && options.id || ''; this.load(); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); },
@@ -28,4 +29,4 @@ Page({
   retry() { this.load(); },
   runAction() { if (this._actionType === 'upload') wx.switchTab({ url: '/pages/thinktank/index' });
     else if (this._actionType === 'topics') navTo('/pages/pouch/index'); else wx.navigateBack({ fail: () => gotoExecution('today') }); },
-});
+}));

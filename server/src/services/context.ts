@@ -79,7 +79,7 @@ export async function resolveUser(token?: string) {
   const id = verifyUserToken(token); // JWT→sub / 历史 token→userId 原样（见 userToken.ts）
   if (!id) throw unauthorized();
   const u = await prisma.user.findUnique({ where: { id }, include: { tenant: true } });
-  if (!u) throw unauthorized();
+  if (!u || u.deletedAt) throw unauthorized();
   return u;
 }
 

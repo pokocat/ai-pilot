@@ -1199,7 +1199,9 @@ test('原生方案继续支付、到账提示、自动续费关闭与离线登�
   assert.match(repay[0], /const state = await this\.waitApplied\(outTradeNo\)/);
   assert.match(repay[0], /if \(state === 'applied'\)[\s\S]*?支付成功，权益已更新/);
   assert.match(repay[0], /支付结果待确认，请稍后刷新订单状态/);
-  assert.match(credits, /return 'pending';\n  \},\n\}\);/);
+  // 收尾容忍 `});` 与 `}));` 两种：全站分享 mixin 上线后页面统一包成 `Page(withShare({...}))`，
+  // 多一层右括号。这条断言要守的是「waitApplied 是本文件最后一个方法、后面没再接东西」，与包装层无关。
+  assert.match(credits, /return 'pending';\n  \},\n\}\)?\);/);
 
   assert.match(login, /code === 'NETWORK_ERROR'/);
   assert.match(login, /token: `local-\$\{this\.data\.phone\}`/);
@@ -1989,6 +1991,9 @@ test('原生设置恢复长按附身入口与六色本命色盘', () => {
 test('原生设置与游客老板页恢复政策、客服和退出登录', () => {
   const settings = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.js'), 'utf8');
   const settingsWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.wxml'), 'utf8');
+  const nativeLegal = fs.readFileSync(path.join(sourceRoot, 'packages/main/legal/index.js'), 'utf8');
+  const h5Settings = fs.readFileSync(path.join(appRoot, 'src/packages/main/settings/index.tsx'), 'utf8');
+  const h5Legal = fs.readFileSync(path.join(appRoot, 'src/packages/main/legal/index.tsx'), 'utf8');
   const settingsScss = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.scss'), 'utf8');
   const profile = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.js'), 'utf8');
   const profileWxml = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.wxml'), 'utf8');
@@ -2005,6 +2010,15 @@ test('原生设置与游客老板页恢复政策、客服和退出登录', () =>
   assert.match(settingsScss, /\.settings-contact-btn\s*\{[\s\S]*?background:\s*transparent/);
   assert.match(settingsScss, /\.settings-contact-btn::after\s*\{\s*border:\s*0/);
   assert.match(settingsScss, /\.logout-btn\s*\{/);
+
+  for (const source of [settings, nativeLegal, h5Settings, h5Legal]) {
+    assert.match(source, /30 天/, '注销入口与隐私政策必须明确默认保留期');
+    assert.doesNotMatch(source, /注销(?:将|会)永久删除|永久删除(?:你的)?账号|删除全部账号数据|此操作不可恢复/, '不得把注销请求误称为立即永久删除');
+  }
+  assert.match(settings, /账号和公开分享会立即停用/);
+  assert.match(h5Settings, /账号和公开分享会立即停用/);
+  assert.match(nativeLegal, /期满后删除或匿名化/);
+  assert.match(h5Legal, /到期后删除或匿名化/);
 
   assert.match(profileWxml, /<button wx:if="\{\{row\.action==='contact'\}\}" class="menu-row guest-contact" open-type="contact">/);
   assert.doesNotMatch(profile, /请使用页面右上角客服入口|action === 'contact'/, '游客客服不得再落到死 toast');
@@ -2509,7 +2523,9 @@ test('自带字体：family 名三处一致，未配托管地址时静默跳过�
   // 失败静默：不弹 toast、不打断
   assert.match(font, /fail: \(\) => \{\}/);
   // 只在 onLaunch 触发一次
-  assert.match(appJs, /onLaunch\(\)\s*\{[\s\S]{0,200}loadAppFont\(\)/);
+  // onLaunch 现在接 options（冷启动捕获分享带来的邀请码，见 services/invite.js），
+  // 且体内多了说明注释，故放宽形参与窗口；这条断言守的仍是「loadAppFont 在 onLaunch 里被调一次」。
+  assert.match(appJs, /onLaunch\((?:options)?\)\s*\{[\s\S]{0,900}loadAppFont\(\)/);
   assert.match(font, /let started = false;[\s\S]{0,400}if \(started\) return;/);
 });
 
@@ -2621,7 +2637,9 @@ test('成片页必须声明转发：不实现 onShareAppMessage，微信会把�
   assert.ok(block, '取不到 onShareAppMessage 实现');
   // path 必须是快拍入口、不带 workId：成片是私有资产，转出去对方也拿不到（本页无参会 toast 退回），
   // 与 mingpan / quickscan 同一条约定。
-  assert.match(block[0], /path: '\/packages\/video\/home\/index'/, '转发落地页必须是快拍入口');
+  // path 现在经 pathWithCode() 接上邀请码做裂变归因——落地页本身没变（仍是快拍入口、仍不带 workId），
+  // 所以这条约定继续成立，只是外面多包了一层。
+  assert.match(block[0], /path: pathWithCode\('\/packages\/video\/home\/index'\)/, '转发落地页必须是快拍入口（经 pathWithCode 接归因参数）');
   assert.doesNotMatch(block[0], /workId/, '转发路径不许带 workId —— 那是把别人的私有成片塞给对方');
 });
 

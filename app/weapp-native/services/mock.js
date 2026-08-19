@@ -307,7 +307,14 @@ function updateIdentity(body) {
   wx.setStorageSync(storageKey('identity'), next);
   return Promise.resolve(Object.assign({ ok: true }, next));
 }
-function deleteAccount() { wx.clearStorageSync(); return Promise.resolve({ ok: true }); }
+function deleteAccount() {
+  // mock 与真实服务保持同一保留期语义，不在注销请求时立即清除业务数据。
+  return Promise.resolve({
+    ok: true,
+    erasureJobId: `mock-erasure-${Date.now()}`,
+    retentionUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+}
 function bindPhone(phone, _code, phoneCode) {
   let value = String(phone || '').trim();
   if (!value && phoneCode) {
