@@ -42,6 +42,16 @@ test('无套餐用户：业务写 403 PLAN_REQUIRED，读放行', async () => {
   assert.notEqual(r.status, 403, 'GET 不应被禁写闸拦');
 });
 
+test('无套餐用户：注销不受商业写权限门阻断', async () => {
+  const id = await bareUser();
+  const result = await api('DELETE', '/api/me', { token: id });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.ok, true);
+  const retained = await prisma.user.findUniqueOrThrow({ where: { id } });
+  assert.ok(retained.deletedAt);
+  assert.ok(retained.purgeAfter);
+});
+
 test('无套餐新账号：可完成入局建档与每日 1 次首判，其他写能力仍锁定', async () => {
   const id = await bareUser();
 
@@ -87,6 +97,15 @@ test('套餐已到期：同样禁写，但错误码是 PLAN_EXPIRED（前端续�
   });
   assert.equal(onboardingWrite.status, 403);
   assert.equal(onboardingWrite.body.code, 'PLAN_EXPIRED', '首次入局例外只属于从未开通的新账号');
+});
+
+test('套餐已到期用户：仍可注销账号', async () => {
+  const token = await login(uniquePhone(), '过期注销用户');
+  await prisma.user.update({ where: { id: token }, data: { planExpiresAt: new Date(Date.now() - 86400_000) } });
+  __resetPlanGate();
+  const result = await api('DELETE', '/api/me', { token });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.ok((await prisma.user.findUniqueOrThrow({ where: { id: token } })).deletedAt);
 });
 
 test('放行前缀：无套餐也能走 auth / pay 写路径（不被 PLAN_REQUIRED 拦）', async () => {

@@ -1,4 +1,4 @@
-// 定时任务框架（M1 PR-4）：进程内周期扫描（生产为单实例部署，见 prod 部署口径）。
+// 定时任务框架（M1 PR-4）：每个 API 实例都会计时，但每轮通过 PostgreSQL advisory lock 选出唯一执行者。
 // 设计：任务注册制（名字+周期+执行体），每个任务独立 try/catch —— 一个任务崩不影响其它；
 // 每次执行打点日志，命中业务动作再落审计（audit_log）。测试/脚本环境不自启（NODE_ENV=test 或未调 start）。
 // 任务位（随里程碑挂载）：案卷久未推进召回（已挂，v1 打点候选）→ M2 接：久不复盘提醒、预言到期验证、里程碑解锁。
@@ -19,6 +19,8 @@ import {
 } from './wechatSubscribe.js';
 import { scanClipRenderNotifications } from './video/renderNotification.js';
 import { scanAvatarTrainingNotifications } from './video/avatarNotification.js';
+import { scanDataErasureJobs } from './accountDeletion.js';
+import { runVideoMaintenanceSweep } from './video/maintenance.js';
 
 export interface ScheduledJob {
   name: string;
@@ -40,7 +42,20 @@ export async function runJob(name: string): Promise<void> {
   if (!job) throw new Error(`未注册的定时任务：${name}`);
   const t0 = Date.now();
   try {
-    await job.run();
+    if (process.env.NODE_ENV === 'test') {
+      await job.run();
+    } else {
+      await prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ acquired: boolean }>>`
+          SELECT pg_try_advisory_xact_lock(hashtext(${`junshi:scheduler:${name}`})) AS acquired
+        `;
+        if (!rows[0]?.acquired) {
+          console.log(`[scheduler] ${name} skipped · another instance owns lease`);
+          return;
+        }
+        await job.run();
+      }, { timeout: 15 * 60_000 });
+    }
     console.log(`[scheduler] ${name} ok in ${Date.now() - t0}ms`);
   } catch (err) {
     console.error(`[scheduler] ${name} failed:`, (err as Error).message);
@@ -52,9 +67,7 @@ export function startScheduler(): void {
   // 显式停机开关。两个用途：
   //   ① 压测——本函数只在 NODE_ENV!=test 时启动，而压测栈按 P0-0 已切到 production，
   //      定时任务会真的开始周期性全量扫库并尝试推送，给容量测量掺进无关的背景负载；
-  //   ② 运维——AGENTS §13 记着「scheduler 每进程各跑一份，选主没做完不许加第二个进程」。
-  //      在拆出独立 cron worker 之前，这个开关让「多个 API 进程 + 一个专职跑定时任务的进程」
-  //      成为可行的过渡形态：API 侧全部置 false，只留一个进程为 true。
+  //   ② 运维——可在只运 API 的节点关闭背景扫描；多实例同时开启也会由 DB 锁去重。
   // 默认 true = 行为不变。
   if ((process.env.SCHEDULER_ENABLED ?? 'true').trim() === 'false') {
     console.log('[scheduler] SCHEDULER_ENABLED=false，本进程不启动定时任务');
@@ -335,6 +348,11 @@ registerJob({ name: 'clip-render-notification', intervalMs: 60_000, run: async (
     console.log(`[scheduler] clip render: settled=${result.settled} sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
   }
 } });
+registerJob({ name: 'account-erasure-sweep', intervalMs: 5 * 60_000, run: async () => {
+  const completed = await scanDataErasureJobs();
+  if (completed) console.log(`[scheduler] account erasure completed: ${completed}`);
+} });
+registerJob({ name: 'video-maintenance-sweep', intervalMs: 5 * 60_000, run: runVideoMaintenanceSweep });
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
 registerJob(MORNING_ORDER_JOB);
 registerJob(WEEKLY_REVIEW_JOB);

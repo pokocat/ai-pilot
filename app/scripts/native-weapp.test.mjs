@@ -1976,6 +1976,9 @@ test('原生设置恢复长按附身入口与六色本命色盘', () => {
 test('原生设置与游客老板页恢复政策、客服和退出登录', () => {
   const settings = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.js'), 'utf8');
   const settingsWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.wxml'), 'utf8');
+  const nativeLegal = fs.readFileSync(path.join(sourceRoot, 'packages/main/legal/index.js'), 'utf8');
+  const h5Settings = fs.readFileSync(path.join(appRoot, 'src/packages/main/settings/index.tsx'), 'utf8');
+  const h5Legal = fs.readFileSync(path.join(appRoot, 'src/packages/main/legal/index.tsx'), 'utf8');
   const settingsScss = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.scss'), 'utf8');
   const profile = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.js'), 'utf8');
   const profileWxml = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.wxml'), 'utf8');
@@ -1992,6 +1995,15 @@ test('原生设置与游客老板页恢复政策、客服和退出登录', () =>
   assert.match(settingsScss, /\.settings-contact-btn\s*\{[\s\S]*?background:\s*transparent/);
   assert.match(settingsScss, /\.settings-contact-btn::after\s*\{\s*border:\s*0/);
   assert.match(settingsScss, /\.logout-btn\s*\{/);
+
+  for (const source of [settings, nativeLegal, h5Settings, h5Legal]) {
+    assert.match(source, /30 天/, '注销入口与隐私政策必须明确默认保留期');
+    assert.doesNotMatch(source, /注销(?:将|会)永久删除|永久删除(?:你的)?账号|删除全部账号数据|此操作不可恢复/, '不得把注销请求误称为立即永久删除');
+  }
+  assert.match(settings, /账号和公开分享会立即停用/);
+  assert.match(h5Settings, /账号和公开分享会立即停用/);
+  assert.match(nativeLegal, /期满后删除或匿名化/);
+  assert.match(h5Legal, /到期后删除或匿名化/);
 
   assert.match(profileWxml, /<button wx:if="\{\{row\.action==='contact'\}\}" class="menu-row guest-contact" open-type="contact">/);
   assert.doesNotMatch(profile, /请使用页面右上角客服入口|action === 'contact'/, '游客客服不得再落到死 toast');

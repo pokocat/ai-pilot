@@ -26,6 +26,7 @@ import type {
   CreativePosterListResult,
   GenerationView,
   FactConfirmationRequest, FactConfirmationResult,
+  AccountDeletionResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -109,6 +110,11 @@ function throwUnauthorized(tokenAtRequest: string, data?: unknown, message = '�
     authHandled,
     staleAuth,
   });
+}
+
+/** 给 fetch/downloadFile 等不能走 request() 的旁路复用同一登录失效裁决。 */
+export function throwUnauthorizedForRequest(tokenAtRequest: string, data?: unknown, message?: string): never {
+  return throwUnauthorized(tokenAtRequest, data, message);
 }
 
 // D-1 开通来源归因：随解锁/下单请求带入的位子来源（与 UserAgent.source 正交）。
@@ -541,7 +547,7 @@ export const api = {
   uploadAvatar: (file: UploadSource) =>
     useMockApi() ? mock.uploadAvatar(file) : uploadAvatarFile(file),
   deleteAccount: () =>
-    useMockApi() ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
+    useMockApi() ? mock.deleteAccount() : request<AccountDeletionResult>('/me', 'DELETE'),
   agents: () => (useMockApi() ? mock.agents() : request<Agent[]>('/agents')),
   // D-1 开通来源归因：解锁 agent 带可选 source/refId（缺省服务端按 catalog 记）。
   purchaseAgent: (key: string, attribution?: ActivationAttribution) =>

@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma, VideoCreditHold } from '@prisma/client';
 import { prisma } from '../../db.js';
 import { chargeCreditsOnce, refundCreditsOnce } from '../credits.js';
 
@@ -43,6 +43,13 @@ export async function attachVideoJob(holdId: string, upstreamJobId: string) {
   return prisma.videoCreditHold.update({ where: { id: holdId }, data: { upstreamJobId, status: 'submitted', lastJobStatus: 'queued' } });
 }
 
+export async function markVideoSubmissionUnknown(holdId: string, message?: string) {
+  return prisma.videoCreditHold.updateMany({
+    where: { id: holdId, status: { in: ['submitting', 'unknown'] }, upstreamJobId: null },
+    data: { status: 'unknown', lastJobStatus: message ? `submission_unknown:${message.slice(0, 120)}` : 'submission_unknown' },
+  });
+}
+
 export async function settleVideoJob(upstreamJobId: string, status: string) {
   const hold = await prisma.videoCreditHold.findUnique({ where: { upstreamJobId } });
   if (!hold) return null;
@@ -80,17 +87,37 @@ export async function refundVideoHold(holdId: string, lastJobStatus = 'failed') 
   });
 }
 
-/** 进程在扣费后、上游建单前崩溃时自动退回；不碰已拿到 jobId 的正常长任务。 */
-export async function refundStaleUnsubmittedVideoHolds(maxAgeMs = 10 * 60_000): Promise<number> {
+export type VideoSubmissionProbeResult =
+  | { outcome: 'accepted'; jobId: string; status?: string }
+  | { outcome: 'rejected'; reason?: string }
+  | { outcome: 'unknown' };
+export type VideoSubmissionProbe = (hold: VideoCreditHold) => Promise<VideoSubmissionProbeResult>;
+
+/**
+ * 扣费后未拿到 jobId 只能向上游按 clientRequestId 对账/幂等补交，绝不能按超时直接退款。
+ * accepted 回填锚点；明确 rejected 才退款；网络不确定继续保留 unknown 等下一轮。
+ */
+export async function reconcileStaleUnsubmittedVideoHolds(
+  probe: VideoSubmissionProbe,
+  maxAgeMs = 30_000,
+): Promise<{ scanned: number; attached: number; refunded: number }> {
   const rows = await prisma.videoCreditHold.findMany({
-    where: { status: { in: ['submitting', 'charged'] }, upstreamJobId: null, updatedAt: { lt: new Date(Date.now() - maxAgeMs) } },
-    select: { id: true },
+    where: { status: { in: ['submitting', 'unknown'] }, upstreamJobId: null, updatedAt: { lt: new Date(Date.now() - maxAgeMs) } },
     take: 100,
   });
-  let refunded = 0;
-  for (const row of rows) {
-    const result = await refundVideoHold(row.id, 'submit_timeout').catch(() => null);
-    if (result?.status === 'refunded') refunded += 1;
+  let attached = 0; let refunded = 0;
+  for (const hold of rows) {
+    const result = await probe(hold).catch(() => ({ outcome: 'unknown' as const }));
+    if (result.outcome === 'accepted') {
+      await attachVideoJob(hold.id, result.jobId);
+      if (result.status && result.status !== 'queued') await settleVideoJob(result.jobId, result.status);
+      attached += 1;
+    } else if (result.outcome === 'rejected') {
+      const row = await refundVideoHold(hold.id, result.reason ?? 'submit_rejected').catch(() => null);
+      if (row?.status === 'refunded') refunded += 1;
+    } else {
+      await markVideoSubmissionUnknown(hold.id);
+    }
   }
-  return refunded;
+  return { scanned: rows.length, attached, refunded };
 }

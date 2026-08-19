@@ -5,6 +5,7 @@ import { authReasonText, shouldInterruptForUnauthorized } from './authGate';
 import { setPlatform, type HttpRequestOptions, type HttpResponse } from './platform';
 import { store } from './store';
 import { setToken } from './token';
+import { generateStream } from './streaming';
 
 test('动作级登录理由均明示本次登录目的', () => {
   assert.match(authReasonText('chat'), /对话/);
@@ -55,6 +56,39 @@ test('同一旧 token 的并发 401 只退出一次，晚到响应不清新会�
     return Boolean((error as { staleAuth?: boolean })?.staleAuth);
   });
   assert.equal(token, 'new.session.token');
+  assert.equal(removed, 1);
+  assert.equal(authLost, 1);
+});
+
+test('H5 fetch 流收到 401 复用全局登录失效裁决', async (t) => {
+  const oldEnv = process.env.TARO_ENV;
+  const oldFetch = globalThis.fetch;
+  t.after(() => {
+    process.env.TARO_ENV = oldEnv;
+    globalThis.fetch = oldFetch;
+  });
+  let token = 'expired.stream.token';
+  let removed = 0;
+  let authLost = 0;
+  setPlatform({
+    storage: {
+      get: () => token,
+      set: (_key: string, value: string) => { token = value; },
+      remove: () => { token = ''; removed += 1; },
+    },
+    request: async () => ({ statusCode: 500, data: null }),
+  });
+  setAuthLostHandler(() => { authLost += 1; });
+  process.env.TARO_ENV = 'h5';
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: '令牌无效' }), {
+    status: 401, headers: { 'Content-Type': 'application/json' },
+  });
+
+  await assert.rejects(
+    generateStream({ text: '测试', agentKey: 'general' }, {}),
+    (error: unknown) => (error as { authHandled?: boolean }).authHandled === true,
+  );
+  assert.equal(token, '');
   assert.equal(removed, 1);
   assert.equal(authLost, 1);
 });

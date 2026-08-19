@@ -15,6 +15,8 @@ import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
+import { eraseAccount } from '../services/accountDeletion.js';
+import type { AccountDeletionResult } from '../../../shared/contracts';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -199,51 +201,9 @@ export async function metaRoutes(app: FastifyInstance) {
     return { ok: true, avatarUrl };
   });
 
-  // 注销账号（合规：彻底删除账号及其数据）。本应用 1 用户 ≈ 1 租户，独占租户时连同租户数据一并清除。
-  app.delete('/me', async (req) => {
+  // 注销账号：立即停用身份与公开链接；本地及外部数据由保留期到期后的可重试任务清理/匿名化。
+  app.delete('/me', async (req): Promise<AccountDeletionResult> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const tenantId = user.tenantId;
-    // 删除前先记一条 null-租户审计（不会被下面按租户清除）
-    await recordAudit({ userId: user.id, action: 'user.account.delete', payload: { tenantId } }).catch(() => {});
-    const others = await prisma.user.count({ where: { tenantId, id: { not: user.id } } });
-    await prisma.$transaction(async (tx) => {
-      if (others === 0) {
-        // 独占租户：按外键顺序清空该租户全部业务数据
-        await tx.deliverable.deleteMany({ where: { tenantId } });
-        await tx.message.deleteMany({ where: { session: { tenantId } } });
-        await tx.reportDoc.deleteMany({ where: { tenantId } }); // 级联 reportVersion
-        await tx.knowledgeItem.deleteMany({ where: { tenantId } }); // 级联 knowledgeChunk
-        await tx.session.deleteMany({ where: { tenantId } });
-        await tx.memory.deleteMany({ where: { tenantId } });
-        await tx.project.deleteMany({ where: { tenantId } });
-        await tx.creditLedger.deleteMany({ where: { tenantId } });
-        await tx.tokenUsage.deleteMany({ where: { tenantId } });
-        await tx.tokenWallet.deleteMany({ where: { tenantId } });
-        await tx.monthlyCreditGrant.deleteMany({ where: { tenantId } });
-        await tx.tokenQuotaAdjustment.deleteMany({ where: { tenantId } });
-        await tx.planEntitlement.deleteMany({ where: { tenantId } });
-        await tx.skuEntitlement.deleteMany({ where: { tenantId } });
-        await tx.profile.deleteMany({ where: { tenantId } });
-        await tx.auditLog.deleteMany({ where: { tenantId } });
-        await tx.userAgent.deleteMany({ where: { userId: user.id } });
-        await tx.user.delete({ where: { id: user.id } });
-        await tx.tenant.delete({ where: { id: tenantId } });
-      } else {
-        // 多人租户：仅删除该用户自身相关数据
-        await tx.userAgent.deleteMany({ where: { userId: user.id } });
-        await tx.creditLedger.deleteMany({ where: { userId: user.id } });
-        await tx.tokenUsage.deleteMany({ where: { userId: user.id } });
-        await tx.tokenWallet.deleteMany({ where: { userId: user.id } });
-        await tx.monthlyCreditGrant.deleteMany({ where: { userId: user.id } });
-        await tx.tokenQuotaAdjustment.deleteMany({ where: { userId: user.id } });
-        await tx.planEntitlement.deleteMany({ where: { userId: user.id } });
-        await tx.skuEntitlement.deleteMany({ where: { userId: user.id } });
-        await tx.deliverable.deleteMany({ where: { userId: user.id } });
-        await tx.session.deleteMany({ where: { userId: user.id } });
-        await tx.memory.deleteMany({ where: { userId: user.id } });
-        await tx.user.delete({ where: { id: user.id } });
-      }
-    });
-    return { ok: true };
+    return eraseAccount(user.id);
   });
 }

@@ -13,23 +13,43 @@ import type {
   Deliverable, DeliverableSection, ReportDiff, SectionDiff, WordOp, SaveReportResult,
 } from '../llm/schema.js';
 
-// —— 词级 diff（LCS）：把一段 section 的文本细到「句内增删」高亮 ——
+export const REPORT_LIMITS = {
+  maxBytes: 512 * 1024,
+  maxSections: 80,
+  maxSectionBytes: 64 * 1024,
+  maxDiffTokens: 6_000,
+  maxDiffCells: 500_000,
+} as const;
+
+// —— 有界词级 diff：常规段落走 LCS；超大输入退化为线性前后缀 diff，绝不分配无界二维矩阵。 ——
 function tokenize(s: string): string[] {
   return s.match(/[a-z0-9]+|[一-鿿]|[^\sa-z0-9一-鿿]+|\s+/gi) ?? [];
 }
 export function wordDiff(before: string, after: string): WordOp[] {
   const a = tokenize(before), b = tokenize(after);
   const n = a.length, m = b.length;
+  const ops: WordOp[] = [];
+  const push = (t: WordOp['t'], s: string) => {
+    if (!s) return;
+    const last = ops[ops.length - 1];
+    if (last && last.t === t) last.s += s; else ops.push({ t, s });
+  };
+  if (n > REPORT_LIMITS.maxDiffTokens || m > REPORT_LIMITS.maxDiffTokens || n * m > REPORT_LIMITS.maxDiffCells) {
+    let start = 0;
+    while (start < n && start < m && a[start] === b[start]) start += 1;
+    let ai = n - 1; let bi = m - 1;
+    while (ai >= start && bi >= start && a[ai] === b[bi]) { ai -= 1; bi -= 1; }
+    push('eq', a.slice(0, start).join(''));
+    push('del', a.slice(start, ai + 1).join(''));
+    push('add', b.slice(start, bi + 1).join(''));
+    push('eq', a.slice(ai + 1).join(''));
+    return ops;
+  }
   // LCS 长度表
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const ops: WordOp[] = [];
-  const push = (t: WordOp['t'], s: string) => {
-    const last = ops[ops.length - 1];
-    if (last && last.t === t) last.s += s; else ops.push({ t, s });
-  };
   let i = 0, j = 0;
   while (i < n && j < m) {
     if (a[i] === b[j]) { push('eq', a[i]); i++; j++; }
@@ -39,6 +59,26 @@ export function wordDiff(before: string, after: string): WordOp[] {
   while (i < n) { push('del', a[i]); i++; }
   while (j < m) { push('add', b[j]); j++; }
   return ops;
+}
+
+export function assertReportContentLimits(content: object): void {
+  const raw = JSON.stringify(content);
+  const bytes = Buffer.byteLength(raw, 'utf8');
+  if (bytes > REPORT_LIMITS.maxBytes) {
+    throw Object.assign(new Error('报告正文过长，请精简后重试'), { statusCode: 413, code: 'REPORT_TOO_LARGE' });
+  }
+  // 安全限制必须检查原始输入；normalizeDeliverableSections 会自愈并截成 12 段，
+  // 若先归一化再检查，攻击者可以把第 13 段以后的超大载荷隐藏在限制外。
+  const rawSectionsValue = (content as { sections?: unknown }).sections;
+  const rawSections = Array.isArray(rawSectionsValue)
+    ? rawSectionsValue
+    : (rawSectionsValue == null ? [] : [rawSectionsValue]);
+  if (rawSections.length > REPORT_LIMITS.maxSections) {
+    throw Object.assign(new Error(`报告段落不能超过 ${REPORT_LIMITS.maxSections} 段`), { statusCode: 422, code: 'REPORT_TOO_MANY_SECTIONS' });
+  }
+  if (rawSections.some((section) => Buffer.byteLength(JSON.stringify(section), 'utf8') > REPORT_LIMITS.maxSectionBytes)) {
+    throw Object.assign(new Error('单个报告段落过长，请拆分后重试'), { statusCode: 413, code: 'REPORT_SECTION_TOO_LARGE' });
+  }
 }
 function sectionText(sec?: DeliverableSection): string {
   if (!sec) return '';
@@ -144,6 +184,7 @@ async function lockReportVersion(db: Prisma.TransactionClient, tenantId: string,
 
 /** 保存一版报告：同名归一、同内容去重、自动变更摘要。返回 {reportId, version, created, changed}。 */
 export async function saveReportVersion(opts: SaveVersionOpts): Promise<SaveReportResult & { reportId: string }> {
+  assertReportContentLimits(opts.content);
   const slug = slugify(opts.title);
   const hash = hashContent(opts.content);
 

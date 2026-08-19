@@ -132,9 +132,9 @@ export function withMiniCode(html: string, qrDataUri: string | null): string {
 
 /** 卡片发布：存库留底 → 永远返回自有域名链接（{PUBLIC_BASE_URL}/api/r/:id）。
  *  刻意不走 OSS——分享出去是品牌域名、微信内直接打开；报告内打开同样走自有域名，OSS 仅作镜像。 */
-async function publishCardHtml(tenantId: string, title: string, html: string, kind: CardKind): Promise<string> {
+async function publishCardHtml(tenantId: string, userId: string, title: string, html: string, kind: CardKind): Promise<string> {
   const finalHtml = withMiniCode(html, await miniCodeDataUri(`card=${kind}`));
-  const row = await prisma.reportHtml.create({ data: { tenantId, title, html: finalHtml } });
+  const row = await prisma.reportHtml.create({ data: { tenantId, userId, title, html: finalHtml } });
   return `${env.publicBaseUrl}/api/r/${row.id}`;
 }
 
@@ -153,7 +153,7 @@ export async function publishCard(args: {
   if (args.kind === 'calendar') {
     const chart = await loadChart(args.userId);
     if (!chart) throw Object.assign(new Error('还没有命盘，先在建档里补生辰'), { statusCode: 400, code: 'NO_CHART' });
-    return publishCardHtml(args.tenantId, '天时日历', renderCalendarCard(chart, args.ownerLabel || '主理人', args.verse), 'calendar');
+    return publishCardHtml(args.tenantId, args.userId, '天时日历', renderCalendarCard(chart, args.ownerLabel || '主理人', args.verse), 'calendar');
   }
   // fate：优先朋友生辰现算（送你一卦，不落库）；否则用自己的命盘。
   // 注：routes/cards.ts 已用 USE_FATE_PREVIEW 把 fate+friendBazi 拦到 /cards/fate/preview，
@@ -165,5 +165,5 @@ export async function publishCard(args: {
       )
     : await loadChart(args.userId);
   if (!chart) throw Object.assign(new Error('缺少生辰：提供朋友生辰，或先补自己的命盘'), { statusCode: 400, code: 'NO_CHART' });
-  return publishCardHtml(args.tenantId, '天命速写', renderFateCard(chart, args.friendName), 'fate');
+  return publishCardHtml(args.tenantId, args.userId, '天命速写', renderFateCard(chart, args.friendName), 'fate');
 }

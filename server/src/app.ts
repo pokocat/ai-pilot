@@ -56,9 +56,9 @@ import { planGateState, PlanRequiredError } from './services/planGate.js';
 import { PlanExpiredError } from './services/tokenQuota.js';
 import {
   startEventLoopMonitor, noteRequestStart, noteRequestEnd, noteRequestAborted,
-  gateEnter, gateLeave, gateInFlightNow, noteOverloadRejected,
   noteHttpTiming, notePlanGateBlocked,
 } from './services/metrics.js';
+import { registerOverloadGate } from './services/overloadGate.js';
 
 /**
  * 反代信任配置（压测 P0-0）。
@@ -161,19 +161,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   if (maxInFlight > 0 && !isAiTestMode()) {
     const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream')
       || url.startsWith('/api/video/');
-    app.addHook('onRequest', async (req, reply) => {
-      if (isLongRunning(req.url) || req.url.startsWith('/api/health') || req.url.startsWith('/api/metrics')) return;
-      if (gateInFlightNow() >= maxInFlight) {
-        noteOverloadRejected();
-        reply.header('Retry-After', '1');
-        return reply.code(503).send({ error: '服务繁忙，请稍后重试', code: 'SERVER_BUSY' });
-      }
-      gateEnter();
-      (req as typeof req & { __counted?: boolean }).__counted = true;
-    });
-    const done = (req: { __counted?: boolean }) => { if (req.__counted) { req.__counted = false; gateLeave(); } };
-    app.addHook('onResponse', async (req) => done(req as typeof req & { __counted?: boolean }));
-    app.addHook('onError', async (req) => done(req as typeof req & { __counted?: boolean }));
+    registerOverloadGate(app, maxInFlight, (url) => isLongRunning(url)
+      || url.startsWith('/api/health') || url.startsWith('/api/metrics'));
   }
 
   // 指标采集（压测方案 S-b / 优化计划 P1-2）：与过载闸分开计数——闸门那份刻意不含长耗时 LLM 路径
@@ -235,15 +224,18 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       'PUT /api/profile',
       'POST /api/quickscan',
     ]);
+    // 注销是法定退出能力，不属于商业写权限；无套餐与已过期账号都必须可用。
+    const ALLOW_WITHOUT_PLAN = new Set(['DELETE /api/me']);
     app.addHook('onRequest', async (req, reply) => {
       if (!WRITE_METHODS.has(req.method)) return;
       if (!req.url.startsWith('/api/')) return;
       if (ALLOW_PREFIX.some((p) => req.url.startsWith(p))) return;
       const userId = verifyUserToken(req.headers['x-user-id'] as string | undefined);
       if (!userId) return;
+      const path = req.url.split('?', 1)[0];
+      if (ALLOW_WITHOUT_PLAN.has(`${req.method} ${path}`)) return;
       const state = await planGateState(userId);
       if (state === 'none') {
-        const path = req.url.split('?', 1)[0];
         if (ALLOW_NONE_ONLY.has(`${req.method} ${path}`)) return;
         notePlanGateBlocked('none');
         const e = new PlanRequiredError();

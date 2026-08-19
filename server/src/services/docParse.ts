@@ -1,16 +1,15 @@
 // 文档解析：把上传的 PDF / Word(docx) / Excel(xlsx) / PowerPoint(pptx) / CSV / Markdown / 纯文本提取成可入库的纯文本。
-// 重型库（pdfjs/mammoth/xlsx）一律「按需动态 import」——避免拖慢服务启动、也不影响测试加载。
+// 重型解析在受限 Worker 中按需加载，避免用户文件占满 API 主事件循环或主堆。
 // 解析失败由调用方写入 KnowledgeItem.status=failed + error，不致命。
 
 export type DocType = 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'csv' | 'md' | 'html' | 'txt';
 
-// 扩展名 → 类型。.doc/.xls 尽力而为（多为旧二进制格式，可能解析失败 → 走 failed 兜底）。
+// 扩展名 → 类型。旧二进制 .xls 不再接受，避免继续依赖无修复版本的 xlsx 解析链。
 const EXT_MAP: Record<string, DocType> = {
   pdf: 'pdf',
   docx: 'docx',
   doc: 'docx',
   xlsx: 'xlsx',
-  xls: 'xlsx',
   pptx: 'pptx',
   csv: 'csv',
   md: 'md',
@@ -23,6 +22,8 @@ const EXT_MAP: Record<string, DocType> = {
 
 export const SUPPORTED_EXT = [...new Set(Object.keys(EXT_MAP))];
 
+const LEGACY_UNSUPPORTED_EXT = new Set(['xls']);
+
 // 提取文本上限：约 12 万字符（≈ 数百个切片），防超大文件把嵌入次数打爆。
 const MAX_TEXT = 120_000;
 // NUL 字节：Postgres TEXT 不允许存 0x00，PDF 解析偶发——入库前必须剔除。运行时生成，避免源码里出现裸 NUL。
@@ -31,6 +32,7 @@ const NUL = String.fromCharCode(0);
 /** 由文件名扩展名（优先）或 mime 推断文档类型；无法识别返回 null。 */
 export function detectDocType(fileName: string, mime?: string): DocType | null {
   const ext = (fileName.split('.').pop() ?? '').toLowerCase();
+  if (LEGACY_UNSUPPORTED_EXT.has(ext)) return null;
   if (EXT_MAP[ext]) return EXT_MAP[ext];
   const m = (mime ?? '').toLowerCase();
   if (m.includes('pdf')) return 'pdf';
@@ -125,35 +127,52 @@ async function parseDocx(buf: Buffer): Promise<string> {
 }
 
 async function parseXlsx(buf: Buffer): Promise<string> {
-  const mod = (await import('xlsx')) as unknown as { default?: unknown };
-  const XLSX = (mod.default ?? mod) as typeof import('xlsx');
-  const wb = XLSX.read(buf, { type: 'buffer' });
+  const mod = await import('read-excel-file/node');
+  const sheets = await mod.default(buf);
+  if (sheets.length > 50) throw new Error('表格工作表过多（上限 50 张）');
   const parts: string[] = [];
-  for (const name of wb.SheetNames) {
-    const sheet = wb.Sheets[name];
-    if (!sheet) continue;
-    const csv = XLSX.utils.sheet_to_csv(sheet);
-    if (csv.trim()) parts.push(`工作表：${name}\n${csv}`);
+  let cellsRead = 0;
+  for (const sheet of sheets) {
+    if (sheet.data.length > 20_000) throw new Error(`工作表「${sheet.sheet}」超过 20000 行`);
+    const rows: string[] = [];
+    for (const row of sheet.data) {
+      const values = row.map((cell) => {
+        cellsRead += 1;
+        if (cellsRead > 200_000) throw new Error('表格单元格过多（上限 200000 个）');
+        if (cell == null) return '';
+        const value = cell instanceof Date ? cell.toISOString() : String(cell);
+        return value.replace(/[\t\r\n]+/g, ' ').trim();
+      });
+      const line = values.join('\t').trim();
+      if (line) rows.push(line);
+    }
+    if (rows.length) parts.push(`工作表：${sheet.sheet}\n${rows.join('\n')}`);
   }
   return parts.join('\n\n');
 }
 
 async function parsePptx(buf: Buffer): Promise<string> {
-  // pptx 是 OOXML ZIP。复用现有 xlsx 依赖暴露的 CFB ZIP 读取器，避免再引入一套重型解析库；
-  // 这里只取每页 slide*.xml 的 <a:t> 文本，图片、动画和备注不冒充正文。
-  const mod = (await import('xlsx')) as unknown as { default?: unknown };
-  const XLSX = (mod.default ?? mod) as typeof import('xlsx');
-  const archive = XLSX.CFB.read(buf, { type: 'buffer' }) as unknown as {
-    FullPaths: string[];
-    FileIndex: Array<{ content?: Buffer }>;
-  };
-  const slides = archive.FullPaths
-    .map((path, index) => ({ path: path.replace(/^Root Entry\//, ''), index }))
-    .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/i.test(entry.path))
-    .sort((a, b) => Number(a.path.match(/slide(\d+)/i)?.[1] || 0) - Number(b.path.match(/slide(\d+)/i)?.[1] || 0));
+  // pptx 是 OOXML ZIP。先按目录数、宣告解压体积限流，再只读 slide*.xml。
+  const mod = (await import('jszip')) as unknown as { default?: unknown };
+  const JSZip = (mod.default ?? mod) as typeof import('jszip');
+  const archive = await JSZip.loadAsync(buf, { createFolders: false });
+  const entries = Object.values(archive.files);
+  if (entries.length > 2_000) throw new Error('PPTX 压缩包条目过多（上限 2000 个）');
+  let declaredBytes = 0;
+  for (const entry of entries) {
+    const size = Number((entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0);
+    if (!Number.isFinite(size) || size < 0) throw new Error('PPTX 压缩包大小信息异常');
+    declaredBytes += size;
+    if (declaredBytes > 100 * 1024 * 1024) throw new Error('PPTX 解压后体积过大（上限 100MB）');
+  }
+  const slides = entries
+    .filter((entry) => !entry.dir && /^ppt\/slides\/slide\d+\.xml$/i.test(entry.name))
+    .sort((a, b) => Number(a.name.match(/slide(\d+)/i)?.[1] || 0) - Number(b.name.match(/slide(\d+)/i)?.[1] || 0));
   const parts: string[] = [];
   for (const [slideIndex, slide] of slides.entries()) {
-    const xml = archive.FileIndex[slide.index]?.content?.toString('utf8') ?? '';
+    const declaredSize = Number((slide as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0);
+    if (declaredSize > 2 * 1024 * 1024) throw new Error(`PPTX 第 ${slideIndex + 1} 页 XML 过大`);
+    const xml = await slide.async('string');
     const lines = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi)]
       .map((match) => decodeHtmlEntities(match[1].replace(/<[^>]+>/g, '')).trim())
       .filter(Boolean);
@@ -165,7 +184,7 @@ async function parsePptx(buf: Buffer): Promise<string> {
 /**
  * 解析文档为纯文本。返回 { type, text }；不支持的类型或提取不到文本时抛出（调用方落 failed）。
  */
-export async function parseDocument(buf: Buffer, fileName: string, mime?: string): Promise<{ type: DocType; text: string }> {
+export async function parseDocumentInProcess(buf: Buffer, fileName: string, mime?: string): Promise<{ type: DocType; text: string }> {
   const type = detectDocType(fileName, mime);
   if (!type) throw new Error(`不支持的文件类型：${fileName}（支持 ${SUPPORTED_EXT.join(' / ')}）`);
   let text = '';
@@ -192,4 +211,41 @@ export async function parseDocument(buf: Buffer, fileName: string, mime?: string
   text = normalizeDocumentText(text, type);
   if (!text) throw new Error('未能从文件中提取到文本（可能是扫描件/纯图片 PDF，或空文件）');
   return { type, text };
+}
+
+/**
+ * 公开解析入口：每份用户文件放入独立受限 Worker。
+ * 192MB 老生代 + 20s 超时是安全边界；超限只会终止该文件，不影响 API 进程。
+ */
+export async function parseDocument(buf: Buffer, fileName: string, mime?: string): Promise<{ type: DocType; text: string }> {
+  const { Worker } = await import('node:worker_threads');
+  const bytes = Uint8Array.from(buf);
+  const worker = new Worker(new URL('./docParseWorker.js', import.meta.url), {
+    resourceLimits: {
+      maxOldGenerationSizeMb: 192,
+      maxYoungGenerationSizeMb: 32,
+      stackSizeMb: 4,
+    },
+  });
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      fn();
+    };
+    const timer = setTimeout(() => finish(() => reject(new Error('文档解析超时（上限 20 秒）'))), 20_000);
+    timer.unref?.();
+    worker.once('message', (message: { ok: true; value: { type: DocType; text: string } } | { ok: false; error: string }) => {
+      if (message.ok) finish(() => resolve(message.value));
+      else finish(() => reject(new Error(message.error)));
+    });
+    worker.once('error', (error) => finish(() => reject(new Error(`文档解析工作线程失败：${error.message}`))));
+    worker.once('exit', (code) => {
+      if (code !== 0) finish(() => reject(new Error(`文档解析工作线程异常退出（${code}）`)));
+    });
+    worker.postMessage({ buffer: bytes.buffer, fileName, mime }, [bytes.buffer]);
+  });
 }

@@ -1,16 +1,17 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
-import { aidramaJson, aidramaUpload } from '../services/video/aidramaGateway.js';
+import { aidramaJson, aidramaUpload, VideoGatewayError } from '../services/video/aidramaGateway.js';
 import {
-  attachVideoJob, refundStaleUnsubmittedVideoHolds, refundVideoHold, reserveVideoCredits, settleVideoJob,
+  attachVideoJob, markVideoSubmissionUnknown, refundVideoHold, reserveVideoCredits, settleVideoJob,
 } from '../services/video/credits.js';
 import {
   applyCloneSettlements, assertCloneAffordable, attachCloneTargets, cloneChargeItems, cloneChargeTotal,
-  cloneHoldsForRequest, pendingCloneHolds, refundCloneHold, refundStaleUnsubmittedCloneHolds, refundStalledCloneHolds,
-  reserveCloneCredits, resolveCloneSettlements, type CloneStatusProbe,
+  cloneHoldsForRequest, pendingCloneHolds, refundCloneHold,
+  reserveCloneCredits, resolveCloneSettlements,
 } from '../services/video/cloneCredits.js';
+import { videoSubmissionProbe } from '../services/video/maintenance.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent, assertVideoUploadedContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import { clonePricing, clonePricingView } from '../services/video/pricing.js';
@@ -216,41 +217,7 @@ async function settleCloneHolds(
   ));
 }
 
-/**
- * 兜底退款前，直接问上游这个目标现在是什么状态。
- *
- * 卡死兜底以前是「超时就退」，而独立声音训完后状态刷不回来（上游只在形象视图里刷新），
- * 于是「已经出货」的声音会被当成超时退掉。退钱这种不可逆动作，能问就不许猜。
- * 问不出来（上游超时/报错）一律返回 null —— 让兜底继续等下一轮，而不是当成失败退掉。
- */
-const stalledCloneProbe: CloneStatusProbe = async (hold) => {
-  const targetId = String(hold.targetId ?? '').trim();
-  if (!targetId || !validId(targetId)) return null;
-  const identity: Identity = { userId: hold.userId, tenantId: hold.tenantId };
-  try {
-    if (hold.targetKind === 'voice') {
-      const view = await aidramaJson<ClipVoiceView>(`/api/me/clip/voices/${enc(targetId)}`, identity, { timeoutCapMs: 10_000 });
-      return view?.status ?? null;
-    }
-    const view = await aidramaJson<ClipAvatarView>(`/api/me/clip/avatars/${enc(targetId)}`, identity, { timeoutCapMs: 10_000 });
-    return view?.imageStatus ?? null;
-  } catch { return null; }
-};
-
 export async function videoRoutes(app: FastifyInstance) {
-  // 扣费后尚未拿到上游 jobId 的崩溃窗口有界自动退款。
-  const sweep = () => {
-    void refundStaleUnsubmittedVideoHolds().catch(() => {});
-    void refundStaleUnsubmittedCloneHolds().catch(() => {});
-    // 上游可能永远不给终态；不设这道闸，用户的钻石会被一笔不会结算的 hold 无限期占住。
-    // 带上 probe：到点先核实再决定退还是结，别把已经出货的训练退成「超时失败」。
-    void refundStalledCloneHolds(undefined, stalledCloneProbe).catch(() => {});
-  };
-  sweep();
-  const sweepTimer = setInterval(sweep, 5 * 60_000);
-  sweepTimer.unref();
-  app.addHook('onClose', async () => clearInterval(sweepTimer));
-
   app.get('/video/templates', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try { return await aidramaJson<ClipTemplate[]>('/api/me/clip/templates', identityOf(user)); }
@@ -380,6 +347,21 @@ export async function videoRoutes(app: FastifyInstance) {
       if (reservation.hold.status === 'refunded') {
         throw Object.assign(new Error('该出片请求已经结束，请重新提交'), { statusCode: 409, code: 'CLIP_RENDER_REQUEST_CLOSED' });
       }
+      if (reservation.reused && reservation.hold.status === 'unknown') {
+        const recovered = await videoSubmissionProbe(reservation.hold);
+        if (recovered.outcome === 'accepted') {
+          await attachVideoJob(reservation.hold.id, recovered.jobId);
+          if (recovered.status && recovered.status !== 'queued') await settleVideoJob(recovered.jobId, recovered.status);
+          return {
+            jobId: recovered.jobId, projectId: req.params.id, status: recovered.status ?? 'queued',
+            creditsHeld: reservation.hold.credits, reused: true,
+          } satisfies ClipRenderResult;
+        }
+        if (recovered.outcome === 'rejected') {
+          await refundVideoHold(reservation.hold.id, recovered.reason ?? 'submit_rejected');
+          throw Object.assign(new Error('该出片请求未被视频服务受理，请重新提交'), { statusCode: 409, code: 'CLIP_RENDER_REQUEST_CLOSED' });
+        }
+      }
       if (reservation.reused) {
         throw Object.assign(new Error('该出片请求正在创建，请稍后查询或重试'), { statusCode: 409, code: 'CLIP_RENDER_CREATING' });
       }
@@ -393,7 +375,15 @@ export async function videoRoutes(app: FastifyInstance) {
       return { jobId: upstream.jobId, projectId: req.params.id, status: upstream.status ?? 'queued', creditsHeld: estimate.total, reused: reservation.reused } satisfies ClipRenderResult;
     } catch (e) {
       // 只有成功创建预扣的请求拥有退款权；并发复用者不得把首个请求的预扣退掉。
-      if (holdId && ownsSubmission) await refundVideoHold(holdId, 'submit_failed').catch(() => {});
+      if (holdId && ownsSubmission) {
+        // 409 可能是同一 request 已受理但本次只撞到项目/幂等冲突，仍需查单，不能当明确拒绝退款。
+        const definitive = e instanceof VideoGatewayError && [400, 401, 403, 404, 422].includes(e.statusCode);
+        if (definitive) await refundVideoHold(holdId, 'submit_rejected').catch(() => {});
+        else {
+          await markVideoSubmissionUnknown(holdId, (e as Error).message).catch(() => {});
+          return reply.code(409).send({ error: '出片请求正在确认，请稍后查询或用原请求重试', code: 'CLIP_RENDER_CREATING' });
+        }
+      }
       return sendErr(reply, e, 422);
     }
   });
@@ -517,20 +507,61 @@ export async function videoRoutes(app: FastifyInstance) {
   /** 同源保存入口：刷新上游短签名并流式转发，避免 OSS downloadFile 合法域名/签名过期导致相册保存失败。 */
   app.get<{ Params: { id: string } }>('/video/works/:id/file', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const controller = new AbortController();
+    const timeoutMs = Math.min(10 * 60_000, Math.max(10_000, Number(process.env.VIDEO_DOWNLOAD_PROXY_TIMEOUT_MS ?? 120_000)));
+    const maxBytes = Math.min(2 * 1024 ** 3, Math.max(10 * 1024 ** 2, Number(process.env.VIDEO_DOWNLOAD_PROXY_MAX_BYTES ?? 500 * 1024 ** 2)));
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref?.();
+    const abortOnDisconnect = () => {
+      if (!reply.raw.writableEnded) controller.abort();
+    };
+    reply.raw.once('close', abortOnDisconnect);
+    let streamStarted = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      reply.raw.off('close', abortOnDisconnect);
+    };
     try {
       assertId(req.params.id);
       const work = await aidramaJson<ClipWork>(`/api/me/clip/works/${enc(req.params.id)}`, identityOf(user), { timeoutCapMs: 15_000 });
       if (!work?.videoUrl) throw Object.assign(new Error('成片还没有准备好'), { statusCode: 409, code: 'CLIP_WORK_NOT_READY' });
       await assertSafeUrl(work.videoUrl);
-      const response = await fetch(work.videoUrl, { redirect: 'error' });
+      const response = await fetch(work.videoUrl, { redirect: 'error', signal: controller.signal });
       if (!response.ok || !response.body) throw Object.assign(new Error('成片下载暂时不可用'), { statusCode: 502, code: 'CLIP_WORK_DOWNLOAD_FAILED' });
       const contentLength = response.headers.get('content-length');
+      const declaredBytes = contentLength ? Number(contentLength) : null;
+      if (declaredBytes != null && (!Number.isFinite(declaredBytes) || declaredBytes < 0 || declaredBytes > maxBytes)) {
+        controller.abort();
+        throw Object.assign(new Error('成片文件超过下载代理上限'), { statusCode: 413, code: 'CLIP_WORK_FILE_TOO_LARGE' });
+      }
       reply.header('Content-Type', response.headers.get('content-type') || 'video/mp4');
-      if (contentLength) reply.header('Content-Length', contentLength);
+      if (declaredBytes != null) reply.header('Content-Length', String(declaredBytes));
       reply.header('Content-Disposition', `attachment; filename="junshi-${req.params.id}.mp4"`);
       reply.header('Cache-Control', 'private, no-store');
-      return reply.send(Readable.fromWeb(response.body as never));
-    } catch (e) { return sendErr(reply, e, 502); }
+      let streamedBytes = 0;
+      const limiter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          streamedBytes += chunk.length;
+          if (streamedBytes > maxBytes) {
+            controller.abort();
+            callback(Object.assign(new Error('成片文件超过下载代理上限'), { code: 'CLIP_WORK_FILE_TOO_LARGE' }));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      const stream = Readable.fromWeb(response.body as never).pipe(limiter);
+      streamStarted = true;
+      stream.once('end', cleanup).once('close', cleanup).once('error', cleanup);
+      return reply.send(stream);
+    } catch (e) {
+      if (controller.signal.aborted && !(e as { code?: string }).code) {
+        return sendErr(reply, Object.assign(new Error('成片下载超时或已取消'), { statusCode: 504, code: 'CLIP_WORK_DOWNLOAD_TIMEOUT' }), 504);
+      }
+      return sendErr(reply, e, 502);
+    } finally {
+      if (!streamStarted) cleanup();
+    }
   });
   app.delete<{ Params: { id: string } }>('/video/works/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);

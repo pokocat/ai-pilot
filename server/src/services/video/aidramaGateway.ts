@@ -125,6 +125,11 @@ export async function aidramaJson<T>(
   }, opts.timeoutCapMs) as Promise<T>;
 }
 
+/** 账号注销：让下游按外部 owner 清除全部数字人、声音、素材、项目与作品。 */
+export async function aidramaDeleteOwnerData(identity: VideoGatewayIdentity): Promise<void> {
+  await gatewayFetch('/api/me/clip/account', identity, { method: 'DELETE' });
+}
+
 export async function aidramaUpload<T>(
   path: string,
   identity: VideoGatewayIdentity,

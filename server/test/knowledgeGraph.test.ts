@@ -62,6 +62,24 @@ test('幂等：完全相同的关系不重复入边', async () => {
   assert.equal(all, 1);
 });
 
+test('跨项目复用租户实体时两个项目都可见，且并发写不重复入边', async () => {
+  await upsertTriples(tenantId, 'project-a', [{ subject: '公司', predicate: '负责人', object: '张三' }]);
+  await upsertTriples(tenantId, 'project-b', [{ subject: '公司', predicate: '负责人', object: '李四' }]);
+  assert.equal((await listEntities(tenantId, 'project-a')).some((e) => e.name === '公司'), true);
+  assert.equal((await listEntities(tenantId, 'project-b')).some((e) => e.name === '公司'), true);
+  assert.equal((await queryRelations(tenantId, { projectId: 'project-a' }))[0]?.object, '张三');
+  assert.equal((await queryRelations(tenantId, { projectId: 'project-b' }))[0]?.object, '李四');
+
+  await Promise.all(Array.from({ length: 6 }, () => upsertTriples(
+    tenantId,
+    'project-c',
+    [{ subject: '产品', predicate: '归属', object: '商业线' }],
+  )));
+  assert.equal(await prisma.graphRelation.count({
+    where: { tenantId, projectId: 'project-c', predicate: '归属', validTo: null },
+  }), 1);
+});
+
 test('HTTP：手工 triples 入图 + as-of 查询 + 租户隔离', async () => {
   const ins = await api('POST', '/api/graph/extract', {
     token: userId,

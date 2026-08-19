@@ -234,7 +234,7 @@ function isPasteRef(r: MessageRef): boolean {
 }
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
-const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
+const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
 // 一次至多带几份：与 server retrieval.MAX_REFS(9) 对齐——选得进来就带得上，不在服务端悄悄丢。
 const UPLOAD_COUNT_MAX = 9;
 // 一批总量上限。单份 20MB 是 MAX_UPLOAD_BYTES（对齐服务端 multipart 上限），但 9 份 × 20MB = 180MB

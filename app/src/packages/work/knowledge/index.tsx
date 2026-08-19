@@ -19,7 +19,7 @@ const STAGE_BADGE: Record<string, { label: string; cls: string }> = {
   optimized: { label: '已优化', cls: 'kb-st-optimized' },
 };
 const isWeapp = process.env.TARO_ENV === 'weapp';
-const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
+const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xlsx', 'csv', 'pptx', 'md', 'markdown', 'txt'];
 // 解析中项退避轮询节奏（2s → 4s → 8s → …），累计约 30s 后停止并提示下拉刷新。
 const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
 const isSettled = (st: string) => st === 'ready' || st === 'failed';

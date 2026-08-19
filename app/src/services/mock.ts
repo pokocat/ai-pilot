@@ -1098,10 +1098,10 @@ export const mock = {
     return delay({ ok: true, name: d.name, company: d.company, avatarUrl: d.avatarUrl });
   },
 
-  async deleteAccount(): Promise<{ ok: boolean }> {
-    const { token } = current();
-    try { platform.storage.remove(dataKey(token)); } catch { /* noop */ }
-    return delay({ ok: true });
+  async deleteAccount(): Promise<import('../../../shared/contracts').AccountDeletionResult> {
+    // mock 也遵守真实服务的保留期口径：退出当前身份，但不立即删除本地业务数据。
+    const retentionUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    return delay({ ok: true, erasureJobId: `mock-erasure-${Date.now()}`, retentionUntil });
   },
 
   async plans(): Promise<Plan[]> { return delay(PLANS); },

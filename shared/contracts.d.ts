@@ -379,6 +379,8 @@ export interface SmsSendRequest { phone: string; scene?: 'login' | 'bind'; }
  *  二选一：phoneCode=微信一键(getPhoneNumber 的 code)；或 phone+code=短信验证码兜底。 */
 export interface BindPhoneRequest { phoneCode?: string; phone?: string; code?: string; }
 export interface BindPhoneResult { ok: boolean; phone: string; wechatLinked: boolean; }
+/** 注销只在本地数据、公开链接及异步外部清理任务都已登记后返回成功。 */
+export interface AccountDeletionResult { ok: true; erasureJobId: string; retentionUntil: string; }
 /** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
 export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
 /** 微信快捷登录（POST /auth/wechat-login）：只放行**已关联**手机号账号的 openid/unionid。

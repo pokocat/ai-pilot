@@ -14,6 +14,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
+  await prisma.dataErasureJob.deleteMany();
   await prisma.monthlyCreditGrant.deleteMany();
   await prisma.tokenQuotaAdjustment.deleteMany();
   await prisma.planEntitlement.deleteMany();
@@ -59,6 +60,8 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   // 客户端埋点（问策入口 WP1）：userId/tenantId 同样是**无外键**的裸字符串列（游客上报时为空），
   // user.deleteMany() 清不掉，不显式删就会跨用例累积。WenceTemplate 是运营目录（同 Saying），不在此列。
   await prisma.clientEvent.deleteMany();
+  await prisma.reportHtml.deleteMany();
+  await prisma.llmTrace.deleteMany();
   await prisma.creditLedger.deleteMany();
   await prisma.tokenUsage.deleteMany();
   await prisma.tokenWallet.deleteMany();

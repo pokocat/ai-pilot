@@ -589,14 +589,14 @@ export function webviewSafeReportUrl(url: string | undefined | null): string | n
 /** 渲染 + 存库 + 返回可分享链接。失败抛出,由调用方吞掉(不影响产出)。
  *  小程序打开入口始终是自有域名 /api/r/:id；配了 OSS 时额外上传一份 CDN 镜像。
  *  DB report_html 行始终保留(留底 + 兜底服务)。 */
-export async function publishReport(tenantId: string | null, d: Deliverable): Promise<PublishedHtml> {
-  return publishHtml(tenantId, d.title || '咨询成果', renderReportHtml(d));
+export async function publishReport(tenantId: string | null, userId: string | null, d: Deliverable): Promise<PublishedHtml> {
+  return publishHtml(tenantId, userId, d.title || '咨询成果', renderReportHtml(d));
 }
 
 /** 通用 HTML 发布：存库留底 → 自有域名入口；OSS 配好时同步一份 CDN 镜像。 */
-export async function publishHtml(tenantId: string | null, title: string, html: string): Promise<PublishedHtml> {
+export async function publishHtml(tenantId: string | null, userId: string | null, title: string, html: string): Promise<PublishedHtml> {
   const row = await prisma.reportHtml.create({
-    data: { tenantId: tenantId ?? null, title, html },
+    data: { tenantId: tenantId ?? null, userId: userId ?? null, title, html },
   });
   const htmlUrl = publicReportUrl(row.id);
   let cdnUrl: string | undefined;

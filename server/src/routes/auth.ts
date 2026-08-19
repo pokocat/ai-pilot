@@ -18,6 +18,7 @@ import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
+import { smsLoginEnabled, wechatLoginEnabled } from '../services/authConfig.js';
 import type { LoginPhoneBinding, LoginResult } from '../../../shared/contracts';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
@@ -62,6 +63,8 @@ type AuthUser = {
   wechatOpenId?: string | null;
   wechatUnionId?: string | null;
   wechatLinkedAt?: Date | null;
+  deletedAt?: Date | null;
+  purgeAfter?: Date | null;
   createdAt: Date;
 };
 
@@ -150,6 +153,7 @@ function loginResult(
   onboarded: boolean,
   phoneBinding?: LoginPhoneBinding,
 ): LoginResult {
+  assertAccountActive(user);
   return {
     token: signUserToken(user.id), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
     isNew,
@@ -166,10 +170,19 @@ function loginResult(
   };
 }
 
+function assertAccountActive(user: AuthUser): void {
+  if (!user.deletedAt) return;
+  throw Object.assign(new Error('账号已进入注销保留期，如需恢复请联系客服'), {
+    statusCode: 423,
+    code: 'ACCOUNT_DELETION_PENDING',
+  });
+}
+
 /** 按手机号登录或注册（短信登录 / 微信一键登录 / 未来运营商一键登录共用）。 */
 async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ user: AuthUser; isNew: boolean }> {
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing) {
+    assertAccountActive(existing);
     await recordAudit({ tenantId: existing.tenantId, userId: existing.id, action: 'auth.login', payload: phoneAudit(phone) });
     return { user: existing, isNew: false };
   }
@@ -274,6 +287,9 @@ export async function authRoutes(app: FastifyInstance) {
   // 按 IP 收紧：SMS 发送是成本+轰炸型接口。既有 sms.ts 已按手机号限频（60s 冷却 + 5 条/小时），
   // 这里再叠一层按 IP 的频控，挡「换号池、同 IP 批量轰炸」。（rate-limit 未注册的测试环境此 config 被忽略。）
   app.post('/auth/sms/send', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
+    if (!smsLoginEnabled()) {
+      return reply.code(503).send({ error: '短信登录暂不可用，请使用手机号快捷登录', code: 'SMS_LOGIN_DISABLED' });
+    }
     const parsed = smsSendSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.sms.send_attempt', {
@@ -313,6 +329,9 @@ export async function authRoutes(app: FastifyInstance) {
   // 免费注册防薅：登录/注册按 IP 频控（唯一门槛此前只有「一手机号一账号」，无 IP/设备频控 → 号池可批量薅
   // 免费钻石+额度，见售卖前体检 P1）。20 次/10 分钟对 NAT 后正常多用户仍宽松，但挡住脚本化批量建号。
   app.post('/auth/login', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    if (!smsLoginEnabled()) {
+      return reply.code(503).send({ error: '短信登录暂不可用，请使用手机号快捷登录', code: 'SMS_LOGIN_DISABLED' });
+    }
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.login.attempt', {
@@ -367,6 +386,9 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/wechat-login', async (req, reply) => {
+    if (!wechatLoginEnabled()) {
+      return reply.code(503).send({ error: '手机号快捷登录暂不可用，请使用短信验证码登录', code: 'WECHAT_LOGIN_DISABLED' });
+    }
     const parsed = wechatLoginSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
@@ -396,6 +418,7 @@ export async function authRoutes(app: FastifyInstance) {
         });
         return reply.code(404).send({ error: '当前快捷登录尚未关联账号，请先用手机号登录', code: 'PHONE_LOGIN_REQUIRED' });
       }
+      assertAccountActive(user);
 
       if (!user.wechatOpenId || (wx.unionid && !user.wechatUnionId)) {
         user = await prisma.user.update({
@@ -434,6 +457,9 @@ export async function authRoutes(app: FastifyInstance) {
   // 本机号一键登录（手机号唯一身份键的正门）：phoneCode 换手机号 → 按手机号定位/新建账号；
   // 可选 loginCode 换到的 openid/unionid 一律强制绑到该账号（原挂别处先解绑，留审计）。
   app.post('/auth/wechat-phone', async (req, reply) => {
+    if (!wechatLoginEnabled()) {
+      return reply.code(503).send({ error: '手机号快捷登录暂不可用，请使用短信验证码登录', code: 'WECHAT_LOGIN_DISABLED' });
+    }
     const parsed = wechatPhoneSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
@@ -460,6 +486,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       /** 手机号已定位到账号：登录它，并把本次微信身份强制绑上来。 */
       const loginAndLink = async (target: AuthUser): Promise<{ user: AuthUser; binding: LoginPhoneBinding }> => {
+        assertAccountActive(target);
         if (!openid) return { user: target, binding: phoneBinding('matched', target.phone, phone) };
         const linked = await forceLinkWechatIdentity(target, openid, unionid);
         return { user: linked.user, binding: phoneBinding(linked.moved ? 'wechat_relinked' : 'matched', linked.user.phone, phone) };
@@ -467,6 +494,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       const byPhone = await prisma.user.findUnique({ where: { phone } });
       if (byPhone) {
+        assertAccountActive(byPhone);
         isNew = false;
         ({ user, binding } = await loginAndLink(byPhone));
       } else {
@@ -474,6 +502,7 @@ export async function authRoutes(app: FastifyInstance) {
           ? await prisma.user.findFirst({ where: { OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])] } })
           : null;
         if (byWechat && byWechat.phone.startsWith('wx_')) {
+          assertAccountActive(byWechat);
           // 历史纯微信占位账号（wx_<openid>）首次补上真实手机号：保留老数据，不新建账号。
           // 这是「登录动作里改 phone」的唯一例外，其余换号一律走 /auth/bind-phone 显式验证。
           isNew = false;

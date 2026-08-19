@@ -1,6 +1,6 @@
 // 用户登录态 token：HS256 JWT（Node 内置 crypto HMAC，零外部依赖），向后兼容历史 `token=userId`。
 //
-// 渐进式上线，不破坏存量客户端：
+// 非生产环境保留渐进式兼容，生产环境一律 fail-closed：
 //   - 未配 APP_JWT_SECRET（默认）：签发=原样返回 userId；校验=原样返回（与历史完全一致）。
 //   - 配了 APP_JWT_SECRET：新登录签发 JWT（带 sub/iat/exp）；校验优先验 JWT，
 //     验不过的「JWT 形」token 拒绝；非 JWT 形（历史 userId）默认仍放行（平滑过渡），
@@ -14,7 +14,7 @@ function secret(): string {
   return (process.env.APP_JWT_SECRET ?? '').trim();
 }
 function jwtRequired(): boolean {
-  return (process.env.APP_JWT_REQUIRED ?? 'false') === 'true';
+  return process.env.NODE_ENV === 'production' || (process.env.APP_JWT_REQUIRED ?? 'false') === 'true';
 }
 function ttlSec(): number {
   const n = Number(process.env.APP_JWT_TTL_SEC ?? 60 * 60 * 24 * 30); // 默认 30 天
@@ -50,7 +50,14 @@ function looksLikeJwt(token: string): boolean {
  * sub/iat/exp 始终由本函数写定，放在 extra 之后，extra 无法覆盖它们。
  */
 export function signUserToken(userId: string, opts?: { ttlSec?: number; extra?: Record<string, unknown> }): string {
-  if (!jwtEnabled()) return userId;
+  if (!jwtEnabled()) {
+    if (process.env.NODE_ENV === 'production') {
+      throw Object.assign(new Error('生产环境未配置 APP_JWT_SECRET，拒绝签发不安全登录态'), {
+        code: 'AUTH_JWT_CONFIG_INVALID',
+      });
+    }
+    return userId;
+  }
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'HS256', typ: 'JWT' };
   const life = opts?.ttlSec && opts.ttlSec > 0 ? Math.floor(opts.ttlSec) : ttlSec();

@@ -1101,7 +1101,7 @@ const methods = {
     } });
   },
   pickFile() {
-    wx.chooseMessageFile({ count: Math.min(REF_LIMIT - this._refs.length - this.data.pastePendings.length, 4), type: 'file', extension: ['pdf','doc','docx','xls','xlsx','csv','pptx','md','markdown','txt'], success: async (result) => {
+    wx.chooseMessageFile({ count: Math.min(REF_LIMIT - this._refs.length - this.data.pastePendings.length, 4), type: 'file', extension: ['pdf','doc','docx','xlsx','csv','pptx','md','markdown','txt'], success: async (result) => {
       for (const file of result.tempFiles || []) {
         if (Number(file.size || 0) > 20 * 1024 * 1024) { wx.showToast({ title: '单个文件不能超过 20MB', icon: 'none' }); continue; }
         this.safeSetData({ uploading: true, canSend: false }, () => this.measureComposer());

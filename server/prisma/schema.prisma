@@ -238,6 +238,8 @@ model User {
   inviteCode      String?   @unique // V7-13：邀请码（首次读取惰性生成 = "JS"+4 位 base32，跨用户唯一）
   createdAt       DateTime  @default(now())
   wechatLinkedAt  DateTime?
+  deletedAt       DateTime? // 注销申请时间；非空即禁止登录和业务访问，但保留数据到 purgeAfter
+  purgeAfter      DateTime? // 隔离期结束后才允许物理清理（默认 30 天，可由 ACCOUNT_DELETION_RETENTION_DAYS 配置）
 
   tenant              Tenant                  @relation(fields: [tenantId], references: [id])
   plan                Plan?                   @relation(fields: [planId], references: [id])
@@ -1257,12 +1259,34 @@ model ToolCallLog {
 model ReportHtml {
   id        String   @id @default(cuid())
   tenantId  String?
+  userId    String?
   title     String
   html      String   @db.Text
+  revokedAt DateTime? // 注销隔离期内保留正文，但公开入口立即 404
   createdAt DateTime @default(now())
 
   @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
   @@map("report_html")
+}
+
+/// 账号注销的可重试外部清理任务。成功后清空对象 key 与上游 owner，只保留无个人信息的完成凭据。
+model DataErasureJob {
+  id              String    @id @default(cuid())
+  subjectHash     String
+  subjectUserId   String?   @unique // 仅隔离期/清理中保留；完成后清空；同时防重复注销任务
+  objectKeys      Json
+  externalOwnerId String?
+  status          String    @default("retained") // retained | pending | processing | completed
+  attempts        Int       @default(0)
+  lastError       String?   @db.Text
+  nextAttemptAt   DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@map("data_erasure_job")
 }
 
 /// 运营自助技能库：自定义 HTTP 工具。agent 通过 skillsConfig.tools 按 key 勾选启用。
@@ -2127,7 +2151,7 @@ model VideoCreditHold {
   clientRequestId String
   upstreamJobId   String?   @unique
   credits         Int
-  status          String    @default("submitting") // submitting | submitted | notifying | settled | refunded
+  status          String    @default("submitting") // submitting | unknown | submitted | notifying | settled | refunded
   // notifying 是出片完成通知的**原子认领态**：clip-render-notification 把 submitted 抢成 notifying，
   // 并发的另一轮扫描就抢不到，同一单只推一次。认领后立刻结算，所以它只是个短暂中间态。
   // refunded 是终点，任何路径都不许把它写回 settled（见 services/video/credits.ts）。

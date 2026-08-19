@@ -544,7 +544,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - AIStar 已完成逐段 avatar/b-roll/尾段标准化、H.264/AAC 多段 ffmpeg 总装、字幕、全程 AI 标识和缩略图；但固定正式尾片素材、亮度/响度质量阈值、真实长视频压力验收及四平台真实发布未完成前，仍不得打开生产入口、提交微信审核或宣称完整出片闭环。若后续把大文件改为签名直传/直取，还要在微信后台补齐对应 OSS/CDN 的 `uploadFile / downloadFile` 合法域名。
 
 ## 9. 上线前安全/生产硬约束（务必过一遍 · 详见 ROADMAP P2）
-- [ ] **鉴权**：短信验证码与小程序本机号登录已接入；当前小程序登录态仍是 `token=userId`（演示）→ 换 JWT；运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，生产仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
+- [x] **用户鉴权代码门禁**：production 强制高强度 `APP_JWT_SECRET`、`APP_JWT_REQUIRED=true`，并要求至少一个配置完整的短信/微信登录通道；缺项启动失败，运行时不接受 `token=userId`，短信通道不能关闭验码。发布前必须先补齐真实凭据再重启，禁止在现有生产缺配置时直接发布造成全量锁号。运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权；细粒度 RBAC、管理员密钥轮换仍是独立待办。
 - [x] **AI 模型凭证存储口径（产品已拍板）**：正常写路径使用 `AiCredential.apiKey` 明文存库，一把凭证可供多个端点复用；旧 `AiSetting`/`AiModel` 只保留迁移历史。对外接口只回 `hasKey`；部署执行 `npm run secrets:decrypt-ai` 清理历史密文。数据库账号最小权限、备份 0600 与主机访问控制是硬要求。`ADMIN_TOKEN` 仍只放服务端；Agent/Dify/技能库/告警/图片供应商等其它密钥继续走 `secretBox`。
 - [ ] **内容审核/计量**：关键词→合规审核服务；算力按次扣减已实现，充值/支付/token 级归集待接。
 - [ ] **图片内容审核（海报成品图放量前必过）**：`services/creative/imageModeration.ts` 默认 `provider='none'` = 放行 + 审计记 `skipped`。放量前须接一家图片内容安全服务（后台「创作任务」页把 provider 置 `http` 并配地址/密钥），否则用户上传的人像与生成的主视觉都没有机器审核。文案侧已走既有 `moderate()`。

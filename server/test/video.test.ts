@@ -27,12 +27,15 @@ let cloneUpstream: Record<string, unknown> = { voiceId: 'VC-new' };
 /** 非 null 时让上游 clone 直接报错，用来验「上游失败 → 预扣必须退回」。 */
 let cloneUpstreamError: { status: number; code: string; error: string } | null = null;
 let renderCalls = 0;
+let renderTimeoutAfterAccept = false;
+const renderedByRequest = new Map<string, { jobId: string; status: string }>();
 let seenHeaders: Headers | null = null;
 let seenCloneModel: unknown = null;
 let seenDirectSubmitBody: Record<string, unknown> = {};
 let renderBlock: Promise<void> | null = null;
 let signalRenderStarted: (() => void) | null = null;
 let directUploadSubmitCalls = 0;
+let finalVideoContentLength = 16;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -67,7 +70,15 @@ before(async () => {
       renderCalls += 1;
       signalRenderStarted?.();
       if (renderBlock) await renderBlock;
+      const body = JSON.parse(String(init?.body ?? '{}')) as { clientRequestId?: string };
+      if (body.clientRequestId) renderedByRequest.set(body.clientRequestId, { jobId: 'cj_test', status: 'queued' });
+      if (renderTimeoutAfterAccept) throw new TypeError('socket closed after upstream commit');
       return json({ jobId: 'cj_test', projectId: 'cp_test', status: 'queued' }, 201);
+    }
+    if (url.pathname.startsWith('/api/me/clip/jobs/by-request/')) {
+      const requestId = decodeURIComponent(url.pathname.split('/').pop() ?? '');
+      const found = renderedByRequest.get(requestId);
+      return found ? json(found) : json({ error: 'not found', code: 'CLIP_JOB_NOT_FOUND' }, 404);
     }
     if (url.pathname === '/api/me/clip/jobs/cj_test') {
       return json({ id: 'cj_test', status: jobStatus, stage: 'avatar', progress: jobStatus === 'failed' ? 40 : 10, errorMessage: jobStatus === 'failed' ? '上游失败' : null });
@@ -114,7 +125,7 @@ before(async () => {
       return json({ id: 'cp_test', projectId: 'cp_test', title: '测试作品', status: 'done', durationSec: 12, avatarSec: 4, videoUrl: 'https://aiartist.oss-cn-hangzhou.aliyuncs.com/media/final.mp4' });
     }
     if (url.hostname === 'aiartist.oss-cn-hangzhou.aliyuncs.com' && url.pathname === '/media/final.mp4') {
-      return new Response(Buffer.from('test-video-bytes'), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': '16' } });
+      return new Response(Buffer.from('test-video-bytes'), { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(finalVideoContentLength) } });
     }
     return json({ error: 'not found', code: 'CLIP_NOT_FOUND' }, 404);
   };
@@ -135,12 +146,15 @@ beforeEach(async () => {
   cloneUpstreamError = null;
   jobStatus = 'queued';
   renderCalls = 0;
+  renderTimeoutAfterAccept = false;
+  renderedByRequest.clear();
   seenHeaders = null;
   seenCloneModel = null;
   seenDirectSubmitBody = {};
   renderBlock = null;
   signalRenderStarted = null;
   directUploadSubmitCalls = 0;
+  finalVideoContentLength = 16;
 });
 
 test('视频 BFF 未登录一律 401', async () => {
@@ -228,6 +242,20 @@ test('成片保存经军师同源流式下载并刷新上游签名', async () =>
   assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.headers['content-type'], 'video/mp4');
   assert.equal(response.rawPayload.toString(), 'test-video-bytes');
+});
+
+test('成片下载代理在上游声明超限时中止，不把大文件拖进 API 进程', async () => {
+  const token = await login(uniquePhone(), '成片上限用户');
+  finalVideoContentLength = 11 * 1024 * 1024;
+  process.env.VIDEO_DOWNLOAD_PROXY_MAX_BYTES = String(10 * 1024 * 1024);
+  try {
+    const app = await getApp();
+    const response = await app.inject({ method: 'GET', url: '/api/video/works/cp_test/file', headers: { 'x-user-id': token } });
+    assert.equal(response.statusCode, 413, response.body);
+    assert.equal(response.json().code, 'CLIP_WORK_FILE_TOO_LARGE');
+  } finally {
+    delete process.env.VIDEO_DOWNLOAD_PROXY_MAX_BYTES;
+  }
 });
 
 test('视频 BFF 原样保存默认关闭的 AI 水印偏好', async () => {
@@ -345,6 +373,31 @@ test('出片按 clientRequestId 幂等预扣，上游失败只退款一次', asy
   await api('GET', '/api/video/jobs/cj_test', { token });
   assert.equal(await getBalance(token), beforeBalance, '重复轮询失败不得双退');
   assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'refunded' } }), 1);
+});
+
+test('上游已接单但响应断开时不退款，原 clientRequestId 重试可对账找回', async () => {
+  const token = await login(uniquePhone(), '模糊结果视频用户');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+  await grantCredits(user.tenantId, token, 50, '视频模糊结果测试充值');
+  const beforeBalance = await getBalance(token);
+  const body = { clientRequestId: 'clip:test:unknown-001', expectedCredits: 6 };
+  renderTimeoutAfterAccept = true;
+
+  const first = await api('POST', '/api/video/projects/cp_test/render', { token, body });
+  assert.equal(first.status, 409, JSON.stringify(first.body));
+  assert.equal(first.body.code, 'CLIP_RENDER_CREATING');
+  assert.equal(await getBalance(token), beforeBalance - 6, '模糊结果不能立即退款');
+  assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'unknown' } }), 1);
+  assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'refunded' } }), 0);
+
+  renderTimeoutAfterAccept = false;
+  const retry = await api('POST', '/api/video/projects/cp_test/render', { token, body });
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.equal(retry.body.jobId, 'cj_test');
+  assert.equal(retry.body.reused, true);
+  assert.equal(renderCalls, 1, '对账命中已接单任务后不得再创建第二个任务');
+  assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'submitted', upstreamJobId: 'cj_test' } }), 1);
+  assert.equal(await getBalance(token), beforeBalance - 6);
 });
 
 test('用户确认价与服务端重算不一致时拒绝扣费和建单', async () => {
