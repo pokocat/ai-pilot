@@ -42,7 +42,14 @@ after(async () => { await closeApp(); });
 /** 走真实注册链路建号（可带邀请码）——物化路径由 services/referral.ts 写，不由本测试捏造。 */
 async function register(opts: { inviteCode?: string } = {}): Promise<string> {
   const body: Record<string, unknown> = { phone: uniquePhone(), name: '邀请视图用户' };
-  if (opts.inviteCode) { body.inviteCode = opts.inviteCode; body.inviteCodeAt = Date.now(); }
+  if (opts.inviteCode) {
+    const captured = await api<{ token: string }>('POST', '/api/auth/referral-capture', {
+      body: { inviteCode: opts.inviteCode, source: 'share_friend' },
+    });
+    assert.equal(captured.status, 200);
+    body.inviteCode = opts.inviteCode;
+    body.referralToken = captured.body.token;
+  }
   const r = await api<{ token: string }>('POST', '/api/auth/login', { body });
   assert.equal(r.status, 200, `注册应成功，实际 ${r.status} ${JSON.stringify(r.body)}`);
   return r.body.token;

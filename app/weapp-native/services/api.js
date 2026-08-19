@@ -2,7 +2,7 @@ const mock = require('./mock');
 const { request, upload } = require('./request');
 const { getToken } = require('./token');
 const { getApiBaseUrl, getImpersonationBaseUrl, useMockApi } = require('./runtime-mode');
-const { inviteParams } = require('./invite');
+const { inviteParamsReady } = require('./invite');
 
 const isMock = () => useMockApi();
 const query = (value) => encodeURIComponent(value == null ? '' : String(value));
@@ -26,13 +26,19 @@ const api = {
   deleteSession: (id) => isMock() ? mock.deleteSession(id) : request(`/sessions/${query(id)}`, { method: 'DELETE' }),
   search: (q) => isMock() ? mock.search(q) : request(`/search?q=${query(q)}`),
   sendSmsCode: (phone, scene) => isMock() ? mock.sendSmsCode(phone, scene) : request('/auth/sms/send', { method: 'POST', data: { phone, scene } }),
-  // 登录请求统一由 inviteParams() 带上邀请码归因（没码时返回空对象，请求体不出现 undefined 字段）。
+  // 游客落地换服务端签名捕获凭证；mock 包不外呼真实服务，真实会话才启用。
+  captureReferral: (inviteCode, source) => isMock()
+    ? Promise.resolve(null)
+    : request('/auth/referral-capture', { method: 'POST', data: { inviteCode, source }, isolatedAuth: true }),
+  // 登录请求统一短等 inviteParamsReady()，带上签名归因凭证（没码时返回空对象）。
   // 放在这一层而不是让每个调用方自己传：login-sheet 被 88 个页面引用，调用方零改动。
-  login: (phone, code) => isMock() ? mock.login(phone) : request('/auth/login', { method: 'POST', data: Object.assign({ phone, code }, inviteParams()) }),
+  login: (phone, code) => isMock()
+    ? mock.login(phone)
+    : inviteParamsReady().then((params) => request('/auth/login', { method: 'POST', data: Object.assign({ phone, code }, params) })),
   wechatLogin: (code) => isMock() ? mock.wechatLogin(code) : request('/auth/wechat-login', { method: 'POST', data: { code } }),
   wechatPhoneLogin: (phoneCode, loginCode) => isMock()
     ? mock.wechatPhoneLogin(phoneCode)
-    : request('/auth/wechat-phone', { method: 'POST', data: Object.assign({ phoneCode, loginCode }, inviteParams()) }),
+    : inviteParamsReady().then((params) => request('/auth/wechat-phone', { method: 'POST', data: Object.assign({ phoneCode, loginCode }, params) })),
   me: () => isMock() ? mock.me() : request('/me'),
   verifyImpersonation: (token) => request('/me', {
     token,

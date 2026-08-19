@@ -413,24 +413,44 @@ export interface LoginResult {
   user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
   /** 仅手机号快捷登录需要；旧客户端忽略即可。wechat_relinked 是登录成功后的非阻断提醒。 */
   phoneBinding?: LoginPhoneBinding;
+  /**
+   * 本次登录携带邀请归因时的服务端处理结果。`no_timestamp` / `config_unavailable` 可重试，
+   * 客户端必须保留本地邀请凭证；其余结果均为终态，可清理本地凭证。未携带邀请参数时不返回。
+   */
+  referralOutcome?: ReferralBindingOutcome;
 }
 
 /**
  * 登录请求可带的邀请归因入参（三条建号通道通用：`/auth/login`、`/auth/wechat-phone`、`/auth/carrier-onetap`）。
  *
- * 两个字段都**可选**：老客户端不带、用户不是从分享进来也不带。
- * `inviteCodeAt` = 客户端捕获到该码的时刻（ms epoch），**归因窗口的判定权在服务端**
- * （窗口天数归运营后台配置），客户端只如实上报「码」和「什么时候拿到的」，不写死业务天数。
+ * 两个字段都**可选**：用户不是从分享进来时不带。`referralToken` 由公开的
+ * `POST /auth/referral-capture` 在落地时按服务端时钟签发，登录链只信它携带的捕获时间与来源；
+ * `inviteCode` 只用于无 token/验签失败时留下 `no_timestamp` 诊断与后续受限恢复，不能单独建关系。
  * **脏参数一律不让登录失败**（分享链路不能因为一个参数把用户拦在门外），但也**不等于当没传**：
  *   · 压根没带 → 不归因、不留痕；
  *   · 带了但形状/类型不对（含 `inviteCode: 123`）→ 仍落一条 `unknown_code` 归因记录，
  *     否则用户问「我填了邀请码怎么没算给他」时运营手上没有任何凭据；
- *   · `inviteCodeAt` 缺失或不是正整数 → 落 `no_timestamp` 且**不建关系**：判不了新鲜度就不能
- *     建一条不可变更的永久关系（早先「没时间戳按不过期」的写法是绕过归因窗口的后门）。
+ *   · token 缺失、验签失败或与邀请码不一致 → 落 `no_timestamp` 且**不建关系**：客户端自报时间
+ *     不能作为不可变关系的凭据。
  */
 export interface LoginAttribution {
   inviteCode?: string;
-  inviteCodeAt?: number;
+  referralToken?: string;
+}
+
+export type ReferralSource = 'share_friend' | 'share_timeline' | 'poster_qr' | 'manual';
+export type ReferralBindingOutcome =
+  | 'bound' | 'self' | 'cycle' | 'unknown_code' | 'expired'
+  | 'already_bound' | 'config_unavailable' | 'no_timestamp';
+
+/** 游客落地时换取服务端签名捕获凭证；manual 只允许服务端内部使用。 */
+export interface ReferralCaptureRequest {
+  inviteCode: string;
+  source: Exclude<ReferralSource, 'manual'>;
+}
+export interface ReferralCaptureResult {
+  token: string;
+  capturedAt: string;
 }
 
 /**

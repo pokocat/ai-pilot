@@ -20,6 +20,14 @@
 - `scripts/deploy-prod.sh` 增加显式 `SKIP_DB_PUSH=1`，仅供确认本次无数据库变更的代码热修复保留线上额外 schema，常规 schema 变更仍必须走 Prisma 预检。
 - 生产后端已发布 `1d4469d` 并通过公网 health/监控 smoke；原生小程序 `0.2.45` 已按生产 API 与构建身份校验后上传微信开发版，包体 2,346,872 B。
 
+### 2026-08-19 · 修复邀请归因的客户端伪造、代理 IP、失败不可恢复、注销误删后代链与支付补记易失问题 · 影响面：邀请捕获/登录契约、小程序分享来源、账号注销、支付激活 outbox、Prisma schema 与回归测试
+
+- 新增公开 `POST /auth/referral-capture`：按服务端时钟签发 HMAC 捕获凭证，登录只信 token 内的 `capturedAt/source`，旧 `inviteCodeAt` 即使伪造未来时间也不能建边；验签在生产密钥暂缺时 fail-closed 为不可归因而不阻断登录。归因 IP 改读 Fastify 的可信代理解析结果，不再直接取可伪造的 XFF 首段。
+- `LoginResult.referralOutcome` 明确可恢复结果；小程序对 `no_timestamp|config_unavailable` 保留邀请码，上次签名请求已失败时在下一次登录前自动重签；服务端仅允许“首次注册已有同一码失败留痕”的账号重试，普通存量账号仍禁止追认。好友/朋友圈/海报分别写 `share_friend/share_timeline/poster_qr`，不再全部硬记好友分享。
+- 注销账号在独占与多人租户分支都调用同一清理函数：只删除本人边和直接指向本人的失效边，保留仍有效的后代直邀关系并重算 lv2/lv3；涉及本人的归因留痕与邀请激活 outbox 同步删除。
+- 新增 `InviteActivationOutbox`：支付权益事务内持久化补记意图，提交后异步处理，`pay-reconcile-sweep` 定时续扫并退避；进程在支付响应后退出也不会永久漏掉 `ActivationEvent(source='invite')`，重复通知与并发仍幂等。
+- 回归新增服务端签名/未来时间/XFF/失败恢复/来源区分/两条注销分支/链路重算/outbox 重启恢复，以及小程序捕获 token 与来源断言；目标测试、构建和全量校验见本次交付记录。
+
 ### 2026-08-18 · 快出片声音训练模型切换为 2.0 · 影响面：军师 BFF → AIStar 声音训练、直传与旧 multipart 兼容链路
 
 - 声音相关 clone 请求统一向 AIStar 传 `model: "2.0"`；照片分身不创建声音，因此不传该字段。
@@ -39,6 +47,18 @@
 - 已用正式发布闸门先 dry-run、再上传开发版 `0.2.47`：构建身份 `native-weapp / server / https://wxapi.aibuzz.cn/api / e9c5edd`，AppID `wx810ebe6dfef8e75f`，DevTools 上传成功，包体 2,413,152 B。
 - 本次仅替换微信后台开发版，尚未转体验版、提交审核或正式发布；包含同一失效 token 并发 401 只执行一次退出/跳转的客户端修复。
 
+### 2026-08-18 · 修掉功能开关 payload 的整块覆盖写（运营改一个数值会静默抹掉同 flag 的其他配置）· 影响面：`server/src/services/featureFlag.ts`、`server/src/routes/admin.ts`（number / arms 两个分支）、`server/test/featureFlagPayload.test.ts`（新）、`services/referral.ts` 与 `routes/adminReferral.ts` 的注释订正
+
+**问题**：`PATCH /admin/flags/:id` 的 number 分支写 `setFeatureFlagPayload(id, { [payloadKey]: v })`，而那个函数是 `prisma.featureFlag.upsert({ update: { payload } })`——**整块替换 payload 列**，不是合并。A/B 权重分支（`{ arms }`）同形。于是同一个 flag 的 payload 上只要有第二个键，运营在「功能开关」页改任一数值就会把其余键静默清空。最贴近的一处是 `services/referral.ts` 在 `referral` payload 上预留的五个奖励键（`rewardInviter` / `rewardInvitee` / `rewardOnPaid` / `dailyCap` / `ladder`）：今天全是 null，所以线上看不出任何异常——**等奖励机制真上线，第一次改归因窗口就是一次查不出来的配置丢失**。这类 bug 的代价全在未来，所以趁没人踩先修。
+
+**修法**：新增 `mergeFeatureFlagPayload(key, patch)`，只覆盖 patch 带的顶层键。实现是**一条 `jsonb ||` 的 upsert**而不是「先读后写」——两个运营同时保存不同键也不会互相覆盖（先读后写在这里会丢更新）；旧值不是 JSON 对象（历史脏数据写过标量/数组）时按空对象起算，避免 `||` 退化成数组拼接；`updatedAt` 显式写 `now() AT TIME ZONE 'UTC'`，raw SQL 绕过了 Prisma 的 `@updatedAt`，不这么写会按会话时区落库、跟其他行差一个时区。`admin.ts` 的 number 与 arms 两个分支改走它。
+
+**`setFeatureFlagPayload` 刻意保留整块覆盖语义**，没有「顺手统一」：`artifactPricing.updateArtifactPrices` 靠「不写某个键 = 删掉它 = 回退默认」来清掉一个已配的规格价（`delete entry[variant]`），`creative/config.ts`、`video/pricing.ts`、`video/storagePlan.ts` 同样是自己先读全量再整块落库。把它改成合并，运营就再也删不掉一个配错的价。两种语义各自的适用场景写进了函数注释，并**都在测试里钉住**——任一边被统一掉就红。
+
+**测试**：新增 `server/test/featureFlagPayload.test.ts`（8 例）：合并保键 / 写完立刻读到（payload 缓存已清）/ 行不存在时新建且 enabled 取库默认 / 脏数据旧值不抛 / 并发写不同键两边都留住 / `setFeatureFlagPayload` 仍整块覆盖 / 路由 number 与 arms 两个分支不再抹掉同 payload 其他键。已验证反向红：把两处调用换回 `setFeatureFlagPayload`，那两条路由用例即失败。
+
+**`referral-window` / `referral-risk` 继续各占一个 flag id**：当初拆开就是为了躲这条 bug，但修完也不合回去——一个 flag 一个数，运营后台各自一行、审计各自一条，语义本就更清楚。相关注释已订正为「当初为躲整块覆盖写而拆开，该行为已修掉」，不再把它描述成现行行为。
+
 ### 2026-08-18 · 运营后台「邀请增长」三视图（本体 Schema / 邀请关系树 / IP 风控二部图）· 影响面：`admin/src/views/referral.tsx`（新）、`admin/src/nav.ts`、`admin/src/api.ts`、`admin/src/styles/admin.css`、`server/src/routes/adminReferral.ts`（新）、`routes/admin.ts` 开关目录、`app.ts` 注册、契约新增、AGENTS §9.0/§9.1/§13
 
 **为什么要做**：`Referral` 的物化路径 `lv1/lv2/lv3` 从第一天就写全，理由就是「运营侧的邀请关系树要看完整链路」——但在此之前运营侧**一个视图都没有**，那三列冗余字段谁也用不上；`ReferralAttribution.clientIp/userAgent` 同理，采了却没人看。这次把三个投影落到后台，那些列才第一次兑现价值。
@@ -56,7 +76,7 @@
 
 **取数形状（避免 N+1 是硬要求）**：树接口用**物化路径一条 `OR`（`lv1/lv2/lv3` 各有索引）一次取全三级子树**，配合一次 `groupBy(lv1)`（给出任意深度都准的直邀数——第三级节点的下级不在本次结果里，但它的直邀数在这张表里，所以树末端**不会谎报成 0**，而是显式标「下级超出三级视野」）+ 一次 `findMany` 补名字/套餐，全程 4 条查询、没有逐层展开的回头请求。风控接口把聚集判定**整体下推到 SQL**：一条 `GROUP BY clientIp HAVING COUNT(DISTINCT newUserId) >= 阈值` 直接出组（同一条里带出 `group_total`），名单用 `DISTINCT ON (clientIp,newUserId)` 取每人最早那条、再 `ROW_NUMBER() OVER (PARTITION BY clientIp)` 按组限量。~~原先是「`groupBy(clientIp)` 拿候选 → 只对候选拉明细、在内存里按 `newUserId` 去重」~~——那个写法配着全局 `take: 5000` 会让某个 IP 的重复旧留痕把另一个真实聚集组**整组挤没**，页面显示「没有聚集」（第三轮复核判为阻断：风控视图唯一的价值就是看见聚集）。**行级上限已彻底删除**，截断只发生在组数上且如实透出 `groupTotal`。
 
-**阈值归运营，不写死**：聚集阈值是功能开关 `referral-risk` 的 `payload.ipMin`（默认 5，区间 2~200，单位「个新号/IP」），区间与默认值由 `routes/adminReferral.ts` 导出、`FEATURE_FLAG_CATALOG` 引用，「开关页能改的范围」与「视图判定用的范围」是同一份。**刻意另立一个 flag id 而不是复用 `referral` 的 payload**：`PATCH /admin/flags/:id` 的 number 分支是 `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，两个数值挤同一个 flag，运营改完归因窗口就会把阈值抹掉。读阈值走 `{ fresh: true }` 绕过 60s 缓存（运营改完当场要能验证，否则会以为改动没生效）。
+**阈值归运营，不写死**：聚集阈值是功能开关 `referral-risk` 的 `payload.ipMin`（默认 5，区间 2~200，单位「个新号/IP」），区间与默认值由 `routes/adminReferral.ts` 导出、`FEATURE_FLAG_CATALOG` 引用，「开关页能改的范围」与「视图判定用的范围」是同一份。**刻意另立一个 flag id 而不是复用 `referral` 的 payload**：`PATCH /admin/flags/:id` 的 number 分支当时是 `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，两个数值挤同一个 flag，运营改完归因窗口就会把阈值抹掉（**该覆盖写已于同日修掉，见本文顶部条目**；两个 flag id 的安排保留不变）。读阈值走 `{ fresh: true }` 绕过 60s 缓存（运营改完当场要能验证，否则会以为改动没生效）。
 
 **读失败不许伪装成空**：三个端点里没有任何兜底 catch，配置或查询失败一律 5xx 交给 `useResource`/`ViewState` 渲染成「加载失败 + 重试」。空态则给**显式零计数**——风控还回 `scannedIps`，让「近 30 天扫过 214 个 IP、没有一个达标」与「一条数据都没有」在界面上是两句不同的话（前者是正常形态，后者才要去查链路）。
 

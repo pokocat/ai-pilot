@@ -45,9 +45,11 @@ type RiskGroupOut = AdminReferralRiskGroup;
 type RiskOut = AdminReferralRisk;
 
 /* ── 风控聚集阈值：归运营配置，代码里只留兜底 ─────────────────────────────
-   单独一个 flag id 而不是复用 `referral` 的 payload：`PATCH /admin/flags/:id` 的 number 分支是
-   `setFeatureFlagPayload(id, { [payloadKey]: v })`——**整块 payload 覆盖写**，把两个数值挤进同一个
-   flag，运营改完归因窗口就会把阈值抹掉（反之亦然）。两个 id 各管一个数，谁都不会被对方清掉。
+   单独一个 flag id 而不是复用 `referral` 的 payload。当初拆开是为了躲 `PATCH /admin/flags/:id`
+   的整块 payload 覆盖写（改一个数值会抹掉同 payload 的另一个）——那条已于 2026-08-18 修掉，
+   number / arms 分支现在走 `mergeFeatureFlagPayload`，只覆盖自己那个键（守卫见
+   test/featureFlagPayload.test.ts）。这里**继续分两个 id**：一个 flag 一个数，语义本就更清楚，
+   运营后台各自一行、审计日志各自一条，没有合回去的理由。
    这四个常量由 routes/admin.ts 的 FEATURE_FLAG_CATALOG 引用（同 REVIEW_GRACE_PER_DAY 的做法），
    保证「功能开关页能改的区间」与「本视图判定用的区间」是同一份，不会各写一遍后漂移。 */
 export const REFERRAL_RISK_FLAG = 'referral-risk';

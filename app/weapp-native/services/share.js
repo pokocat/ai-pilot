@@ -171,13 +171,13 @@ function pathWithCode(base) {
   const path = base || LANDING;
   const code = currentCode();
   if (!code) return path;
-  return `${path}${path.indexOf('?') >= 0 ? '&' : '?'}ic=${encodeURIComponent(code)}`;
+  return `${path}${path.indexOf('?') >= 0 ? '&' : '?'}ic=${encodeURIComponent(code)}&src=friend`;
 }
 
 /** 朋友圈只能给 query（落地页被微信固定为当前页，改不了 path），所以这里只回参数串。 */
 function timelineQuery() {
   const code = currentCode();
-  return code ? `ic=${encodeURIComponent(code)}` : '';
+  return code ? `ic=${encodeURIComponent(code)}&src=timeline` : '';
 }
 
 const friendMixin = {

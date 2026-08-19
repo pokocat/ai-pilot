@@ -43,7 +43,7 @@ import { clonePricing, clonePricingView, updateClonePricing } from '../services/
 import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
-import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
+import { setFeatureFlag, mergeFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
 import {
   REFERRAL_RISK_FLAG, REFERRAL_RISK_PAYLOAD_KEY, REFERRAL_RISK_DEF, REFERRAL_RISK_MIN, REFERRAL_RISK_MAX,
 } from './adminReferral.js';
@@ -113,10 +113,11 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
   { id: WENCE_FLAG, label: '问策入口改版 A/B', desc: '关闭即全量走现状军师列表；开启后按权重分组 control（现状）/ dock（列表页+输入坞）/ chat（对话即 tab），未配权重时三臂均分', compliance: false, kind: 'toggle', arms: ['control', 'dock', 'chat'] },
   // 邀请归因窗口：捕获到邀请码距注册超过这么多天就不再归因（services/referral.ts 读它）。
   // 登记在这里才算真的「归运营配置」——只写在代码默认值里、要改得连数据库，等于没有入口。
-  { id: 'referral-window', label: '邀请归因窗口', desc: '用户点开分享后多少天内注册仍算这次邀请（超过即不建立关系，只留归因记录）。单独一个 flag：payload 是整块覆盖写的，与奖励配置共用会互相抹掉', compliance: false, kind: 'number', payloadKey: 'window', def: 30, min: 1, max: 365, unit: '天' },
+  // 与奖励配置（flag `referral`）分属两个 id：一个 flag 一个语义，理由见 services/referral.ts 的注释。
+  { id: 'referral-window', label: '邀请归因窗口', desc: '用户点开分享后多少天内注册仍算这次邀请（超过即不建立关系，只留归因记录）', compliance: false, kind: 'number', payloadKey: 'window', def: 30, min: 1, max: 365, unit: '天' },
   // 邀请风控聚集阈值：同一 IP 在窗口期内注册多少个带码新号就进「邀请增长 · 风控关联」视图。
-  // **另立一个 flag id 而不是复用 'referral' 的 payload**：下面 number 分支是整块 payload 覆盖写
-  // （`setFeatureFlagPayload(id, { [payloadKey]: v })`），两个数值挤一个 flag 会互相抹掉。
+  // **另立一个 flag id 而不是复用 'referral' 的 payload**：当初是为躲 number 分支的整块覆盖写
+  // （已于 2026-08-18 改成 mergeFeatureFlagPayload），现在保持分开只是因为一个 flag 一个数更清楚。
   // 区间与默认值从 routes/adminReferral.ts 引用，保证「这里能改的范围」与「视图判定用的范围」同源。
   // 公理 5：这只是预警线——超阈值只进视图，关系照常绑定、注册照常放行，本页没有任何封禁动作。
   {
@@ -2199,7 +2200,8 @@ export async function adminRoutes(app: FastifyInstance) {
         total += arms[k];
       }
       if (total <= 0) return reply.code(400).send({ error: '权重总和必须大于 0', code: 'BAD_ARMS' });
-      await setFeatureFlagPayload(def.id, { arms });
+      // 合并写：只动 payload.arms，同 flag payload 上的其他键（若有）不受影响。
+      await mergeFeatureFlagPayload(def.id, { arms });
       await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, arms } });
       if (typeof req.body?.enabled !== 'boolean') {
         const row = await prisma.featureFlag.findUnique({ where: { id: def.id } });
@@ -2215,7 +2217,9 @@ export async function adminRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: `数值需在 ${min}-${max} 之间`, code: 'BAD_VALUE' });
       }
       const v = Math.floor(value);
-      await setFeatureFlagPayload(def.id, { [def.payloadKey!]: v });
+      // 合并写：只动 payload[payloadKey]，同 flag payload 上的其他键原样保留
+      // （整块覆盖写时，运营改一个数值会把同 payload 的其他运营配置静默抹掉）。
+      await mergeFeatureFlagPayload(def.id, { [def.payloadKey!]: v });
       await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, value: v } });
       const row = await prisma.featureFlag.findUnique({ where: { id: def.id } });
       return shapeFlag(def, row);
