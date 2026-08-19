@@ -1419,6 +1419,12 @@ test('执行 tab 守住独立状态机、锦囊兼容与冷启动复盘红点', 
   assert.match(executionWxml, /worksStatus==='error'[\s\S]{0,180}bindtap="retryWorks"/, '战果失败必须给局部重试');
   assert.ok(executionWxml.indexOf("worksStatus==='error'") < executionWxml.indexOf('bindtap="scrollToPouch"'), '失败判据必须先于真空态');
   assert.match(executionWxml, /bindtap="scrollToPouch"/, '汇总行点了滚到页尾锦囊段，不跳页');
+  // enhanced 的 scroll-view 已经绑了 scroll-top + bindscroll，不许再叠 scroll-into-view：
+  // 全仓只有 chat / 问策用 scroll-into-view，且都没绑 scroll-top，别在这里造独一份的组合。
+  const execScrollTag = executionWxml.slice(executionWxml.indexOf('<scroll-view'), executionWxml.indexOf('>', executionWxml.indexOf('<scroll-view')));
+  assert.match(execScrollTag, /enhanced/);
+  assert.doesNotMatch(execScrollTag, /scroll-into-view/, 'enhanced + scroll-top 的滚动容器不得再叠 scroll-into-view');
+  assert.match(execution, /select\('#pouch-sec'\)\.boundingClientRect\(\)/, '滚到锦囊段靠量位置写 scroll-top');
   assert.doesNotMatch(executionWxml, /today-works|today-work-img/, '同一页不得再出现第二排作品缩略图');
   assert.match(executionWxml, /reviewDue[\s\S]{0,180}今晚复盘还没做/, '21 点复盘提醒在今日段顶部可见');
   assert.match(executionWxml, /pouchMovedHint[\s\S]{0,120}锦囊搬到这了/, '锦囊迁移提示挂在段头');

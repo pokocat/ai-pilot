@@ -90,7 +90,7 @@ Page({
     orderDone: 0, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
     weekGroups: [], weekStrip: [], weekDone: 0, weekTotal: 0, streak: 0,
     backfill: null, savingBackfill: false, reminders: [], reviewOpen: false,
-    todaySummary: '', todayPartial: '', todayEmpty: false, crafts: [], archiveText: '跨手艺翻找 · 全部作品按时间排', unlockAgent: null, scrollAnchor: '',
+    todaySummary: '', todayPartial: '', todayEmpty: false, crafts: [], archiveText: '跨手艺翻找 · 全部作品按时间排', unlockAgent: null,
     battleForces: [], pendingDecision: null, verifying: false,
     bizItems: [], bizSaved: false, bizEditing: false, savingBiz: false, reviewKeyboardHeight: 0, reviewAnchor: '',
     goalRows: goalRows(null), goalEdit: null, goalDraft: '', savingGoal: false,
@@ -240,11 +240,29 @@ Page({
     this.setData({ [`crafts[${index}].works[${work}].thumb`]: item.art });
   },
 
-  /** 汇总行：点了滚到页尾锦囊段（同一页内，不跳转）。 */
+  /**
+   * 汇总行：点了滚到页尾锦囊段（同一页内，不跳转）。
+   *
+   * 不用 scroll-into-view —— 本页这个 scroll-view 开了 enhanced，且已经绑着 scroll-top 与
+   * bindscroll；再叠一个 scroll-into-view 就成了全仓独一份的组合（chat / 问策只绑
+   * scroll-into-view，不绑 scroll-top）。这里改成量出段头位置直接写 scroll-top，
+   * 与本页既有的分段滚动位置记忆同一条路子。
+   */
   scrollToPouch() {
     api.track('pouch_entry_click', { entry: 'today_summary', segment: this.data.segment ? 'week' : 'today' });
-    this.setData({ scrollAnchor: 'pouch-sec' });
-    setTimeout(() => this.setData({ scrollAnchor: '' }), 400);
+    const query = wx.createSelectorQuery();
+    query.select('#pouch-sec').boundingClientRect();
+    query.select('.exec-scroll').scrollOffset();
+    query.exec((res) => {
+      const target = res && res[0];
+      const scroll = res && res[1];
+      if (!target || !scroll) return;
+      let top = Math.max(0, scroll.scrollTop + target.top - 12);
+      // scroll-top 绑的是同一个值：已经停在那儿时再点，得让值真的变一下才会重滚。
+      if (top === this.data.scrollTop) top += 1;
+      this._scrollBySegment[this.data.segment] = top;
+      this.setData({ scrollTop: top });
+    });
   },
 
   /**

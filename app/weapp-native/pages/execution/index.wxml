@@ -1,6 +1,6 @@
 <view class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
-  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll exec-scroll" scroll-top="{{scrollTop}}" scroll-into-view="{{scrollAnchor}}" scroll-with-animation bindscroll="onScroll">
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll exec-scroll" scroll-top="{{scrollTop}}" scroll-with-animation bindscroll="onScroll">
     <view class="native-nav-inset"></view>
     <view class="pad execution exec-page">
       <tab-header title="今日" kicker="今天该做的都在这" glyph="今"></tab-header>
