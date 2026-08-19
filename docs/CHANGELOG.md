@@ -6,6 +6,28 @@
 
 ## 变更日志
 
+### 2026-08-19 · 注销不再删邀请关系链，只抹个人字段 · 影响面：注销清理、关系链账本、两条注销用例
+
+原实现（08-18）在注销时删掉「本人的上级边 + 直接指向本人的边」并用一条 raw SQL 重算后代的
+lv2/lv3。**那个口径是错的**，改为只抹个人可识别字段：
+
+- **邀请关系是邀请人的账本**：A 邀请了 B，B 注销跟 A 的业绩无关。删边等于让 A 的直邀数/已开通数
+  凭空缩水，还会截断 A→B→C 的三级链条（C 的 lv2 变 null）。
+- **`Referral` 表里没有个人可识别数据**：只有内部 cuid、邀请码、时间戳。`user` 行一删，那些 cuid
+  就是无意义标识符，**它天然已经去标识化**，不需要任何处理——所以整表一行不动，重算 lv2/lv3 的
+  raw SQL 整段删除（不删边就不用补路径，逻辑反而更简单）。
+- **与本仓既有口径对齐**：账本类（paymentOrder / subscriptionContract / tokenUsage / clientEvent /
+  auditLog / moderationLog）一律去标识保留，只有个人内容（reportHtml / profile / userAgent）才删。
+  原实现对 referral 用「全删」与这套规矩不一致。
+- **唯一处理的是 `ReferralAttribution.clientIp` / `userAgent`**：网络与设备标识符，属个人数据，
+  隐私政策承诺「期满后删除或匿名化」。置 null 而**不删行**——邀请码、outcome、时间、双方 id 全留，
+  归因历史完整。业务零损失：这两个字段只服务风控视图的「同 IP 批量注册」，那是实时判断，
+  30 天前的 IP 对风控已无价值。`InviteActivationOutbox` 同样保留（无个人数据）。
+- 函数随语义改名 `removeUserReferralData` → `scrubUserReferralPii`。
+- 两条注销用例方向反转（原来断言「边必须删除」）：现在断言关系链与三级路径一行不动、归因行保留、
+  只有 IP/UA 为 null。实测双向变异均红：scrub 变空操作 → 报「clientIp 必须抹掉」；退回删边 → 报
+  关系链断裂。
+
 ### 2026-08-19 · 生产发布增加 schema 保守旁路 · 影响面：生产部署脚本、数据库安全门
 
 - 线上只读核对发现 `generation_job.priority` 为历史额外列（`0=209`、`9=6`），当前生产归档与代码均不读取它；本次不删除、不接受数据损失。

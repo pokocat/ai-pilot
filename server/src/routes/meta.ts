@@ -10,7 +10,7 @@ import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
-import { referralSummary, removeUserReferralData } from '../services/referral.js';
+import { referralSummary, scrubUserReferralPii } from '../services/referral.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
@@ -219,7 +219,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const others = await prisma.user.count({ where: { tenantId, id: { not: user.id } } });
     await prisma.$transaction(async (tx) => {
       // 两个分支都必须清理邀请隐私与关系；仅删除本人/直指本人的边，后代链按剩余直邀边重算。
-      await removeUserReferralData(tx, user.id);
+      // 只抹个人可识别字段：关系链与归因记录整体保留（邀请业绩属邀请人，不因下级注销而缩水）。
+      await scrubUserReferralPii(tx, user.id);
       if (others === 0) {
         // 独占租户：按外键顺序清空该租户全部业务数据
         await tx.deliverable.deleteMany({ where: { tenantId } });

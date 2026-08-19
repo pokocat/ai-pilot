@@ -368,24 +368,28 @@ export async function traceOutsideTransaction(args: {
  * 例：A→B→C→D，删 A 只删除 B→A 这条直接边；B→C、C→D 仍有效。删除直接指向 A 的行后，
  * 用剩余直接边重新投影受影响行的 lv2/lv3。此前直接 delete lv2/lv3 命中的行会把整条后代链删光。
  */
-export async function removeUserReferralData(tx: Prisma.TransactionClient, userId: string): Promise<void> {
-  await tx.inviteActivationOutbox.deleteMany({ where: { userId } });
-  await tx.referralAttribution.deleteMany({
+/**
+ * 注销到期清理：**只抹掉个人可识别字段，关系链与归因记录整体保留**（2026-08-19 决策）。
+ *
+ * 为什么不删关系链（原先是删的，那是错的）：
+ * ① 邀请关系是**第三方的账本**——A 邀请了 B，B 注销跟 A 的邀请业绩没关系。删掉等于让 A 的
+ *    直邀数、已开通数凭空缩水，还会把 A→B→C 的三级链条截断、把 C 的 lv2 变成 null。
+ * ② `Referral` 表里根本没有个人可识别数据：只有内部 cuid、邀请码、时间戳。`user` 行一删，
+ *    那些 cuid 就是无意义标识符，**它天然已经是去标识化的**，不需要任何处理。
+ * ③ 与本仓既有口径一致：账本类（paymentOrder / tokenUsage / clientEvent / auditLog…）一律
+ *    去标识保留，只有个人内容（reportHtml / profile / userAgent）才删。
+ *
+ * 唯一必须处理的是 `ReferralAttribution` 的 `clientIp` / `userAgent`：那是网络与设备标识符，
+ * 属个人数据，隐私政策承诺「期满后删除或匿名化」。置 null 而不删行——邀请码、outcome、时间、
+ * 双方 id 全部留着，归因历史完整。业务上零损失：这两个字段只服务风控视图的「同 IP 批量注册」，
+ * 那是**实时**判断，30 天前的 IP 对风控已无价值。
+ *
+ * `InviteActivationOutbox` 同样保留：字段只有 outTradeNo / userId / itemType / itemKey，无个人数据。
+ */
+export async function scrubUserReferralPii(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.referralAttribution.updateMany({
     where: { OR: [{ newUserId: userId }, { referrerId: userId }] },
+    data: { clientIp: null, userAgent: null },
   });
-  // 本人的上级边 + 直接指向本人的边无法继续存在；更深后代的直接推荐人仍在，不能删。
-  await tx.referral.deleteMany({ where: { OR: [{ userId }, { referrerId: userId }] } });
-  await tx.$executeRaw`
-    UPDATE referral AS r
-    SET lv1 = r."referrerId",
-        lv2 = (SELECT p1."referrerId" FROM referral AS p1 WHERE p1."userId" = r."referrerId"),
-        lv3 = (
-          SELECT p2."referrerId"
-          FROM referral AS p2
-          WHERE p2."userId" = (
-            SELECT p1."referrerId" FROM referral AS p1 WHERE p1."userId" = r."referrerId"
-          )
-        )
-    WHERE r.lv2 = ${userId} OR r.lv3 = ${userId}
-  `;
 }
+
