@@ -11,3 +11,15 @@
    再放大反而复现「锦囊大一号」。 */
 
 .tab.on .tab-label { color: var(--accent); }
+
+/* resizable 的 PC / iPad 大窗口里，底栏保持手指和视线可扫的宽度，不跟着窗口无限拉长。
+   只放原生覆盖层，避免把微信宿主规则带进共享的 H5 样式。 */
+@media (min-width: 720px) {
+  .tabbar {
+    left: 50%;
+    right: auto;
+    width: 560px;
+    max-width: calc(100vw - 48px);
+    transform: translateX(-50%);
+  }
+}

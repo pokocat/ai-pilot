@@ -119,6 +119,31 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
 });
 
+test('微信桌面端启用官方可拉伸与分栏能力，五个主 Tab 响应当前栏尺寸', () => {
+  const app = JSON.parse(read(sourceRoot, 'app.json'));
+  assert.equal(app.resizable, true, 'PC 最大化/自由拉伸与 iPad 旋转依赖 app.json.resizable');
+  assert.equal(app.frameset, true, 'Windows 微信自动左右分栏依赖 app.json.frameset');
+
+  const pageService = read(sourceRoot, 'services/page.js');
+  assert.match(pageService, /function viewportData\(size\)/);
+  assert.match(pageService, /windowWidth >= 1100 \? 'expanded' : \(windowWidth >= 720 \? 'medium' : 'compact'\)/);
+  assert.match(pageService, /function syncViewport\(page, size\)/);
+  assert.match(pageService, /navRightInset: metrics\.navRightInset/);
+
+  for (const route of ['sessions', 'home', 'execution', 'thinktank', 'profile']) {
+    const source = read(sourceRoot, `pages/${route}/index.js`);
+    const markup = read(sourceRoot, `pages/${route}/index.wxml`);
+    assert.match(source, /onResize\(event\)[\s\S]{0,180}syncViewport\(this, event && event\.size\)/, `${route} 必须消费官方 Page.onResize`);
+    assert.match(markup, /class="[^"]*\{\{viewportClass\}\}/, `${route} 根节点必须挂语义化窗口档位`);
+    assert.match(markup, /--window-width:\{\{windowWidth\}\}px;--window-height:\{\{windowHeight\}\}px/, `${route} 必须透出当前栏的真实窗口尺寸`);
+  }
+
+  const appScss = read(sourceRoot, 'app.scss');
+  const tabbarScss = read(sourceRoot, 'custom-tab-bar/index.scss');
+  assert.match(appScss, /\.viewport-medium \.pad,[\s\S]*?max-width:\s*920px/);
+  assert.match(tabbarScss, /@media \(min-width:\s*720px\)[\s\S]*?width:\s*560px/);
+});
+
 test('数字分身训练通知必须由用户点击授权并回写 avatar 场景', () => {
   const cloneJs = read(sourceRoot, 'packages/video/clone/index.js');
   const cloneWxml = read(sourceRoot, 'packages/video/clone/index.wxml');
@@ -830,7 +855,7 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
 
   // —— 分形态：两棵互斥的树，control 那棵必须保留现状列表的全部关键节点 ——
   assert.match(wxml, /<view wx:if="\{\{form === 'chat'\}\}" class="wence-page/, '终态挂在 form==="chat" 上');
-  assert.match(wxml, /<view wx:else class="native-page \{\{themeClass\}\}"/, 'control 仍是原来那棵 native-page');
+  assert.match(wxml, /<view wx:else class="native-page \{\{themeClass\}\} \{\{viewportClass\}\}"/, 'control 仍是原来那棵 native-page，只追加窗口档位类');
   for (const node of ['<tab-header title="问策" kicker="有事问军师" glyph="谋">', 'class="council-searchrow"', 'class="quick-row"', 'bindtap="toggleHistory"', 'class="tabbar-space"']) {
     assert.ok(wxml.includes(node), `control 形态缺少现状节点：${node}`);
   }

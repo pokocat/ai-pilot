@@ -6,7 +6,7 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo, gotoExecution } = require('../../services/nav');
 const { getToken } = require('../../services/token');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 const { TABS, visualTabs } = require('../../services/tabbar');
 const { chatCore, useStreamRenderer } = require('../../chat-core/behavior');
 // 开发版环境角标：mock 时同时充当数据档案开关。
@@ -119,6 +119,11 @@ Page({
     this._booting = false;
     this._streamReady = this.setupStreamRenderer();
     this.setData({ headHeight: Number(this.data.navInset || 0) + 105 });
+  },
+
+  onResize(event) {
+    const viewport = syncViewport(this, event && event.size);
+    this.setData({ headHeight: Number(viewport && viewport.navInset || this.data.navInset || 0) + 105 });
   },
 
   onShow() {

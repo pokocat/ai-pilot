@@ -27,6 +27,40 @@ function capsuleMetrics() {
 
 function capsuleInset() { return capsuleMetrics().navInset; }
 
+/**
+ * 微信 PC / iPad 在 app.json 开启 resizable 后，页面显示区域会随拖拽、最大化和旋转变化。
+ * 这里统一把官方 onResize 返回的 px 尺寸折成三档；页面只消费语义档位，不猜 platform，
+ * 因而 Windows 分栏、macOS 大窗口、iPad 横屏和开发者工具都走同一套布局。
+ */
+function viewportData(size) {
+  let win = size || null;
+  if (!win) {
+    try { win = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync(); } catch (_) { win = null; }
+  }
+  const windowWidth = Math.max(1, Number(win && win.windowWidth) || 375);
+  const windowHeight = Math.max(1, Number(win && win.windowHeight) || 667);
+  const sizeClass = windowWidth >= 1100 ? 'expanded' : (windowWidth >= 720 ? 'medium' : 'compact');
+  return {
+    windowWidth,
+    windowHeight,
+    viewportClass: `viewport-${sizeClass}${windowWidth > windowHeight ? ' viewport-landscape' : ''}`,
+    isLargeScreen: sizeClass !== 'compact',
+  };
+}
+
+function syncViewport(page, size) {
+  if (!page || typeof page.setData !== 'function') return null;
+  const metrics = capsuleMetrics();
+  const next = Object.assign({}, viewportData(size), {
+    navInset: metrics.navInset,
+    navTop: metrics.navTop,
+    navRowHeight: metrics.navRowHeight,
+    navRightInset: metrics.navRightInset,
+  });
+  page.setData(next);
+  return next;
+}
+
 function baseData(extra) {
   const snapshot = store.snapshot();
   const metrics = capsuleMetrics();
@@ -38,7 +72,7 @@ function baseData(extra) {
     navTop: metrics.navTop,
     navRowHeight: metrics.navRowHeight,
     navRightInset: metrics.navRightInset,
-  }, backendEnvironmentData(), extra || {});
+  }, viewportData(), backendEnvironmentData(), extra || {});
 }
 
 function syncTabBar(page, selected) {
@@ -53,4 +87,4 @@ function syncTabBar(page, selected) {
   }
 }
 
-module.exports = { baseData, backendEnvironmentData, capsuleInset, capsuleMetrics, syncTabBar };
+module.exports = { baseData, backendEnvironmentData, capsuleInset, capsuleMetrics, syncTabBar, syncViewport, viewportData };

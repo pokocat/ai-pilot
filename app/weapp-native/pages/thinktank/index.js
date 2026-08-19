@@ -1,7 +1,7 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 const { SUPPORTED_DOCUMENT_EXT, validateDocumentUpload } = require('../../utils/document-upload');
@@ -96,6 +96,7 @@ Page({
     batches:[], optimizedItems:[], folders:[], sources:[], sourceStats:{bound:0,needed:0,total:0},
     confirmButton:'确认 0 份并写入知识库'
   }),
+  onResize(event) { syncViewport(this, event && event.size); },
   onShow() {
     const state=store.snapshot();
     this.setData(Object.assign({themeClass:state.themeClass,colorKey:state.colorKey,isMock:state.mock,mockProfileLabel:state.mock?mockProfile.label():'',authed:state.authed,segment:state.authed?this.data.segment:0},backendEnvironmentData()));

@@ -5,7 +5,7 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo, gotoExecution } = require('../../services/nav');
 const { commitBattle: commitBattleShared } = require('../../services/battle-commit');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
@@ -90,6 +90,7 @@ Page({
     hasDossier: false,
   }),
   onLoad() {},
+  onResize(event) { syncViewport(this, event && event.size); },
   onShow() {
     const state = store.snapshot();
     this.setData(Object.assign({

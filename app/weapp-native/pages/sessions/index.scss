@@ -217,3 +217,53 @@
   font-size: 12px; line-height: 1.35; color: var(--ink-2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* 大窗口问策：正文、页头与输入浮岛共用阅读轴；control 形态把军师列表展开为双列。 */
+.viewport-medium .wence-head,
+.viewport-expanded .wence-head { padding-left: 24px; padding-right: 24px; }
+.viewport-medium .wh-head,
+.viewport-expanded .wh-head {
+  width: 100%;
+  max-width: 840px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+.viewport-medium .chat-stream,
+.viewport-expanded .chat-stream {
+  width: calc(100% - 48px);
+  max-width: 840px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+.viewport-medium .wence-isle,
+.viewport-expanded .wence-isle {
+  left: 50%;
+  right: auto;
+  width: calc(100% - 48px);
+  max-width: 840px;
+  transform: translateX(-50%);
+}
+.viewport-medium .wence-pill { left: 24px; }
+.viewport-expanded .wence-pill { left: calc((100% - 840px) / 2); }
+.viewport-medium .wd-sheet,
+.viewport-expanded .wd-sheet {
+  left: 50%;
+  right: auto;
+  width: calc(100% - 48px);
+  max-width: 720px;
+  transform: translateX(-50%);
+  border-radius: 26px 26px 0 0;
+}
+.viewport-expanded .council > .wx-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin-left: 0;
+  margin-right: 0;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+.viewport-expanded .council > .wx-list > .wx-item:nth-last-child(2) { border-bottom: 0; }

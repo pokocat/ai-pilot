@@ -1,7 +1,7 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 // 开发版环境角标：mock 时同时充当数据档案开关。
 const mockProfile = require('../../services/mockProfile');
 
@@ -67,6 +67,7 @@ Page({
     completeness: 0, workbenchSections: [], workbenchMissing: [], progress: null, progressDesc: '', progressNext: '', showRank: false,
     fortuneOn: true, verseLines: [], verseSign: '', verseMoment: '', hasVerse: false,
   }),
+  onResize(event) { syncViewport(this, event && event.size); },
   onShow() {
     const state = store.snapshot();
     this.setData(Object.assign({ themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock, mockProfileLabel: state.mock ? mockProfile.label() : '', authed: state.authed }, backendEnvironmentData()));

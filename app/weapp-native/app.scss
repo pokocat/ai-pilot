@@ -31,6 +31,34 @@ page .onboard {
   box-sizing: border-box;
 }
 
+/* 微信官方大屏能力：app.json 的 resizable/frameset 负责可拉伸与自动左右分栏，
+   页面 onResize 再把当前栏的真实宽度折成 compact / medium / expanded。
+   这里按“当前栏宽”而非设备型号排版，所以分栏后的单栏不会误套超宽桌面样式。 */
+.viewport-medium .pad,
+.viewport-expanded .pad {
+  width: calc(100% - 40px);
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
+  box-sizing: border-box;
+}
+
+.viewport-expanded .pad { max-width: 1080px; padding-left: 32px; padding-right: 32px; }
+
+/* 大窗口里的底部 sheet 不再从显示器左边铺到右边，保持可读行长与操作聚焦。
+   遮罩仍覆盖整栏；只有实体面板收窄并居中。 */
+.viewport-medium .force-sheet,
+.viewport-expanded .force-sheet,
+.viewport-medium .profile-sheet,
+.viewport-expanded .profile-sheet {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+  border-radius: 24px 24px 0 0;
+}
+
 .native-nav-inset {
   height: var(--native-nav-inset, calc(env(safe-area-inset-top) + 46px));
 }

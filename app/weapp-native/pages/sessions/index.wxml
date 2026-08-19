@@ -4,7 +4,7 @@
 <!-- 问策 tab 分形态渲染（/me.features.wenceForm，游客读 /wence/hints 的 guestForm）：
      form==='chat' 走终态「总军师对话即 tab」；其余（control / dock / 字段缺失 / 取数失败）
      一律落到下面那棵现状军师列表，一个节点都不动，灰度回退才有意义。-->
-<view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
+<view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
 
   <!-- 合一页头：固定不滚。kicker 位换成对话对象身份（总军师 + 花名 + 在线），
@@ -123,7 +123,7 @@
   <coach-marks bindcoachstate="onCoachState"></coach-marks>
 </view>
 
-<view wx:else class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+<view wx:else class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>

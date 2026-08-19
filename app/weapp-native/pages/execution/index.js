@@ -2,7 +2,7 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo, consumeExecutionIntent } = require('../../services/nav');
-const { baseData, backendEnvironmentData, syncTabBar } = require('../../services/page');
+const { baseData, backendEnvironmentData, syncTabBar, syncViewport } = require('../../services/page');
 const { commitBattle } = require('../../services/battle-commit');
 const worksCache = require('../../services/works-cache');
 const mockProfile = require('../../services/mockProfile');
@@ -64,6 +64,7 @@ Page({
   onLoad() {
     this._scrollBySegment = [0, 0]; this._backfill = {}; this._orderResultText = ''; this._goalDraft = ''; this._bizDraft = {}; this._forceVerdicts = {};
   },
+  onResize(event) { syncViewport(this, event && event.size); },
   onShow() {
     const state = store.snapshot();
     this._pouchEntryTracked = false;

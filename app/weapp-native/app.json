@@ -86,6 +86,8 @@
       { "pagePath": "pages/profile/index", "text": "主公" }
     ]
   },
+  "resizable": true,
+  "frameset": true,
   "lazyCodeLoading": "requiredComponents",
   "sitemapLocation": "sitemap.json"
 }
