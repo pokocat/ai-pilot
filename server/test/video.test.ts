@@ -28,6 +28,8 @@ let cloneUpstream: Record<string, unknown> = { voiceId: 'VC-new' };
 let cloneUpstreamError: { status: number; code: string; error: string } | null = null;
 let renderCalls = 0;
 let seenHeaders: Headers | null = null;
+let seenCloneModel: unknown = null;
+let seenDirectSubmitBody: Record<string, unknown> = {};
 let renderBlock: Promise<void> | null = null;
 let signalRenderStarted: (() => void) | null = null;
 let directUploadSubmitCalls = 0;
@@ -78,6 +80,7 @@ before(async () => {
     }
     if (url.pathname === '/api/me/clip/avatar/clone') {
       cloneCalls += 1;
+      seenCloneModel = (init?.body as FormData | undefined)?.get('model') ?? null;
       if (cloneUpstreamError) return json({ error: cloneUpstreamError.error, code: cloneUpstreamError.code }, cloneUpstreamError.status);
       return json({ ok: true, kind: 'voice', status: 'training', ...cloneUpstream });
     }
@@ -89,6 +92,7 @@ before(async () => {
     }
     if (url.pathname === '/api/me/clip/avatar/uploads/CU-test/submit' && init?.method === 'POST') {
       directUploadSubmitCalls += 1;
+      seenDirectSubmitBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return json({ uploadId: 'CU-test', clientRequestId: 'clone:direct-0001', kind: 'voice', status: 'accepted', voiceId: 'VC-direct' });
     }
     if (url.pathname === '/api/me/clip/avatar/uploads/CU-test' && (!init?.method || init.method === 'GET')) {
@@ -132,6 +136,8 @@ beforeEach(async () => {
   jobStatus = 'queued';
   renderCalls = 0;
   seenHeaders = null;
+  seenCloneModel = null;
+  seenDirectSubmitBody = {};
   renderBlock = null;
   signalRenderStarted = null;
   directUploadSubmitCalls = 0;
@@ -206,6 +212,7 @@ test('本人素材直传只在完成校验后扣费，并按同一受理号附�
   assert.equal(completed.body.status, 'accepted');
   assert.equal(completed.body.reviewUrl, undefined, '内部审核短签名不得下发给小程序');
   assert.equal(directUploadSubmitCalls, 1);
+  assert.equal(seenDirectSubmitBody.model, '2.0');
   assert.equal(await getBalance(token), before - 200);
 
   const status = await api('GET', '/api/video/avatar/uploads/CU-test', { token });
@@ -467,6 +474,7 @@ test('训练声音真的扣钻石，而不是只在界面上写着要扣', async
   });
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(cloneCalls, 1);
+  assert.equal(seenCloneModel, '2.0');
   assert.equal(await getBalance(token), before - 200, '预扣必须落到余额上');
 });
 

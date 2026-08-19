@@ -2499,6 +2499,7 @@ test('保存成片走军师同源下载并检查下载状态、相册权限与�
   assert.match(api, /workDownloadUrl:[\s\S]{0,160}\/works\/\$\{q\(id\)\}\/file/);
   assert.match(work, /wx\.getSetting/);
   assert.match(work, /scope\.writePhotosAlbum/);
+  assert.doesNotMatch(work, /!work \|\| !work\.videoUrl/, '同源下载接口负责刷新短签名，详情页不得用旧 videoUrl 拦截下载');
   assert.match(work, /Number\(res\.statusCode\)\s*!==\s*200/);
   assert.match(work, /onProgressUpdate/);
   assert.match(work, /saveVideoToPhotosAlbum/);

@@ -13,8 +13,8 @@
 - 文案首步新增连续 AI 对话：模型结合模板、当前稿和最近消息追问或出稿，`scriptChat` 随项目持久化；生成输出会主动把碎句收成完整语义段。文案 `segments` 与视觉 `shots` 已分层，配画面支持圈选连续句范围共用同一素材，默认相邻 b-roll 每 3 句一镜；报价、preflight、worker 与总装均按 shot 聚合。
 - 军师 BFF 已落地 `/api/video/**`、service-token 身份桥、`externalOwnerId` 隔离、SSRF/重定向防护、限流、文本审核，以及积分 `hold → settle/refund` 幂等状态机；同一请求并发只允许一个请求创建 AIStar 任务。
 - AIStar 已落地独立 `clip_template / clip_project / clip_render_job / clip_asset` 域、OpenAPI、管理员模板与 preset 上传、30 天回收、数据库租约 worker 和 stale reaper。作品列表回传任务开始/成片完成两个时间，用户可删除完成作品或取消并删除生成中任务；删除后立即退出列表并进入同一 30 天回收机制。Scheme A 已定：AIStar 不扣用户钱包，只记录军师报价与供应商成本事实。
-- 石榴官方 API v1 已接 speaker/avatar 训练、可选授权视频、V2 TTS、V2 音频驱动出片、状态轮询与删除；Train Avatar Model 的 `authId` 不再被误做必填。上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 V2 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
-- 数字人创建主链按官方契约收成“一段视频 → Avatar 训练”：`speakerId` 只是制作 demo 的选填参数，未克隆声音时也必须立即调用 `/avatar/create`。AIStar 会 best-effort 从视频中提取原声创建基础 V2 speaker，任何提取/声音失败都不回滚形象；专门采集声音是独立增强。出片前仍需可用 speaker，视频原声不可用时提示用户补录，而不是把该限制前置成创建门槛。
+- 石榴官方 API v1 已接 speaker/avatar 训练、可选授权视频、2.0 TTS、2.0 音频驱动出片、状态轮询与删除；声音训练请求的 `model` 固定传 `2.0`。Train Avatar Model 的 `authId` 不再被误做必填。上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 2.0 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
+- 数字人创建主链按官方契约收成“一段视频 → Avatar 训练”：`speakerId` 只是制作 demo 的选填参数，未克隆声音时也必须立即调用 `/avatar/create`。AIStar 会 best-effort 从视频中提取原声创建基础 2.0 speaker，任何提取/声音失败都不回滚形象；专门采集声音是独立增强。出片前仍需可用 speaker，视频原声不可用时提示用户补录，而不是把该限制前置成创建门槛。
 - 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
 - 2026-08-18 本人素材改为受限 OSS 单次直传：军师核价/验余额后向 AIStar领取精确 object key、字节数、MIME、10 分钟有效的 PostObject V4 票据；手机不再先传军师再由军师搬到 AIStar。AIStar 以 owner + clientRequestId 持久化 uploadId，HEAD 核验后异步做媒体深检、HEVC/H.265 转 H.264 与石榴受理，客户端只轮状态，超时不得重新上传。旧 multipart 路由仅保留旧版本兼容。
 - 成片保存新增军师同源下载：`GET /api/video/works/:id/file` 每次读取作品后刷新上游短签名并流式转发；小程序带原登录头下载、校验 HTTP 状态并展示进度，明确处理相册权限、格式与空间错误，不再直接下载 OSS URL。

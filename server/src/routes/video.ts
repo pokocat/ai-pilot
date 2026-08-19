@@ -31,6 +31,8 @@ function sendErr(reply: FastifyReply, error: unknown, fallback = 400) {
 
 const enc = (value: string) => encodeURIComponent(value);
 const validId = (value: string) => /^[A-Za-z0-9_-]{3,100}$/.test(value);
+/** 石榴声音训练模型版本；仅声音相关的 clone 请求携带，照片分身不创建声音。 */
+const CLIP_VOICE_MODEL = '2.0';
 
 function identityOf(user: { id: string; tenantId: string }): Identity {
   return { userId: user.id, tenantId: user.tenantId };
@@ -691,6 +693,7 @@ export async function videoRoutes(app: FastifyInstance) {
         method: 'POST', body: {
           clientRequestId: input.clientRequestId, avatarId: input.avatarId, voiceId: input.voiceId,
           name: input.name, voiceSource: input.voiceSource,
+          ...(input.kind !== 'avatarImage' ? { model: CLIP_VOICE_MODEL } : {}),
         },
       });
       if (submitted.status === 'failed') {
@@ -788,6 +791,7 @@ export async function videoRoutes(app: FastifyInstance) {
 
       const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as CaptureKind, data.filename, mimeType), mimeType }, {
         kind,
+        ...(kind !== 'avatarImage' ? { model: CLIP_VOICE_MODEL } : {}),
         // 声音来源的显式意图：'video' = 只从本次视频提取，服务端据此禁止回退到旧声音。
         voiceSource,
         avatarId: String(fields?.avatarId?.value ?? ''),

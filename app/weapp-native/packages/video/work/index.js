@@ -83,7 +83,9 @@ Page({
   saveToAlbum() {
     if (!host.requireLogin(this, 'execute')) return;
     const work = this.data.work;
-    if (!work || !work.videoUrl) { host.toast('成片地址待接入'); return; }
+    // 下载走军师同源接口，由 BFF 每次读取作品并刷新上游短签名；不能用详情里的旧 videoUrl
+    // 做前置门槛，否则地址缺失/过期时会连下载请求都不发，用户只能看到“地址待接入”。
+    if (!work) { host.toast('作品还没加载完成，请稍后重试'); return; }
     if (this.data.saving) return;
 
     wx.getSetting({
