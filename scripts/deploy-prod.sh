@@ -24,6 +24,7 @@ DEPLOY_H5="${DEPLOY_H5:-0}"
 DEPLOY_PC="${DEPLOY_PC:-0}"
 TARO_APP_API="${TARO_APP_API:-https://wxapi.aibuzz.cn/api}"
 ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data-loss（按需，默认关）
+SKIP_DB_PUSH="${SKIP_DB_PUSH:-0}"           # 1=已完成只读 schema 核对且本次无 DB 变更时跳过 db push
 
 SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
 ARCHIVE="/tmp/junshi-${SHA}.tar.gz"
@@ -66,7 +67,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' SKIP_DB_PUSH='$SKIP_DB_PUSH' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"
@@ -177,10 +178,16 @@ npx prisma generate
 # user and skip generate, because generate already ran as deploy user above.
 # ACCEPT_DATA_LOSS=1 时追加 --accept-data-loss：仅在明知本次为加法迁移（新可空列/新表/新可空唯一索引）
 # 时按需启用，让 prisma 越过 data-loss 门；默认关，避免误吞真正的破坏性变更。
-DB_PUSH_EXTRA=""
-[ "${ACCEPT_DATA_LOSS:-0}" = "1" ] && DB_PUSH_EXTRA="--accept-data-loss"
-sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" DB_PUSH_EXTRA="$DB_PUSH_EXTRA" bash -c \
-  'cd "$APP_ROOT/server" && ./node_modules/.bin/prisma db push --skip-generate $DB_PUSH_EXTRA'
+# SKIP_DB_PUSH=1 只适用于已完成线上 schema 只读核对、且本次发布明确没有 DB 变更的热修复；
+# 它保留生产已有的额外列/索引，避免代码发布顺手做破坏性 db push。
+if [ "${SKIP_DB_PUSH:-0}" = "1" ]; then
+  echo "== skip prisma db push (explicitly verified no schema change) =="
+else
+  DB_PUSH_EXTRA=""
+  [ "${ACCEPT_DATA_LOSS:-0}" = "1" ] && DB_PUSH_EXTRA="--accept-data-loss"
+  sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" DB_PUSH_EXTRA="$DB_PUSH_EXTRA" bash -c \
+    'cd "$APP_ROOT/server" && ./node_modules/.bin/prisma db push --skip-generate $DB_PUSH_EXTRA'
+fi
 
 # 2026-08-05 产品决策：AI 模型、Embedding、Rerank 凭证明文存库。旧服务本就兼容明文，
 # 所以可在重启前原子迁移；若历史密文与 APP_ENCRYPTION_KEY 不匹配，脚本 fail-closed，旧服务继续运行。
