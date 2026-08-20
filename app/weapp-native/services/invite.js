@@ -79,7 +79,7 @@ function requestCapture(code, source) {
  *   下面的冷启动抑制标记只在 true 时才置：用一条没发出去的上报去抵消紧随其后那条本该发出去的，
  *   净结果是一条落地都不剩（见 launchEcho）。
  */
-function trackLanding(channel) {
+function trackLanding(channel, slot) {
   try {
     // **必须用 api.track 的返回值**，不能硬编码 true：真实的 api.track 自己吞掉
     // wx.request 的同步异常、永不抛，只以返回值告知「有没有交给 wx」。
@@ -88,7 +88,9 @@ function trackLanding(channel) {
     // （2026-08-18 第七轮复核抓到，它用真实模块链验证到 attempts=1 / successes=0）。
     // 兼容旧签名：老版本 api.track 不回值（undefined），那时按「已投递」处理，
     // 不因为拿不到布尔就把落地全判成没发出去。
-    return require('./api').api.track('invite_landing', { channel }) !== false;
+    // slot 只在 scene 通道有意义（物料位），query 通道不带——props 里不放空值省得取数侧误判。
+    const props = slot && slot !== 'default' ? { channel, slot } : { channel };
+    return require('./api').api.track('invite_landing', props) !== false;
   } catch (_) {
     return false; /* 连模块都加载不起来：这一跳压根没发出去；捕获照常、启动照常 */
   }
@@ -164,15 +166,30 @@ function captureInvite(options, opts) {
   // 通道：query = 分享卡 `?ic=`；scene = 小程序码（海报）。埋点只报这一个枚举，不报码本身
   // ——邀请码是可以反查到人的，埋点库没有必要存它（服务端在绑定时点已经完整留痕了 attribution）。
   let channel = code ? 'query' : '';
+  let slot = '';   // 仅 scene 通道有值：物料位，用于回答「这个客户从哪块物料来的」
   let referralSource = code && query.src === 'timeline' ? 'share_timeline' : 'share_friend';
   if (!code && typeof query.scene === 'string') {
     // scene 由微信按 URL 编码回传；解码失败绝不能让启动流程抛出去。
     let scene = '';
     try { scene = decodeURIComponent(query.scene); } catch (_) { scene = query.scene; }
-    // scene 可能是裸邀请码，也可能是 `ic:JSxxxx` 这种带前缀的形态（海报小程序码用后者，
-    // 给将来的多用途 scene 留出命名空间）。
-    const candidate = scene.indexOf('ic:') === 0 ? scene.slice(3) : scene;
-    if (isInviteCode(candidate)) { code = candidate; channel = 'scene'; referralSource = 'poster_qr'; }
+    // scene 的三种形态都要认（2026-08-20 修）：
+    //   · 裸邀请码 `JSxxxx`（历史形态）
+    //   · `ic:JSxxxx`（通用码）
+    //   · `ic:JSxxxx:card` —— **带物料位**，服务端 inviteQrcode.sceneFor 对 default 之外的位
+    //     都会拼上这一段。早先这里只 slice(3) 不切物料位，于是 `JS2K7P:card` 过不了
+    //     isInviteCode，**名片/门店/提案/活动四个位印出去的码全部归因不了**，
+    //     而 default 位是好的——所以自测扫一张通用码完全看不出问题，码印出去才会发现。
+    // 端上解析与服务端生成是两处独立实现，形状必须对着改。
+    const withoutPrefix = scene.indexOf('ic:') === 0 ? scene.slice(3) : scene;
+    const parts = withoutPrefix.split(':');
+    const candidate = parts[0];
+    if (isInviteCode(candidate)) {
+      code = candidate;
+      channel = 'scene';
+      referralSource = 'poster_qr';
+      // 物料位只作埋点维度，不参与归因判定：位标识脏了不该让整张码失效。
+      slot = parts[1] && /^[a-z]{1,12}$/.test(parts[1]) ? parts[1] : 'default';
+    }
   }
   if (!code) return '';
   // 冷启动紧邻回响不是新落地：不要重写 storage、更不要清掉刚签回来的 token。
@@ -190,7 +207,7 @@ function captureInvite(options, opts) {
   // 归因窗口的起点由服务端在这次真实落地时签发；客户端本地 Date.now 只作展示/兼容，不再参与建边。
   requestCapture(code, referralSource);
   // 放在 storage 之后：存不存下都算落地打开了（存不下只是这一跳不计归因），但先把码稳住再上报。
-  const dispatched = trackLanding(channel);
+  const dispatched = trackLanding(channel, slot);
   // onLaunch 那一路记下**已投递**的落地码与时刻，供紧随其后的首次 onShow 抵消。
   // `dispatched` 是这里的闸：没发出去的一跳不置标记，否则紧随的那条真上报会被白吞掉，
   // 一次冷启动净落地为零（见 launchEcho 第①条）。

@@ -827,3 +827,36 @@ test('切换物料位要清掉已生成的图，否则会把上一位的图当�
   assert.ok(block, '未找到 pickSlot');
   assert.match(block[0], /imgPath: ''/, '换物料位必须清 imgPath——否则用户会把「通用」那张当「名片」的存走');
 });
+
+test('跨端 scene 形状对齐：服务端生成的每一种码，端上都必须解析得出邀请码', () => {
+  // **这条是补上一个真实事故的守卫**（2026-08-20）：服务端 sceneFor 对 default 之外的物料位
+  // 会拼成 `ic:JS2K7P:card`，而端上早先只 slice(3) 不切物料位，于是 `JS2K7P:card`
+  // 过不了 isInviteCode——**名片/门店/提案/活动四个位印出去的码全部归因不了**。
+  // default 位是好的，所以自测扫一张通用码完全看不出问题，码印出去才会发现。
+  //
+  // 根因是端上解析与服务端生成**两处独立实现**，此前从未被放在一起测过。
+  // 这里用服务端的枚举与拼法逐个产出 scene，喂给端上的真实解析逻辑。
+  const serverSrc = fs.readFileSync(
+    path.join(appRoot, '..', 'server/src/services/inviteQrcode.ts'), 'utf8',
+  );
+  // 从服务端源码里取权威的物料位列表，而不是在测试里再抄一份（抄一份就会各自漂移）
+  const slots = [...serverSrc.matchAll(/'(default|card|store|deck|event)'/g)].map((m) => m[1]);
+  const uniqueSlots = [...new Set(slots)];
+  assert.ok(uniqueSlots.length >= 5, `未从服务端解析出物料位列表，实际 ${JSON.stringify(uniqueSlots)}`);
+
+  const { mod: invite } = loadInvite();
+  const CODE = 'JS2K7P';
+  for (const slot of uniqueSlots) {
+    // 与服务端 sceneFor 同一拼法
+    const scene = slot === 'default' ? `ic:${CODE}` : `ic:${CODE}:${slot}`;
+    assert.ok(scene.length <= 32, `${slot}: scene 超微信 32 字符上限（${scene.length}）`);
+    const got = invite.captureInvite({ query: { scene } });
+    assert.equal(got, CODE, `物料位 ${slot} 的 scene（${scene}）端上解析不出邀请码——这张码印出去就归因不了`);
+    invite.clearInvite();
+  }
+  // 裸码（历史形态）也要继续认
+  assert.equal(invite.captureInvite({ query: { scene: CODE } }), CODE, '裸邀请码形态不能回归');
+  invite.clearInvite();
+  // 脏物料位不该让整张码失效——位标识只是埋点维度
+  assert.equal(invite.captureInvite({ query: { scene: `ic:${CODE}:BAD!` } }), CODE, '脏物料位不该让码失效');
+});
