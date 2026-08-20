@@ -5,12 +5,12 @@
 // 邀请码这条链有两点不同：
 //   ① 要带 `page`：扫码的人是**陌生游客**，直接落问策 tab（公开内容、不撞登录门），
 //      落主页再自己找一遍会掉转化；
-//   ② 必须缓存：`getwxacode/unlimit` 有调用频率限制，而「我的邀请」页是会被反复打开的，
+//   ② 必须缓存：`getwxacodeunlimit` 有调用频率限制，而「我的邀请」页是会被反复打开的，
 //      每次都打微信接口既慢又可能被限流。同一个 (code, slot) 的码是**恒定**的，缓存天然安全。
 //
 // 铁律沿用：测试环境 / 凭据未配 / 接口失败一律返回 null —— 页面降级成「只显示邀请码大字 +
 // 可手输」，绝不给一张裂图，也绝不让邀请页因为外部依赖打不开。
-import { getAccessToken } from './wechat.js';
+import { getAccessToken, WXACODE_UNLIMIT_URL } from './wechat.js';
 import { cacheGet, cacheSet } from './cache.js';
 
 /** 扫码落地页：问策 tab。陌生人扫进来第一屏必须是公开内容，不能是登录门或空态。 */
@@ -62,7 +62,7 @@ export async function inviteQrcode(inviteCode: string, slot: QrSlot): Promise<st
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`https://api.weixin.qq.com/wxa/getwxacode/unlimit?access_token=${token}`, {
+    const res = await fetch(`${WXACODE_UNLIMIT_URL}?access_token=${token}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

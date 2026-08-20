@@ -172,7 +172,18 @@ export async function getPhoneNumberByCode(code: string): Promise<string> {
 }
 
 // ───────────────────────── 小程序码（网页卡片 → 小程序回流） ─────────────────────────
-// getwxacode/unlimit：scene 携带来源（如 card=daily），码打在 B 级卡片页脚，微信内长按识别直达小程序。
+/**
+ * 「数量不限的小程序码」官方端点。**路径里没有斜杠**：`getwxacodeunlimit`，不是 `getwxacode/unlimit`。
+ *
+ * 2026-08-20 线上实测：写成后者时微信对**任何**入参都回
+ * `{"errcode":40066,"errmsg":"invalid url"}`（invalid url 说的是请求的这条 URL 本身，不是 page），
+ * 而本文件与 inviteQrcode 的失败分支都静默降级成「无码」，所以卡片页脚的码其实一直没出来过、
+ * 日志里也查不到。同一条路径两处在用，所以收成一个常量：改错只会错一次，且被下面的测试钉住。
+ * 对照：同 token 打 `wxa/getwxacode` 与 `cgi-bin/wxaapp/createwxaqrcode` 均正常返回 PNG。
+ */
+export const WXACODE_UNLIMIT_URL = 'https://api.weixin.qq.com/wxa/getwxacodeunlimit';
+
+// scene 携带来源（如 card=daily），码打在 B 级卡片页脚，微信内长按识别直达小程序。
 // 铁律：测试环境 / 凭据未配置 / 接口失败一律返回 null——卡片降级为无码，绝不让分享链路被外部依赖卡死。
 export async function miniCodeDataUri(scene: string): Promise<string | null> {
   if (process.env.NODE_ENV === 'test') return null;
@@ -185,7 +196,7 @@ export async function miniCodeDataUri(scene: string): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`https://api.weixin.qq.com/wxa/getwxacode/unlimit?access_token=${token}`, {
+    const res = await fetch(`${WXACODE_UNLIMIT_URL}?access_token=${token}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       // check_path:false → 不校验 page 已发布；不传 page 默认落在小程序主页，对老版本/体验版都安全

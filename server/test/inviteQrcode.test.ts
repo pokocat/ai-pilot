@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { QR_SLOTS, parseSlot, sceneFor } from '../src/services/inviteQrcode.ts';
+import { WXACODE_UNLIMIT_URL } from '../src/services/wechat.ts';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 
@@ -83,4 +84,12 @@ test('邀请码惰性生成：从没打开过 /me 也能直接取码', async () 
   assert.ok(r.body.inviteCode, '必须现场生成邀请码，不能因为没进过 /me 就回空');
   const inDb = await prisma.user.findFirstOrThrow({ where: { phone }, select: { inviteCode: true } });
   assert.equal(inDb.inviteCode, r.body.inviteCode, '生成的码要落库，下次取到同一个');
+});
+
+test('小程序码端点路径：getwxacodeunlimit 不带斜杠', () => {
+  // 2026-08-20 线上事故：写成 `wxa/getwxacode/unlimit` 时微信对任何入参都回 40066 invalid url，
+  // 而两处调用都静默降级成「无码」——没有报错、没有日志，只有码一直不出来。
+  // 这条断言就是那次事故的钉子：路径错一个字符，测试必红。
+  assert.equal(WXACODE_UNLIMIT_URL, 'https://api.weixin.qq.com/wxa/getwxacodeunlimit');
+  assert.ok(!WXACODE_UNLIMIT_URL.includes('/unlimit'), '不是 getwxacode/unlimit——那条 URL 不存在');
 });
