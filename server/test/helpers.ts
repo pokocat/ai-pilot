@@ -94,6 +94,13 @@ export async function api<T = any>(
   const res = await a.inject({ method, url, headers, payload: hasBody ? (opts.body as object) : undefined });
   let body: any = null;
   try { body = res.json(); } catch { body = res.body; }
+  // app 是 logger:false 起的（1900 条用例的日志会把失败信息冲走），代价是 5xx 的原因被彻底吞掉：
+  // 用例只断言 status，失败信息就只有一句 `500 !== 200`，间歇性 500 于是无从下手。
+  // 这里把 5xx 连同 Fastify 默认错误体（含 err.message）打到 stderr——只有真出错才有输出。
+  // 只挑 5xx：不少用例是**故意**打 401/403/400/402/429 的，那些不是故障。
+  if (res.statusCode >= 500) {
+    console.error(`\n[test:5xx] ${method} ${url} -> ${res.statusCode}\n${JSON.stringify(body)}\n`);
+  }
   return { status: res.statusCode, body };
 }
 

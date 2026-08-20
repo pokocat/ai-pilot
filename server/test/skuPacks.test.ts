@@ -495,7 +495,7 @@ test('GET /me：packRemaining 透传，used 只算月度，月度用满不报 ex
   await prisma.user.update({ where: { id: userId }, data: { planActivatedAt: null, planExpiresAt: new Date(Date.now() + 30 * 864e5) } });
   await setWallet({ quota: 1000, balance: 200, packBalance: 200, periodKey: naturalPk() });
   const r = await api('GET', '/api/me', { token: userId });
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 200, `GET /api/me 应 200，实际 ${r.status}：${JSON.stringify(r.body)}`);
   assert.equal(r.body.tokenQuota.packRemaining, 200);
   assert.equal(r.body.tokenQuota.used, 1000, '月度已用不含 pack');
   assert.equal(r.body.tokenQuota.remaining, 200, 'remaining 是含 pack 的总余额');
