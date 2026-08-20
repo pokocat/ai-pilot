@@ -967,3 +967,24 @@ test('服务端失败必须留痕：限流/接口变更时不能只有用户看�
   assert.match(src, /errcode/, '微信错误要把 errcode 读出来——这是区分限流与接口变更的唯一线索');
   assert.match(src, /REASON_LOG_TTL_MS|限频/, '必须限频：码页会被反复打开，真故障时每秒能刷几十条');
 });
+
+test('二维码卡的文案：固定不随机，但同样要有召唤（不能只罗列痛点）', () => {
+  // 两个场景要求相反，所以这张卡刻意**不接** BUILTIN_COPY 也不随机：
+  // 那 12 条是给微信聊天流的（一闪而过、每次不同才不显假）；
+  // 这张是**印出去的静态物料**（名片/台卡/提案封底），同一批每张字不一样很怪，
+  // 而且印错了召不回。但口径要一致：有钩子也要有召唤。
+  const paint = read('packages/work/invite/paint.js');
+  // 剥掉注释再查：文件头注释里正好解释了「为什么不接 BUILTIN_COPY」，
+  // 直接全文匹配会把那段说明当成违规（第一次写这条断言就踩了这个）。
+  const code = paint.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(code, /BUILTIN_COPY|require\([^)]*services\/share/,
+    '物料卡不该接分享文案库——印出去的东西不能每张不一样');
+  assert.doesNotMatch(code, /Math\.random/, '物料卡的文案不许随机');
+  // 必须落到产品上，不能只摆痛点
+  assert.match(paint, /问问 AI 军师|找军师|问策/, '物料卡缺少行动召唤：只罗列痛点等于没说该干什么');
+  // 痛点那行仍要在（它是钩子），但后面必须紧跟召唤
+  assert.match(paint, /获客贵/, '痛点钩子应保留');
+  assert.match(paint, /这些事，找军师陪你拆一遍/, '痛点罗列后必须紧跟一句召唤');
+  // 老口径不得回归
+  assert.doesNotMatch(paint, /值得有人陪你想一遍/, '旧文案没有召唤，不得回归');
+});
