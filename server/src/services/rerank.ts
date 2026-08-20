@@ -86,13 +86,14 @@ export async function rerank(query: string, documents: string[], topN: number): 
 }
 
 /** 连通性探活（运营后台「测试连接」用）。 */
-export async function testRerank(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string }> {
+// tokens：rerankCall 里已按「上游回报优先、字符粗估兜底」算好，探活据此记账（0 = 没成功调用，不编数）。
+export async function testRerank(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; tokens?: number }> {
   const c = resolveRerank(cfg);
   if (!c.enabled) return { ok: false, error: '未开启重排接入' };
   if (!rerankUsable(c)) return { ok: false, error: '缺少模型 / baseUrl / 真实 Key（留空则回退对话模型）' };
   try {
-    await rerankCall(c, '连接测试', ['军师是商业战略顾问', '今天天气不错'], 2, cfg.timeoutMs);
-    return { ok: true };
+    const r = await rerankCall(c, '连接测试', ['军师是商业战略顾问', '今天天气不错'], 2, cfg.timeoutMs);
+    return { ok: true, tokens: r.tokens };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }

@@ -22,6 +22,7 @@ import { scanClipRenderNotifications } from './video/renderNotification.js';
 import { scanAvatarTrainingNotifications } from './video/avatarNotification.js';
 import { scanDataErasureJobs } from './accountDeletion.js';
 import { runVideoMaintenanceSweep } from './video/maintenance.js';
+import { runLlmHealthSweep } from './llmHealth.js';
 
 export interface ScheduledJob {
   name: string;
@@ -354,6 +355,15 @@ registerJob({ name: 'account-erasure-sweep', intervalMs: 5 * 60_000, run: async 
   if (completed) console.log(`[scheduler] account erasure completed: ${completed}`);
 } });
 registerJob({ name: 'video-maintenance-sweep', intervalMs: 5 * 60_000, run: runVideoMaintenanceSweep });
+// LLM 健康兜底扫描：接管熔断与洪水闸都是**定向**告警，只在各自那个已知故障形态下响。
+// 这一条不问错因、只看错量，堵的是「换个形态又 16 小时没人知道」（2026-08-19：23,303 条报错无人发现）。
+// 只读、内部吞异常，留 LLM_HEALTH_SWEEP=false 一键关停。详见 services/llmHealth.ts。
+registerJob({ name: 'llm-health-sweep', intervalMs: 5 * 60_000, run: async () => {
+  const r = await runLlmHealthSweep();
+  if (r.alerts || r.errorCount5m) {
+    console.log(`[scheduler] llm health: errors5m=${r.errorCount5m} stuckUsers=${r.stuckUsers.length} alerts=${r.alerts}`);
+  }
+} });
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
 registerJob(MORNING_ORDER_JOB);
 registerJob(WEEKLY_REVIEW_JOB);

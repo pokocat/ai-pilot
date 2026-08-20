@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # 军师 · 生产部署脚本（server + admin，H5 可选）
 #
-# 默认目标是当前固定 ECS：ecs-user@8.136.36.175，上传当前 git HEAD 的干净归档。
+# 默认目标是当前固定 ECS：ecs-user@8.136.36.175，上传 DEPLOY_SHA（缺省=启动时的 HEAD）的干净归档。
 # 远端 /opt/junshi 是上传包式部署，不是 git 仓库；不要在服务器上 git pull。
 #
 # 用法：
 #   bash scripts/deploy-prod.sh
+#   DEPLOY_SHA=<完整或短 sha> bash scripts/deploy-prod.sh   # 发指定提交（回滚 / 重发某次校验过的版本）
 #   DEPLOY_H5=1 bash scripts/deploy-prod.sh
 #   DEPLOY_PC=1 bash scripts/deploy-prod.sh      # PC 工作台（/pc/）
 #   ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh   # schema 含新唯一约束/破坏性列变更时，让 db push 接受 prisma 的 data-loss 门；默认关（保护线上数据）
@@ -26,7 +27,17 @@ TARO_APP_API="${TARO_APP_API:-https://wxapi.aibuzz.cn/api}"
 ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data-loss（按需，默认关）
 SKIP_DB_PUSH="${SKIP_DB_PUSH:-0}"           # 1=已完成只读 schema 核对且本次无 DB 变更时跳过 db push
 
-SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
+# ── 锁定本次要发布的提交 ──────────────────────────────────────────────────────
+# 从前全脚本各处各自引用 HEAD。校验、打包、记账之间隔着几十秒到几分钟，**并行 session 只要在这
+# 中间提交一次，打包就会把没经过校验的提交发上生产**——2026-08-20 真实发生过，事后才发现线上
+# 多了别人 mid-flight 的改动。
+# 现在开头把 SHA 定死并 export，全脚本（含下面自重入的那次）只认这一个值；要发指定提交就
+# `DEPLOY_SHA=<sha> bash scripts/deploy-prod.sh`。
+# 统一解析成完整 sha：显式传短 sha 时也要归一，否则下面与 HEAD 的比对会长短不等而恒报「有并行提交」。
+# 顺带当校验用——ref 不存在时 rev-parse 非零退出，set -e 直接中止，好过打出一个空包。
+DEPLOY_SHA="$(cd "$ROOT" && git rev-parse "${DEPLOY_SHA:-HEAD}")"
+export DEPLOY_SHA
+SHA="$(cd "$ROOT" && git rev-parse --short "$DEPLOY_SHA")"
 ARCHIVE="/tmp/junshi-${SHA}.tar.gz"
 
 # 谁发的、发的什么，都要能事后追溯。制表符/换行会破坏历史行的 TSV 结构，先洗掉。
@@ -55,12 +66,25 @@ die(){ printf "\033[1;31m[deploy] %s\033[0m\n" "$*" >&2; exit 1; }
 
 [ -f "$SSH_KEY" ] || die "SSH key 不存在：$SSH_KEY"
 
+# 醒目声明本次到底发的是哪个提交——发错版本的代价太大，不能只靠日志里一行小字。
+printf '\033[1;33m========================================================\033[0m\n'
+printf '\033[1;33m[deploy] 本次发布提交：%s  %s\033[0m\n' "$SHA" "$( (cd "$ROOT" && git log -1 --format=%s "$DEPLOY_SHA") 2>/dev/null || echo '(subject 读取失败)')"
+printf '\033[1;33m========================================================\033[0m\n'
+
 if ! ( cd "$ROOT" && git diff --quiet && git diff --cached --quiet ); then
-  log "检测到未提交的 tracked 改动；本次仍只部署当前 HEAD=${SHA}。"
+  log "检测到未提交的 tracked 改动；本次仍只部署已锁定的 ${SHA}。"
 fi
 
-log "打包当前 HEAD：${SHA}"
-( cd "$ROOT" && git archive --format=tar.gz -o "$ARCHIVE" HEAD )
+# 打包前再看一眼 HEAD。**不阻断**：内容正确性已由「打包 $DEPLOY_SHA 而不是 HEAD」本身保证，
+# 这行只是让人知道校验之后有人提交过——否则日志里的 SHA 和 `git log` 对不上会让人怀疑发错了。
+CURRENT_HEAD="$( (cd "$ROOT" && git rev-parse HEAD) 2>/dev/null || echo '')"
+if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$DEPLOY_SHA" ]; then
+  printf '\033[1;33m[deploy] ⚠ 本地 HEAD 已变为 %s，与锁定的 %s 不同（有并行提交）。本次仍按锁定的 SHA 打包。\033[0m\n' \
+    "$(cd "$ROOT" && git rev-parse --short "$CURRENT_HEAD")" "$SHA"
+fi
+
+log "打包锁定提交：${SHA}"
+( cd "$ROOT" && git archive --format=tar.gz -o "$ARCHIVE" "$DEPLOY_SHA" )
 
 log "上传 $ARCHIVE -> $DEPLOY_HOST:/tmp/"
 scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"

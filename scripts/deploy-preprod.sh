@@ -6,7 +6,7 @@
 #
 # 首次运行自动完成：建库 junshi_preprod、写 preprod .env(改 DATABASE_URL+PORT)、
 # 装 systemd 单元 junshi-api-preprod、在 nginx wxapi 块追加 location /api_preprod/(带 nginx -t 兜底)、
-# 从生产库复制 ai_setting/ai_model(真 AI 密钥，复制后统一明文化)。之后每次运行只做：上传 HEAD → 构建 → 迁移 → 重启。
+# 从生产库复制 ai_setting/ai_model(真 AI 密钥，复制后统一明文化)。之后每次运行只做：上传 DEPLOY_SHA → 构建 → 迁移 → 重启。
 # 生产的 junshi-api / junshi 库 / /opt/junshi 全程不受影响（AI 复制仅只读生产库）。
 #
 # 用法：
@@ -38,7 +38,15 @@ PREPROD_DB="junshi_preprod"
 RUNTIME_USER="junshi"
 PUBLIC="https://wxapi.aibuzz.cn/api_preprod"
 
-SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
+# ── 锁定本次要发布的提交 ──────────────────────────────────────────────────────
+# 与 deploy-prod.sh 同口径、同理由：校验与打包之间隔着几十秒，并行 session 只要在这中间提交，
+# `git archive HEAD` 就会把没校验过的提交打进包（2026-08-20 在生产真发生过）。开头定死并 export，
+# 全脚本（含下面自重入的那次）只认这一个值。要发指定提交：DEPLOY_SHA=<sha> bash scripts/deploy-preprod.sh
+# 统一解析成完整 sha（显式传短 sha 时也归一，否则与 HEAD 比对会恒报「有并行提交」）；
+# ref 不存在时 rev-parse 非零退出，set -e 直接中止，好过打出一个空包。
+DEPLOY_SHA="$(cd "$ROOT" && git rev-parse "${DEPLOY_SHA:-HEAD}")"
+export DEPLOY_SHA
+SHA="$(cd "$ROOT" && git rev-parse --short "$DEPLOY_SHA")"
 RELEASE_ID="${SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
 
@@ -62,8 +70,21 @@ log(){ printf "\033[1;36m[preprod]\033[0m %s\n" "$*"; }
 die(){ printf "\033[1;31m[preprod] %s\033[0m\n" "$*" >&2; exit 1; }
 [ -f "$SSH_KEY" ] || die "SSH key 不存在：$SSH_KEY"
 
-log "打包当前 HEAD=${SHA}"
-( cd "$ROOT" && git archive --format=tar.gz -o "$ARCHIVE" HEAD )
+# 醒目声明本次到底发的是哪个提交（预发是验收基准，发错版本会把验收结论也带偏）。
+printf '\033[1;33m========================================================\033[0m\n'
+printf '\033[1;33m[preprod] 本次发布提交：%s  %s\033[0m\n' "$SHA" "$( (cd "$ROOT" && git log -1 --format=%s "$DEPLOY_SHA") 2>/dev/null || echo '(subject 读取失败)')"
+printf '\033[1;33m========================================================\033[0m\n'
+
+# 打包前再看一眼 HEAD。**不阻断**：内容正确性已由「打包 $DEPLOY_SHA 而不是 HEAD」保证，
+# 这行只是提示有并行提交，免得日志 SHA 与 `git log` 对不上时误以为发错。
+CURRENT_HEAD="$( (cd "$ROOT" && git rev-parse HEAD) 2>/dev/null || echo '')"
+if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$DEPLOY_SHA" ]; then
+  printf '\033[1;33m[preprod] ⚠ 本地 HEAD 已变为 %s，与锁定的 %s 不同（有并行提交）。本次仍按锁定的 SHA 打包。\033[0m\n' \
+    "$(cd "$ROOT" && git rev-parse --short "$CURRENT_HEAD")" "$SHA"
+fi
+
+log "打包锁定提交：${SHA}"
+( cd "$ROOT" && git archive --format=tar.gz -o "$ARCHIVE" "$DEPLOY_SHA" )
 
 log "上传归档 -> $DEPLOY_HOST"
 scp -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$ARCHIVE" "$DEPLOY_HOST:/tmp/"

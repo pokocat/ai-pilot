@@ -143,13 +143,14 @@ export async function embeddingDim(): Promise<number> {
 }
 
 /** 连通性探活（运营后台「测试连接」用）。 */
-export async function testEmbedding(cfg: ResolvedAiConfig): Promise<{ ok: boolean; dim?: number; error?: string }> {
+// tokens：上游 usage 回报的真实消耗，探活据此记账（0 = 上游没报或没成功调用，不编数）。
+export async function testEmbedding(cfg: ResolvedAiConfig): Promise<{ ok: boolean; dim?: number; error?: string; tokens?: number }> {
   const c = resolveEmbedding(cfg);
   if (!c.enabled) return { ok: false, error: '未开启嵌入接入' };
   if (!embeddingUsable(c)) return { ok: false, error: '缺少模型 / baseUrl / 真实 Key（留空则回退对话模型）' };
   try {
     const v = await embedRemote(c, '连接测试', cfg.timeoutMs);
-    return { ok: true, dim: v.embedding.length };
+    return { ok: true, dim: v.embedding.length, tokens: v.tokens };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }

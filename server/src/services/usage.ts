@@ -16,7 +16,9 @@ export interface UsageMeta {
   sessionId?: string | null;
   agentKey?: string | null;
   ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
-  sandbox?: boolean; // 运营沙盒试跑：仍记诊断 trace，但不写 token_usage（不污染计费统计、不真扣额度）
+  // 运营沙盒试跑：仍记诊断 trace，且**按 kind='sandbox' 照实写 token_usage**（provider 真的收了这笔钱）。
+  // 只是不挂 userId/sessionId、creditCost 恒 0，用户用量口径本就只聚合 chat/deliverable，自然过滤。
+  sandbox?: boolean;
   signal?: AbortSignal; // GenerationJob 显式取消/job 预算；只传执行链，不写入 usage/trace
   skipAskRecovery?: boolean; // durable worker 先落主消息，再在独立 attempt + 3s 预算内补推荐选项
   firstTokenStartedAtMs?: number; // 用户体验口径起点：GenerationJob 接单/创建时刻
@@ -85,8 +87,17 @@ export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, to
  * 记录「主模型辅助调用」（洞察抽取 / 预言 / 势研判 / 履历 / 汇总 / 图谱等 rawText 系）的 token 消耗。
  * 这些调用此前完全不入 token_usage → 真实成本被系统性低估（见售卖前体检 P1；每轮 extractInsights、
  * 每次总军师输出后的 extractProphecies 都是未记账的真实调用，直接影响单位经济/定价口径）。
- * 无 user 归属（辅助调用常无会话上下文），按 kind='aux' 归入基建用量；provider 无 usage 返回时按文本长度粗估
- * （CJK 为主 ≈ 2 字符/token）——仅供成本可见性，不参与按次扣费。fire-and-forget，绝不抛。
+ * 无 user 归属（辅助调用常无会话上下文），按 kind='aux' 归入基建用量，不参与按次扣费（creditCost 恒 0）。
+ *
+ * 取数顺序（**先真实回报、后字符估算**，2026-08 与七牛逐笔对账后定死）：
+ *  1. `reported`：provider 在响应里回的 usage（openai/claude 的 usageOf()）。这是唯一可信口径。
+ *  2. 只有 provider 没回 usage（inputTokens+outputTokens<=0，如 mock / 端点不吐 usage 字段）才退回字符估算。
+ *
+ * 为什么必须以真实回报为准：**推理模型的思考 token 不出现在返回正文里**。实测 kimi-k3 一次
+ * completion_tokens:400 / reasoning_tokens:400 而正文 0 字——按「字符数÷2」估会记成 0。deepseek-v4-flash 同理。
+ * 2026-08 与七牛逐笔对账：我方账本 ¥22.44 vs 实计 ¥56.30，系统性少记约 60%，aux 占当月成本 17.5%，
+ * 输出侧最多被低估 11 倍。字符估算只保留为「provider 真的没给数」时的下限兜底，绝不能再当主口径。
+ * fire-and-forget，绝不抛。
  */
 export function recordAuxUsage(
   model: string,
@@ -94,11 +105,28 @@ export function recordAuxUsage(
   inputText: string,
   outputText: string,
   meta?: UsageMeta,
+  reported?: Usage | null,
 ): void {
-  const inputTokens = Math.ceil((inputText?.length ?? 0) / 2);
-  const outputTokens = Math.ceil((outputText?.length ?? 0) / 2);
-  if (inputTokens + outputTokens <= 0) return;
-  void recordTokenUsage({ ...meta, kind: 'aux', provider, model, usage: { inputTokens, outputTokens, cachedInput: 0 } });
+  const usage = auxUsageOf(inputText, outputText, reported);
+  if (usage.inputTokens + usage.outputTokens <= 0) return;
+  void recordTokenUsage({ ...meta, kind: 'aux', provider, model, usage });
+}
+
+/**
+ * aux 用量取数：provider 真实回报优先，字符估算兜底。见 recordAuxUsage 上的顺序说明。
+ * 导出仅供单测直接断言「同一段文本 + 真实 usage 时记的是真实值」，业务侧请走 recordAuxUsage。
+ */
+export function auxUsageOf(inputText: string, outputText: string, reported?: Usage | null): Usage {
+  if (reported) {
+    const inputTokens = Math.max(0, reported.inputTokens);
+    const outputTokens = Math.max(0, reported.outputTokens);
+    // >0 才认：`?? 0` 会把「字段缺失」和「真的是 0」抹平，两者都退回估算才不会静默漏账。
+    if (inputTokens + outputTokens > 0) {
+      return { inputTokens, outputTokens, cachedInput: Math.max(0, reported.cachedInput ?? 0), ...(reported.cacheWrite ? { cacheWrite: Math.max(0, reported.cacheWrite) } : {}) };
+    }
+  }
+  // 兜底：CJK 为主 ≈ 2 字符/token。已知偏低（思考 token 不在正文里），仅供成本可见性。
+  return { inputTokens: Math.ceil((inputText?.length ?? 0) / 2), outputTokens: Math.ceil((outputText?.length ?? 0) / 2), cachedInput: 0 };
 }
 
 /**

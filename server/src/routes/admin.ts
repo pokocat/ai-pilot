@@ -1953,7 +1953,9 @@ export async function adminRoutes(app: FastifyInstance) {
     } catch (e) { return sendErr(reply, e); }
   });
 
-  // —— 调教沙盒：用草稿/某版本即时试跑，返回产出 + 诊断指标（不真扣额度、不污染计费统计）——
+  // —— 调教沙盒：用草稿/某版本即时试跑，返回产出 + 诊断指标 ——
+  // 不真扣额度（creditCost=0、不挂 userId），但**成本照实入账**：kind='sandbox' 单独成档、可过滤。
+  // 2026-08 对账教训：早先「不写 token_usage」让沙盒调用的约 ¥45 完全查不到出处，而七牛照样计费。
   app.post<{ Params: { key: string }; Body: SandboxRequest }>('/admin/agents/:key/sandbox', async (req, reply): Promise<SandboxResult | void> => {
     try { await requireAgentAccess(actorOf(req), req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
     const b = req.body ?? ({} as SandboxRequest);
