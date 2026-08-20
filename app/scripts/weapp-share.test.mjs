@@ -791,3 +791,72 @@ test('事件名白名单必须真的一致：解析服务端集合与 SSOT 联�
   assert.match(read('services/share.js'), /track\('share_expose'/);
   assert.match(read('services/invite.js'), /track\('invite_landing'/);
 });
+
+test('物料投放埋点：只在真拿到码时报 view，降级态不许混进漏斗', () => {
+  // qr_provision 记的是「投放意图」而不是曝光——二维码的曝光在端外发生，端上捕获不到。
+  // 关键口径：**降级态（没拿到码、只能手输）不报**。那种情况下用户根本没有可贴出去的物料，
+  // 报上去会让「投放数」虚高，而这个数是要跟线下扫码量对照看的。
+  const src = read('packages/work/invite/index.js');
+  assert.match(src, /qr_provision/, '必须上报 qr_provision');
+  assert.match(src, /if \(dataUri\) trackProvision/, '必须以「真拿到码」为前提才报 view');
+  // 三个动作各一处：看码 / 出图 / 存相册
+  for (const act of ['view', 'image', 'save']) {
+    assert.ok(src.includes(`'${act}'`), `缺少 ${act} 这一段投放动作`);
+  }
+  // 埋点必须懒 require（避开 api→invite→store 的加载链成环），且整体包 try
+  assert.match(src, /require\('\.\.\/\.\.\/\.\.\/services\/api'\)\.api\.track/, '埋点要懒 require，不能提到模块顶层');
+  assert.match(src, /function trackProvision[\s\S]{0,240}try \{/, 'trackProvision 必须整体包在 try 里——埋点绝不能让页面报错');
+});
+
+test('邀请页的降级路径：拿不到码要给可手输的邀请码，不能留空框', () => {
+  // 这张图是要印出去的，留个空二维码框等于把物料做废。
+  const js = read('packages/work/invite/index.js');
+  const wxml = read('packages/work/invite/index.wxml');
+  const paint = read('packages/work/invite/paint.js');
+  assert.match(js, /qrFailed/, '要把「读失败」与「还在加载」分开，不能一直转圈');
+  assert.match(wxml, /fb-code/, 'wxml 要有降级的大字邀请码');
+  assert.match(paint, /data\.qr \? [\s\S]{0,40}|if \(data\.qr\)/, '出图也要分有码/无码两条路');
+  assert.match(paint, /手动输入|手输/, '降级版必须告诉对方可以手输邀请码');
+  // 静区：小程序码贴满边会扫不动
+  assert.match(paint, /静区/, '出图必须给二维码留静区，否则印出来扫不动');
+});
+
+test('切换物料位要清掉已生成的图，否则会把上一位的图当本位存走', () => {
+  const src = read('packages/work/invite/index.js');
+  const block = src.match(/pickSlot\([\s\S]*?\n  \},/);
+  assert.ok(block, '未找到 pickSlot');
+  assert.match(block[0], /imgPath: ''/, '换物料位必须清 imgPath——否则用户会把「通用」那张当「名片」的存走');
+});
+
+test('跨端 scene 形状对齐：服务端生成的每一种码，端上都必须解析得出邀请码', () => {
+  // **这条是补上一个真实事故的守卫**（2026-08-20）：服务端 sceneFor 对 default 之外的物料位
+  // 会拼成 `ic:JS2K7P:card`，而端上早先只 slice(3) 不切物料位，于是 `JS2K7P:card`
+  // 过不了 isInviteCode——**名片/门店/提案/活动四个位印出去的码全部归因不了**。
+  // default 位是好的，所以自测扫一张通用码完全看不出问题，码印出去才会发现。
+  //
+  // 根因是端上解析与服务端生成**两处独立实现**，此前从未被放在一起测过。
+  // 这里用服务端的枚举与拼法逐个产出 scene，喂给端上的真实解析逻辑。
+  const serverSrc = fs.readFileSync(
+    path.join(appRoot, '..', 'server/src/services/inviteQrcode.ts'), 'utf8',
+  );
+  // 从服务端源码里取权威的物料位列表，而不是在测试里再抄一份（抄一份就会各自漂移）
+  const slots = [...serverSrc.matchAll(/'(default|card|store|deck|event)'/g)].map((m) => m[1]);
+  const uniqueSlots = [...new Set(slots)];
+  assert.ok(uniqueSlots.length >= 5, `未从服务端解析出物料位列表，实际 ${JSON.stringify(uniqueSlots)}`);
+
+  const { mod: invite } = loadInvite();
+  const CODE = 'JS2K7P';
+  for (const slot of uniqueSlots) {
+    // 与服务端 sceneFor 同一拼法
+    const scene = slot === 'default' ? `ic:${CODE}` : `ic:${CODE}:${slot}`;
+    assert.ok(scene.length <= 32, `${slot}: scene 超微信 32 字符上限（${scene.length}）`);
+    const got = invite.captureInvite({ query: { scene } });
+    assert.equal(got, CODE, `物料位 ${slot} 的 scene（${scene}）端上解析不出邀请码——这张码印出去就归因不了`);
+    invite.clearInvite();
+  }
+  // 裸码（历史形态）也要继续认
+  assert.equal(invite.captureInvite({ query: { scene: CODE } }), CODE, '裸邀请码形态不能回归');
+  invite.clearInvite();
+  // 脏物料位不该让整张码失效——位标识只是埋点维度
+  assert.equal(invite.captureInvite({ query: { scene: `ic:${CODE}:BAD!` } }), CODE, '脏物料位不该让码失效');
+});

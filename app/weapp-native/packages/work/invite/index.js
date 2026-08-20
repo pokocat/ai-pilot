@@ -22,6 +22,24 @@ const SLOTS = [
   { key: 'event', label: '活动' },
 ];
 
+
+/**
+ * 物料投放埋点（`qr_provision`，静态传播链的第一段）。
+ *
+ * **它不是「曝光」**：二维码的曝光在端外发生（名片被看到、台卡被扫），小程序里没有任何时机
+ * 能捕获，硬凑一个只会让漏斗分母失真。这里记的是端上真实可捕获的**投放意图**：
+ * 用户看了码 / 出了图 / 存了相册。取数时与 `share_expose` **不可相加**——
+ * 一次投放会带来 N 次线下扫码，量级不同。
+ *
+ * 实现口径抄 share.js：懒 require（避开 api→invite→store 的加载链成环）、
+ * fire-and-forget、整个调用包在 try 里——埋点绝不能让页面变慢或报错。
+ */
+function trackProvision(slot, act) {
+  try {
+    require('../../../services/api').api.track('qr_provision', { slot, act });
+  } catch (_) { /* 埋点不可用：页面照常 */ }
+}
+
 Page(withShare({
   data: baseData({
     slots: SLOTS,
@@ -52,14 +70,18 @@ Page(withShare({
       api.inviteQrcode(this.data.slot).catch(() => null),
       api.me().catch(() => null),
     ]);
+    const dataUri = (qrRes && qrRes.dataUri) || '';
     this.setData({
       loading: false,
       inviteCode: (qrRes && qrRes.inviteCode) || (meRes && meRes.inviteCode) || '',
-      qr: (qrRes && qrRes.dataUri) || '',
+      qr: dataUri,
       // 请求成功但 dataUri 为空 = 服务端降级；请求本身失败也算失败态。
       qrFailed: !qrRes || !qrRes.dataUri,
       summary: (meRes && meRes.referral) || null,
     });
+    // 只有真拿到码才算一次可用的投放：降级态（没码、只能手输）不报，
+    // 否则漏斗里会混进一批根本没法贴出去的「投放」。
+    if (dataUri) trackProvision(this.data.slot, 'view');
   },
 
   async pickSlot(event) {
@@ -82,6 +104,7 @@ Page(withShare({
         slotLabel,
       }));
       this.setData({ imgPath });
+      trackProvision(this.data.slot, 'image');
     } catch (_) {
       wx.showToast({ title: '出图失败，请重试', icon: 'none' });
     } finally {
@@ -89,7 +112,12 @@ Page(withShare({
     }
   },
 
-  saveImage() { canvas.save(this.data.imgPath); },
+  saveImage() {
+    if (!this.data.imgPath) return;
+    // 存相册是这条链里最强的投放信号——图存下来才可能进 PPT / 交给设计做物料。
+    trackProvision(this.data.slot, 'save');
+    canvas.save(this.data.imgPath);
+  },
   shareImage() { canvas.share(this.data.imgPath); },
 
   copyCode() {

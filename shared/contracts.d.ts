@@ -1227,7 +1227,14 @@ export type ClientEventName =
   // 再补一份客户端埋点只会出现「端上报了、库里没有」的对不上账。
   // share_expose：用户点开「转发给朋友」/「分享到朋友圈」时由 services/share.js 上报（props: channel + 当日素材序号）。
   // invite_landing：带码落地时由 services/invite.js 在捕获成功处上报（props: channel=query|scene），游客态照发。
-  | 'share_expose' | 'invite_landing';
+  //
+  // qr_provision（2026-08-20）：**不是「曝光」，是「物料投放」**。
+  // 二维码的曝光发生在端外——名片被人看到、台卡被扫——小程序里没有任何时机能捕获它，
+  // 硬凑一个只会让漏斗分母失真。端上真实可捕获的动作是「用户取了这张码去印物料」，
+  // 所以这一段记的是投放意图：props 为 slot（物料位）+ act（view=看了码 / image=出了图 /
+  // save=存了相册）。取数时它与 share_expose **不能相加**当「总曝光」：
+  // 一次投放会带来 N 次线下扫码，量级完全不同，相加没有意义。
+  | 'share_expose' | 'invite_landing' | 'qr_provision';
 /** POST /events 请求体：鉴权可选（游客也上报，userId 空）。props 序列化后限 2KB，超限截断。 */
 export interface ClientEventRequest { name: ClientEventName; props?: Record<string, unknown> }
 export interface ClientEventResult { ok: true }
