@@ -28,7 +28,7 @@ import {
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。挂在 provider 层而不是 gateway 的业务分支，
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
-import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
+import { withLlmSlot, acquireLlmSlot, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
@@ -443,6 +443,7 @@ export async function* claudeChatStream(
   // 端点故障转移在流式下有个硬边界：**一旦已经向客户端 yield 过 delta，就不能再转移**——
   // 换端点意味着重新生成，前面已经吐给用户的半句话会和新内容对不上。所以只在「还没吐出任何内容」
   // 时才允许转移；建流阶段和首个 delta 之前的 429/5xx 都能救回来，之后只能如实报错。
+  assertUpstreamCallBudget(affinityOf(ctx)); // 洪水闸：流式不走 withEndpoint，入口自己查
   const candidates = await resolveCandidates(cfg, { affinityKey: affinityOf(ctx) });
   const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
   const cls = cfg.lane === 'aux' ? 'aux' : 'main';
@@ -463,7 +464,7 @@ export async function* claudeChatStream(
     const sink = { text: '', usage: { ...ZERO_USAGE } };
     let yieldedAny = false;
     try {
-      noteEndpointAttempt(ep);
+      noteEndpointAttempt(ep, affinityOf(ctx));
       const round = yield* streamChatRound(ep, system, base, {
         allowThinking: true,
         onDelta: () => { yieldedAny = true; }, // 置位后就不能再转移端点了
@@ -521,7 +522,7 @@ export async function* claudeChatStream(
     const slot = await acquireLlmSlot(laneOf(served));
     const contSink = { text: '', usage: { ...ZERO_USAGE } };
     try {
-      noteEndpointAttempt(served);
+      noteEndpointAttempt(served, affinityOf(ctx));
       const cont = yield* streamChatRound(served, system, continuationMessages(base, text), {
         allowThinking: false,
         dedupeAgainst: text,

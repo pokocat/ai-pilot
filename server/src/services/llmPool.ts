@@ -34,7 +34,7 @@ import { prisma } from '../db.js';
 import { getRedis } from './redis.js';
 import { readAiCredential } from './aiCredentialStorage.js';
 import { isRealKey } from '../env.js';
-import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, type LlmLaneClass } from './llmGate.js';
+import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, assertUpstreamCallBudget, noteUpstreamOutcall, type LlmLaneClass } from './llmGate.js';
 import type { ResolvedAiConfig } from './aiConfig.js';
 import type { AiProvider, AiThinkingMode } from '../llm/schema.js';
 import { normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
@@ -92,7 +92,10 @@ export function runWithEndpointCapture<T>(capture: EndpointCapture, run: () => P
 }
 
 /** provider 手动管理候选（流式路径）时也调用；普通 withEndpoint 会自动调用。 */
-export function noteEndpointAttempt(cfg: ResolvedAiConfig): void {
+export function noteEndpointAttempt(cfg: ResolvedAiConfig, sessionKey?: string | null): void {
+  // 洪水闸计数：这里是所有真实外呼的必经点（流式/非流式/探活/aux 全走这），
+  // 放在这里就不会随新增调用路径而漏计。sessionKey 只有入口层才有，缺省只计全局。
+  noteUpstreamOutcall(sessionKey);
   const capture = endpointCaptureStore.getStore();
   if (!capture) return;
   capture.hit = {
@@ -358,7 +361,10 @@ export function isTransferable(err: unknown): boolean {
   const e = err as { status?: number; statusCode?: number; code?: string; name?: string; message?: string } | null;
   if (!e) return false;
   // 我方主动降级 / 内容问题 / 输出截断：换端点也一样，不转移。
-  if (e.code === 'AI_BUSY' || e.code === 'MODERATION_BLOCK' || e.code === 'AI_OUTPUT_TRUNCATED') return false;
+  // UPSTREAM_FLOOD 是**我方洪水闸主动拒绝**（statusCode 是 429 但不是上游限流）：
+  // 必须在 is429 之前排除，否则会被当成可转移错误——换端点重试只会把配额烧到别的端点上，
+  // 还会把无辜端点标成冷却。
+  if (e.code === 'AI_BUSY' || e.code === 'MODERATION_BLOCK' || e.code === 'AI_OUTPUT_TRUNCATED' || e.code === 'UPSTREAM_FLOOD') return false;
   if (is429(err)) return true;
   const status = e.status ?? e.statusCode;
   if (typeof status === 'number') return status >= 500; // 5xx 转移；其余 4xx 是请求本身的问题
@@ -387,6 +393,7 @@ export async function withEndpoint<T>(
   opts?: { affinityKey?: string; laneClass?: LlmLaneClass },
 ): Promise<T> {
   const cls: LlmLaneClass = opts?.laneClass ?? (base.lane === 'aux' ? 'aux' : 'main');
+  assertUpstreamCallBudget(opts?.affinityKey); // 洪水闸：外呼前查预算，超限抛 UPSTREAM_FLOOD
   const candidates = await resolveCandidates(base, { affinityKey: opts?.affinityKey });
   const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
 
@@ -396,7 +403,7 @@ export async function withEndpoint<T>(
     const lane = cfg.endpointId ? endpointLane(cls, cfg.endpointId) : cls;
     try {
       return await withLlmSlot(() => {
-        noteEndpointAttempt(cfg);
+        noteEndpointAttempt(cfg, opts?.affinityKey);
         return fn(cfg);
       }, lane);
     } catch (err) {

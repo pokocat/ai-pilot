@@ -27,6 +27,8 @@
  * 这样共享同一个上游配额的事实不会被两个独立计数器掩盖（否则等于把限额悄悄放大一倍）。
  * 这个判断在 aiConfig.resolveAuxConfig 里做，本模块只认调用方传进来的 lane。
  */
+import { noteUpstreamFloodBlocked } from './metrics.js';
+
 export type LlmLaneClass = 'main' | 'aux';
 
 /**
@@ -294,6 +296,108 @@ export async function withLlmSlot<T>(fn: () => Promise<T>, lane: LlmLane = 'main
  * 冷却期内**不发放任何新槽位**（在途的自然跑完），到点后从 rampStart 水位逐步爬回常态。
  * 优先采信上游给的 Retry-After；没有则按 base × 2^(连续次数-1) 指数退避，封顶 cooldownMaxMs。
  */
+/* ──────────────── 上游外呼洪水闸（模型调用侧的最后一道兜底） ────────────────
+ *
+ * 为什么在这一层还要一道闸：2026-08-19 单个会话在 12 小时里打出 23,235 次真实上游调用
+ * （每次都带着 28k token 的提示词），HTTP 限流拦不住它——那些调用是 worker 内部
+ * 租约抖动打出来的，根本不走 HTTP 层。这里是所有真实外呼的必经点，是「不管上面哪层
+ * 出了什么新花样的循环，一天刷几万次」这类事故的最终止损位。
+ *
+ * 两把尺子，滑动 60 分钟窗（按分钟分桶）：
+ *   · 按会话（affinityKey，无会话时退到 agentKey）：默认 240 次/小时。正常对话一条消息
+ *     3-4 次调用，240 相当于一小时连发 60-80 条消息，真人碰不到；08-19 是约 1,900 次/小时。
+ *   · 全局：默认 3,000 次/小时。整个 8 月正常业务≤7,000 次/月，探活关掉后 3,000/小时
+ *     有百倍余量；它兜的是「会话键被轮换」的刷法。
+ *
+ * 超限抛 code='UPSTREAM_FLOOD'（statusCode 429）：llmPool.isTransferable 把它列为不可
+ * 转移——这是**我方主动拒绝**，换端点重试只会把配额烧到别的端点上。触发时打 Prometheus
+ * 计数并发一条节流的飞书告警（同 key 10 分钟最多一条）——上次事故 16 小时无人知晓，
+ * 告警本身就是这道闸的一半价值。设 0 关闭对应尺子。
+ */
+const FLOOD_WINDOW_MIN = 60;
+const floodBuckets = new Map<string, number[]>(); // key -> 60 个分钟桶的环
+let floodEpochMin = 0;
+const floodAlertedAt = new Map<string, number>();
+
+function floodCap(kind: 'session' | 'global'): number {
+  const raw = Number(process.env[kind === 'session' ? 'LLM_FLOOD_SESSION_HOURLY' : 'LLM_FLOOD_GLOBAL_HOURLY'] ?? (kind === 'session' ? 240 : 3000));
+  return Number.isFinite(raw) && raw >= 0 ? raw : (kind === 'session' ? 240 : 3000);
+}
+
+function floodRing(key: string, nowMin: number): number[] {
+  // 环形桶按全局分钟推进：跨过的分钟清零。所有 key 共用同一个 epoch，逐 key 惰性清理。
+  let ring = floodBuckets.get(key);
+  if (!ring) { ring = new Array(FLOOD_WINDOW_MIN).fill(0); floodBuckets.set(key, ring); }
+  const advance = Math.min(FLOOD_WINDOW_MIN, Math.max(0, nowMin - (ringEpoch.get(key) ?? nowMin)));
+  for (let i = 1; i <= advance; i++) ring[(nowMin - advance + i) % FLOOD_WINDOW_MIN] = 0;
+  ringEpoch.set(key, nowMin);
+  return ring;
+}
+const ringEpoch = new Map<string, number>();
+
+function floodSum(ring: number[]): number { return ring.reduce((a, b) => a + b, 0); }
+
+/** 每次真实上游外呼计一笔。由 llmPool.noteEndpointAttempt 调用——那是所有外呼路径的必经点。 */
+export function noteUpstreamOutcall(sessionKey: string | null | undefined): void {
+  const nowMin = Math.floor(Date.now() / 60_000);
+  floodEpochMin = nowMin;
+  floodRing('__global__', nowMin)[nowMin % FLOOD_WINDOW_MIN] += 1;
+  if (sessionKey) floodRing(`s:${sessionKey}`, nowMin)[nowMin % FLOOD_WINDOW_MIN] += 1;
+}
+
+/**
+ * 外呼前的预算检查。超限抛 UPSTREAM_FLOOD（不可转移、429 语义）。
+ * 只在「带会话身份的入口」调用（withEndpoint / 两个流式入口）；流式续写轮等内部环节
+ * 不再重复检查，它们本身有轮数上限，且计数照记，下一次入口检查自然会拦。
+ */
+export function assertUpstreamCallBudget(sessionKey: string | null | undefined): void {
+  const nowMin = Math.floor(Date.now() / 60_000);
+  const gCap = floodCap('global');
+  const sCap = floodCap('session');
+  const gSum = gCap > 0 ? floodSum(floodRing('__global__', nowMin)) : 0;
+  const sSum = sCap > 0 && sessionKey ? floodSum(floodRing(`s:${sessionKey}`, nowMin)) : 0;
+  const hit = (gCap > 0 && gSum >= gCap) ? { scope: 'global' as const, sum: gSum, cap: gCap }
+    : (sCap > 0 && sessionKey && sSum >= sCap) ? { scope: 'session' as const, sum: sSum, cap: sCap }
+      : null;
+  if (!hit) return;
+  noteUpstreamFloodBlocked(hit.scope);
+  fireFloodAlert(hit.scope, hit.scope === 'session' ? sessionKey! : '__global__', hit.sum, hit.cap);
+  throw Object.assign(
+    new Error(hit.scope === 'session'
+      ? `该会话一小时内的模型调用已达 ${hit.sum} 次（上限 ${hit.cap}），已临时拦截`
+      : `全站一小时内的模型调用已达 ${hit.sum} 次（上限 ${hit.cap}），已临时拦截`),
+    { code: 'UPSTREAM_FLOOD', statusCode: 429 },
+  );
+}
+
+/** 节流的飞书告警：同 key 10 分钟最多一条；发不出去只打日志，绝不影响拦截本身。 */
+function fireFloodAlert(scope: 'session' | 'global', key: string, sum: number, cap: number): void {
+  const nowMs = Date.now();
+  const last = floodAlertedAt.get(key) ?? 0;
+  if (nowMs - last < 10 * 60_000) return;
+  floodAlertedAt.set(key, nowMs);
+  void import('./alertConfig.js')
+    .then(({ sendFeishuText }) => sendFeishuText(
+      `⛔ 模型调用洪水闸触发（${scope === 'session' ? '单会话' : '全站'}）
+`
+      + `key=${key}
+一小时内已 ${sum} 次，上限 ${cap}，新调用已被拦截。
+`
+      + `多为客户端重试循环或任务系统自激（参照 2026-08-19 租约抖动事故）。
+`
+      + `排查：llm_trace 按 sessionId 聚合；调上限用 LLM_FLOOD_SESSION_HOURLY / LLM_FLOOD_GLOBAL_HOURLY。`,
+    ))
+    .then((r) => { if (!r.sent) console.error('[llmGate] 洪水闸告警未送达:', r.reason); })
+    .catch((err) => console.error('[llmGate] 洪水闸告警失败:', (err as Error).message));
+}
+
+/** 仅供测试：清空洪水闸计数。 */
+export function __resetUpstreamFlood(): void {
+  floodBuckets.clear();
+  ringEpoch.clear();
+  floodAlertedAt.clear();
+}
+
 export function noteUpstreamRateLimited(retryAfterSec?: number, lane: LlmLane = 'main'): void {
   const c = cfg(lane);
   if (!c.enabled) return;

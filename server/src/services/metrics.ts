@@ -256,6 +256,14 @@ export function restoreScheduledProbeState(
 const genDegraded = new LabeledCounter('junshi_gen_degraded_total', '产出降级次数（mock 兜底 / 工程语境泄漏替换）');
 export function noteGenDegraded(path: string): void { genDegraded.inc({ path }); }
 
+// 接管抖动熔断。**这条必须有告警**：2026-08-19 那次单个 job 被接管 64 万次、烧掉 16 小时并发闸，
+// 全程没有任何指标能看见它——只能靠事后翻 leaseVersion 才发现。
+const leaseThrashing = new LabeledCounter('junshi_gen_lease_thrashing_total', '生成任务因反复被接管而熔断的次数');
+// 模型调用侧洪水闸拦截数（llmGate.assertUpstreamCallBudget）。scope=session|global。
+const upstreamFloodBlocked = new LabeledCounter('junshi_llm_flood_blocked_total', '上游外呼洪水闸拦截次数');
+export function noteUpstreamFloodBlocked(scope: 'session' | 'global'): void { upstreamFloodBlocked.inc({ scope }); }
+export function noteLeaseThrashing(agentKey: string): void { leaseThrashing.inc({ agent: agentKey || 'unknown' }); }
+
 // resolved=continued：撞上限后被自动续写救回（用户无感）；given_up：续写用尽/结构化产出，按残缺处理。
 // 两者要分开看：continued 高说明输出预算或提示词长度约束该调，given_up 高才是用户真的看到了未写完。
 const outputTruncated = new LabeledCounter('junshi_llm_output_truncated_total', '输出达 token 上限的次数（resolved=continued 已续写救回 / given_up 交回用户）');
