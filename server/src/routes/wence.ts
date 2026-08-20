@@ -22,7 +22,7 @@ export const EVENT_NAMES = new Set([
   'pouch_entry_view', 'pouch_entry_click', 'weapon_click',
   // 邀请漏斗前两段（分享曝光 / 带码落地）。**这两条几乎全是游客上报**——分享是登录用户发的，
   // 点开分享卡的那个人此刻还没有账号，正是漏斗分母的来源，所以必须走这条鉴权可选的路由。
-  'share_expose', 'invite_landing',
+  'share_expose', 'invite_landing', 'qr_provision',
 ]);
 
 /** props 序列化上限：2KB。超限只留截断标记 + 前 2KB 原文，绝不整条丢弃（漏斗分母不能因为脏 props 缺口）。 */
