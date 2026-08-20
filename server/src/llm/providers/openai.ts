@@ -25,7 +25,7 @@ import {
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
 import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
 import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
 import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
@@ -159,9 +159,12 @@ async function callChat(
           }),
           signal,
         });
-        const data = (await res.json().catch(() => ({}))) as OAResponse;
-        // 记在 !res.ok 判定之前：上游回了响应体就说明它已经受理并可能计费，哪怕这次被判失败，
+        // 记在 !res.ok 判定之前：上游回了响应就说明它已经受理并可能计费，哪怕这次被判失败，
         // 账单上照样有这一笔——失败的调用恰恰是最需要能反查的。
+        // 头优先：`http_x_reqid` 是供应商工作台索引的那个 id（OpenAI 兼容路径上它与 body.id 相同，
+        // 但 Anthropic 路径上 body.id 是无用的透传值，故统一以头为准，body.id 只作兜底）。
+        noteUpstreamId(upstreamIdOfHeaders(res.headers));
+        const data = (await res.json().catch(() => ({}))) as OAResponse;
         noteUpstreamId(data.id);
         if (!res.ok) {
           // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）；
@@ -275,6 +278,7 @@ async function callChatStream(
         }),
         signal,
       });
+      noteUpstreamId(upstreamIdOfHeaders(res.headers)); // 流式：头在建流时就到了，报错分支也覆盖
       if (!res.ok) {
         const data = (await res.clone().json().catch(async () => {
           const text = await res.text().catch(() => '');

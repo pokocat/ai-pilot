@@ -2,6 +2,9 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
+// SDK 自带的 fetch shim（node-fetch），**不是** globalThis.fetch。下面 tapUpstreamId 要包的就是它：
+// 包自己这一个、而不是塞 globalThis.fetch 进去，传输层才一字不变（见 getClient 上方注释里那个坑）。
+import { fetch as sdkFetch } from '@anthropic-ai/sdk/_shims/index';
 import { CHAT_TAIL_DIRECTIVE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizeDeliverableTitle, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
@@ -27,7 +30,7 @@ import {
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
 import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
 import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
@@ -70,6 +73,16 @@ export function __setClaudeFetchForTest(f: typeof globalThis.fetch | null): void
   clients.clear(); // client 缓存里绑着旧 fetch，必须一起丢掉
 }
 
+/** 包一层 fetch，只做一件事：把响应头里的上游 request id 记进本轮 capture。不改请求、不改响应。 */
+function tapUpstreamId(inner: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (async (input, init) => {
+    const res = await inner(input, init);
+    // 报错响应也要记：上游回了响应就说明它已受理并可能计费，失败的调用恰恰最需要能反查。
+    noteUpstreamId(upstreamIdOfHeaders(res.headers));
+    return res;
+  }) as typeof globalThis.fetch;
+}
+
 function getClient(apiKey: string, baseUrl?: string): Anthropic {
   const base = normalizeClaudeBaseUrl(baseUrl);
   const cacheKey = `${apiKey}|${base}`;
@@ -80,7 +93,10 @@ function getClient(apiKey: string, baseUrl?: string): Anthropic {
     // → 冷却 → 换端点，至多 LLM_POOL_MAX_ATTEMPTS 次）。此前 SDK 层 2 次 × 端点池 3 次层层相乘，
     // 报告最坏 3×3×120s≈18 分钟——客户端 180s 就断了，剩下的全是白烧 token 的僵尸请求
     // （2026-07-28 报告卡死修复）。关掉后最坏收敛为 3×120s=6 分钟硬上界。
-    const injected = testFetch ? { fetch: testFetch } : {};
+    // 上游 id 从**响应头**取，不从响应体：本路径 body.id 是 Anthropic 原样透传的 `msg_*`，
+    // 2026-08-20 人工在七牛工作台验证过**搜不到**；工作台索引的是头 `http_x_reqid`（`chatptmsg-<32hex>`）。
+    // 包在 fetch 层而不是各调用点，是因为流式走 messages.stream()，SDK 0.32.1 没有对外暴露它的 Response。
+    const injected = { fetch: tapUpstreamId(testFetch ?? (sdkFetch as unknown as typeof globalThis.fetch)) };
     c = new Anthropic(
       base
         ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 0, ...injected }
@@ -124,10 +140,6 @@ function metaOf(ctx: GenContext): string {
 // cache_creation 并进 inputTokens 且不单独记，于是缓存写按 1× 计价——每次写都少算 25%，
 // 且用量不落库、事后无法量化。现在 cacheWrite 独立上报并持久化。
 function usageOf(res: Anthropic.Message): Usage {
-  // 落在这里而不是各个 messages.create 调用点：本文件 7 处 usageOf 覆盖了全部路径
-  // （非流式、截断续写、工具循环、流式的 message_start 与 finalMessage），且入参就是带 `.id`
-  // 的完整 Message。挑单个调用点补会漏掉流式。id 形如 `msg_*`，供应商工作台可按它查单次调用。
-  noteUpstreamId(res.id);
   const u = res.usage as { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
   const cacheRead = u.cache_read_input_tokens ?? 0;
   const cacheCreate = u.cache_creation_input_tokens ?? 0;

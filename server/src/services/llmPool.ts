@@ -104,6 +104,28 @@ export function noteEndpointAttempt(cfg: ResolvedAiConfig): void {
 }
 
 /**
+ * 从响应头取供应商自己的 request id。**必须用它，不能用响应体的 id。**
+ *
+ * 2026-08-20 实测（七牛）：
+ *   · Anthropic 协议 `/bypass/anthropic` —— 头 `http_x_reqid: chatptmsg-<32hex>`，
+ *     而响应体 `id` 是 Anthropic 原样透传的 `msg_*`，**供应商工作台查不到**（已人工验证搜不出来）。
+ *   · OpenAI 兼容 `/v1` —— 头 `http_x_reqid: chatcmpl-<32hex>`，与响应体 `id` **完全相同**。
+ * 也就是说响应体 id 只在 OpenAI 那条路上碰巧对，Anthropic 那条（占我们 91% 成本）是错的。
+ * 头是两条路统一正确的来源。同一个 id 也出现在 429 报错体的 `request_id` 字段里，可交叉印证。
+ *
+ * `x-request-id` 是网关（APISIX）自己的 UUID，与账单口径无关，仅在没有 `http_x_reqid` 时兜底。
+ * 参数用结构化类型而不是 DOM `Headers`：Anthropic SDK 走的是它自带的 node-fetch shim，
+ * 那边的 Headers 是另一个类，只保证有 `get()`。
+ */
+export function upstreamIdOfHeaders(headers: { get(name: string): string | null } | null | undefined): string | null {
+  if (!headers) return null;
+  return headers.get('http_x_reqid')      // 七牛自己的 id，工作台按它检索
+    || headers.get('request-id')          // Anthropic 官方直连时是这个
+    || headers.get('x-request-id')        // 网关(APISIX)兜底
+    || null;
+}
+
+/**
  * 记下上游这次外呼返回的响应 id。**唯一用途是账单对账**：供应商工作台能按 `chatcmpl-*` 查单次调用，
  * 没有它我们最细只能对到「某模型某天的 token 数 ↔ 某计费项的整月金额」（见 2026-07 账期对账）。
  *

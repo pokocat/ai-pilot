@@ -1,10 +1,15 @@
-// 上游响应 id 捕获的回归测试。
+// 上游 request id 捕获的回归测试。
 //
 // 为什么值得单独立一个文件：这个字段**存在的唯一理由是账单对账**——供应商工作台能按
 // `chatcmpl-*` / `msg_*` 查单次调用，没有它我们最细只能对到「某模型某天的 token 数 ↔ 某计费项的
 // 整月金额」（2026-07 账期就是这么被卡住的，只能给出合计倍数、给不出逐档单价）。
 // 它不影响任何产出，所以一旦漏抓**永远不会有人发现**，只会在下次对账时才暴露，且那时数据已经没了。
-// 因此三条路径（非流式 / 流式 / 报错）各钉一条用例。
+//
+// **最关键的一条：id 必须取自响应头 `http_x_reqid`，不能取响应体的 `id`。**
+// 2026-08-20 第一版就是抓的响应体，上线后人工拿 `msg_011CeDr2jgxXfU3Q4zbNG7Jv` 去七牛工作台
+// 搜不到才发现：Anthropic 协议路径的 body.id 是 Anthropic 原样透传的，供应商根本不认；
+// 工作台索引的是头 `http_x_reqid`（`chatptmsg-<32hex>`）。OpenAI 兼容路径上两者恰好相同，
+// 所以只测那一条会**假绿**。下面的 Anthropic 用例刻意让头和体给出不同的值来钉死这一点。
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEndpointCapture, runWithEndpointCapture, noteUpstreamId } from '../src/services/llmPool.js';
@@ -54,7 +59,7 @@ function stubClaudeSse(body: string): void {
     const enc = new TextEncoder();
     return new Response(new ReadableStream<Uint8Array>({
       start(c) { c.enqueue(enc.encode(body)); c.close(); },
-    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }), { status: 200, headers: { 'content-type': 'text/event-stream', http_x_reqid: 'chatptmsg-stream00000000000000000000000000' } });
   }) as unknown as typeof globalThis.fetch);
 }
 
@@ -64,41 +69,43 @@ function stubClaudeJson(id: string): void {
     content: [{ type: 'text', text: '毛利先看结构。' }],
     stop_reason: 'end_turn', stop_sequence: null,
     usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-  }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof globalThis.fetch);
+  }), { status: 200, headers: { 'content-type': 'application/json', http_x_reqid: 'chatptmsg-sync000000000000000000000000000' } })) as unknown as typeof globalThis.fetch);
 }
 
 /** openai.ts 用的是 globalThis.fetch（不是 SDK shim），所以打全局有效。 */
-function stubOpenai(status: number, body: unknown): void {
+function stubOpenai(status: number, body: unknown, reqid?: string): void {
   globalThis.fetch = (async () => new Response(JSON.stringify(body), {
-    status, headers: { 'content-type': 'application/json' },
+    status,
+    headers: { 'content-type': 'application/json', ...(reqid ? { http_x_reqid: reqid } : {}) },
   })) as unknown as typeof globalThis.fetch;
 }
 
-describe('上游响应 id 捕获（账单对账用）', () => {
-  test('Anthropic 非流式：从响应体 id 抓到 msg_*', async () => {
-    stubClaudeJson('msg_01ABCdef');
+describe('上游 request id 捕获（账单对账用）', () => {
+  test('Anthropic 非流式：取响应头 http_x_reqid，**不取**响应体的 msg_*', async () => {
+    stubClaudeJson('msg_01ABCdef'); // 响应体给一个 msg_*，它不该出现在结果里
     const capture = createEndpointCapture();
     await runWithEndpointCapture(capture, () => claudeRawMetered(claudeCfg, '系统', '用户'));
-    assert.deepEqual(capture.upstreamIds, ['msg_01ABCdef']);
+    assert.deepEqual(capture.upstreamIds, ['chatptmsg-sync000000000000000000000000000']);
+    assert.ok(!capture.upstreamIds.some((x) => x.startsWith('msg_')), 'body.id 供应商工作台查不到，不许记');
   });
 
-  test('Anthropic 流式：从 message_start 抓到，且不因多事件重复', async () => {
+  test('Anthropic 流式：同样取响应头（SDK 未暴露流的 Response，故包在 fetch 层）', async () => {
     stubClaudeSse(anthropicSse('msg_stream_9', ['先看', '毛利', '结构。']));
     const capture = createEndpointCapture();
     await runWithEndpointCapture(capture, async () => {
       // 流式是惰性 generator，必须真的抽干才会产生外呼。
       for await (const _ of claudeChatStream(CTX, claudeCfg)) { /* drain */ }
     });
-    // message_start 与 finalMessage 都会过 usageOf → 同一个 id 出现两次，必须只留一个。
-    assert.deepEqual(capture.upstreamIds, ['msg_stream_9']);
+    assert.deepEqual(capture.upstreamIds, ['chatptmsg-stream00000000000000000000000000']);
   });
 
   test('OpenAI 兼容非流式：抓到 chatcmpl-*', async () => {
+    // OpenAI 兼容路径上头与体本来就相同，去重后只剩一个。
     stubOpenai(200, {
       id: 'chatcmpl-7Xk2p',
       choices: [{ message: { content: '毛利结构如下。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 120, completion_tokens: 18 },
-    });
+    }, 'chatcmpl-7Xk2p');
     const capture = createEndpointCapture();
     await runWithEndpointCapture(capture, () => openaiRawMetered(openaiCfg, '系统', '用户'));
     assert.deepEqual(capture.upstreamIds, ['chatcmpl-7Xk2p']);
@@ -106,11 +113,10 @@ describe('上游响应 id 捕获（账单对账用）', () => {
 
   // 这条是本文件最重要的一条：**上游回了响应体就说明它已受理、账单上就有这一笔**，
   // 即使随后被判失败。失败的调用恰恰是最需要拿 id 去工作台反查的。
-  test('OpenAI 兼容报错（429）：响应体带 id 时仍要抓到', async () => {
+  test('OpenAI 兼容报错（429）：上游回了响应就已计费，头里的 id 仍要抓到', async () => {
     stubOpenai(429, {
-      id: 'chatcmpl-rate-limited',
       error: { message: 'rate limit reached', type: 'rate_limit_error' },
-    });
+    }, 'chatcmpl-rate-limited');
     const capture = createEndpointCapture();
     await runWithEndpointCapture(capture, async () => {
       await assert.rejects(() => openaiRawMetered(openaiCfg, '系统', '用户'));
