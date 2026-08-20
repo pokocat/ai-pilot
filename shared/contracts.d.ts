@@ -470,6 +470,27 @@ export interface ReferralSummary {
   referrerName: string | null;
 }
 
+/**
+ * 邀请小程序码（静态传播链，`GET /invite/qrcode`）。
+ *
+ * 与转发通道的区别：转发依赖微信会话（人传人），二维码是**离线锚点**——名片、门店台卡、
+ * 提案封底、展会物料，转发到不了的地方它能到。
+ *
+ * `slot` 是物料位：同一个人可有多张码，扫码后能回答「这客户从哪块物料来的」，
+ * 转发通道给不了这个信息。scene 形状 `ic:<码>[:<位>]`，受微信 32 字符硬限制。
+ *
+ * `dataUri` 为 null = 生成失败（凭据未配 / 微信限流 / 测试环境）。
+ * **客户端必须降级**成「只显示邀请码大字 + 说明可手输」，不要给一张裂图。
+ */
+export interface InviteQrcode {
+  inviteCode: string;
+  slot: 'default' | 'card' | 'store' | 'deck' | 'event';
+  /** `data:image/png;base64,...`；null 时按上面的口径降级 */
+  dataUri: string | null;
+  /** 扫码落地页（陌生人第一屏必须是公开内容，不能是登录门） */
+  landingPage: string;
+}
+
 /* ────────────── 建档 ────────────── */
 /** 公开问卷（GET /survey） */
 export interface SurveyQuestion { key: string; title: string; options: string[]; }

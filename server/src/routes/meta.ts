@@ -11,6 +11,7 @@ import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
 import { referralSummary } from '../services/referral.js';
+import { inviteQrcode, parseSlot } from '../services/inviteQrcode.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
 import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
@@ -129,6 +130,25 @@ export async function metaRoutes(app: FastifyInstance) {
   });
 
   // 军师记忆库（P2）：主公档案页「军师记事」六类结构化呈现
+  /**
+   * 邀请小程序码（静态传播链）。`?slot=card|store|deck|event` 指定物料位。
+   *
+   * 生成失败一律回 `dataUri:null` 而**不是 5xx**：这条链是增强，不该因为微信限流就让
+   * 「我的邀请」整页打不开。客户端按契约降级成「邀请码大字 + 可手输」。
+   *
+   * 邀请码走 ensureInviteCode 惰性生成，与 /me 同一个口径——用户可能从没打开过 /me 就先来扫码页。
+   */
+  app.get('/invite/qrcode', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const slot = parseSlot((req.query as { slot?: string } | undefined)?.slot);
+    const inviteCode = await ensureInviteCode(user.id);
+    const dataUri = await inviteQrcode(inviteCode, slot).catch((err) => {
+      req.log?.warn?.(`[invite-qr] 生成失败 user=${user.id} slot=${slot}: ${(err as Error).message}`);
+      return null;
+    });
+    return { inviteCode, slot, dataUri, landingPage: 'pages/sessions/index' };
+  });
+
   app.get('/me/memory-library', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     return buildMemoryLibrary(user.id);
