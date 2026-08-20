@@ -23,7 +23,7 @@ import {
   MAX_CHAT_CONTINUATIONS,
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
-import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
+import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
@@ -249,6 +249,7 @@ async function callChatStream(
   // 冷却态也不共享）。转移规则与 claude 流式一致：响应头返回（res.ok）之前的 429/5xx/超时
   // 可换端点重试；流一旦建立只能如实消费/报错——中途换端点等于让用户看到重复的半截回答。
   const cls = cfg.lane === 'aux' ? 'aux' : 'main';
+  assertUpstreamCallBudget(affinity); // 洪水闸：流式不走 withEndpoint，入口自己查
   const candidates = await resolveCandidates(cfg, { affinityKey: affinity });
   const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
 
@@ -264,7 +265,7 @@ async function callChatStream(
     const slot = await acquireLlmSlot(lane);
     let handedOff = false;
     try {
-      noteEndpointAttempt(ep);
+      noteEndpointAttempt(ep, affinity);
       const signal = externalSignal ? AbortSignal.any([watch.signal, externalSignal]) : watch.signal;
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',

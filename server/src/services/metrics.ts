@@ -259,6 +259,9 @@ export function noteGenDegraded(path: string): void { genDegraded.inc({ path });
 // 接管抖动熔断。**这条必须有告警**：2026-08-19 那次单个 job 被接管 64 万次、烧掉 16 小时并发闸，
 // 全程没有任何指标能看见它——只能靠事后翻 leaseVersion 才发现。
 const leaseThrashing = new LabeledCounter('junshi_gen_lease_thrashing_total', '生成任务因反复被接管而熔断的次数');
+// 模型调用侧洪水闸拦截数（llmGate.assertUpstreamCallBudget）。scope=session|global。
+const upstreamFloodBlocked = new LabeledCounter('junshi_llm_flood_blocked_total', '上游外呼洪水闸拦截次数');
+export function noteUpstreamFloodBlocked(scope: 'session' | 'global'): void { upstreamFloodBlocked.inc({ scope }); }
 export function noteLeaseThrashing(agentKey: string): void { leaseThrashing.inc({ agent: agentKey || 'unknown' }); }
 
 // resolved=continued：撞上限后被自动续写救回（用户无感）；given_up：续写用尽/结构化产出，按残缺处理。

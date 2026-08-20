@@ -73,6 +73,25 @@ const MAX_INFLIGHT_PER_USER = Math.max(2, envNum('GENERATION_MAX_INFLIGHT_PER_US
 function takeoverBackoffMs(leaseVersion: number): number {
   return Math.min(leaseVersion, 10) * 2_000;
 }
+
+/**
+ * 熔断告警（节流：10 分钟最多一条）。08-19 事故 16 小时无人知晓——单靠 Prometheus 指标
+ * 还要等有人配告警规则，这里直接推飞书，发不出去只打日志、绝不影响熔断本身。
+ */
+let lastThrashAlertAt = 0;
+function fireThrashingAlert(jobId: string, agentKey: string, takeovers: number): void {
+  const nowMs = Date.now();
+  if (nowMs - lastThrashAlertAt < 10 * 60_000) return;
+  lastThrashAlertAt = nowMs;
+  void import('./alertConfig.js')
+    .then(({ sendFeishuText }) => sendFeishuText(
+      `⛔ 生成任务接管抖动熔断\njob=${jobId} agent=${agentKey}\n`
+      + `被接管 ${takeovers} 次已判失败（参照 2026-08-19 事故：单 job 曾被接管 64 万次跑了 16 小时）。\n`
+      + `排查：generation_attempt 按 jobId 看 process_recovered；上限用 GENERATION_MAX_LEASE_TAKEOVERS 调。`,
+    ))
+    .then((r) => { if (!r.sent) console.error('[generation] 熔断告警未送达:', r.reason); })
+    .catch((err) => console.error('[generation] 熔断告警失败:', (err as Error).message));
+}
 const MAX_EFFECT_ERROR = 2_000;
 const MAX_PRIORITY = 9;
 const DEFAULT_PRIORITY_AGING_SECONDS = 30;
@@ -767,6 +786,7 @@ export async function claimNextGenerationJob(
         },
       });
       noteLeaseThrashing(current.agentKey);
+      fireThrashingAlert(current.id, current.agentKey, current.leaseVersion);
       console.error(`[generation] job ${current.id} 接管 ${current.leaseVersion} 次触发熔断，已判失败`);
       return null; // 本拍不取单；下一拍会去拿别的
     }
