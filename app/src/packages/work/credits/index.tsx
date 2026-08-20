@@ -125,11 +125,12 @@ export default function Credits() {
             <View className="cd-track">
               <View className="cd-fill" style={{ width: `${me?.usage.unlimited ? 100 : (me?.usage.usagePercent ?? 0)}%`, background: accent }} />
             </View>
-            {/* 增购算力永久有效、不进月度进度条的分母，所以单独一行显示剩余量（无包/旧服务端=0 时隐藏） */}
+            {/* 增购算力永久有效、不进月度进度条的分母，所以单独一行标注（无包/旧服务端=0 时隐藏）。
+                只说「还有」不说「多少」：余量就是刚买那笔的量级，报数等于把包的 token 数贴脸上。 */}
             {packRemaining > 0 && (
               <View className="cd-pack-left">
-                <Text className="cd-ql">增购算力剩余</Text>
-                <Text className="cd-pv serif">{fmtBig(packRemaining)}</Text>
+                <Text className="cd-ql">增购算力</Text>
+                <Text className="cd-pv serif">仍有余量</Text>
               </View>
             )}
           </View>
@@ -149,7 +150,7 @@ export default function Credits() {
                   <View key={sku.key} className="cd-row cd-pack" onClick={() => openPack(sku)}>
                     <View className="cd-rl">
                       <Text className="cd-rt">{sku.name}</Text>
-                      <Text className="cd-rat">{packAmountLabel(sku)}{sku.desc ? ` · ${sku.desc}` : ''}</Text>
+                      <Text className="cd-rat">{packDetailLabel(sku)}</Text>
                     </View>
                     <View className="cd-buy" style={{ background: accent }}><Text>{fmtFen(sku.priceFen)}</Text></View>
                   </View>
@@ -237,41 +238,31 @@ function usageLabel(usage?: { usagePercent: number; unlimited: boolean }): strin
   if (!usage) return '—';
   return usage.unlimited ? '不限量' : `本月已用 ${usage.usagePercent}%`;
 }
-// 大数展示：算力 token 数动辄十万百万，原样铺开读不出量级。1 万起走「万」、1 亿起走「亿」，
-// 保留一位小数并去掉无意义的 .0（123.5万 / 200万 / 1.2亿）。
-function fmtBig(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—';
-  if (n >= 1e8) return `${trimZero(n / 1e8)}亿`;
-  if (n >= 1e4) return `${trimZero(n / 1e4)}万`;
-  return String(Math.round(n));
-}
-function trimZero(v: number): string {
-  return v.toFixed(1).replace(/\.0$/, '');
-}
 // 分 → ¥xx / ¥xx.xx（整元不拖两位小数）
 function fmtFen(fen: number): string {
   return `¥${(fen / 100).toFixed(fen % 100 ? 2 : 0)}`;
 }
-// 增购包数量口径：credits=钻石颗数，quota=算力 token 数。运营没填 amount 时不编数字，只留价格。
-function packAmountLabel(sku: SkuView): string {
+// 增购包行文案。钻石包报颗数（对外货币口径），运营没填就不编数字、只留价格。
+// **算力包一律不报 token 数**：价 ÷ token 就是每 token 售价，能反推成本与毛利，属商业机密
+// （服务端 /skus 也已不下发算力包 amount）。只留运营写的价值描述，没填给通用兜底。
+function packDetailLabel(sku: SkuView): string {
+  const desc = (sku.desc ?? '').trim();
+  if (sku.kind !== 'credits') return desc || '月度额度用尽后自动接着用，永久有效';
   const amount = Number(sku.amount ?? 0);
-  if (!(amount > 0)) return '数量以运营配置为准';
-  return sku.kind === 'credits' ? `+${amount} 钻石` : `+${fmtBig(amount)} 算力`;
+  return [amount > 0 ? `+${amount} 钻石` : '数量以运营配置为准', desc].filter(Boolean).join(' · ');
 }
-// PaySheet「当前余额」：钻石包看钻石余额，算力包看增购算力剩余（月度额度不在增购口径里）。
+// PaySheet「当前余额」：钻石包看钻石余额；算力包只说有没有余量，不报数（同上，机密口径）。
 function packBalanceLabel(sku: SkuView, creditBalance: number | undefined, packRemaining: number): string {
   if (sku.kind === 'credits') return creditBalance == null ? '—' : creditBalance < 0 ? '不限量' : `${creditBalance} 钻石`;
-  return `增购算力 ${fmtBig(packRemaining)}`;
+  return packRemaining > 0 ? '增购算力 · 仍有余量' : '增购算力 · 已用尽';
 }
-// PaySheet「扣后状态」：到账即为余额 + 增购量；拿不到余额或数量就不猜结果。
-function packAfterLabel(sku: SkuView, creditBalance: number | undefined, packRemaining: number): string {
+// PaySheet「扣后状态」：钻石包报到账后的余额；算力包只承诺「接着用」，同样不报数。
+function packAfterLabel(sku: SkuView, creditBalance: number | undefined, _packRemaining: number): string {
+  if (sku.kind !== 'credits') return '到账后月度额度用尽可接着用';
   const amount = Number(sku.amount ?? 0);
   if (!(amount > 0)) return '到账后按运营配置发放';
-  if (sku.kind === 'credits') {
-    if (creditBalance == null) return `到账 +${amount} 钻石`;
-    return creditBalance < 0 ? '不限量' : `${creditBalance + amount} 钻石`;
-  }
-  return `增购算力 ${fmtBig(packRemaining + amount)}`;
+  if (creditBalance == null) return `到账 +${amount} 钻石`;
+  return creditBalance < 0 ? '不限量' : `${creditBalance + amount} 钻石`;
 }
 // ISO → MM-DD HH:mm
 function fmtAt(iso: string): string {

@@ -111,7 +111,7 @@ const PLANS: Plan[] = [
 // 让本地 mock 走查看得到增购区块与下单流程，价格/数量不作为线上口径。
 const SKUS: { key: string; name: string; desc: string; priceFen: number; kind: SkuView['kind']; grantsModuleKey?: string; amount?: number }[] = [
   { key: 'pack-credits-50', name: '钻石增购包 · 50 颗', desc: '按需补钻石，用于启用专项顾问与出图。', priceFen: 2900, kind: 'credits', amount: 50 },
-  { key: 'pack-quota-1m', name: '算力增购包 · 100 万', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1_000_000 },
+  { key: 'pack-quota-1m', name: '算力增购包', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1_000_000 },
   { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。', priceFen: 3900, kind: 'service' },
   { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
   { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
@@ -1185,7 +1185,8 @@ export const mock = {
   async skus(): Promise<SkuView[]> {
     return delay(SKUS.map((s) => ({
       key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind,
-      grantsModuleKey: s.grantsModuleKey ?? null, ...(s.amount != null ? { amount: s.amount } : {}),
+      // 与服务端 publicSku 同口径：算力包不下发 amount（token 数属商业机密），钻石包照旧带颗数。
+      grantsModuleKey: s.grantsModuleKey ?? null, ...(s.kind === 'credits' && s.amount != null ? { amount: s.amount } : {}),
     })));
   },
   async createSkuOrder(key: string): Promise<SkuOrderResult> {

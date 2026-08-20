@@ -366,8 +366,16 @@ test('POST /admin/skus 建档 + PATCH 改量 + DELETE 删除', async () => {
   assert.equal(listed.body.find((s: { key: string }) => s.key === created.body.key).amount, 300_000);
   assert.equal(listed.body.find((s: { key: string }) => s.key === 'storage-2g').amount, null, '非增购包不带 amount');
 
+  // 公开目录对算力包**不**下发 amount：价 ÷ token 就是每 token 售价，据此可反推供应商成本与毛利，
+  // 属商业机密。运营后台（/admin/skus）照旧看得见，发放读库里的 metaJson.amount，都不受影响。
   const pub = await api('GET', '/api/skus', {});
-  assert.equal(pub.body.find((s: { key: string }) => s.key === created.body.key).amount, 300_000, '公开目录带 amount');
+  const pubQuota = pub.body.find((s: { key: string }) => s.key === created.body.key);
+  assert.ok(pubQuota, '算力包本身仍要出现在公开目录里（藏的是数量，不是商品）');
+  assert.equal(pubQuota.amount, undefined, '公开目录不得下发算力包 token 数');
+  const pubCredits = await api('POST', '/api/admin/skus', { body: { kind: 'credits', name: '钻石包 · 50 颗', desc: '', priceFen: 2900, amount: 50 } });
+  assert.equal(pubCredits.status, 201);
+  const pubAfter = await api('GET', '/api/skus', {});
+  assert.equal(pubAfter.body.find((s: { key: string }) => s.key === pubCredits.body.key).amount, 50, '钻石是对外货币口径，颗数照旧下发');
 
   const patched = await api('PATCH', `/api/admin/skus/${created.body.key}`, { body: { amount: 500_000, priceFen: 6900 } });
   assert.equal(patched.status, 200);

@@ -8,20 +8,17 @@ const ORDER_LABEL = { created: '待支付', paid: '已支付 · 权益发放中'
 const REFUND_LABEL = { refund_requested: '退款已申请', refund_processing: '退款处理中', refund_closed: '退款已关闭', refund_abnormal: '退款异常', refunded: '已退款' };
 const PACK_KINDS = ['credits', 'quota']; // 增购包：credits=钻石颗数，quota=算力 token 数
 function fmtAt(iso) { const value = String(iso || ''); const match = value.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); return match ? `${match[2]}-${match[3]} ${match[4]}:${match[5]}` : value.slice(0, 16); }
-// 大数展示（与 H5 算力明细同口径）：1 万起走「万」、1 亿起走「亿」，去掉无意义的 .0。
-function fmtBig(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return '—';
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1).replace(/\.0$/, '')}亿`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(1).replace(/\.0$/, '')}万`;
-  return String(Math.round(n));
-}
 function fmtFen(fen) { const value = Number(fen) || 0; return `¥${(value / 100).toFixed(value % 100 ? 2 : 0)}`; }
-// 增购包行文案：运营没填 amount 时不编数字，只留价格。
+// 增购包行文案。钻石包报颗数（对外货币口径），运营没填就不编数字、只留价格。
+// **算力包一律不报 token 数**：价 ÷ token 就是每 token 售价，能反推成本与毛利，属商业机密
+// （服务端 /skus 也已不下发 amount，这里即便想报也没有数）。只留运营写的价值描述，没填给通用兜底。
 function mapPack(sku) {
   const amount = Number(sku.amount || 0);
-  const amountText = amount > 0 ? (sku.kind === 'credits' ? `+${amount} 钻石` : `+${fmtBig(amount)} 算力`) : '数量以运营配置为准';
-  return Object.assign({}, sku, { amountText: sku.desc ? `${amountText} · ${sku.desc}` : amountText, priceText: fmtFen(sku.priceFen) });
+  const desc = String(sku.desc || '').trim();
+  const amountText = sku.kind === 'credits'
+    ? [amount > 0 ? `+${amount} 钻石` : '数量以运营配置为准', desc].filter(Boolean).join(' · ')
+    : (desc || '月度额度用尽后自动接着用，永久有效');
+  return Object.assign({}, sku, { amountText, priceText: fmtFen(sku.priceFen) });
 }
 function usageLabel(usage) { if (!usage) return '—'; return usage.unlimited ? '不限量' : `本月已用 ${Number(usage.usagePercent) || 0}%`; }
 function mapOrder(order) {
@@ -75,7 +72,8 @@ Page(withShare({
       this.applyPacks();
       this._loaded = true; this.setData({
         loading: false, errorText: '', creditBalance: Number(balance) < 0 ? '不限量' : String(balance == null ? '—' : balance),
-        packRemainingText: packRemaining > 0 ? fmtBig(packRemaining) : '',
+        // 余量同样不报数：它就是刚买那笔的量级，写出来等于把包的 token 数贴脸上。
+        packRemainingText: packRemaining > 0 ? '仍有余量' : '',
         usageText: usage ? usageLabel(usage) : '', usagePercent: usage && usage.unlimited ? 100 : Number(usage && usage.usagePercent) || 0, usageUnlimited: Boolean(usage && usage.unlimited),
         items: (credits && credits.items || []).map((item) => Object.assign({}, item, { atText: fmtAt(item.at), deltaText: Number(item.delta) >= 0 ? `+${item.delta}` : String(item.delta), positive: Number(item.delta) >= 0 })),
         orders: (orderResult.items || orderResult || []).map(mapOrder),

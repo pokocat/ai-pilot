@@ -54,14 +54,6 @@ function openMobile(path: string) {
   window.open(mobileHashUrl(path), '_blank', 'noopener');
 }
 
-// 大数展示（与手机端算力明细同口径）：1 万起走「万」、1 亿起走「亿」，去掉无意义的 .0。
-function fmtBig(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—';
-  if (n >= 1e8) return `${(n / 1e8).toFixed(1).replace(/\.0$/, '')}亿`;
-  if (n >= 1e4) return `${(n / 1e4).toFixed(1).replace(/\.0$/, '')}万`;
-  return String(Math.round(n));
-}
-
 function openGeneral(st: PcState, prompt?: string) {
   if (prompt) st.setChatDraft(prompt);
   st.go('sessions');
@@ -276,7 +268,7 @@ function Credits({ st }: { st: PcState }) {
   if (!s.isAuthed()) return <Guest st={st} />;
   return (
     <div className="pc-page pc-lord-page">
-      <section className="pc-lord-credit-hero"><div><div className="pc-lord-eyebrow">算力账本</div><h1>{me?.creditBalance && me.creditBalance < 0 ? '不限量' : me?.creditBalance ?? 0}</h1><p>当前可见算力余额 · 本月已用 {me?.usage?.usagePercent ?? 0}%{packLeft > 0 ? ` · 增购算力剩余 ${fmtBig(packLeft)}` : ''}</p></div><div className="pc-lord-credit-acts">{/* PC 只做展示与导流：增购下单仍走手机端安全支付页 */}<button type="button" className="pc-btn" onClick={() => openMobile('/packages/work/credits/index')}>去增购</button><button type="button" className="pc-btn" onClick={() => st.setView('plans')}>查看方案</button></div></section>
+      <section className="pc-lord-credit-hero"><div><div className="pc-lord-eyebrow">算力账本</div><h1>{me?.creditBalance && me.creditBalance < 0 ? '不限量' : me?.creditBalance ?? 0}</h1><p>当前可见算力余额 · 本月已用 {me?.usage?.usagePercent ?? 0}%{packLeft > 0 ? ' · 增购算力仍有余量' : ''}</p></div><div className="pc-lord-credit-acts">{/* PC 只做展示与导流：增购下单仍走手机端安全支付页 */}<button type="button" className="pc-btn" onClick={() => openMobile('/packages/work/credits/index')}>去增购</button><button type="button" className="pc-btn" onClick={() => st.setView('plans')}>查看方案</button></div></section>
       <section className="pc-lord-credit-list"><header><span>时间</span><span>事由</span><span>变动</span><span>余额</span></header>{loading ? <div className="pc-lord-credit-empty">正在读取账本…</div> : failed ? <div className="pc-lord-credit-empty">账本没有取到，请稍后重试。</div> : items.length ? items.map((x, i) => <div key={`${x.at}-${i}`}><span>{new Date(x.at).toLocaleString('zh-CN', { hour12: false })}</span><b>{x.reason}</b><em className={x.delta >= 0 ? 'pc-plus' : ''}>{x.delta >= 0 ? '+' : ''}{x.delta}</em><strong>{x.balance < 0 ? '不限量' : x.balance}</strong></div>) : <div className="pc-lord-credit-empty">还没有算力变动记录。</div>}</section>
       <button type="button" className="pc-lord-back" onClick={() => st.setView('overview')}>← 返回主公总览</button>
     </div>

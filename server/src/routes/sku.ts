@@ -11,12 +11,15 @@ import { getBalance } from '../services/credits.js';
 import type { SkuView, SkuOrderResult } from '../../../shared/contracts';
 
 function publicSku(s: { key: string; name: string; desc: string; priceFen: number; kind: string; grantsModuleKey: string | null; metaJson: unknown }): SkuView {
-  // 增购包（credits 钻石 / quota 算力）把数量带给端上展示；其余 kind 不带 amount。
-  const isPack = s.kind === 'credits' || s.kind === 'quota';
+  // 钻石增购包把颗数带给端上（钻石是对外货币口径，端上到处显示颗数）。
+  // **算力增购包不下发 amount**：token 数是成本口径，价格一除就是每 token 售价，据此可反推
+  // 供应商成本与毛利——属商业机密。端上文案藏了但公开接口照给，等于没藏（curl /skus 即可见）。
+  // 发放侧不受影响：markPaidAndApply 读库里的 metaJson.amount，从不信端上回传的数量。
+  const isCreditsPack = s.kind === 'credits';
   return {
     key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen,
     kind: s.kind as SkuView['kind'], grantsModuleKey: s.grantsModuleKey,
-    ...(isPack ? { amount: skuPackAmount(s.metaJson) } : {}),
+    ...(isCreditsPack ? { amount: skuPackAmount(s.metaJson) } : {}),
   };
 }
 

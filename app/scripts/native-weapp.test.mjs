@@ -1553,11 +1553,12 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
 
     const mockSkus = await mock.skus();
     assert.equal(mockSkus.length, 8); // 6 个能力/服务/空间包 + 2 个增购包（credits/quota）
-    // 增购包必须带数量，否则端上只能显示价格、说不出「买到多少」。
+    // 钻石包带颗数（对外货币口径）；算力包**不下发** token 数（成本口径，属商业机密），
+    // 所以下面校验发放时只看「进没进池」，不拿目录里的数字对账。
     const creditsPack = mockSkus.find((item) => item.kind === 'credits');
     const quotaPack = mockSkus.find((item) => item.kind === 'quota');
     assert.ok(Number(creditsPack?.amount) > 0);
-    assert.ok(Number(quotaPack?.amount) > 0);
+    assert.equal(quotaPack?.amount, undefined);
     // 增购包 mock 必须真的发放：钻石进余额、算力进增购池（不能只提示成功）。
     const balanceBefore = (await mock.me()).creditBalance;
     // 无套餐时 usage 为 null（现有 mock 口径），增购余量固定看 tokenQuota。
@@ -1566,7 +1567,7 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     await mock.createSkuOrder(quotaPack.key);
     const afterPurchase = await mock.me();
     assert.equal(afterPurchase.creditBalance, balanceBefore + creditsPack.amount);
-    assert.equal(afterPurchase.tokenQuota.packRemaining, packBefore + quotaPack.amount);
+    assert.ok(afterPurchase.tokenQuota.packRemaining > packBefore, '算力包必须真的进增购池');
     await mock.createSkuOrder('fin-checkup');
     await mock.enableModule('finance');
     assert.equal((await mock.modules()).modules.find((item) => item.key === 'finance')?.enabled, true);
@@ -2930,6 +2931,58 @@ test('算力明细页游客态也拉增购目录：公开接口不许停在骨�
     assert.equal(page.data.packState, 'ready', '增购区块不许停在骨架屏');
     assert.ok(page.data.packs.length >= 1, '目录里要有增购包');
     assert.ok(page.data.packs.every((sku) => sku.kind === 'credits' || sku.kind === 'quota'), '只收增购类 SKU，能力目录不进本页');
+  } finally {
+    delete globalThis.wx;
+  }
+});
+
+test('算力包不对外报 token 数：目录不下发、行文案与余量都不出现绝对值', async () => {
+  const values = new Map();
+  globalThis.wx = {
+    getStorageSync: (key) => values.get(key) ?? '',
+    setStorageSync: (key, value) => values.set(key, value),
+    removeStorageSync: (key) => values.delete(key),
+    showToast() {},
+  };
+  try {
+    const require = createRequire(import.meta.url);
+    const mockPath = path.join(sourceRoot, 'services/mock.js');
+    delete require.cache[require.resolve(mockPath)];
+    const mock = require(mockPath);
+
+    // ① 目录口径：算力包不下发 amount（价 ÷ token 就是每 token 售价，属商业机密）；
+    //    钻石是对外货币口径，颗数照旧带。
+    const list = await mock.skus();
+    const quota = list.find((sku) => sku.kind === 'quota');
+    const credits = list.find((sku) => sku.kind === 'credits');
+    assert.ok(quota, 'mock 目录里要有算力包');
+    assert.equal(quota.amount, undefined, '算力包不得下发 token 数');
+    assert.ok(Number(credits.amount) > 0, '钻石包照旧带颗数');
+    assert.doesNotMatch(quota.name, /\d/, '算力包名字也不许带量级（线上名字归运营后台）');
+
+    // ② 行文案：算力包只出运营写的价值描述，不出数字。
+    const pagePath = path.join(sourceRoot, 'packages/work/credits/index.js');
+    const pageRequire = createRequire(pagePath);
+    for (const key of Object.keys(pageRequire.cache)) {
+      if (key.includes(`${path.sep}weapp-native${path.sep}`)) delete pageRequire.cache[key];
+    }
+    let config;
+    const sandbox = { require: pageRequire, module: { exports: {} }, console, setTimeout, Page(value) { config = value; }, wx: globalThis.wx };
+    vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), sandbox, { filename: 'packages/work/credits/index.js' });
+    const page = Object.create(config);
+    page.data = JSON.parse(JSON.stringify(config.data));
+    page.setData = function (patch) { Object.assign(this.data, patch); };
+    await page.loadPacks();
+    const quotaRow = page.data.packs.find((sku) => sku.kind === 'quota');
+    assert.doesNotMatch(quotaRow.amountText, /\d/, `算力包行文案不得出现数字：${quotaRow.amountText}`);
+    assert.ok(quotaRow.amountText.length > 0, '不报数不等于留白，得说清买到什么');
+    assert.match(page.data.packs.find((sku) => sku.kind === 'credits').amountText, /钻石/);
+
+    // ③ 余量：买完之后同样不报数，否则刚买那笔的量级立刻贴脸上。
+    page._loaded = true;
+    const source = fs.readFileSync(pagePath, 'utf8');
+    assert.doesNotMatch(source, /packRemainingText:[^,]*fmtBig/, '余量行不得报 token 数');
+    assert.match(source, /packRemainingText: packRemaining > 0 \? '仍有余量' : ''/);
   } finally {
     delete globalThis.wx;
   }

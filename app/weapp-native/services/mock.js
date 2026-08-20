@@ -382,7 +382,7 @@ function purchasePlan(id) {
 const MOCK_SKUS = [
   // 增购包（credits/quota）：线上由运营在后台自建、不入 seed；这里两档只为本地走查，价格/数量不作线上口径。
   { key: 'pack-credits-50', name: '钻石增购包 · 50 颗', desc: '按需补钻石，用于启用专项顾问与出图。', priceFen: 2900, kind: 'credits', amount: 50 },
-  { key: 'pack-quota-1m', name: '算力增购包 · 100 万', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1000000 },
+  { key: 'pack-quota-1m', name: '算力增购包', desc: '月度额度用尽后自动接着用，永久有效直到用完。', priceFen: 9900, kind: 'quota', amount: 1000000 },
   { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。', priceFen: 3900, kind: 'service' },
   { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
   { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
@@ -472,7 +472,13 @@ function modules() {
   return Promise.resolve({ recommended: items.find((item) => item.key === 'growth') || null, modules: items });
 }
 function skus() {
-  return Promise.resolve(MOCK_SKUS.map((item) => Object.assign({}, item, { grantsModuleKey: item.grantsModuleKey || null })));
+  // 与服务端 publicSku 同口径：算力包不下发 amount（token 数属商业机密），钻石包照旧带颗数。
+  // 本地发放仍读 MOCK_SKUS 里的 amount，与下发口径无关。
+  return Promise.resolve(MOCK_SKUS.map((item) => {
+    const view = Object.assign({}, item, { grantsModuleKey: item.grantsModuleKey || null });
+    if (item.kind !== 'credits') delete view.amount;
+    return view;
+  }));
 }
 function createSkuOrder(key) {
   const sku = MOCK_SKUS.find((item) => item.key === key);

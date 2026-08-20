@@ -1838,7 +1838,7 @@ export type SkuKind = 'module' | 'service' | 'storage' | 'credits' | 'quota';
 export interface SkuView {
   key: string; name: string; desc: string; priceFen: number;
   kind: SkuKind; grantsModuleKey?: string | null;
-  amount?: number; // 增购包数量：credits=钻石颗数；quota=算力 token 数（其余 kind 不带）
+  amount?: number; // 仅钻石增购包的颗数。算力包**不下发**（token 数是成本口径，属商业机密；发放读库里的 metaJson.amount）
 }
 /** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）；
  *  mock=测试期模拟支付单（PAY_MOCK_SUCCESS）：payParams 是占位值，端上必须跳过 wx.requestPayment，
