@@ -792,40 +792,115 @@ test('事件名白名单必须真的一致：解析服务端集合与 SSOT 联�
   assert.match(read('services/invite.js'), /track\('invite_landing'/);
 });
 
-test('物料投放埋点：只在真拿到码时报 view，降级态不许混进漏斗', () => {
-  // qr_provision 记的是「投放意图」而不是曝光——二维码的曝光在端外发生，端上捕获不到。
-  // 关键口径：**降级态（没拿到码、只能手输）不报**。那种情况下用户根本没有可贴出去的物料，
-  // 报上去会让「投放数」虚高，而这个数是要跟线下扫码量对照看的。
-  const src = read('packages/work/invite/index.js');
-  assert.match(src, /qr_provision/, '必须上报 qr_provision');
-  assert.match(src, /if \(dataUri\) trackProvision/, '必须以「真拿到码」为前提才报 view');
-  // 三个动作各一处：看码 / 出图 / 存相册
-  for (const act of ['view', 'image', 'save']) {
-    assert.ok(src.includes(`'${act}'`), `缺少 ${act} 这一段投放动作`);
-  }
-  // 埋点必须懒 require（避开 api→invite→store 的加载链成环），且整体包 try
-  assert.match(src, /require\('\.\.\/\.\.\/\.\.\/services\/api'\)\.api\.track/, '埋点要懒 require，不能提到模块顶层');
-  assert.match(src, /function trackProvision[\s\S]{0,240}try \{/, 'trackProvision 必须整体包在 try 里——埋点绝不能让页面报错');
+/**
+ * 加载**真实的邀请页**并取回它注册给微信的 Page 对象。
+ *
+ * 为什么必须这样测而不是源码文本匹配（codex 2026-08-20 的批评，成立）：
+ * 上一版三条测试全是 `assert.match(src, ...)`，它们只能证明「某段文字存在」，
+ * 正好漏掉了本次两个真实事故——切位乱序串码、以及无码/取消保存时的误报。
+ * 文本匹配还会在重构后变脆或恒真。这里注入可控的 api/canvas/wx，跑真回调。
+ */
+function loadInvitePage(opts = {}) {
+  const Module = cjsRequire('node:module');
+  const original = Module.prototype.require;
+  const pagePath = path.join(sourceRoot, 'packages/work/invite/index.js');
+  const tracks = [];
+  const saves = [];
+  let registered = null;
+  global.Page = (o) => { registered = o; };
+  stubStorage({});
+  global.wx = Object.assign({}, global.wx, {
+    showToast() {},
+    setClipboardData() {},
+    navigateBack() {},
+    saveImageToPhotosAlbum(o) {
+      saves.push(o);
+      // 由用例决定相册回调走 success 还是 fail
+      if (opts.albumFail) { if (o.fail) o.fail({ errMsg: opts.albumFail }); }
+      else if (o.success) o.success();
+    },
+  });
+  Module.prototype.require = function patched(id) {
+    if (id.endsWith('services/api')) {
+      return { api: {
+        inviteQrcode: (slot) => opts.qr(slot),
+        me: () => Promise.resolve(opts.me || { inviteCode: 'JS2K7P', referral: null }),
+        track: (name, props) => { tracks.push({ name, props }); return true; },
+      } };
+    }
+    if (id.endsWith('services/store')) return { isAuthed: () => true, snapshot: () => ({}), handleApiError: () => '' };
+    if (id.endsWith('services/page')) return { baseData: (x) => Object.assign({}, x) };
+    if (id.endsWith('services/share')) return { withShare: (page) => page };
+    if (id.endsWith('gift/canvas')) return { render: () => Promise.resolve('/tmp/card.png'), save() {}, share() {} };
+    return original.apply(this, arguments);
+  };
+  try {
+    delete cjsRequire.cache[cjsRequire.resolve(pagePath)];
+    cjsRequire(pagePath);
+  } finally { Module.prototype.require = original; }
+  assert.ok(registered && typeof registered.load === 'function', '邀请页应向 Page() 注册 load');
+  // 给 Page 对象补上 setData 与 data，模拟微信运行时
+  registered.data = Object.assign({}, registered.data);
+  registered.setData = function setData(patch) { Object.assign(this.data, patch); };
+  // 必须跑一次 onLoad：请求代次 `_gen` 在那里初始化，跳过它 load() 里的 ++this._gen
+  // 会从 NaN 起算，代次比较恒为 false —— 那样测的就不是真实运行时序了。
+  if (typeof registered.onLoad === 'function') registered.onLoad();
+  return { page: registered, tracks, saves };
+}
+
+test('切物料位不许串码：旧请求晚到必须整份丢弃，不落地也不上报', async () => {
+  // 真实事故（codex 审出的阻断）：default 请求还在飞时点「名片」，
+  // 旧响应晚到会把 default 的二维码写进已显示「名片」的状态——用户出的图是
+  // 「名片」文案配通用码，印出去归因就错了；还会按当前 slot 误报一次 view。
+  let releaseDefault;
+  const pending = new Promise((r) => { releaseDefault = r; });
+  const { page, tracks } = loadInvitePage({
+    qr: (slot) => (slot === 'default'
+      ? pending.then(() => ({ inviteCode: 'JS2K7P', slot: 'default', dataUri: 'data:image/png;base64,AAA' }))
+      : Promise.resolve({ inviteCode: 'JS2K7P', slot, dataUri: `data:image/png;base64,${slot}` })),
+  });
+
+  const first = page.load();                       // default，卡住不返回
+  await page.pickSlot({ currentTarget: { dataset: { slot: 'card' } } });  // 切到名片并完成
+  assert.equal(page.data.slot, 'card');
+  assert.equal(page.data.qr, 'data:image/png;base64,card', '当前显示的必须是名片的码');
+
+  releaseDefault();                                 // 旧请求现在才回来
+  await first;
+  assert.equal(page.data.slot, 'card', '旧请求不得改回 slot');
+  assert.equal(page.data.qr, 'data:image/png;base64,card', '旧请求的码绝不能盖住当前码');
+  const views = tracks.filter((t) => t.props.act === 'view');
+  assert.deepEqual(views.map((v) => v.props.slot), ['card'], '只该有名片这一条 view，旧请求不得上报');
 });
 
-test('邀请页的降级路径：拿不到码要给可手输的邀请码，不能留空框', () => {
-  // 这张图是要印出去的，留个空二维码框等于把物料做废。
-  const js = read('packages/work/invite/index.js');
-  const wxml = read('packages/work/invite/index.wxml');
-  const paint = read('packages/work/invite/paint.js');
-  assert.match(js, /qrFailed/, '要把「读失败」与「还在加载」分开，不能一直转圈');
-  assert.match(wxml, /fb-code/, 'wxml 要有降级的大字邀请码');
-  assert.match(paint, /data\.qr \? [\s\S]{0,40}|if \(data\.qr\)/, '出图也要分有码/无码两条路');
-  assert.match(paint, /手动输入|手输/, '降级版必须告诉对方可以手输邀请码');
-  // 静区：小程序码贴满边会扫不动
-  assert.match(paint, /静区/, '出图必须给二维码留静区，否则印出来扫不动');
+test('无码时不报投放：降级卡能出图，但它不是可扫的物料', async () => {
+  const { page, tracks } = loadInvitePage({
+    qr: () => Promise.resolve({ inviteCode: 'JS2K7P', slot: 'default', dataUri: null }),
+  });
+  await page.load();
+  assert.equal(page.data.qrFailed, true, '要显式进失败态，不能一直转圈');
+  await page.makeImage();
+  assert.ok(page.data.imgPath, '降级卡照样要能出图（大字邀请码可手输）');
+  page.saveImage();
+  assert.deepEqual(tracks.filter((t) => t.name === 'qr_provision'), [],
+    '无码时 view/image/save 一条都不许报——否则漏斗混进贴不出去的物料');
 });
 
-test('切换物料位要清掉已生成的图，否则会把上一位的图当本位存走', () => {
-  const src = read('packages/work/invite/index.js');
-  const block = src.match(/pickSlot\([\s\S]*?\n  \},/);
-  assert.ok(block, '未找到 pickSlot');
-  assert.match(block[0], /imgPath: ''/, '换物料位必须清 imgPath——否则用户会把「通用」那张当「名片」的存走');
+test('save 必须等相册成功回调：用户取消或拒权限不算「已存相册」', async () => {
+  const good = { qr: () => Promise.resolve({ inviteCode: 'JS2K7P', slot: 'default', dataUri: 'data:image/png;base64,AAA' }) };
+
+  const ok = loadInvitePage(good);
+  await ok.page.load();
+  await ok.page.makeImage();
+  ok.page.saveImage();
+  assert.equal(ok.tracks.filter((t) => t.props.act === 'save').length, 1, '成功保存要报一条');
+
+  const cancelled = loadInvitePage(Object.assign({ albumFail: 'saveImageToPhotosAlbum:fail cancel' }, good));
+  await cancelled.page.load();
+  await cancelled.page.makeImage();
+  cancelled.page.saveImage();
+  assert.deepEqual(cancelled.tracks.filter((t) => t.props.act === 'save'), [],
+    '用户取消不算存了相册——契约里 save 的定义是「存了相册」，报上去就是造假');
 });
 
 test('跨端 scene 形状对齐：服务端生成的每一种码，端上都必须解析得出邀请码', () => {

@@ -31,12 +31,16 @@ const SLOTS = [
  * 用户看了码 / 出了图 / 存了相册。取数时与 `share_expose` **不可相加**——
  * 一次投放会带来 N 次线下扫码，量级不同。
  *
- * 实现口径抄 share.js：懒 require（避开 api→invite→store 的加载链成环）、
  * fire-and-forget、整个调用包在 try 里——埋点绝不能让页面变慢或报错。
+ *
+ * **直接用顶层的 `api`，不做懒 require**（2026-08-20 codex 指出，成立）：
+ * share.js 那边懒 require 是因为它被 54 个页面在模块顶层引入、怕加载链成环；
+ * 这一页顶层已经 `require` 了同一个 api 模块，再懒加载一次不减少任何依赖环，
+ * 只是让实现更绕、也让测试没法注入。
  */
 function trackProvision(slot, act) {
   try {
-    require('../../../services/api').api.track('qr_provision', { slot, act });
+    api.track('qr_provision', { slot, act });
   } catch (_) { /* 埋点不可用：页面照常 */ }
 }
 
@@ -55,6 +59,7 @@ Page(withShare({
   }),
 
   onLoad() {
+    this._gen = 0;   // 请求代次，见 load() 注释
     if (!store.isAuthed()) { this.setData({ showLogin: false, loading: false }); }
     this.load();
   },
@@ -62,14 +67,31 @@ Page(withShare({
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); this.load(); },
 
+  /**
+   * 取码 + 读数。
+   *
+   * **请求代次（`_gen`）是必须的**（2026-08-20 codex 审出的阻断）：切物料位会立刻发新请求，
+   * 而旧请求还在飞。没有代次时，default 的响应会晚于 card 的切换落地，把 default 的二维码
+   * 写进已经显示「名片」的状态里——**用户出的图会是「名片」文案配通用码，印出去归因就错了**；
+   * 而且还会按 `this.data.slot`（此刻已是 card）误报一次 view。
+   * 快速连点多个位时，最后返回的那个旧请求甚至能永久盖住当前码。
+   *
+   * 代次的判断依据：只有「我发起时的代次 === 当前代次」才允许落地与上报，否则整个响应丢弃。
+   * slot 也从**发起时**的闭包里取，不读 this.data（读了就还是会串）。
+   */
   async load() {
     if (!store.isAuthed()) { this.setData({ loading: false }); return; }
-    this.setData({ loading: true, qrFailed: false });
+    const gen = ++this._gen;
+    const slot = this.data.slot;   // 钉住发起时的位，不在回调里读 this.data
+    // 切位时先清掉旧码：否则新码还没回来的那段时间，屏上显示的是上一位的二维码，
+    // 用户此刻点「生成邀请卡」就会拿到错配的图。
+    this.setData({ loading: true, qrFailed: false, qr: '', imgPath: '' });
     // 两个请求各自成败：码取不到不该连人数一起没了，反之亦然。
     const [qrRes, meRes] = await Promise.all([
-      api.inviteQrcode(this.data.slot).catch(() => null),
+      api.inviteQrcode(slot).catch(() => null),
       api.me().catch(() => null),
     ]);
+    if (gen !== this._gen) return;  // 已被更新的请求取代：整份响应丢弃，不落地也不上报
     const dataUri = (qrRes && qrRes.dataUri) || '';
     this.setData({
       loading: false,
@@ -80,15 +102,16 @@ Page(withShare({
       summary: (meRes && meRes.referral) || null,
     });
     // 只有真拿到码才算一次可用的投放：降级态（没码、只能手输）不报，
-    // 否则漏斗里会混进一批根本没法贴出去的「投放」。
-    if (dataUri) trackProvision(this.data.slot, 'view');
+    // 否则漏斗里会混进一批根本没法贴出去的「投放」。用发起时的 slot，不用 this.data.slot。
+    if (dataUri) trackProvision(slot, 'view');
   },
 
   async pickSlot(event) {
     const slot = event.currentTarget.dataset.slot;
     if (!slot || slot === this.data.slot) return;
-    // 换位就是换一张码，旧的出图要作废，否则用户会把「通用」的图当成「名片」的存走。
-    this.setData({ slot, imgPath: '' });
+    // 换位就是换一张码：旧出图与旧二维码都要立刻作废（load 里会清），
+    // 否则用户会把「通用」的图当成「名片」的存走。
+    this.setData({ slot });
     await this.load();
   },
 
@@ -104,7 +127,9 @@ Page(withShare({
         slotLabel,
       }));
       this.setData({ imgPath });
-      trackProvision(this.data.slot, 'image');
+      // 与 view 同一口径：**只有真拿到码才算投放**。降级卡（大字邀请码、没有二维码）
+      // 也能出图，但它不是可扫的物料，报上去会让漏斗混进贴不出去的东西。
+      if (this.data.qr) trackProvision(this.data.slot, 'image');
     } catch (_) {
       wx.showToast({ title: '出图失败，请重试', icon: 'none' });
     } finally {
@@ -115,8 +140,26 @@ Page(withShare({
   saveImage() {
     if (!this.data.imgPath) return;
     // 存相册是这条链里最强的投放信号——图存下来才可能进 PPT / 交给设计做物料。
-    trackProvision(this.data.slot, 'save');
-    canvas.save(this.data.imgPath);
+    //
+    // **必须等相册回调成功才报**（2026-08-20 codex 审出的阻断）：早先在调用前就报，
+    // 于是用户点了「取消」或拒了相册权限也被记成「已存相册」——契约里 save 的定义是
+    // 「存了相册」，那样就是造假。这里不复用 canvas.save（它只 toast 不回状态），
+    // 直接调 wx，成功分支里才上报；无码的降级卡同样不报。
+    const slot = this.data.slot;
+    const hasQr = Boolean(this.data.qr);
+    wx.saveImageToPhotosAlbum({
+      filePath: this.data.imgPath,
+      success: () => {
+        wx.showToast({ title: '已保存到相册', icon: 'none' });
+        if (hasQr) trackProvision(slot, 'save');
+      },
+      fail: (error) => {
+        // 用户主动取消不算失败，不打扰；拒权限才提示怎么开。
+        if (!/cancel/i.test(String(error && error.errMsg))) {
+          wx.showToast({ title: '保存失败，请在设置中允许相册权限', icon: 'none' });
+        }
+      },
+    });
   },
   shareImage() { canvas.share(this.data.imgPath); },
 

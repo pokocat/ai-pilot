@@ -24,7 +24,7 @@ const TTL_MS = 12 * 60 * 60 * 1000;
  * 转发通道给不了这个信息，这是静态链独有的价值。
  *
  * **scene 上限 32 字符**（微信硬限制），所以位标识只留短码：
- * `ic:JS2K7P:card` = 13 字符，余量充足。
+ * `ic:JS2K7P:card` = 14 字符，余量充足。
  */
 export const QR_SLOTS = ['default', 'card', 'store', 'deck', 'event'] as const;
 export type QrSlot = (typeof QR_SLOTS)[number];
@@ -36,7 +36,18 @@ export function parseSlot(raw: unknown): QrSlot {
 /** scene 形状：`ic:<码>` 或 `ic:<码>:<位>`。端上 invite.js 只认 `ic:` 前缀，与 query 通道同一套归因。 */
 export function sceneFor(inviteCode: string, slot: QrSlot): string {
   const base = `ic:${inviteCode}`;
-  return slot === 'default' ? base : `${base}:${slot}`;
+  const scene = slot === 'default' ? base : `${base}:${slot}`;
+  // **运行时守卫**（2026-08-20 codex 审出）：32 是微信硬限制，早先只靠注释和固定样例的测试兜。
+  // 当前最长 `ic:JS2K7P:event`（14 字符）安全，但邀请码规则一旦变长（比如加到 24 位），
+  // `ic:<24>:event` 就是 33 字符——微信直接拒绝，端上表现为「码一直生成不出来」，
+  // 而单元测试若仍用短样例会保持假绿。这里显式抛错，让它在生成时就暴露而不是静默降级。
+  if (scene.length > 32) {
+    throw Object.assign(
+      new Error(`邀请码 scene 超微信 32 字符上限（${scene.length}）：${scene}。邀请码或物料位变长时必须同步收缩。`),
+      { statusCode: 500, code: 'INVITE_SCENE_TOO_LONG' },
+    );
+  }
+  return scene;
 }
 
 /**
