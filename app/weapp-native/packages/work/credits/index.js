@@ -56,9 +56,11 @@ Page(withShare({
   },
   retryPacks() { this.loadPacks(); },
   async load() {
+    // 增购目录是公开接口，游客也要拉：留在登录判断之后会让增购区块永远停在骨架屏。
+    // 游客点购买行时 buyPack 自带登录门，这里只管展示。
+    this.loadPacks();
     if (!store.isAuthed()) { this.setData({ loading: false, showLogin: true }); return; }
     if (!this._loaded) this.setData({ loading: true });
-    this.loadPacks();
     try {
       const [credits, orderResult, me] = await Promise.all([api.credits(), api.orders().catch(() => ({ items: [] })), store.loadMe()]);
       // 余额与用量的唯一真源是 /me（creditBalance / usage）。这里曾兜底读 credits.balance 与
