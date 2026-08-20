@@ -383,6 +383,11 @@ test('文案库本身的口径：条数、双语气、不出现盘面黑话与�
     const both = `${c.title}${c.timelineTitle}`;
     assert.doesNotMatch(both, /宜攻|宜守|攻守|运势|吉凶|流年/, `不许用盘面黑话：${c.title}`);
     assert.doesNotMatch(both, /米诺|Mino/i, `品牌红线：${c.title}`);
+    // **每条都必须有行动召唤**（2026-08-20）：只说中痛点、不告诉人来干什么，
+    // 分享卡的唯一文案位（图上刻意无字）就只用了一半——看的人「然后呢？」没了。
+    // 认「军师」这个称谓：召唤必须落到产品上，不能只是泛泛的「值得想想」。
+    assert.match(c.title, /军师/, `转发文案缺少行动召唤（要落到「军师」上）：${c.title}`);
+    assert.match(c.timelineTitle, /军师/, `朋友圈文案缺少行动召唤：${c.timelineTitle}`);
   }
   // 底图池里每套都要两张（5:4 与 1:1 分开，共用会被朋友圈裁掉两侧）
   for (const a of share.BUILTIN_ART) {
