@@ -94,12 +94,16 @@ export async function api<T = any>(
   const res = await a.inject({ method, url, headers, payload: hasBody ? (opts.body as object) : undefined });
   let body: any = null;
   try { body = res.json(); } catch { body = res.body; }
-  // app 是 logger:false 起的（1900 条用例的日志会把失败信息冲走），代价是 5xx 的原因被彻底吞掉：
+  // app 是 logger:false 起的（1900 条用例的日志会把失败信息冲走），代价是 500 的原因被彻底吞掉：
   // 用例只断言 status，失败信息就只有一句 `500 !== 200`，间歇性 500 于是无从下手。
-  // 这里把 5xx 连同 Fastify 默认错误体（含 err.message）打到 stderr——只有真出错才有输出。
-  // 只挑 5xx：不少用例是**故意**打 401/403/400/402/429 的，那些不是故障。
-  if (res.statusCode >= 500) {
-    console.error(`\n[test:5xx] ${method} ${url} -> ${res.statusCode}\n${JSON.stringify(body)}\n`);
+  // 这里把 500 连同 Fastify 默认错误体（含错误码与 err.message）打到 stderr。
+  //
+  // **只挑 500，不挑 501/502/503**：后三个在本仓是**有意的协议码**（未实现的支付回调 501、
+  // 上游不可用 502/503），全量跑一轮能打出十几条，全是正常用例，纯噪音。
+  // 500 也仍有少数用例是**故意**断言的（例如「查询失败回 5xx，绝不伪装成空数据」会注入
+  // 「模拟数据库抖动」），所以出现本行不等于有失败——它只是把原因摆在失败旁边备查。
+  if (res.statusCode === 500) {
+    console.error(`\n[test:500] ${method} ${url}（部分用例故意断言 500，本行不代表失败）\n${JSON.stringify(body)}\n`);
   }
   return { status: res.statusCode, body };
 }

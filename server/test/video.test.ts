@@ -328,12 +328,39 @@ test('媒体机审旁路需显式开启；生产还要二次确认，并留下�
     assert.equal(clipMediaModerationBypassEnabled(), true, 'production 双开关才允许运营旁路');
     assert.doesNotThrow(() => assertSandboxSafe());
     await assertVideoMediaModerationReady('image/png');
+    // 落审计那一刻的三个开关快照：provider 标签就是由它们算出来的，
+    // 失败时必须能看见它们的真实值，否则只知道「标签不对」、不知道为什么。
+    const envAtWrite = {
+      NODE_ENV: process.env.NODE_ENV,
+      BYPASS: process.env.CLIP_MEDIA_MODERATION_BYPASS,
+      ALLOW_PRODUCTION: process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION,
+    };
     await assertVideoUploadContent(Buffer.from('production-test-image'), 'image/png', { tenantId: user.tenantId, userId: token });
-    const productionAudit = await prisma.auditLog.findFirstOrThrow({
+    // 不靠「取最新那条」来断言。原写法是 `findFirstOrThrow(orderBy createdAt desc)`，
+    // 而 audit_log.createdAt 是 timestamp(3)（毫秒精度）：本用例前后两次旁路写入落在同一毫秒的
+    // 概率实测约 5%，一旦打平，「最新」就没有确定答案——实测人为打平 60 次，findFirst desc
+    // 60 次取到的都是**旧**那条，于是断言读到上一步的 'test-bypass' 而红。这是一个真实存在的
+    // 隐性 flake 源，本改动消掉它：按 provider 断言两条审计各自存在，与顺序无关，
+    // 且比原来更强——原来只看「最新一条」，并没有验证 production 那次到底有没有落下自己的审计。
+    //
+    // ⚠️ 但「打平」**不是**本用例已观测到那次 flaky 的原因：换成下面这个与顺序无关的断言之后，
+    // 它依然复现过（120 轮里第 49 轮），且失败时两条审计都是 'test-bypass'，
+    // 而落审计那一刻的开关快照是 NODE_ENV=production/BYPASS=true/ALLOW_PRODUCTION=true——
+    // 按 moderation.ts 里那个同步三元表达式，这种组合本该写出 'operator-bypass'。
+    // 也就是说还有第二个未查清的成因，下面的 message 会把开关快照与审计原文一起打出来备查。
+    const bypassAudits = await prisma.auditLog.findMany({
       where: { userId: token, action: 'user.video.media.moderation.bypassed' },
-      orderBy: { createdAt: 'desc' },
+      select: { payloadJson: true },
     });
-    assert.equal((productionAudit.payloadJson as { provider?: string }).provider, 'operator-bypass');
+    assert.deepEqual(
+      bypassAudits.map((a) => (a.payloadJson as { provider?: string }).provider).sort(),
+      ['operator-bypass', 'test-bypass'],
+      `development 那次记 test-bypass、production 那次记 operator-bypass，两条都必须在；`
+      + `落审计时的开关快照=${JSON.stringify(envAtWrite)}；`
+      // payload 里的 bytes 能认出是哪一次写的：development 那次传 'test-image'（10 字节），
+      // production 那次传 'production-test-image'（21 字节）。
+      + `审计原文=${JSON.stringify(bypassAudits.map((a) => a.payloadJson))}`,
+    );
   } finally {
     if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
     if (savedBypass === undefined) delete process.env.CLIP_MEDIA_MODERATION_BYPASS;
