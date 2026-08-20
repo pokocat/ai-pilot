@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   assertNativeBuild,
   assertReleaseBuild,
@@ -101,4 +103,52 @@ test('schema 2 但不是 native-weapp 运行时也拒绝上传', () => {
   withMeta({ ...serverMeta, runtime: 'taro-weapp' }, (dir) => {
     assert.throws(() => assertReleaseBuild(dir, { expectedApi: serverMeta.api }), /不是原生微信小程序/);
   });
+});
+
+test('包体积不得顶穿微信上限：主包与各分包压缩后都要留够余量', () => {
+  // 2026-08-19：主包曾达 2.54MB（上限 2MB）被这条挡住。根因是 build-native-weapp.mjs 把
+  // app/src/assets/ 整目录拷进包，连 1.79MB 的 H5 字体一起带上了——而小程序侧根本不读包内
+  // 字体（services/font.js 走 wx.loadFontFace 拉远程 URL）。构建脚本现已排除 fonts/。
+  //
+  // 微信算的是**压缩后**体积，所以这里用 zip 近似（真实打包略有差异，故阈值留 15% 余量）。
+  // 这条守的不是某个具体文件，而是「谁往 src/assets/ 放了大东西」这类会静默顶穿上限的改动
+  // ——那种问题只有上传到微信后台才会报，本地 tsc 与单测都看不出来。
+  const distRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const dist = path.join(distRoot, 'dist-native');
+  if (!fs.existsSync(dist)) return; // 未构建时跳过（CI 里先 build 再跑本条）
+
+  const SUBS = ['packages/main', 'packages/work', 'packages/video'];
+  const walk = (root) => fs.readdirSync(root, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(root, e.name);
+    return e.isDirectory() ? walk(full) : [full];
+  });
+  const groups = new Map([['主包', []], ...SUBS.map((s) => [s, []])]);
+  for (const abs of walk(dist)) {
+    const rel = path.relative(dist, abs).split(path.sep).join('/');
+    const hit = SUBS.find((s) => rel.startsWith(`${s}/`));
+    groups.get(hit ?? '主包').push(abs);
+  }
+
+  // 用 zlib 逐文件 deflate 求和近似压缩包体积（不引第三方 zip 库）
+  const zipish = (files) => files.reduce(
+    (sum, f) => sum + zlib.deflateSync(fs.readFileSync(f), { level: 9 }).length + 100, 0,
+  );
+
+  const LIMIT = 2 * 1024 * 1024;
+  const BUDGET = LIMIT * 0.85; // 留 15% 余量：真实打包与 zip 近似有差异，且别贴着上限过
+  for (const [name, files] of groups) {
+    const size = zipish(files);
+    assert.ok(
+      size <= BUDGET,
+      `${name} 压缩后约 ${(size / 1048576).toFixed(2)}MB，超出预算 ${(BUDGET / 1048576).toFixed(2)}MB`
+      + `（微信硬上限 2MB）。别急着调高阈值——先看是不是又有大文件被拷进包了：`
+      + `du -sh dist-native/assets/*`,
+    );
+  }
+
+  // 字体必须不在包里（这是上面那个根因的定点守卫）
+  assert.ok(
+    !fs.existsSync(path.join(dist, 'assets/fonts')),
+    'assets/fonts 不该进小程序包：小程序走 wx.loadFontFace 拉远程字体，包内那份是纯白占 1.79MB',
+  );
 });

@@ -237,7 +237,27 @@ function build() {
       fs.copyFileSync(source, target);
     }
   }
-  fs.cpSync(ASSET_ROOT, path.join(OUTPUT_ROOT, 'assets'), { recursive: true });
+  // 整目录拷 assets，但**排除 fonts/**（2026-08-19 包体积治理）。
+  //
+  // `app/src/assets/fonts/` 那两个 woff2 合计 1.79MB，是**给 H5 用的**：H5 在 index.html 里
+  // 以同源 `/fonts/...` 引用它们（放仓库正是为了躲开 CORS，见该目录 README）。
+  // 小程序这一侧从来不读包内文件——`services/font.js` 走 `wx.loadFontFace` 拉
+  // `APP_FONT_BASE`（默认 https://wxapi.aibuzz.cn/fonts）的远程 URL，微信自己缓存。
+  // 所以这两个文件进包是**纯白占**，而且占掉主包 2.54MB 里的 1.79MB，直接把 2MB 上限顶穿。
+  // 全仓验证过：weapp-native/ 下引用 `junshi-serif` 的只有 font.js（远程 URL）与
+  // tokens.scss（仅 CSS 字体族名），没有任何地方读 `assets/fonts/*`。
+  //
+  // 留一个逃生开关：真机万一验出老基础库 loadFontFace 加载不上，
+  // `WEAPP_BUNDLE_FONTS=1` 可以把字体打回包里（那时必须同步把字体挪进分包或做更小的子集）。
+  const bundleFonts = process.env.WEAPP_BUNDLE_FONTS === '1';
+  fs.cpSync(ASSET_ROOT, path.join(OUTPUT_ROOT, 'assets'), {
+    recursive: true,
+    filter: (src) => {
+      if (bundleFonts) return true;
+      const rel = path.relative(ASSET_ROOT, src);
+      return !(rel === 'fonts' || rel.startsWith(`fonts${path.sep}`));
+    },
+  });
   emitSharedIcons();
   // 自带字体：FONT_BASE 置空 → services/font.js 直接跳过加载，CSS 落回系统字体，本地开发不受影响。
   // family 名与 src/app.scss 字体栈第一位必须一致（构建期展开成字面量，见 inlineFontTokens）。
