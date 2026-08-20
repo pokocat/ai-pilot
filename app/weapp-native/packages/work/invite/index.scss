@@ -1,0 +1,30 @@
+.page { min-height: 100vh; background: #F4F2EC; padding: 0 32rpx 60rpx; box-sizing: border-box; }
+.nav { position: fixed; left: 0; right: 0; display: flex; align-items: center; padding: 0 24rpx; z-index: 10; }
+.nav-back { width: 56rpx; height: 56rpx; display: flex; align-items: center; }
+.nav-title { flex: 1; text-align: center; font-size: 32rpx; color: #16191D; font-weight: 600; margin-right: 56rpx; }
+
+.stats { display: flex; gap: 24rpx; margin: 8rpx 0 24rpx; }
+.stat { flex: 1; background: #FBFAF6; border-radius: 16rpx; padding: 28rpx 0; text-align: center; }
+.stat-n { display: block; font-size: 48rpx; color: #143726; font-weight: 600; }
+.stat-l { display: block; font-size: 24rpx; color: #8A8170; margin-top: 6rpx; }
+
+.slots { white-space: nowrap; margin-bottom: 24rpx; }
+.slot { display: inline-block; padding: 12rpx 28rpx; margin-right: 16rpx; background: #FBFAF6; color: #6B6558; border-radius: 999rpx; font-size: 26rpx; }
+.slot.on { background: #143726; color: #FBFAF6; }
+
+.card { background: #FBFAF6; border-radius: 20rpx; padding: 40rpx 32rpx; text-align: center; }
+.qr { width: 420rpx; }
+.ph { height: 420rpx; line-height: 420rpx; color: #8A8170; font-size: 26rpx; }
+.fallback { padding: 40rpx 0; }
+.fb-code { display: block; font-size: 88rpx; color: #143726; font-weight: 600; letter-spacing: 4rpx; }
+.fb-tip { display: block; font-size: 24rpx; color: #8A8170; margin: 20rpx 40rpx 0; line-height: 1.6; }
+.fb-retry { display: inline-block; margin-top: 24rpx; font-size: 26rpx; color: #A07D2C; }
+.code { display: block; margin-top: 24rpx; font-size: 26rpx; color: #6B6558; }
+
+.acts { display: flex; gap: 20rpx; margin-top: 32rpx; }
+.btn { flex: 1; text-align: center; padding: 26rpx 0; border-radius: 14rpx; font-size: 28rpx; background: #FBFAF6; color: #16191D; }
+.btn.primary { background: #143726; color: #FBFAF6; }
+.btn.off { opacity: .6; }
+
+.hint { margin-top: 28rpx; font-size: 24rpx; color: #8A8170; line-height: 1.7; }
+.off-canvas { position: fixed; left: -9999rpx; top: 0; width: 750px; height: 1000px; }

@@ -32,6 +32,11 @@ const api = {
     : request('/auth/referral-capture', { method: 'POST', data: { inviteCode, source }, isolatedAuth: true }),
   // 登录请求统一短等 inviteParamsReady()，带上签名归因凭证（没码时返回空对象）。
   // 放在这一层而不是让每个调用方自己传：login-sheet 被 88 个页面引用，调用方零改动。
+  // 邀请小程序码（静态传播链）。失败时服务端回 dataUri:null，页面降级为邀请码大字——
+  // 所以这里不做 catch 包装，让调用方自己决定降级，别把「码没拿到」和「请求挂了」混成一种。
+  inviteQrcode: (slot) => isMock()
+    ? Promise.resolve({ inviteCode: 'JS2K7P', slot: slot || 'default', dataUri: null, landingPage: 'pages/sessions/index' })
+    : request(`/invite/qrcode${slot && slot !== 'default' ? `?slot=${encodeURIComponent(slot)}` : ''}`),
   login: (phone, code) => isMock()
     ? mock.login(phone)
     : inviteParamsReady().then((params) => request('/auth/login', { method: 'POST', data: Object.assign({ phone, code }, params) })),

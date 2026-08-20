@@ -125,6 +125,9 @@ Page(withShare({
   login() { this.setData({ showLogin: true }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
+  // 我的邀请：静态传播链入口（二维码 + 邀请卡出图）。转发通道到不了的物料靠它。
+  openInvite() { navTo('/packages/work/invite/index'); },
+
   openIdentity() { navTo('/packages/main/settings/index'); },
   openPlans() { navTo('/packages/work/plans/index'); },
   openCommunity() { navTo('/packages/work/community/index'); },

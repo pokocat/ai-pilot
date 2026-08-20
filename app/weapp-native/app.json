@@ -11,52 +11,108 @@
   "subPackages": [
     {
       "root": "packages/main",
-      "pages": ["chat/index", "brief/index", "settings/index", "onboarding/index", "legal/index"]
+      "pages": [
+        "chat/index",
+        "brief/index",
+        "settings/index",
+        "onboarding/index",
+        "legal/index"
+      ]
     },
     {
       "root": "packages/work",
       "pages": [
-        "library/index", "knowledge/index", "knowledge/detail/index", "projects/index", "project/index",
-        "report/index", "credits/index", "plans/index", "bindings/index", "market/index", "community/index",
-        "gift/index", "calendar/index", "mingpan/index", "dossier/index", "ledger/index", "quickscan/index",
-        "brandkit/index", "webview/index", "command/index", "reminders/index", "daily/index", "poster/index",
-        "posterJob/index", "gallery/index", "architecture/index", "relations/index", "enterprise/index"
+        "library/index",
+        "knowledge/index",
+        "knowledge/detail/index",
+        "projects/index",
+        "project/index",
+        "report/index",
+        "credits/index",
+        "plans/index",
+        "bindings/index",
+        "market/index",
+        "community/index",
+        "gift/index",
+        "calendar/index",
+        "mingpan/index",
+        "dossier/index",
+        "ledger/index",
+        "quickscan/index",
+        "brandkit/index",
+        "webview/index",
+        "command/index",
+        "reminders/index",
+        "daily/index",
+        "poster/index",
+        "posterJob/index",
+        "gallery/index",
+        "architecture/index",
+        "relations/index",
+        "enterprise/index",
+        "invite/index"
       ]
     },
     {
       "root": "packages/video",
       "pages": [
-        "home/index", "templates/index", "template/index", "clone/index",
-        "script/index", "shots/index", "confirm/index",
-        "cover/index", "rendering/index",
-        "work/index", "works/index", "assets/index", "avatar/index", "voices/index"
+        "home/index",
+        "templates/index",
+        "template/index",
+        "clone/index",
+        "script/index",
+        "shots/index",
+        "confirm/index",
+        "cover/index",
+        "rendering/index",
+        "work/index",
+        "works/index",
+        "assets/index",
+        "avatar/index",
+        "voices/index"
       ]
     }
   ],
   "preloadRule": {
     "pages/sessions/index": {
       "network": "wifi",
-      "packages": ["packages/main"]
+      "packages": [
+        "packages/main"
+      ]
     },
     "pages/execution/index": {
       "network": "wifi",
-      "packages": ["packages/main", "packages/work", "packages/video"]
+      "packages": [
+        "packages/main",
+        "packages/work",
+        "packages/video"
+      ]
     },
     "pages/pouch/index": {
       "network": "wifi",
-      "packages": ["packages/work", "packages/video"]
+      "packages": [
+        "packages/work",
+        "packages/video"
+      ]
     },
     "pages/profile/index": {
       "network": "all",
-      "packages": ["packages/work", "packages/main"]
+      "packages": [
+        "packages/work",
+        "packages/main"
+      ]
     },
     "pages/thinktank/index": {
       "network": "all",
-      "packages": ["packages/work"]
+      "packages": [
+        "packages/work"
+      ]
     },
     "packages/main/chat/index": {
       "network": "all",
-      "packages": ["packages/work"]
+      "packages": [
+        "packages/work"
+      ]
     }
   },
   "window": {
@@ -79,11 +135,26 @@
     "selectedColor": "#16191D",
     "backgroundColor": "#FBFAF6",
     "list": [
-      { "pagePath": "pages/sessions/index", "text": "问策" },
-      { "pagePath": "pages/home/index", "text": "战局" },
-      { "pagePath": "pages/execution/index", "text": "今日" },
-      { "pagePath": "pages/thinktank/index", "text": "图籍" },
-      { "pagePath": "pages/profile/index", "text": "主公" }
+      {
+        "pagePath": "pages/sessions/index",
+        "text": "问策"
+      },
+      {
+        "pagePath": "pages/home/index",
+        "text": "战局"
+      },
+      {
+        "pagePath": "pages/execution/index",
+        "text": "今日"
+      },
+      {
+        "pagePath": "pages/thinktank/index",
+        "text": "图籍"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "主公"
+      }
     ]
   },
   "resizable": true,

@@ -55,8 +55,8 @@ const CUSTOM_SHARE_ROUTES = new Set([
 
 const routes = allRoutes();
 
-test('原生小程序 app.json 声明的路由数量未变（54 个）——分享覆盖清单据此派生', () => {
-  assert.equal(routes.length, 54, '路由数量变化时，本文件的分享覆盖清单也要跟着复核');
+test('原生小程序 app.json 声明的路由数量未变（55 个）——分享覆盖清单据此派生', () => {
+  assert.equal(routes.length, 55, '路由数量变化时，本文件的分享覆盖清单也要跟着复核');
 });
 
 test('朋友圈白名单必须游客友好：onLoad 里不得对未登录用户直接弹登录弹层', () => {
@@ -585,7 +585,8 @@ test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调
     // 本来就该不同。这条用例要证的是「埋点炸了分享照常」，与具体选中哪条文案无关，
     // 所以断言改成：文案必须来自池内且非空（不是等于某个特定值）。
     const titles = new Set(share.BUILTIN_COPY.map((c) => c.title));
-    const expected = { path: `${share.LANDING}?ic=JS2K7P&src=friend`, image: share.CARD_FRIEND };
+    const expected = { path: `${share.LANDING}?ic=JS2K7P&src=friend` };
+    const friendImgs = new Set(share.BUILTIN_ART.map((a) => a.image));
     const stub = stubApiTrack(mode);
     try {
       const page = share.withShare({}, { timeline: true });
@@ -595,7 +596,7 @@ test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调
       assert.doesNotThrow(() => { timeline = page.onShareTimeline(); }, `mode=${mode}：朋友圈回调不得抛错`);
       assert.ok(friend.title && titles.has(friend.title), `mode=${mode}：标题仍须是池内的真实文案，不能变空或变脏`);
       assert.equal(friend.path, expected.path, `mode=${mode}：归因路径不变`);
-      assert.equal(friend.imageUrl, expected.image, `mode=${mode}：封面图不变`);
+      assert.ok(friendImgs.has(friend.imageUrl), `mode=${mode}：封面图仍须取自图池（3 套随机，不能写死单张）`);
       assert.ok(timeline.imageUrl, `mode=${mode}：朋友圈封面仍在`);
     } finally { stub.restore(); }
   }

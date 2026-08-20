@@ -20,7 +20,7 @@
             <view class="sct-b" bindtap="openIdentity"><text class="account-profile-name serif">{{name}}</text><text class="account-profile-role">{{company}}</text></view>
             <text class="member-pill" bindtap="openPlans">{{planName}}</text>
           </view>
-          <view class="account-profile-meta"><text class="apm-line">手机 {{phoneDisplay}}</text><text class="apm-line">邀请码 <text class="apm-code">{{inviteCode}}</text></text></view>
+          <view class="account-profile-meta"><text class="apm-line">手机 {{phoneDisplay}}</text><text class="apm-line" bindtap="openInvite">邀请码 <text class="apm-code">{{inviteCode}}</text> <text class="apm-more">二维码</text><native-icon name="arrow" size="12" color="gold" /></text></view>
           <view class="account-benefit-grid">
             <view class="account-benefit" data-route="/packages/work/credits/index" bindtap="openRoute"><text class="ab-t">算力</text><text class="ab-s">{{usagePercent}}% · {{creditBalance}} 钻石</text></view>
             <view class="account-benefit" data-route="/packages/work/dossier/index" bindtap="openRoute"><text class="ab-t">深度报告</text><text class="ab-s">军师执笔</text></view>

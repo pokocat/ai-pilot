@@ -1,0 +1,44 @@
+<view class="page {{themeClass}}" style="padding-top:{{navInset}}px">
+  <view class="nav" style="top:{{navTop}}px;height:{{navRowHeight}}px">
+    <view class="nav-back" bindtap="back"><native-icon name="back" size="20" color="ink" /></view>
+    <text class="nav-title">我的邀请</text>
+  </view>
+
+  <!-- 读数：取不到显示「—」，与真实的 0 区分开 -->
+  <view class="stats">
+    <view class="stat"><text class="stat-n">{{summary ? summary.directCount : '—'}}</text><text class="stat-l">已邀请</text></view>
+    <view class="stat"><text class="stat-n">{{summary ? summary.activatedCount : '—'}}</text><text class="stat-l">已开通</text></view>
+  </view>
+
+  <!-- 物料位：印出去后能对上是哪批物料 -->
+  <scroll-view class="slots" scroll-x="true">
+    <view wx:for="{{slots}}" wx:key="key" class="slot {{slot === item.key ? 'on' : ''}}" data-slot="{{item.key}}" bindtap="pickSlot">{{item.label}}</view>
+  </scroll-view>
+
+  <view class="card">
+    <block wx:if="{{loading}}"><view class="ph">正在生成…</view></block>
+    <block wx:elif="{{qr}}"><image class="qr" src="{{qr}}" mode="widthFix" show-menu-by-longpress="true" /></block>
+    <block wx:else>
+      <!-- 降级：不给裂图，把邀请码做成主角 -->
+      <view class="fallback">
+        <text class="fb-code">{{inviteCode || '——'}}</text>
+        <text class="fb-tip">二维码暂时取不到，对方可在「主公」页手动输入这个邀请码</text>
+        <text class="fb-retry" bindtap="retry">重试</text>
+      </view>
+    </block>
+    <text class="code" bindtap="copyCode">邀请码 {{inviteCode || '——'}} · 点击复制</text>
+  </view>
+
+  <view class="acts">
+    <view class="btn primary {{busy ? 'off' : ''}}" bindtap="makeImage">{{busy ? '出图中…' : '生成邀请卡'}}</view>
+    <block wx:if="{{imgPath}}">
+      <view class="btn" bindtap="saveImage">存到相册</view>
+      <view class="btn" bindtap="shareImage">发给朋友</view>
+    </block>
+  </view>
+
+  <view class="hint">生成的卡片可印在名片、门店台卡、提案封底或活动物料上——扫码的人从哪块物料来，后台能分得清。</view>
+
+  <canvas canvas-id="inviteCanvas" class="off-canvas"></canvas>
+  <login-sheet wx:if="{{showLogin}}" bind:close="closeLogin" bind:success="loggedIn" />
+</view>
