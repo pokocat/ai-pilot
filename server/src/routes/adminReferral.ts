@@ -25,7 +25,7 @@
 //      树节点也照此掩码——树上同时带着风控红环，关联面与风控屏是同一类。
 import type { FastifyInstance } from 'fastify';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../db.js';
+import { prisma, utcTimestamp } from '../db.js';
 import { requireAdmin } from '../services/adminAuth.js';
 import { maskAuditPhone } from '../services/audit.js';
 import { featureFlagPayload } from '../services/featureFlag.js';
@@ -110,6 +110,10 @@ async function riskThreshold(): Promise<{ threshold: number; configured: boolean
  * 聚集判定必须 `COUNT(DISTINCT)`（Prisma 的 groupBy 做不到）走原生 SQL，而「这些树节点里
  * 哪些落在被报出的 IP 上」是一次普通的有界 groupBy，用 Prisma 更清楚。
  * 两者的作用域字面同源，不会各写一遍后漂移。
+ *
+ * 边界过 utcTimestamp 是必须的，不是讲究：同一个 since 直接插进原生 SQL 会按会话时区渲染成本地
+ * naive，而 Prisma 那侧比的是 UTC naive 列——字面同源也照样在运行时差出一个时区偏移（生产 8 小时），
+ * 于是分母（riskScanCounts）和成员名单（走 where 的 groupBy）看的是两个窗口。
  */
 function riskWindow(days: number, tenantId: string | null): {
   sql: Prisma.Sql; where: Prisma.ReferralAttributionWhereInput;
@@ -117,7 +121,7 @@ function riskWindow(days: number, tenantId: string | null): {
   const since = new Date(now().getTime() - days * DAY_MS);
   return {
     // 老记录可能没采到 IP（列是后加的）：它们不参与聚集判定，也不该被算进 scannedIps 分母。
-    sql: Prisma.sql`"createdAt" >= ${since} AND "clientIp" IS NOT NULL${tenantId ? Prisma.sql` AND "tenantId" = ${tenantId}` : Prisma.empty}`,
+    sql: Prisma.sql`"createdAt" >= ${utcTimestamp(since)} AND "clientIp" IS NOT NULL${tenantId ? Prisma.sql` AND "tenantId" = ${tenantId}` : Prisma.empty}`,
     where: {
       createdAt: { gte: since },
       clientIp: { not: null },

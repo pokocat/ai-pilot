@@ -2,7 +2,7 @@
 // 网关在每次真实模型调用后调用 recordTokenUsage()；不参与按次扣费，记账失败绝不影响主流程产出。
 // 统计供运营后台「Token 用量」看板用。Dify 路径 v1 暂不计量（其响应未取 metadata.usage）。
 
-import { prisma } from '../db.js';
+import { prisma, utcTimestamp } from '../db.js';
 import { estimateCostMicros } from '../data/modelPrices.js';
 import { resolveModelRate } from './aiConfig.js';
 import { noteUsageUnreported, noteTokenUsage } from './metrics.js';
@@ -137,7 +137,7 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
              COALESCE(SUM("totalTokens"), 0) AS totaltokens,
              COALESCE(SUM("costMicros"), 0) AS costmicros
       FROM token_usage
-      WHERE "createdAt" >= ${since} AND "kind" IN ('chat', 'deliverable')
+      WHERE "createdAt" >= ${utcTimestamp(since)} AND "kind" IN ('chat', 'deliverable')
       GROUP BY 1 ORDER BY 1`,
   ]);
 

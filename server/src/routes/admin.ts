@@ -1,7 +1,7 @@
 // 运营后台 API（《投产开发指导》§7）：概览看板 / 每日献策 / 智能体（提示词+记忆）/ 问卷 / 套餐。
 // 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
-import { prisma } from '../db.js';
+import { prisma, utcTimestamp } from '../db.js';
 import { getAiConfig, effectiveProvider, mergedTestConfig } from '../services/aiConfig.js';
 import {
   checkEndpoint, hasBlocking, blockingMessage, draftFromEndpointUpsert, checkRoutePurpose,
@@ -678,7 +678,7 @@ export async function adminRoutes(app: FastifyInstance) {
         SELECT to_char((("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
                COALESCE(SUM("totalTokens"), 0) AS total
         FROM token_usage
-        WHERE "userId" = ${userId} AND "createdAt" >= ${since}
+        WHERE "userId" = ${userId} AND "createdAt" >= ${utcTimestamp(since)}
         GROUP BY 1 ORDER BY 1`,
       prisma.creditLedger.findMany({ where: { userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 }),
       prisma.paymentOrder.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10, select: { outTradeNo: true, amount: true, status: true, paidAt: true, attrSource: true } }),
@@ -895,7 +895,7 @@ export async function adminRoutes(app: FastifyInstance) {
         SELECT to_char((("paidAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
                COALESCE(SUM("amount"), 0) AS amount
         FROM payment_order
-        WHERE "paidAt" >= ${since} AND "status" IN ('paid', 'applied') AND "provider" = 'wechat'
+        WHERE "paidAt" >= ${utcTimestamp(since)} AND "status" IN ('paid', 'applied') AND "provider" = 'wechat'
         GROUP BY 1 ORDER BY 1`,
     ]);
     // 卡单清单（P0）：paid 未 applied = 收钱未发权益（资损，最高优先）；created 超 30 分钟 = 回调可能丢失/用户未支付。

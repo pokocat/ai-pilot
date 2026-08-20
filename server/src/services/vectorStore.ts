@@ -44,6 +44,21 @@ export async function vectorSearchChunks(
 
 export interface MemHit { id: string; text: string; weight: number; dist: number; }
 
+/**
+ * 记忆「未过期」谓词。
+ *
+ * 必须用 `now() AT TIME ZONE 'UTC'` 而不是裸 `now()`：expiresAt 是 timestamp(3) naive，存的是
+ * **UTC naive**，而裸 now() 是 timestamptz——两者比较时 Postgres 会把 naive 列按**会话时区**解释。
+ * 生产库 Asia/Shanghai 下这让每条记忆的到期时刻被读早 8 小时（还没过期就被判过期、检索不到），
+ * 本地 dev（America/Los_Angeles）方向相反、已过期的还能捞出来。加上 AT TIME ZONE 'UTC' 后两侧同为
+ * UTC naive，在任何时区的库上都对，也与 memory.ts 里走 Prisma where 的关键词召回口径一致。
+ *
+ * 抽成常量是为了可测：本地没有 pgvector（embedding_vec 只在生产建），
+ * vectorSearchMemories 整条查询跑不起来，测试只能引用这个谓词来验行为——
+ * 所以下面两条查询必须用它，不许各自内联，否则测试就守不住真正上线的那句。
+ */
+export const MEMORY_ALIVE_SQL = `("expiresAt" IS NULL OR "expiresAt" > (now() AT TIME ZONE 'UTC'))`;
+
 /** 长期记忆向量检索（ANN），按用户 + 未过期。agentKey=null → 用户级共享池（跨军师，A-3）；传值则按智能体隔离。 */
 export async function vectorSearchMemories(
   userId: string, agentKey: string | null, queryVec: number[], k: number,
@@ -54,7 +69,7 @@ export async function vectorSearchMemories(
       `SELECT id, text, weight, (embedding_vec <=> $1::vector) AS dist
        FROM memory
        WHERE "userId" = $2 AND embedding_vec IS NOT NULL
-         AND ("expiresAt" IS NULL OR "expiresAt" > now())
+         AND ${MEMORY_ALIVE_SQL}
        ORDER BY embedding_vec <=> $1::vector LIMIT $3`,
       v, userId, k,
     );
@@ -63,7 +78,7 @@ export async function vectorSearchMemories(
     `SELECT id, text, weight, (embedding_vec <=> $1::vector) AS dist
      FROM memory
      WHERE "userId" = $2 AND "agentKey" = $3 AND embedding_vec IS NOT NULL
-       AND ("expiresAt" IS NULL OR "expiresAt" > now())
+       AND ${MEMORY_ALIVE_SQL}
      ORDER BY embedding_vec <=> $1::vector LIMIT $4`,
     v, userId, agentKey, k,
   );
