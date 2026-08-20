@@ -2299,6 +2299,8 @@ export interface LlmContextTrace {
   };
 }
 export interface AdminTraceDetail extends AdminTraceItem {
+  /** 上游响应 id，逗号分隔（`chatcmpl-*` / `msg_*`）。拿它去供应商工作台查单次调用做账单对账。 */
+  upstreamIds: string | null;
   iterations: number;
   inputTokens: number;
   outputTokens: number;

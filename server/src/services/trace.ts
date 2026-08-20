@@ -14,6 +14,12 @@ function clip(s?: string | null): string | null {
   return s.length > TEXT_MAX ? s.slice(0, TEXT_MAX) + '…' : s;
 }
 
+/** 上游 id 列表 → 逗号分隔字符串。空数组落 null，别落空串——SQL 里 `IS NULL` 比 `= ''` 好查。 */
+function joinUpstreamIds(ids?: string[] | null): string | null {
+  if (!ids?.length) return null;
+  return ids.join(',');
+}
+
 export interface TraceInput {
   meta?: UsageMeta;
   agentKey?: string | null;
@@ -23,6 +29,8 @@ export interface TraceInput {
   model: string;
   endpointId?: string | null;
   endpointLabel?: string | null;
+  /** 本次调用产生的全部上游响应 id（按发生顺序）。落库为逗号分隔，供账单对账反查。 */
+  upstreamIds?: string[] | null;
   status: 'ok' | 'error';
   errorMessage?: string | null;
   /** classifyLlmError() 的分类结果；只喂 Prometheus 错误分布指标，不落库（无 schema 变更）。 */
@@ -54,6 +62,7 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         model: t.model,
         endpointId: t.endpointId ?? null,
         endpointLabel: t.endpointLabel ?? null,
+        upstreamIds: joinUpstreamIds(t.upstreamIds),
         status: t.status,
         errorMessage: clip(t.errorMessage),
         latencyMs: Math.max(0, Math.round(t.latencyMs)),
@@ -194,6 +203,7 @@ export async function getTrace(id: string): Promise<AdminTraceDetail | null> {
       tenantName: tenant?.name ?? null,
       agentName: agent?.name ?? null,
     }),
+    upstreamIds: r.upstreamIds,
     iterations: r.iterations,
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,

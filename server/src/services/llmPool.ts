@@ -70,14 +70,21 @@ export interface EndpointHit {
   provider: string;
   model: string;
 }
-export interface EndpointCapture { hit: EndpointHit | null }
+export interface EndpointCapture {
+  hit: EndpointHit | null;
+  /** 上游响应 id（OpenAI 兼容 `chatcmpl-*`、Anthropic `msg_*`），按发生顺序、已去重。 */
+  upstreamIds: string[];
+}
 
 // 一次 gateway 调用可能穿过 provider → tool loop → withEndpoint 多层异步边界。
 // AsyncLocalStorage 只承载排障元数据，不参与路由决策；并发请求各自隔离。
 const endpointCaptureStore = new AsyncLocalStorage<EndpointCapture>();
 
+/** 一条 trace 最多记这么多个上游 id。工具循环可能几十轮，全存会把 trace 表撑肥且对账无益。 */
+const UPSTREAM_ID_MAX = 12;
+
 export function createEndpointCapture(): EndpointCapture {
-  return { hit: null };
+  return { hit: null, upstreamIds: [] };
 }
 
 export function runWithEndpointCapture<T>(capture: EndpointCapture, run: () => Promise<T>): Promise<T> {
@@ -94,6 +101,23 @@ export function noteEndpointAttempt(cfg: ResolvedAiConfig): void {
     provider: cfg.provider,
     model: cfg.model,
   };
+}
+
+/**
+ * 记下上游这次外呼返回的响应 id。**唯一用途是账单对账**：供应商工作台能按 `chatcmpl-*` 查单次调用，
+ * 没有它我们最细只能对到「某模型某天的 token 数 ↔ 某计费项的整月金额」（见 2026-07 账期对账）。
+ *
+ * 与 noteEndpointAttempt 共用同一个 capture，所以错误路径也拿得到——**上游先返回响应体、随后被判失败的
+ * 那些外呼已经计费，正是最需要查的**。provider 在拿到响应体后调用；网络层就失败时自然没有 id，属预期。
+ */
+export function noteUpstreamId(id: string | null | undefined): void {
+  if (!id) return;
+  const capture = endpointCaptureStore.getStore();
+  if (!capture) return;
+  if (capture.upstreamIds.length >= UPSTREAM_ID_MAX) return;
+  // 流式路径每个 chunk 都带同一个 id，去重是必须的，不是优化。
+  if (capture.upstreamIds.includes(id)) return;
+  capture.upstreamIds.push(id);
 }
 
 let cfgCache: { at: number; endpoints: PoolEndpoint[]; settings: PoolSettings } | null = null;

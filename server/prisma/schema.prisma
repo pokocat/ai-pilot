@@ -1220,6 +1220,10 @@ model LlmTrace {
   model         String // 本次实际命中端点的 model
   endpointId    String? // AiModel.id；自定义 per-agent/Dify/mock 无池端点时为空
   endpointLabel String? // 调用时名称快照，防端点改名/删除后历史记录失真
+  /// 上游返回的响应 id（OpenAI 兼容 `chatcmpl-*`、Anthropic `msg_*`）。**存在的唯一理由是账单对账**：
+  /// 供应商工作台可按此 id 查单次调用，没有它我们最细只能对到「某模型某天的 token 数 ↔ 某计费项的整月金额」。
+  /// 一次 gateway 调用可能多次外呼（工具循环、截断续写、端点转移），故为逗号分隔的多值，按发生顺序。
+  upstreamIds   String? @db.Text
   status        String // ok | error
   errorMessage  String?  @db.Text
   latencyMs     Int      @default(0)
@@ -1238,6 +1242,9 @@ model LlmTrace {
   @@index([tenantId, createdAt])
   @@index([agentKey, createdAt])
   @@index([status, createdAt])
+  // upstreamIds 故意不建索引：值是逗号拼接的多值，反查只能 `LIKE '%chatcmpl-x%'`，btree 用不上；
+  // 且 Text 超过 btree 条目上限（约 2704 字节）会直接报错。当前量级约 2.5 万行/月，顺扫毫秒级。
+  // 真要快，加 pg_trgm 的 GIN 索引，不要加 btree。
   @@map("llm_trace")
 }
 

@@ -25,7 +25,7 @@ import {
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
 import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
 import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
 import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
@@ -52,12 +52,15 @@ export function openaiUserContent(userMessage: string, images?: ImageInput[]): s
   return parts;
 }
 interface OAResponse {
+  /** 上游响应 id（`chatcmpl-*`）。只用于账单对账，见 llmPool.noteUpstreamId。 */
+  id?: string;
   choices?: { message?: { content?: string | null; tool_calls?: OAToolCall[] }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   // type/code：OpenAI 标准错误体字段（如 context_length_exceeded），供 errorClassify 分类用。
   error?: { message?: string; type?: string; code?: string | null };
 }
 interface OAStreamChunk {
+  id?: string; // 每个 chunk 都带同一个 chatcmpl-*；noteUpstreamId 内部去重
   choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
   usage?: OAResponse['usage'];
   error?: { message?: string; type?: string; code?: string | null };
@@ -157,6 +160,9 @@ async function callChat(
           signal,
         });
         const data = (await res.json().catch(() => ({}))) as OAResponse;
+        // 记在 !res.ok 判定之前：上游回了响应体就说明它已经受理并可能计费，哪怕这次被判失败，
+        // 账单上照样有这一笔——失败的调用恰恰是最需要能反查的。
+        noteUpstreamId(data.id);
         if (!res.ok) {
           // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）；
           // providerErrorType/Code 供 errorClassify 分类成 context_length/content_filter 等 bucket。
@@ -510,6 +516,7 @@ async function* streamChatRound(
   };
 
   for await (const chunk of chunks) {
+    noteUpstreamId(chunk.id);
     if (chunk.usage) { usage = usageOf({ usage: chunk.usage }); if (opts.sink) opts.sink.usage = usage; }
     const reason = chunk.choices?.find((choice) => choice.finish_reason)?.finish_reason;
     if (reason) finishReason = reason;

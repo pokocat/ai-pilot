@@ -27,7 +27,7 @@ import {
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
 import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
 import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
@@ -124,6 +124,10 @@ function metaOf(ctx: GenContext): string {
 // cache_creation 并进 inputTokens 且不单独记，于是缓存写按 1× 计价——每次写都少算 25%，
 // 且用量不落库、事后无法量化。现在 cacheWrite 独立上报并持久化。
 function usageOf(res: Anthropic.Message): Usage {
+  // 落在这里而不是各个 messages.create 调用点：本文件 7 处 usageOf 覆盖了全部路径
+  // （非流式、截断续写、工具循环、流式的 message_start 与 finalMessage），且入参就是带 `.id`
+  // 的完整 Message。挑单个调用点补会漏掉流式。id 形如 `msg_*`，供应商工作台可按它查单次调用。
+  noteUpstreamId(res.id);
   const u = res.usage as { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
   const cacheRead = u.cache_read_input_tokens ?? 0;
   const cacheCreate = u.cache_creation_input_tokens ?? 0;

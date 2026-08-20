@@ -96,6 +96,8 @@ export function ObservabilityView() {
                 <div className="audit-detail-kv"><span>调用类型</span><b>{TRACE_KIND_LABEL[detail.kind] ?? detail.kind}</b></div>
                 <div className="audit-detail-kv wide"><span>实际端点</span><b>{detail.endpointLabel || '—'}{detail.endpointId ? ` · ${detail.endpointId}` : ''} · {detail.provider}/{detail.model || '—'}</b></div>
                 <div className="audit-detail-kv wide"><span>排障标识</span><b>agent={detail.agentKey || '—'} · kind={detail.kind} · session={detail.sessionId || '—'} · user={detail.userId || '—'}</b></div>
+                {/* 账单对账用：拿这串 id 去供应商工作台可查到单次调用。一次产出可能多次外呼，故为多值。 */}
+                <div className="audit-detail-kv wide"><span>上游调用 id</span><b style={{ userSelect: 'all', wordBreak: 'break-all' }}>{detail.upstreamIds || '—'}</b></div>
               </div>
             </div>
             <div className="sec-h" style={{ marginTop: 8 }}><span className="t">上下文召回</span></div>

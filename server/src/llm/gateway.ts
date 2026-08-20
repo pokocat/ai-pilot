@@ -305,7 +305,7 @@ async function traced<T>(
     const s = withActualEndpoint(await runWithEndpointCapture(capture, run), capture);
     await recordTrace({
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
-      endpointId: s.endpointId, endpointLabel: s.endpointLabel,
+      endpointId: s.endpointId, endpointLabel: s.endpointLabel, upstreamIds: capture.upstreamIds,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
       promptText: args.ctx.userMessage, responseText: args.respText(s.result), context: args.ctx.contextTrace,
     });
@@ -326,6 +326,7 @@ async function traced<T>(
       model: capture.hit?.model ?? '',
       endpointId: capture.hit?.endpointId,
       endpointLabel: capture.hit?.endpointLabel,
+      upstreamIds: capture.upstreamIds,
       status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
       context: args.ctx.contextTrace,
     });
@@ -695,7 +696,7 @@ async function* tracedChatProviderStream(
     const actual = withActualEndpoint({ result: done.result, usage: done.usage, provider, model }, capture);
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: actual.provider, model: actual.model,
-      endpointId: actual.endpointId, endpointLabel: actual.endpointLabel,
+      endpointId: actual.endpointId, endpointLabel: actual.endpointLabel, upstreamIds: capture.upstreamIds,
       status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
       promptText: ctx.userMessage, responseText: done.result.text, context: ctx.contextTrace,
     });
@@ -718,6 +719,7 @@ async function* tracedChatProviderStream(
       model: capture.hit?.model ?? model,
       endpointId: capture.hit?.endpointId,
       endpointLabel: capture.hit?.endpointLabel,
+      upstreamIds: capture.upstreamIds,
       status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       responseText: text, context: ctx.contextTrace,
     });
@@ -884,6 +886,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       model: endpointCapture.hit?.model ?? '',
       endpointId: endpointCapture.hit?.endpointId,
       endpointLabel: endpointCapture.hit?.endpointLabel,
+      upstreamIds: endpointCapture.upstreamIds,
       status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       context: ctx.contextTrace,
     });
@@ -903,6 +906,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   await recordTrace({
     meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: recKind, provider, model, endpointId, endpointLabel,
+    upstreamIds: endpointCapture.upstreamIds,
     status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,
     promptText: ctx.userMessage, responseText: respText, context: ctx.contextTrace,
   });
