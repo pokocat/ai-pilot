@@ -1194,14 +1194,18 @@ test('原生方案继续支付、到账提示、自动续费关闭与离线登�
   assert.match(plans, /return 'pending';\n  \},\n\n  async cancelAutoRenew/);
   assert.doesNotMatch(plans.match(/async waitApplied\(outTradeNo\) \{[\s\S]*?\n  \},\n\n  async cancelAutoRenew/)[0], /showToast|方案已更新/, '轮询超时不得自行提示权益已更新');
 
-  const repay = credits.match(/async repay\(event\) \{[\s\S]*?\n  \},\n  async waitApplied/);
+  const repay = credits.match(/async repay\(event\) \{[\s\S]*?\n  \},\n  waitApplied/);
   assert.ok(repay, '算力页缺少继续支付实现');
   assert.match(repay[0], /const state = await this\.waitApplied\(outTradeNo\)/);
   assert.match(repay[0], /if \(state === 'applied'\)[\s\S]*?支付成功，权益已更新/);
   assert.match(repay[0], /支付结果待确认，请稍后刷新订单状态/);
-  // 收尾容忍 `});` 与 `}));` 两种：全站分享 mixin 上线后页面统一包成 `Page(withShare({...}))`，
-  // 多一层右括号。这条断言要守的是「waitApplied 是本文件最后一个方法、后面没再接东西」，与包装层无关。
-  assert.match(credits, /return 'pending';\n  \},\n\}\)?\);/);
+  // 到账轮询已抽到 services/packs（方案页与算力明细页共用一份，避免两处各写各的）。
+  // 这条要守的还是老规矩：轮询超时只回 pending，不许在超时分支里冒充「已到账」。
+  const packs = fs.readFileSync(path.join(sourceRoot, 'services/packs.js'), 'utf8');
+  const poll = packs.match(/function waitApplied\(outTradeNo\) \{[\s\S]*?\n\}/);
+  assert.ok(poll, '共用模块缺少到账轮询');
+  assert.match(poll[0], /return 'pending';/);
+  assert.doesNotMatch(poll[0], /showToast|已到账/, '轮询超时不得自行提示到账');
 
   assert.match(login, /code === 'NETWORK_ERROR'/);
   assert.match(login, /token: `local-\$\{this\.data\.phone\}`/);
@@ -2896,94 +2900,123 @@ test('锦囊数据三态：读到 / 读失败 / 还没取，三处都不许混�
   assert.ok(works[0].updatedAt >= works[works.length - 1].updatedAt, '混排必须按时间倒序');
 });
 
-test('算力明细页游客态也拉增购目录：公开接口不许停在骨架屏', async () => {
+// 增购的落点：方案页常驻（换档 vs 补一次，两条路摆一起），算力明细页只在快见底时出现。
+function loadNativePage(relPath) {
+  const pagePath = path.join(sourceRoot, relPath);
+  const pageRequire = createRequire(pagePath);
+  for (const key of Object.keys(pageRequire.cache)) {
+    if (key.includes(`${path.sep}weapp-native${path.sep}`)) delete pageRequire.cache[key];
+  }
+  let config;
+  const sandbox = { require: pageRequire, module: { exports: {} }, console, setTimeout, Page(value) { config = value; }, wx: globalThis.wx };
+  vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), sandbox, { filename: relPath });
+  const page = Object.create(config);
+  page.data = JSON.parse(JSON.stringify(config.data));
+  page.setData = function (patch) { Object.assign(this.data, patch); };
+  return page;
+}
+
+function stubWx() {
   const values = new Map();
   globalThis.wx = {
     getStorageSync: (key) => values.get(key) ?? '',
     setStorageSync: (key, value) => values.set(key, value),
     removeStorageSync: (key) => values.delete(key),
-    showToast() {},
+    showToast() {}, showModal() {},
   };
+  return values;
+}
+
+test('方案页常驻增购：游客也看得到包，点了先弹登录门', async () => {
+  stubWx();
   try {
-    const pagePath = path.join(sourceRoot, 'packages/work/credits/index.js');
-    const pageRequire = createRequire(pagePath);
-    // 服务层是单例（token/store 状态跨用例串味），本用例前先整体重载。
-    for (const key of Object.keys(pageRequire.cache)) {
-      if (key.includes(`${path.sep}weapp-native${path.sep}`)) delete pageRequire.cache[key];
-    }
-    let config;
-    const sandbox = { require: pageRequire, module: { exports: {} }, console, setTimeout, Page(value) { config = value; }, wx: globalThis.wx };
-    vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), sandbox, { filename: 'packages/work/credits/index.js' });
-    assert.ok(config, 'credits 页必须以 Page() 注册');
+    const page = loadNativePage('packages/work/plans/index.js');
+    // 目录是公开接口：没登录也要拉到，否则游客看方案时那块永远停在「正在读取」。
+    await page.loadPacks();
+    assert.equal(page.data.packState, 'ready');
+    assert.ok(page.data.packs.length >= 1, '方案页必须常驻增购包');
+    assert.ok(page.data.packs.every((sku) => sku.kind === 'credits' || sku.kind === 'quota'));
 
-    const page = Object.create(config);
-    page.data = JSON.parse(JSON.stringify(config.data));
-    page.setData = function (patch) { Object.assign(this.data, patch); };
-    // 只做观察不改行为：记下 load() 是否触发了目录拉取，便于 await 到落定。
-    const packLoads = [];
-    page.loadPacks = function () { const p = config.loadPacks.call(this); packLoads.push(p); return p; };
-
-    // 游客（无 token）：登录门要弹，但增购目录是公开接口，必须照常拉到 ready。
-    await page.load();
-    assert.equal(packLoads.length, 1, '游客态 load() 必须拉增购目录');
-    await Promise.all(packLoads);
-    assert.equal(page.data.showLogin, true, '游客进入要弹登录层');
-    assert.equal(page.data.packState, 'ready', '增购区块不许停在骨架屏');
-    assert.ok(page.data.packs.length >= 1, '目录里要有增购包');
-    assert.ok(page.data.packs.every((sku) => sku.kind === 'credits' || sku.kind === 'quota'), '只收增购类 SKU，能力目录不进本页');
-  } finally {
-    delete globalThis.wx;
-  }
+    // 游客点购买：只弹登录层，不下单、不跳路由、不清状态。
+    await page.buyPack({ currentTarget: { dataset: { key: page.data.packs[0].key } } });
+    assert.equal(page.data.showLogin, true, '游客点增购要弹登录门');
+    assert.equal(page.data.buying, '', '登录门拦下后不许留着 busy 态');
+  } finally { delete globalThis.wx; }
 });
 
-test('算力包不对外报 token 数：目录不下发、行文案与余量都不出现绝对值', async () => {
-  const values = new Map();
-  globalThis.wx = {
-    getStorageSync: (key) => values.get(key) ?? '',
-    setStorageSync: (key, value) => values.set(key, value),
-    removeStorageSync: (key) => values.delete(key),
-    showToast() {},
-  };
+test('算力明细页是账本不是货架：没见底不摆增购，见底才摆', async () => {
+  stubWx();
+  try {
+    const page = loadNativePage('packages/work/credits/index.js');
+    await page.loadPacks();
+
+    // ① 没见底：整块不渲染（页尾「查看方案与权益」负责导流），也不留骨架屏。
+    page._runningLow = false;
+    page.applyPacks('ready');
+    assert.equal(page.data.showPacks, false);
+    assert.equal(page.data.packs.length, 0, '没见底不该把货架摆出来');
+
+    // ② 见底：摆出来且可买。
+    page._runningLow = true;
+    page.applyPacks('ready');
+    assert.equal(page.data.showPacks, true);
+    assert.ok(page.data.packs.length >= 1, '见底时必须给得出增购包');
+
+    // ③ 见底判定读的是月度用量与钻石余额，不是拍脑袋的常量。
+    const source = fs.readFileSync(path.join(sourceRoot, 'packages/work/credits/index.js'), 'utf8');
+    assert.match(source, /usagePercent\) >= RUNNING_LOW_PERCENT/);
+    assert.match(source, /const creditsLow = balance != null && Number\(balance\) === 0/);
+    assert.match(source, /!\(packRemaining > 0\)/, '手上还有没用完的增购算力就别催');
+  } finally { delete globalThis.wx; }
+});
+
+test('算力包不对外报 token 数：目录不下发、行文案不出现绝对值', async () => {
+  stubWx();
   try {
     const require = createRequire(import.meta.url);
     const mockPath = path.join(sourceRoot, 'services/mock.js');
     delete require.cache[require.resolve(mockPath)];
     const mock = require(mockPath);
 
-    // ① 目录口径：算力包不下发 amount（价 ÷ token 就是每 token 售价，属商业机密）；
-    //    钻石是对外货币口径，颗数照旧带。
+    // 目录口径：算力包不下发 amount（价 ÷ token 就是每 token 售价，属商业机密）；钻石是对外货币，颗数照旧。
     const list = await mock.skus();
     const quota = list.find((sku) => sku.kind === 'quota');
     const credits = list.find((sku) => sku.kind === 'credits');
-    assert.ok(quota, 'mock 目录里要有算力包');
     assert.equal(quota.amount, undefined, '算力包不得下发 token 数');
     assert.ok(Number(credits.amount) > 0, '钻石包照旧带颗数');
     assert.doesNotMatch(quota.name, /\d/, '算力包名字也不许带量级（线上名字归运营后台）');
 
-    // ② 行文案：算力包只出运营写的价值描述，不出数字。
-    const pagePath = path.join(sourceRoot, 'packages/work/credits/index.js');
-    const pageRequire = createRequire(pagePath);
-    for (const key of Object.keys(pageRequire.cache)) {
-      if (key.includes(`${path.sep}weapp-native${path.sep}`)) delete pageRequire.cache[key];
-    }
-    let config;
-    const sandbox = { require: pageRequire, module: { exports: {} }, console, setTimeout, Page(value) { config = value; }, wx: globalThis.wx };
-    vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), sandbox, { filename: 'packages/work/credits/index.js' });
-    const page = Object.create(config);
-    page.data = JSON.parse(JSON.stringify(config.data));
-    page.setData = function (patch) { Object.assign(this.data, patch); };
-    await page.loadPacks();
-    const quotaRow = page.data.packs.find((sku) => sku.kind === 'quota');
+    // 行文案：两页共用 services/packs 的 mapPack，改一处两页同时生效。
+    const packsPath = path.join(sourceRoot, 'services/packs.js');
+    delete require.cache[require.resolve(packsPath)];
+    const { mapPack } = require(packsPath);
+    const quotaRow = mapPack(quota);
     assert.doesNotMatch(quotaRow.amountText, /\d/, `算力包行文案不得出现数字：${quotaRow.amountText}`);
     assert.ok(quotaRow.amountText.length > 0, '不报数不等于留白，得说清买到什么');
-    assert.match(page.data.packs.find((sku) => sku.kind === 'credits').amountText, /钻石/);
+    assert.match(mapPack(credits).amountText, /钻石/);
 
-    // ③ 余量：买完之后同样不报数，否则刚买那笔的量级立刻贴脸上。
-    page._loaded = true;
-    const source = fs.readFileSync(pagePath, 'utf8');
-    assert.doesNotMatch(source, /packRemainingText:[^,]*fmtBig/, '余量行不得报 token 数');
-    assert.match(source, /packRemainingText: packRemaining > 0 \? '仍有余量' : ''/);
-  } finally {
-    delete globalThis.wx;
+    // 余量同样不报数：它就是刚买那笔的量级。
+    const creditsSource = fs.readFileSync(path.join(sourceRoot, 'packages/work/credits/index.js'), 'utf8');
+    assert.match(creditsSource, /packRemainingText: packRemaining > 0 \? '仍有余量' : ''/);
+  } finally { delete globalThis.wx; }
+});
+
+test('showModal 按钮文案不得超 4 字：超了弹窗根本不出现，表现为「点了没反应」', () => {
+  // 微信硬限：confirmText / cancelText 最多 4 个字符，超出直接走 fail —— 弹窗不显示。
+  // 真机与模拟器都拦（实测 errMsg: showModal:fail confirmText length should not larger
+  // than 4 Chinese characters）。而 fail 分支常被写成 resolve(false)/不写，于是失败静默，
+  // 用户看到的就是「点了没反应」：增购包与能力开通两个付费入口都曾栽在这里。
+  const offenders = [];
+  for (const file of walk(sourceRoot).filter((f) => f.endsWith('.js'))) {
+    const source = fs.readFileSync(file, 'utf8');
+    for (const match of source.matchAll(/(confirmText|cancelText)\s*:\s*(`[^`]*`|'[^']*'|"[^"]*")/g)) {
+      const [, field, raw] = match;
+      const literal = raw.slice(1, -1);
+      const rel = path.relative(sourceRoot, file);
+      // 模板串里插价格/数量是最常见的越界写法，长度还随数据变——一律不许。
+      if (raw.startsWith('`') && literal.includes('${')) { offenders.push(`${rel}: ${field} 拼了变量 ${raw}`); continue; }
+      if (Array.from(literal).length > 4) offenders.push(`${rel}: ${field} 超 4 字「${literal}」`);
+    }
   }
+  assert.deepEqual(offenders, [], `showModal 按钮文案越界（弹窗会不显示）：\n${offenders.join('\n')}`);
 });

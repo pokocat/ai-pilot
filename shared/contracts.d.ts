@@ -2192,6 +2192,89 @@ export interface AdminUserContext {
   knowledge: KnowledgeDocRow[];
 }
 
+/** 运营台统一时间口径：查询边界均为 ISO 瞬时，展示按 Asia/Shanghai 解释。 */
+export interface AdminDateRange {
+  from: string;
+  to: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  timeZone: 'Asia/Shanghai';
+}
+
+export interface AdminPageMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  pages: number;
+}
+
+/** 跨用户会话工作台：列表先给运营判断所需元数据，正文按需进详情读取。 */
+export interface AdminSessionItem {
+  id: string;
+  title: string;
+  mode: string | null;
+  userId: string;
+  userName: string | null;
+  userPhone: string | null;
+  tenantId: string;
+  tenantName: string | null;
+  agentKey: string;
+  agentName: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  generationCount: number;
+  failedGenerationCount: number;
+  activeGeneration: { id: string; status: string; phase: string; updatedAt: string } | null;
+  lastMessage: { role: string; preview: string; at: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface AdminSessionListView extends AdminPageMeta {
+  range: AdminDateRange;
+  summary: { sessions: number; messages: number; activeGenerations: number; failedGenerations: number };
+  items: AdminSessionItem[];
+}
+export interface AdminSessionMessageItem {
+  id: string;
+  role: string;
+  content: unknown;
+  textPreview: string;
+  refs: unknown;
+  at: string;
+}
+export interface AdminSessionGenerationItem {
+  id: string;
+  status: string;
+  phase: string;
+  kind: string;
+  requestedOutput: string;
+  deliveryMode: string;
+  priority: number;
+  quotaReserved: number;
+  quotaCharged: number;
+  creditReserved: number;
+  settlementStatus: string;
+  creditSettlementStatus: string;
+  terminationReason: string | null;
+  usage: unknown;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+export interface AdminSessionDetail {
+  session: AdminSessionItem;
+  messages: AdminSessionMessageItem[];
+  messagesTotal: number;
+  nextMessageCursor: string | null;
+  generations: AdminSessionGenerationItem[];
+  traces: AdminTraceItem[];
+}
+
 /** 检索基建（嵌入 / 重排）token 消耗，与「用户产出」用量分开统计。 */
 export interface TokenUsageKindStat {
   kind: string;   // embedding | rerank
@@ -2202,6 +2285,7 @@ export interface TokenUsageKindStat {
 }
 export interface AdminTokenUsageView {
   windowDays: number;
+  range?: AdminDateRange;
   totals: TokenUsageTotals;       // 用户产出（chat + deliverable）
   byModel: TokenUsageModelStat[]; // 用户产出
   byDay: TokenUsageDayStat[];     // 用户产出
@@ -2222,8 +2306,16 @@ export interface AdminAuditItem {
   userPhone: string | null;
   tenantId: string | null;
   tenantName: string | null;
+  requestId?: string | null;
+  sessionId?: string | null;
+  operator?: string | null;
   payload: unknown;
   at: string;
+}
+export interface AdminAuditListView extends AdminPageMeta {
+  range: AdminDateRange;
+  items: AdminAuditItem[];
+  summary: { events: number; failed: number; users: number; operators: number };
 }
 
 /** LLM 调用诊断 trace（可观测） */
@@ -2254,6 +2346,10 @@ export interface AdminTraceItem {
 }
 export interface AdminTraceListView {
   windowDays: number;
+  range?: AdminDateRange;
+  page?: number;
+  pageSize?: number;
+  pages?: number;
   totals: { calls: number; errors: number; avgLatencyMs: number };
   items: AdminTraceItem[];
 }

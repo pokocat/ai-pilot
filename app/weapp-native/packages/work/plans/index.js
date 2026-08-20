@@ -2,6 +2,7 @@ const { api, isMock } = require('../../../services/api');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { withShare } = require('../../../services/share');
+const packsService = require('../../../services/packs');
 
 function money(fen) {
   if (Number(fen) < 0) return '面议';
@@ -112,11 +113,15 @@ Page(withShare({
     loading: true, showLogin: false, authed: false, period: 'month', current: null, usage: null,
     subscription: null, options: [], periodTabs: [], showPeriodSwitch: false,
     quote: null, purchaseMode: 'manual', busy: '',
+    // 增购包常驻本页：换档是「长期够用」，增购是「这次不够用」，两条路得摆在一起选。
+    // 目录是公开接口，与个人方案两条请求互不影响，拉失败要显式说「没取到 + 重试」。
+    packs: [], packState: 'loading', buying: '',
   }),
 
   onLoad() {
     this._intent = '';
     this.load();
+    this.loadPacks();
   },
 
   onShow() {
@@ -164,6 +169,9 @@ Page(withShare({
     this.setData({ loading: true });
     try {
       if (store.isAuthed()) {
+        const me = store.snapshot().me;
+        this._creditsUnlimited = !!me && Number(me.creditBalance) < 0;
+        this.applyPacks();
         const result = await api.planOptions();
         const all = (result.options || []).map((item) => normalizeOption(item, result.currentPlanId));
         this._options = all;
@@ -185,6 +193,40 @@ Page(withShare({
     } catch (error) {
       store.handleApiError(error, { silent: true });
       this.setData({ loading: false });
+    }
+  },
+
+  // 增购目录：游客也拉（下单时才走登录门），与方案数据各自成态。
+  loadPacks() {
+    if (this.data.packState === 'failed') this.setData({ packState: 'loading' });
+    return packsService.fetchPacks()
+      .then((packs) => { this._packs = packs; this.applyPacks('ready'); })
+      .catch(() => this.setData({ packState: 'failed' }));
+  },
+  applyPacks(state) {
+    const packs = packsService.visiblePacks(this._packs, this._creditsUnlimited);
+    this.setData(Object.assign({ packs }, state ? { packState: state } : {}));
+  },
+  retryPacks() { this.loadPacks(); },
+  // 增购下单：与算力明细页同一条阶梯（services/packs），两处不许各写各的。
+  async buyPack(event) {
+    const key = event.currentTarget.dataset.key;
+    const pack = this.data.packs.find((item) => item.key === key);
+    if (!pack || this.data.buying) return;
+    if (!store.isAuthed()) { this.setData({ showLogin: true }); return; }
+    this.setData({ buying: key });
+    try {
+      const { state, mock } = await packsService.purchasePack(pack);
+      if (state === 'cancelled') return;
+      // 钱已扣的路径只影响提示，不许回头说「支付失败」。
+      await store.loadMe().catch(() => {});
+      await this.load();
+      wx.showToast(packsService.purchaseToast(state, mock));
+    } catch (error) {
+      const cancelled = /cancel/i.test(String(error.errMsg || error.message || ''));
+      if (!cancelled) store.handleApiError(error, { fallbackTitle: error.message || '购买没有完成，可稍后重试' });
+    } finally {
+      this.setData({ buying: '' });
     }
   },
 

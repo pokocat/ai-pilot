@@ -73,6 +73,23 @@
           <button class="option-action {{item.canPurchase?'enabled':''}}" data-index="{{index}}" bindtap="choose">{{busy===item.busyKey?'处理中…':item.actionText}}</button>
         </view>
       </view>
+      <!-- 增购：换档是「长期够用」，增购是「这次不够用」，两条路摆在一起选。
+           目录与方案是两条请求，拉失败显式说「没取到 + 重试」，不能退化成「暂无增购包」。 -->
+      <block wx:if="{{packState!=='ready'||packs.length}}">
+        <text class="pack-head serif">不想换档？单独补一次</text>
+        <text class="pack-sub">算力包永久有效，用完为止 · 钻石包到账即可启用顾问</text>
+        <view wx:if="{{packState==='loading'}}" class="plans-state">正在读取增购包…</view>
+        <view wx:elif="{{packState==='failed'}}" class="plans-state">增购包没有取到，<text class="pack-retry" bindtap="retryPacks">重新读取</text></view>
+        <view wx:else class="pack-list">
+          <view wx:for="{{packs}}" wx:key="key" class="pack-row" data-key="{{item.key}}" bindtap="buyPack">
+            <view class="pack-info">
+              <text class="pack-name">{{item.name}}</text>
+              <text class="pack-desc">{{item.amountText}}</text>
+            </view>
+            <view class="pack-buy"><text>{{buying===item.key ? '处理中…' : item.priceText}}</text></view>
+          </view>
+        </view>
+      </block>
       <view class="plans-bottom"></view>
     </view>
   </scroll-view>

@@ -206,7 +206,9 @@ Page(withShare({
     const sku=safeList(this._skus).find((item)=>item.key===key);
     const price=money((sku&&sku.priceFen)||3900);
     wx.showModal({
-      title:title||'开通能力',content:`单次购买 ${price}，支付后立即开通。`,confirmText:`支付 ${price}`,
+      // confirmText 微信硬限 4 字：写 `支付 ${price}` 会让弹窗根本不出现（走 fail），表现为点了没反应。
+      title:title||'开通能力',content:`单次购买 ${price}，支付后立即开通。`,confirmText:'确认支付',
+      fail:(error)=>{wx.showToast({title:'确认框没能打开，请重试',icon:'none'});console.error('[thinktank] showModal 失败',error&&error.errMsg);},
       success:async(result)=>{
         if(!result.confirm)return;
         this.setData({purchasing:key});

@@ -20,3 +20,14 @@
 .plan-option.promo .price-now { color: var(--accent-deep); }
 .quote-was { text-decoration: line-through; }
 .quote-line.promo { color: var(--accent-deep); font-weight: 600; }
+
+/* 增购区块：与方案卡同一套间距/圆角语言，但刻意做轻——它是备选，不该压过换档主路径。 */
+.pack-head { display: block; margin: 26px 0 4px; font-size: 15px; font-weight: 600; color: var(--ink); }
+.pack-sub { display: block; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
+.pack-list { display: flex; flex-direction: column; gap: 8px; }
+.pack-row { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.pack-info { flex: 1; min-width: 0; }
+.pack-name { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.pack-desc { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+.pack-buy { flex-shrink: 0; min-width: 76px; height: 34px; padding: 0 12px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.pack-retry { color: var(--accent); text-decoration: underline; }
