@@ -2894,3 +2894,43 @@ test('锦囊数据三态：读到 / 读失败 / 还没取，三处都不许混�
   assert.equal(works.length, 4);
   assert.ok(works[0].updatedAt >= works[works.length - 1].updatedAt, '混排必须按时间倒序');
 });
+
+test('算力明细页游客态也拉增购目录：公开接口不许停在骨架屏', async () => {
+  const values = new Map();
+  globalThis.wx = {
+    getStorageSync: (key) => values.get(key) ?? '',
+    setStorageSync: (key, value) => values.set(key, value),
+    removeStorageSync: (key) => values.delete(key),
+    showToast() {},
+  };
+  try {
+    const pagePath = path.join(sourceRoot, 'packages/work/credits/index.js');
+    const pageRequire = createRequire(pagePath);
+    // 服务层是单例（token/store 状态跨用例串味），本用例前先整体重载。
+    for (const key of Object.keys(pageRequire.cache)) {
+      if (key.includes(`${path.sep}weapp-native${path.sep}`)) delete pageRequire.cache[key];
+    }
+    let config;
+    const sandbox = { require: pageRequire, module: { exports: {} }, console, setTimeout, Page(value) { config = value; }, wx: globalThis.wx };
+    vm.runInNewContext(fs.readFileSync(pagePath, 'utf8'), sandbox, { filename: 'packages/work/credits/index.js' });
+    assert.ok(config, 'credits 页必须以 Page() 注册');
+
+    const page = Object.create(config);
+    page.data = JSON.parse(JSON.stringify(config.data));
+    page.setData = function (patch) { Object.assign(this.data, patch); };
+    // 只做观察不改行为：记下 load() 是否触发了目录拉取，便于 await 到落定。
+    const packLoads = [];
+    page.loadPacks = function () { const p = config.loadPacks.call(this); packLoads.push(p); return p; };
+
+    // 游客（无 token）：登录门要弹，但增购目录是公开接口，必须照常拉到 ready。
+    await page.load();
+    assert.equal(packLoads.length, 1, '游客态 load() 必须拉增购目录');
+    await Promise.all(packLoads);
+    assert.equal(page.data.showLogin, true, '游客进入要弹登录层');
+    assert.equal(page.data.packState, 'ready', '增购区块不许停在骨架屏');
+    assert.ok(page.data.packs.length >= 1, '目录里要有增购包');
+    assert.ok(page.data.packs.every((sku) => sku.kind === 'credits' || sku.kind === 'quota'), '只收增购类 SKU，能力目录不进本页');
+  } finally {
+    delete globalThis.wx;
+  }
+});
