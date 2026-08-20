@@ -331,9 +331,12 @@ test('分享回调实际执行：必须带真图（留空会让微信截当前�
   for (const url of [friend.imageUrl, timeline.imageUrl]) {
     assert.ok(fs.existsSync(path.join(appRoot, 'src', url)), `图不存在：${url}`);
   }
-  // 每套素材都必须自带图，不能有一套漏配
-  for (const poster of share.BUILTIN_POSTERS) {
-    assert.ok(poster.image && poster.timelineImage, `素材「${poster.title}」缺图`);
+  // 图池里每套都必须两张齐全，且都真实存在（漏一张线上就是裂图）
+  for (const art of share.BUILTIN_ART) {
+    assert.ok(art.image && art.timelineImage, '底图池里有一套缺图');
+    for (const url of [art.image, art.timelineImage]) {
+      assert.ok(fs.existsSync(path.join(appRoot, 'src', url)), `图不存在：${url}`);
+    }
   }
 });
 
@@ -348,15 +351,42 @@ test('分享回调实际执行：有码带 ?ic=、无码退回无参、朋友圈
   assert.equal(noCode.timelineMixin.onShareTimeline().query, '');
 });
 
-test('素材轮动：同一自然日幂等，且严格逐日递进（含 2/29 → 3/1 边界）', () => {
+test('素材随机：多次分享不会永远同一套，且每次都取自池内', () => {
+  // 2026-08-19 改口径：原先按本地自然日轮动（同一天全站同一套，为了「用户说图不对」能复现），
+  // 现在改成每次随机——同一个人一天分享几次，卡片一模一样会显得很假。
+  // 可排查性没丢，改由埋点记下本次选中的序号（见下一条用例）。
   const share = loadShare(null);
-  const at = (y, m, d, h = 0) => new Date(y, m - 1, d, h);
-  // 同日不同时刻 → 同一套
-  assert.equal(share.currentPoster(at(2026, 8, 18, 0)).title, share.currentPoster(at(2026, 8, 18, 23)).title);
-  // 逐日严格 +1（这条能挡住「年*372+月*31+日」那种在月末月初不连续的手算式）
-  for (const [a, b] of [[at(2026, 8, 18), at(2026, 8, 19)], [at(2026, 8, 31), at(2026, 9, 1)], [at(2028, 2, 29), at(2028, 3, 1)]]) {
-    assert.equal(share.dayIndex(b) - share.dayIndex(a), 1, `${a.toDateString()} → ${b.toDateString()} 不是相邻一天`);
-    assert.notEqual(share.currentPoster(a).title, share.currentPoster(b).title, '相邻两天必须换素材');
+  const titles = new Set();
+  const images = new Set();
+  const copyTitles = new Set(share.BUILTIN_COPY.map((c) => c.title));
+  for (let i = 0; i < 80; i++) {
+    const p = share.currentPoster();
+    assert.ok(p.title, '每次都必须取到文案，不能是 undefined');
+    assert.ok(copyTitles.has(p.title), `取到的文案必须来自池内：${p.title}`);
+    assert.ok(p.image, '每次都必须取到底图');
+    assert.equal(typeof p.copyIndex, 'number', '必须回传本次文案序号，埋点要用');
+    assert.equal(typeof p.artIndex, 'number', '必须回传本次底图序号');
+    titles.add(p.title);
+    images.add(p.image);
+  }
+  // 12 条文案跑 80 次只出现 1 种，几乎不可能（除非退回了确定性选择）
+  assert.ok(titles.size > 1, `文案必须是随机的，80 次只出现了 ${titles.size} 种`);
+  assert.ok(titles.size >= 5, `随机应覆盖多条文案，实际只覆盖 ${titles.size} 种，疑似分布有问题`);
+});
+
+test('文案库本身的口径：条数、双语气、不出现盘面黑话与品牌红线', () => {
+  const share = loadShare(null);
+  assert.ok(share.BUILTIN_COPY.length >= 8, `文案库要够用才谈得上随机，当前只有 ${share.BUILTIN_COPY.length} 条`);
+  for (const c of share.BUILTIN_COPY) {
+    assert.ok(c.title && c.title.length <= 30, `title 过长会被微信截断：${c.title}`);
+    assert.ok(c.timelineTitle, `每条都要有朋友圈语气版本（广而告之 vs 递给你看）：${c.title}`);
+    const both = `${c.title}${c.timelineTitle}`;
+    assert.doesNotMatch(both, /宜攻|宜守|攻守|运势|吉凶|流年/, `不许用盘面黑话：${c.title}`);
+    assert.doesNotMatch(both, /米诺|Mino/i, `品牌红线：${c.title}`);
+  }
+  // 底图池里每套都要两张（5:4 与 1:1 分开，共用会被朋友圈裁掉两侧）
+  for (const a of share.BUILTIN_ART) {
+    assert.ok(a.image && a.timelineImage, '每套底图都要有转发图与朋友圈图');
   }
 });
 
@@ -492,17 +522,29 @@ test('分享曝光埋点：两个通道各报一条 share_expose，且回调返�
     assert.deepEqual(stub.calls.map((c) => c.name), ['share_expose', 'share_expose'], '两个入口各一条');
     assert.equal(stub.calls[0].props.channel, 'friend');
     assert.equal(stub.calls[1].props.channel, 'timeline');
-    assert.equal(stub.calls[0].props.poster, share.posterIndex(), '带当日素材序号，便于还原用户看到的是哪张卡');
-    // props 只许有这两个键：带上页面路径/内容/邀请码等于把「谁在账本页点了转发」写进埋点库，
+    // props 只许这三个键：带上页面路径/内容/邀请码等于把「谁在账本页点了转发」写进埋点库，
     // 与「分享内容与页面解耦」自相矛盾。
-    for (const c of stub.calls) assert.deepEqual(Object.keys(c.props).sort(), ['channel', 'poster'], 'props 不得夹带内容或个人数据');
+    for (const c of stub.calls) {
+      assert.deepEqual(Object.keys(c.props).sort(), ['art', 'channel', 'copy'], 'props 不得夹带内容或个人数据');
+      assert.equal(typeof c.props.copy, 'number');
+      assert.equal(typeof c.props.art, 'number');
+    }
 
-    // 埋点不得改变返回值（微信是同步取走这个对象的）
-    assert.equal(friend.title, share.currentPoster().title);
+    // **关键守卫**：上报的序号必须是这次真正用掉的那组。随机化之后，如果埋点在自己内部
+    // 再算一次序号（旧写法就是），报上去的就不是用户看到的那张——埋点等于说谎，而且
+    // 按日轮动时期这个 bug 是看不出来的（同一天恒等）。这里按序号回查文案，必须与返回值一致。
+    const copies = share.BUILTIN_COPY;
+    assert.equal(copies[stub.calls[0].props.copy].title, friend.title, 'friend 埋点序号必须对应本次实际用的文案');
+    assert.equal(copies[stub.calls[1].props.copy].timelineTitle, timeline.title, 'timeline 埋点序号必须对应本次实际用的文案');
+
+    // 返回值本身：路径与图不受随机影响，逐个钉死
     assert.equal(friend.path, `${share.LANDING}?ic=JS2K7P&src=friend`);
     assert.equal(friend.imageUrl, share.CARD_FRIEND);
     assert.equal(timeline.query, 'ic=JS2K7P&src=timeline');
     assert.equal(timeline.imageUrl, share.CARD_TIMELINE);
+    // 内部字段绝不能漏给微信（分享回调返回值是有固定契约的）
+    assert.equal(friend.__pick, undefined, '__pick 必须在返回微信前删掉');
+    assert.equal(timeline.__pick, undefined, '__pick 必须在返回微信前删掉');
   } finally { stub.restore(); }
 });
 
@@ -526,7 +568,11 @@ test('分享曝光埋点：页面自定义的分享回调同样上报，且恰�
 test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调都不抛错且返回值仍然正确', () => {
   for (const mode of ['throw', 'require']) {
     const share = loadShare({ inviteCode: 'JS2K7P' });
-    const expected = { title: share.currentPoster().title, path: `${share.LANDING}?ic=JS2K7P&src=friend`, image: share.CARD_FRIEND };
+    // 随机化之后不能再拿「预先调一次 currentPoster」当期望值——那次调用与回调里的那次
+    // 本来就该不同。这条用例要证的是「埋点炸了分享照常」，与具体选中哪条文案无关，
+    // 所以断言改成：文案必须来自池内且非空（不是等于某个特定值）。
+    const titles = new Set(share.BUILTIN_COPY.map((c) => c.title));
+    const expected = { path: `${share.LANDING}?ic=JS2K7P&src=friend`, image: share.CARD_FRIEND };
     const stub = stubApiTrack(mode);
     try {
       const page = share.withShare({}, { timeline: true });
@@ -534,7 +580,7 @@ test('埋点炸了绝不能弄坏分享：track 抛 / require 抛，两个回调
       let timeline;
       assert.doesNotThrow(() => { friend = page.onShareAppMessage(); }, `mode=${mode}：转发回调不得抛错`);
       assert.doesNotThrow(() => { timeline = page.onShareTimeline(); }, `mode=${mode}：朋友圈回调不得抛错`);
-      assert.equal(friend.title, expected.title, `mode=${mode}：标题不变`);
+      assert.ok(friend.title && titles.has(friend.title), `mode=${mode}：标题仍须是池内的真实文案，不能变空或变脏`);
       assert.equal(friend.path, expected.path, `mode=${mode}：归因路径不变`);
       assert.equal(friend.imageUrl, expected.image, `mode=${mode}：封面图不变`);
       assert.ok(timeline.imageUrl, `mode=${mode}：朋友圈封面仍在`);

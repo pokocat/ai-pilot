@@ -65,72 +65,103 @@ const CARD_TIMELINE = '/assets/share/card-timeline.png';
  *
  * `timelineTitle` 单列：朋友圈是「广而告之」的语气，转发给朋友是「递给你看」的语气。
  */
-const BUILTIN_POSTERS = [
-  {
-    title: '生意上最头疼的那件事，先让军师给你过一遍',
-    timelineTitle: '经营卡在哪一环？让军师陪你拆一遍',
-    image: CARD_FRIEND,
-    timelineImage: CARD_TIMELINE,
-  },
-  {
-    title: '客户越来越贵、账上越来越紧——先看清卡在哪一环',
-    timelineTitle: '获客贵、现金流紧，问题往往不在你以为的地方',
-    image: CARD_FRIEND,
-    timelineImage: CARD_TIMELINE,
-  },
-  {
-    title: '招人难、留人更难，先把用人这件事想清楚',
-    timelineTitle: '招人留人这件事，值得先想清楚再动手',
-    image: CARD_FRIEND,
-    timelineImage: CARD_TIMELINE,
-  },
-  {
-    title: '下一步该押哪里？把你的局摆给军师看看',
-    timelineTitle: '下一步押哪里，值得先想清楚再投钱',
-    image: CARD_FRIEND,
-    timelineImage: CARD_TIMELINE,
-  },
+const BUILTIN_COPY = [
+  // ── 通用（不指定具体痛点，适合还不知道对方卡在哪的时候递出去）──
+  { title: '生意上最头疼的那件事，先让军师给你过一遍',
+    timelineTitle: '经营卡在哪一环？让军师陪你拆一遍' },
+  { title: '想不清下一步的时候，找个人把话摆开说说',
+    timelineTitle: '做生意的难处，值得找个懂的人拆一遍' },
+
+  // ── 获客与客户 ──
+  { title: '客户越来越贵，先看清钱花在哪一环上',
+    timelineTitle: '获客越来越贵，问题往往不在投得少' },
+  { title: '来的客户不少，成的不多——中间漏在哪儿',
+    timelineTitle: '流量不缺、成交不够，中间那一环值得查' },
+  { title: '老客户不回头，比拉新客更该先看',
+    timelineTitle: '复购掉下来的时候，别急着加投放' },
+
+  // ── 现金流与成本 ──
+  { title: '账上紧的时候，先分清是没赚到还是没收回',
+    timelineTitle: '现金流紧，先分清赚没赚到和收没收回' },
+  { title: '看着有利润，钱却总不在账上',
+    timelineTitle: '利润表好看、账上没钱，这中间有账要算' },
+  { title: '成本一年年往上走，先找出最该砍的那一刀',
+    timelineTitle: '降本不是砍人，先找准该砍哪一刀' },
+
+  // ── 用人与团队 ──
+  { title: '招人难、留人更难，先把用人这件事想清楚',
+    timelineTitle: '招人留人这件事，值得先想清楚再动手' },
+  { title: '事都压在自己身上，先把该交出去的交出去',
+    timelineTitle: '老板忙到没空想事，这本身就是要解的题' },
+
+  // ── 方向与决策 ──
+  { title: '下一步该押哪里？把你的局摆给军师看看',
+    timelineTitle: '下一步押哪里，值得先想清楚再投钱' },
+  { title: '要不要扩、要不要转，先把账和势都算一遍',
+    timelineTitle: '扩张还是收一收，先把账算清再决定' },
 ];
 
 /**
- * 服务端下发的素材池（预留）。运营后台维护图与文案后由 `/me` 带下来，
- * 拿不到就用内置兜底——这条读取点先留好，服务端下发是后一期的事。
+ * 底图池。图与文案**各自独立随机**，不成对绑定——12 条文案 × 3 套图 = 36 种组合，
+ * 用户连着看到两条一样的概率很低。图上刻意没有文字，所以任意文案配任意图都不会矛盾。
+ *
+ * 每套两张：转发给朋友按 5:4 原样显示，朋友圈按 1:1 **居中裁剪**，拿 5:4 去发朋友圈会裁掉两侧。
  */
-function posterPool() {
+const BUILTIN_ART = [
+  { image: CARD_FRIEND, timelineImage: CARD_TIMELINE },
+];
+
+/**
+ * 素材池读取。服务端下发优先（运营后台维护），拿不到用内置兜底。
+ * 文案与底图**分开两个池**：运营可能只想换文案不换图，绑在一起就必须成套替换。
+ */
+function copyPool() {
   try {
-    const me = store.snapshot().me;
-    const pool = me && me.sharePosters;
-    if (Array.isArray(pool) && pool.length && pool.every((p) => p && p.title)) return pool;
-  } catch (_) { /* store 未就绪：用内置 */ }
-  return BUILTIN_POSTERS;
+    const pool = store.snapshot().me.shareCopy;
+    if (Array.isArray(pool) && pool.length && pool.every((c) => c && c.title)) return pool;
+  } catch (_) { /* store 未就绪 */ }
+  return BUILTIN_COPY;
+}
+
+function artPool() {
+  try {
+    const pool = store.snapshot().me.shareArt;
+    if (Array.isArray(pool) && pool.length && pool.every((a) => a && a.image)) return pool;
+  } catch (_) { /* store 未就绪 */ }
+  return BUILTIN_ART;
 }
 
 /**
- * 按**本地自然日**取素材序号：同一天任何页面、任何次分享都是同一套素材，便于排查
- * 「用户说他看到的图不对」这类问题。刻意不用 Math.random()——随机会让同一次会话里
- * 前后两次分享不一致，且线上无法复现。
+ * 每次分享**随机**取一条文案、一套图。
  *
- * 用**本地**年月日去构造 UTC 零点再换算天数：
- *   · 不用 `Date.now() / 86400000`——那是按 UTC 切日，东八区会在每天早上 8 点换素材，
- *     同一个「今天」跨零点前后拿到两套图；
- *   · 也不用 `年*372 + 月*31 + 日` 这种手算式——它在月末月初不连续（2/29 与 3/1 差 3，
- *     对 4 套素材取模会撞成同一套，30 天的月份还会跳过一套）。
- * 这个写法严格逐日 +1，且只看设备本地日期。
+ * 早先是按本地自然日轮动（同一天全站同一套），好处是「用户说他看到的图不对」能复现。
+ * 改随机是产品要求：同一个人一天里分享几次，卡片长得一模一样会显得很假。
+ *
+ * **可排查性没有丢**：`share_expose` 埋点把这次选中的两个序号一起报上去（copy / art），
+ * 线上照样能还原「他当时看到的是哪一条配哪张图」——随机与可追溯并不冲突，
+ * 只要选择结果被记下来。所以这里可以放心用 Math.random()。
+ *
+ * 两个池独立取：12 条文案 × N 套图，组合数是乘的，比成对绑定耐看得多。
  */
-function dayIndex(now) {
-  const d = now || new Date();
-  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+function pickIndex(len) {
+  return len > 1 ? Math.floor(Math.random() * len) : 0;
 }
 
-function currentPoster(now) {
-  const pool = posterPool();
-  return pool[dayIndex(now) % pool.length];
-}
-
-/** 当日素材序号（轮到第几套）。埋点只报这个整数——见 trackShareExpose 里关于「不带内容」的说明。 */
-function posterIndex(now) {
-  const pool = posterPool();
-  return pool.length ? dayIndex(now) % pool.length : 0;
+function currentPoster() {
+  const copies = copyPool();
+  const arts = artPool();
+  const ci = pickIndex(copies.length);
+  const ai = pickIndex(arts.length);
+  const copy = copies[ci] || {};
+  const art = arts[ai] || {};
+  return {
+    title: copy.title,
+    timelineTitle: copy.timelineTitle || copy.title,
+    image: art.image,
+    timelineImage: art.timelineImage || art.image,
+    copyIndex: ci,
+    artIndex: ai,
+  };
 }
 
 /**
@@ -152,9 +183,16 @@ function posterIndex(now) {
  * 一旦哪天成环，拿到的是半初始化的 exports（CJS 不报错，只是静默变哑）。懒引用把风险收敛到
  * 「用户点了分享才加载」，且 require 有缓存，第二次起就是查表。
  */
-function trackShareExpose(channel) {
+function trackShareExpose(channel, pick) {
   try {
-    require('./api').api.track('share_expose', { channel, poster: posterIndex() });
+    // props 只带通道 + 本次选中的两个序号。**序号必须是这次真正用掉的那组**——
+    // 早先的写法是在这里再算一次序号，按日轮动时那样还算对（同一天恒等），
+    // 改成随机后就变成"埋点自己又摇了一次"，报上去的不是用户看到的那张，等于埋点说谎。
+    // 所以序号由回调结果透上来（见 wrapShareCallback 的 __pick）。
+    const props = { channel };
+    if (pick && typeof pick.copy === 'number') props.copy = pick.copy;
+    if (pick && typeof pick.art === 'number') props.art = pick.art;
+    require('./api').api.track('share_expose', props);
   } catch (_) { /* 埋点不可用（模块没加载起来 / 宿主无 wx）：分享照常，绝不冒泡 */ }
 }
 
@@ -188,6 +226,8 @@ const friendMixin = {
       title: poster.title,
       path: pathWithCode(LANDING),
       imageUrl: poster.image || CARD_FRIEND,
+      // 内部字段：只为把「这次选了哪组」交给 wrapShareCallback 上报，返回给微信前会被删掉。
+      __pick: { copy: poster.copyIndex, art: poster.artIndex },
     };
   },
 };
@@ -200,6 +240,7 @@ const timelineMixin = {
       title: poster.timelineTitle || poster.title,
       query: timelineQuery(),
       imageUrl: poster.timelineImage || CARD_TIMELINE,
+      __pick: { copy: poster.copyIndex, art: poster.artIndex },
     };
   },
 };
@@ -241,10 +282,25 @@ function withShare(page, opts) {
 function wrapShareCallback(fn, fallback, channel) {
   if (typeof fn !== 'function') return fn;
   return function wrapped(...args) {
-    trackShareExpose(channel);
-    const result = fn.apply(this, args);
+    // 时序：**先执行回调、再上报**（原先是先报再执行）。改的原因是随机化之后要报
+    // 「这次真正选中的序号」，而序号只有回调跑完才知道。原来"先报"图的是
+    // 「回调抛错也不丢曝光」，这条保证没丢——catch 里照样报一次（只是没有序号）。
+    let result;
+    try {
+      result = fn.apply(this, args);
+    } catch (err) {
+      trackShareExpose(channel, null);
+      throw err; // 不吞页面的异常：微信拿不到返回值时自己会兜底，掩掉反而更难查
+    }
+    const pick = result && typeof result === 'object' ? result.__pick : null;
+    trackShareExpose(channel, pick);
     if (!result || typeof result !== 'object') return result;
-    return result.imageUrl ? result : Object.assign({}, result, { imageUrl: fallback });
+    // __pick 是内部字段，**必须删掉再交给微信**：分享回调的返回值是有固定契约的，
+    // 夹带自定义字段虽然当前无害，但不该把内部实现漏给平台。
+    const out = Object.assign({}, result);
+    delete out.__pick;
+    if (!out.imageUrl) out.imageUrl = fallback;
+    return out;
   };
 }
 
@@ -255,10 +311,10 @@ module.exports = {
   pathWithCode,
   timelineQuery,
   currentPoster,
-  posterIndex,
-  dayIndex,
-  posterPool,
-  BUILTIN_POSTERS,
+  copyPool,
+  artPool,
+  BUILTIN_COPY,
+  BUILTIN_ART,
   LANDING,
   CARD_FRIEND,
   CARD_TIMELINE,
