@@ -37,8 +37,26 @@ import { testRerank } from './rerank.js';
 import type { AiPurpose } from './aiRoutes.js';
 import { dialectOf, normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 import { readCaps, type Cap, type EndpointCaps, type ProbeResult } from '../llm/configSchemas.js';
-import type { AiProvider, GenContext } from '../llm/schema.js';
+import type { AiProvider, GenContext, Usage } from '../llm/schema.js';
 import type { Tool } from '../llm/tools/types.js';
+
+// 探活用量累加的零元。不直接用 schema 的 ZERO_USAGE：那是共享常量，累加要的是每轮独立的可变副本。
+const ZERO_PROBE_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0, cacheWrite: 0 };
+
+/** 多次调用的用量求和（thinking 一项就要发两次，整轮探活更是多项叠加）。 */
+function sumUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: Math.max(0, a.inputTokens) + Math.max(0, b.inputTokens),
+    outputTokens: Math.max(0, a.outputTokens) + Math.max(0, b.outputTokens),
+    cachedInput: Math.max(0, a.cachedInput ?? 0) + Math.max(0, b.cachedInput ?? 0),
+    cacheWrite: Math.max(0, a.cacheWrite ?? 0) + Math.max(0, b.cacheWrite ?? 0),
+  };
+}
+
+/** 嵌入 / 重排：协议只有输入侧消耗，上游回报的总 token 全部计入 inputTokens。 */
+function inputOnlyUsage(tokens?: number): Usage | undefined {
+  return tokens && tokens > 0 ? { inputTokens: tokens, outputTokens: 0, cachedInput: 0 } : undefined;
+}
 
 export type ProbeKind =
   | 'connectivity' | 'model_scope' | 'thinking' | 'tools' | 'streaming' | 'long_output'
@@ -150,10 +168,10 @@ function toProbeConfig(cfg: ResolvedAiConfig): ResolvedAiConfig {
 
 // ── 各检测项 ──────────────────────────────────────────────────────────────────
 
-async function probeConnectivity(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown> }> {
-  const { pingModel } = await import('../llm/gateway.js');
-  const r = await pingModel(cfg);
-  return { ok: r.ok, error: r.error, detail: { sample: r.sample, model: r.model } };
+async function probeConnectivity(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown>; usage?: Usage }> {
+  const { pingModelMetered } = await import('../llm/gateway.js');
+  const { result: r, usage } = await pingModelMetered(cfg);
+  return { ok: r.ok, error: r.error, detail: { sample: r.sample, model: r.model }, usage };
 }
 
 /** GET /models 是网关可选能力；明确“不存在/不实现”不能反推实际聊天模型不可用。 */
@@ -216,22 +234,24 @@ async function probeModelScope(cfg: ResolvedAiConfig): Promise<{ ok: boolean; er
  * 两个端点配置一模一样，其中一个就是确定性地返回
  * `thinking.disabled.budget_tokens: Extra inputs are not permitted`——只有真发才知道。
  */
-async function probeThinking(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap }> {
-  const { pingModel } = await import('../llm/gateway.js');
+async function probeThinking(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap; usage?: Usage }> {
+  const { pingModelMetered } = await import('../llm/gateway.js');
   // 关闭态与开启态是两种写法，都要过一遍：关闭态验的是「省略还是显式 disabled」，
   // 开启态验的是「这个模型到底支不支持思考」。
-  const off = await pingModel({ ...cfg, thinkingMode: 'disabled' });
-  if (!off.ok) return { ok: false, error: `关闭思考的写法不被接受：${off.error}` };
+  // 记账要把**两次都算上**：这一项本来就是两次真实调用，其中开启态还带思考 token，是探活里最贵的一项。
+  const off = await pingModelMetered({ ...cfg, thinkingMode: 'disabled' });
+  if (!off.result.ok) return { ok: false, error: `关闭思考的写法不被接受：${off.result.error}`, usage: off.usage };
 
   const mode = normalizeThinkingMode(cfg.thinkingMode);
-  if (mode === 'disabled') return { ok: true };
-  const on = await pingModel({ ...cfg, thinkingMode: mode, thinkingBudget: normalizeThinkingBudget(cfg.thinkingBudget) });
+  if (mode === 'disabled') return { ok: true, usage: off.usage };
+  const on = await pingModelMetered({ ...cfg, thinkingMode: mode, thinkingBudget: normalizeThinkingBudget(cfg.thinkingBudget) });
+  const usage = sumUsage(off.usage, on.usage);
   // 开启失败 → 证伪该模型的思考能力，回填 caps，校验器据此拦住后续配置。
-  return on.ok ? { ok: true, cap: 'yes' } : { ok: false, error: on.error, cap: 'no' };
+  return on.result.ok ? { ok: true, cap: 'yes', usage } : { ok: false, error: on.result.error, cap: 'no', usage };
 }
 
 /** 工具调用——成果链路的命脉，坏了会让所有结构化产出降级成模板。 */
-async function probeTools(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap }> {
+async function probeTools(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap; usage?: Usage }> {
   // 探活只关心「模型愿不愿意、能不能发出 tool_use」，不会走到 run —— 但 Tool 接口要求它存在。
   const tool: Tool = {
     name: 'probe_echo',
@@ -253,16 +273,18 @@ async function probeTools(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?:
       { forceFinal: false },
     );
     const called = r.kind === 'tool_calls' && r.calls.some((c) => c.name === 'probe_echo');
+    // TurnOutput 两个分支都带 provider 回报的 usage——工具检测是探活里 prompt 最长的一项（要塞工具定义），
+    // 用固定常数记会低估得最狠。
     return called
-      ? { ok: true, cap: 'yes' }
-      : { ok: false, error: '模型没有按要求调用工具（可能不支持 function calling）', cap: 'no' };
+      ? { ok: true, cap: 'yes', usage: r.usage }
+      : { ok: false, error: '模型没有按要求调用工具（可能不支持 function calling）', cap: 'no', usage: r.usage };
   } catch (err) {
     return { ok: false, error: (err as Error).message, cap: 'no' };
   }
 }
 
 /** 流式：建了流之后到底吐不吐 delta。只等第一个 delta 就断开，不烧 token。 */
-async function probeStreaming(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap }> {
+async function probeStreaming(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; cap?: Cap; usage?: Usage }> {
   const ctrl = new AbortController();
   try {
     const streamFn = cfg.provider === 'claude'
@@ -275,7 +297,10 @@ async function probeStreaming(cfg: ResolvedAiConfig): Promise<{ ok: boolean; err
         // 立刻 abort + return，别把整条流读完白烧 token。
         ctrl.abort();
         await it.return?.(undefined as never).catch?.(() => {});
-        return { ok: true, cap: 'yes' };
+        // usage 只在流末的 done 事件里才有；本项**故意在第一个 delta 就掐断**，所以绝大多数情况
+        // 拿不到用量，按 0 记。这是有意的少记：上游确实计了费，但没有可信数字，编一个常数比记 0 更糟
+        // （旧的 40/20 就是这么来的）。真要把这块补齐，得让 provider 侧在 abort 时回传已收到的 usage。
+        return { ok: true, cap: 'yes', usage: chunk.type === 'done' ? chunk.usage : undefined };
       }
     }
     return { ok: false, error: '建流成功但一个事件都没收到', cap: 'no' };
@@ -309,23 +334,27 @@ function probeContext(): GenContext {
  * 输出上界与出字速度。超时阈值（CHAT_TIMEOUT_MS 等）本来就是按实测速度定的，
  * 换端点后不重测就等于拿旧端点的速度给新端点设超时。
  */
-async function probeLongOutput(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown>; maxOutputTokens?: number }> {
+async function probeLongOutput(cfg: ResolvedAiConfig): Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown>; maxOutputTokens?: number; usage?: Usage }> {
   const want = Number(process.env.AI_PROBE_LONG_TOKENS ?? '') || 600;
   try {
     const eff = cfg.provider === 'claude' ? 'claude' : 'openai';
+    // 走 *Metered：本项是探活里输出最长的一项（want 默认 600 token），记账必须拿真实回报。
     const raw = eff === 'claude'
-      ? (await import('../llm/providers/claude.js')).claudeRaw
-      : (await import('../llm/providers/openai.js')).openaiRaw;
+      ? (await import('../llm/providers/claude.js')).claudeRawMetered
+      : (await import('../llm/providers/openai.js')).openaiRawMetered;
     const t0 = Date.now();
-    const text = await raw(cfg, '你是输出速度检测。请连续输出阿拉伯数字，从 1 开始，不要换行也不要解释。', '开始', {
+    const m = await raw(cfg, '你是输出速度检测。请连续输出阿拉伯数字，从 1 开始，不要换行也不要解释。', '开始', {
       allowThinking: false, maxTokens: want,
     });
     const seconds = Math.max(0.001, (Date.now() - t0) / 1000);
-    const approxTokens = Math.ceil(text.length / 2);
+    // 出字速度仍按正文字符估：这里量的是「用户能看到多快」，思考 token 不该算进去。
+    // 记账口径（usage）另走 provider 真实回报，两者刻意不同源。
+    const approxTokens = Math.ceil(m.result.length / 2);
     return {
       ok: approxTokens > 0,
       error: approxTokens > 0 ? undefined : '未产出任何正文',
       detail: { approxTokens, seconds: Number(seconds.toFixed(2)), tokensPerSecond: Math.round(approxTokens / seconds) },
+      usage: m.usage,
     };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
@@ -346,8 +375,12 @@ export async function runProbes(
   const capsPatch: EndpointCaps = {};
   const existing = readCaps(cfg.capsJson);
 
-  const push = (kind: ProbeKind, ok: boolean, ms: number, error?: string, detail?: Record<string, unknown>) => {
+  // 本轮各检测项的真实用量累加（见文件尾的记账段）。
+  let spent: Usage = { ...ZERO_PROBE_USAGE };
+
+  const push = (kind: ProbeKind, ok: boolean, ms: number, error?: string, detail?: Record<string, unknown>, usage?: Usage) => {
     results.push({ kind, ok, at: nowIso(at), latencyMs: ms, ...(error ? { error } : {}), ...(detail ? { detail } : {}) });
+    if (usage) spent = sumUsage(spent, usage);
     const interval = context.source === 'scheduled'
       ? (SCHEDULED_PROBES.find((p) => p.kind === kind)?.everyMs ?? 0) / 1000
       : 0;
@@ -363,9 +396,10 @@ export async function runProbes(
   for (const kind of kinds) {
     if (kind === 'connectivity') {
       const r = await timed(() => probeConnectivity(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.detail);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.detail, r.value?.usage);
     } else if (kind === 'model_scope') {
       const r = await timed(() => probeModelScope(probeCfg));
+      // model_scope 是一次 GET /models，**不耗 token**——不传 usage，记 0 是事实而不是兜底。
       push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.detail);
       // 把清单**写回 caps**，否则校验器的 MODEL_OUT_OF_KEY_SCOPE 永远等不到输入——
       // 探活查回来又扔掉，等于一根线的两头从来没接上。
@@ -373,34 +407,41 @@ export async function runProbes(
       if (models.length) capsPatch.modelScope = { models, at: nowIso(at) };
     } else if (kind === 'thinking') {
       const r = await timed(() => probeThinking(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, undefined, r.value?.usage);
       setCap('thinking', r.value?.cap);
     } else if (kind === 'tools') {
       const r = await timed(() => probeTools(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, undefined, r.value?.usage);
       setCap('tools', r.value?.cap);
     } else if (kind === 'streaming') {
       const r = await timed(() => probeStreaming(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, undefined, r.value?.usage);
       setCap('streaming', r.value?.cap);
     } else if (kind === 'long_output') {
       const r = await timed(() => probeLongOutput(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.detail);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.detail, r.value?.usage);
     } else if (kind === 'embedding') {
       const r = await timed(() => testEmbedding(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.dim ? { dim: r.value.dim } : undefined);
+      // 嵌入只有输入侧消耗，上游 usage 回报的 total/prompt_tokens 全记在 inputTokens。
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, r.value?.dim ? { dim: r.value.dim } : undefined, inputOnlyUsage(r.value?.tokens));
     } else if (kind === 'rerank') {
       const r = await timed(() => testRerank(probeCfg));
-      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error);
+      push(kind, !!r.value?.ok, r.ms, r.error?.message ?? r.value?.error, undefined, inputOnlyUsage(r.value?.tokens));
     }
   }
 
   // 探活烧的是真钱。按 kind='probe' 单独记账，成本看板能把它和用户流量分开看。
+  //
+  // 用量取自各检测项**上游回报的真实 usage**（pingModelMetered / TurnOutput.usage / embeddings 与 rerank
+  // 的 usage 字段），不再是每项固定 40 in / 20 out 的拍脑袋常数。倒算实测：kimi 探活一次真实约
+  // 215 in / 174 out，旧常数把输出低估 9-15 倍。定时探活虽已由 AI_PROBE_SCHEDULED=false 关停，
+  // 但手动「测试连接」仍走这里，且谁重新打开定时就会再骗一次账本，所以常数必须删干净。
+  //
+  // 收不到 usage 的项（model_scope 不耗 token；streaming 故意在首个 delta 掐断，用量只在流末的 done 里）
+  // 按 0 记 —— 宁可少记也不编，理由见各自函数上的注释。
+  // totalTokens<=0 时 recordTokenUsage 自己会跳过写库并计入 usage_unreported 指标，这里不用另判。
   if (results.length) {
-    void recordTokenUsage({
-      kind: 'probe', provider: cfg.provider, model: cfg.model,
-      usage: { inputTokens: results.length * 40, outputTokens: results.length * 20, cachedInput: 0 },
-    }).catch(() => {});
+    void recordTokenUsage({ kind: 'probe', provider: cfg.provider, model: cfg.model, usage: spent }).catch(() => {});
   }
 
   return {

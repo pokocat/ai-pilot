@@ -200,6 +200,16 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
 // 所以这几个数字**不能相加**当总开通数，「邀请」那格读作「其中有多少笔来自被邀请的人（首次付费，按人去重）」。
 const RX_SOURCE_LABEL: Record<string, string> = { prescription: '处方位', catalog: '货架', market: '生态市场', invite: '邀请（重叠口径）' };
 
+// token_usage 里「非用户用量」那几档 kind 的中文名。后台按 kind !== chat/deliverable 归到这一栏，
+// 新增一档 kind 必须同步加标签，否则界面上直接漏出裸 key（sandbox 这档就是 2026-08 补记账时一起补的）。
+const INFRA_KIND_LABEL: Record<string, string> = {
+  embedding: '嵌入',
+  rerank: '重排',
+  aux: '辅助抽取',
+  probe: '端点探活',
+  sandbox: '运营沙盒试跑',
+};
+
 export function FunnelView() {
   const [days, setDays] = useState(30);
   const res = useResource(useCallback(() => api.prescriptionFunnel(days), [days]), [days]);
@@ -342,7 +352,7 @@ function TokenUsageBody({ data, onOpenUser }: { data: AdminTokenUsageView; onOpe
         )}
         {infra.length > 0 && (
           <>
-            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">检索基建消耗</span><span className="s">嵌入 / 重排 · 不计入用户用量</span></div>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">非用户用量消耗</span><span className="s">嵌入 / 重排 / 辅助抽取 / 探活 / 沙盒 · 不计入用户用量，但都是真实花掉的钱</span></div>
             <div className="usage-summary" style={{ gridTemplateColumns: '1fr 1fr' }}>
               <div><b>{fmtTokens(infraTokens)}</b><span>基建 Token</span></div>
               <div><b>{fmtCny(infraCost)}</b><span>基建成本（未配单价则计 0）</span></div>
@@ -350,7 +360,7 @@ function TokenUsageBody({ data, onOpenUser }: { data: AdminTokenUsageView; onOpe
             {infra.map((x) => (
               <div key={x.kind + x.model} className="usage-row">
                 <div className="usage-h">
-                  <div className="usage-name">{x.kind === 'embedding' ? '嵌入' : x.kind === 'rerank' ? '重排' : x.kind}<span>{x.model}</span></div>
+                  <div className="usage-name">{INFRA_KIND_LABEL[x.kind] ?? x.kind}<span>{x.model}</span></div>
                   <div className="usage-num">{fmtCny(x.costMicros)}</div>
                 </div>
                 <div className="usage-meta">{x.calls} 次 · {fmtTokens(x.totalTokens)} token</div>

@@ -15,7 +15,7 @@ import { getAiConfig, effectiveProvider, resolveAuxConfigAsync, resolveModelRate
 // **只用在「mock 就是配置的 provider」的分支**；真 provider 失败后的降级兜底一律不套——
 // 故障路径本就该尽快返回，再叠一层模拟延迟只会把故障放大。
 import { mockChat, mockDeliverable, mockAdaptive, mockUpstream } from './providers/mock.js';
-import { ZERO_USAGE, extractAsks, looksLikeAsking, normalizeAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
+import { ZERO_USAGE, extractAsks, looksLikeAsking, normalizeAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage, type Metered } from './schema.js';
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
@@ -336,21 +336,27 @@ async function traced<T>(
 
 // 对真实计费 provider（claude/openai/dify）记账；mock 与 0-token（缓存命中）跳过。记账内部 catch，不影响产出。
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
-  if (meta?.sandbox) return; // 沙盒试跑不计入 token_usage（诊断 trace 仍由 traced() 记录）
   if (s.provider !== 'claude' && s.provider !== 'openai' && s.provider !== 'dify') return;
   const billable = await fillBillable(s);
+  // 运营沙盒试跑：**单独成档（kind='sandbox'）、可过滤，但真实成本必须可见**。
+  // 旧实现直接 return「不污染计费统计」——可七牛照样按真实调用计费，2026-08 因此有约 ¥45 完全查不到出处。
+  // 「不进统计」和「不存在」是两回事：后台的用户用量口径只聚合 chat/deliverable，本来就会把 sandbox 排除在外，
+  // 用不着靠「不写库」来实现隔离。所以照实记 provider/model/usage，只把 creditCost 钉死为 0：
+  // 沙盒是运营自己试跑，不挂任何用户额度（recordTokenUsage 本身也只写流水、不扣额度）。
+  const isSandbox = meta?.sandbox === true;
   await recordTokenUsage({
     tenantId: meta?.tenantId ?? null,
-    userId: meta?.userId ?? null,
-    sessionId: meta?.sessionId ?? null,
+    // 沙盒不关联用户：写了 userId 会让这笔试跑出现在该用户的消耗明细里，是错误归因。
+    userId: isSandbox ? null : (meta?.userId ?? null),
+    sessionId: isSandbox ? null : (meta?.sessionId ?? null),
     agentKey: meta?.agentKey ?? ctx.agentKey ?? null,
-    kind,
+    kind: isSandbox ? 'sandbox' : kind,
     provider: s.provider,
     model: s.model,
     usage: s.usage,
     // 本次扣的月度额度 = ceil(输入token等价量 × ratio)。等价量按后台单价把输出/缓存各档折算成
     // 输入 token（见 billableTokenEquivalents）——等价合并会让长输出用户被系统性少扣。
-    creditCost: Math.ceil(billable * (meta?.ratio ?? 1)),
+    creditCost: isSandbox ? 0 : Math.ceil(billable * (meta?.ratio ?? 1)),
   });
 }
 
@@ -978,19 +984,40 @@ export async function llmJson(system: string, user: string, maxChars = 9000): Pr
 
 /** 测试连接：用给定配置发一次最小补全，返回耗时与样例（后台「测试连接」用）。 */
 export async function pingModel(cfg: ResolvedAiConfig): Promise<AiTestResult> {
+  return (await pingModelMetered(cfg)).result;
+}
+
+/**
+ * pingModel 的带用量版本，供探活记账用。
+ *
+ * AiTestResult 是发给后台的 wire 契约（shared/contracts），不该为了内部记账往上挂 usage；
+ * 所以真实用量走这个内部出口回传。**探活是真实计费请求**，记的必须是 provider 回报的数，
+ * 不能再像从前那样按固定常数拍脑袋（旧实现每项固定 40 in / 20 out，实测 kimi 探活约 215 in / 174 out，
+ * 输出侧低估 9-15 倍）。调用失败 → usage 归零：没成功返回就没有可信数字，宁可少记也不编。
+ */
+export async function pingModelMetered(cfg: ResolvedAiConfig): Promise<{ result: AiTestResult; usage: Usage }> {
   const eff = effectiveProvider(cfg);
   if (eff === 'mock') {
-    return { ok: false, provider: cfg.provider, model: cfg.model, error: cfg.provider === 'mock' ? '当前为本地模板（mock），无需联网' : '未配置真实 API Key，已降级 mock' };
+    return {
+      result: { ok: false, provider: cfg.provider, model: cfg.model, error: cfg.provider === 'mock' ? '当前为本地模板（mock），无需联网' : '未配置真实 API Key，已降级 mock' },
+      usage: { ...ZERO_USAGE },
+    };
   }
   const t0 = Date.now();
   try {
     const sys = '你是连通性测试。请只回复两个字：可用。';
-    const text = eff === 'openai'
-      ? await (await import('./providers/openai.js')).openaiRaw(cfg, sys, 'ping')
-      : await (await import('./providers/claude.js')).claudeRaw(cfg, sys, 'ping');
-    return { ok: true, latencyMs: Date.now() - t0, sample: text.slice(0, 40), provider: cfg.provider, model: cfg.model };
+    const m = eff === 'openai'
+      ? await (await import('./providers/openai.js')).openaiRawMetered(cfg, sys, 'ping')
+      : await (await import('./providers/claude.js')).claudeRawMetered(cfg, sys, 'ping');
+    return {
+      result: { ok: true, latencyMs: Date.now() - t0, sample: m.result.slice(0, 40), provider: cfg.provider, model: cfg.model },
+      usage: m.usage,
+    };
   } catch (err) {
-    return { ok: false, latencyMs: Date.now() - t0, error: (err as Error).message, provider: cfg.provider, model: cfg.model };
+    return {
+      result: { ok: false, latencyMs: Date.now() - t0, error: (err as Error).message, provider: cfg.provider, model: cfg.model },
+      usage: { ...ZERO_USAGE },
+    };
   }
 }
 
@@ -1098,16 +1125,21 @@ async function rawText(
     ? { maxTokens: allowThinking ? chatMaxTokens(opts.maxTokens, useCfg, true) : opts.maxTokens }
     : {};
   const im = opts?.images?.length ? { images: opts.images } : {};
-  let out: string;
+  // 走 *Metered 出口（而不是丢掉 usage 的 openaiRaw/claudeRaw）：辅助记账必须拿 provider 回报的真实
+  // usage。裸 raw 出口把 usage 扔了，记账只能按字符数估，而**推理模型的思考 token 不出现在正文里**
+  // （实测 kimi-k3 completion_tokens:400 / reasoning_tokens:400、正文 0 字），估出来是 0。
+  // 2026-08 与七牛逐笔对账少记约 60% 就有这一份。取数顺序与兜底见 recordAuxUsage。
+  let metered: Metered<string>;
   if (useLive === 'openai') {
-    const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
+    const { openaiRawMetered } = await import('./providers/openai.js');
+    metered = await openaiRawMetered(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   } else {
-    const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
+    const { claudeRawMetered } = await import('./providers/claude.js');
+    metered = await claudeRawMetered(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   }
+  const out = metered.result;
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
-  recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out, opts?.usageMeta);
+  recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out, opts?.usageMeta, metered.usage);
   return out;
 }
 
