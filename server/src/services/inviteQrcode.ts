@@ -55,6 +55,27 @@ export function sceneFor(inviteCode: string, slot: QrSlot): string {
  *
  * 不把失败缓存下来：微信侧的失败多是限流或凭据临时问题，缓存 null 会把一次抖动放大成 12 小时无码。
  */
+/**
+ * 失败原因限频日志（2026-08-20 codex 审出：外部失败此前完全不可观测）。
+ *
+ * 这个服务把 token / HTTP / content-type / 超时全部吞成 `null` 好让页面降级，
+ * 代价是**再发生 45009 限流或微信改接口时，服务端一点痕迹都没有**——
+ * 只有用户看到「二维码取不到」，运维无从知道原因。
+ *
+ * 限频而不是每次都打：码页会被反复打开，真出故障时每秒能刷出几十条同样的日志。
+ * 同一 reason 5 分钟一条，够定位又不淹没日志。
+ */
+const REASON_LOG_TTL_MS = 5 * 60 * 1000;
+const reasonLoggedAt = new Map<string, number>();
+
+function noteFailure(reason: string, detail?: string): void {
+  const now = Date.now();
+  const last = reasonLoggedAt.get(reason) ?? 0;
+  if (now - last < REASON_LOG_TTL_MS) return;
+  reasonLoggedAt.set(reason, now);
+  console.warn(`[invite-qr] 生成失败 reason=${reason}${detail ? ` detail=${detail}` : ''}（限频 5 分钟一条）`);
+}
+
 export async function inviteQrcode(inviteCode: string, slot: QrSlot): Promise<string | null> {
   if (process.env.NODE_ENV === 'test') return null;
   const scene = sceneFor(inviteCode, slot);
@@ -66,7 +87,8 @@ export async function inviteQrcode(inviteCode: string, slot: QrSlot): Promise<st
   let token: string;
   try {
     token = await getAccessToken();
-  } catch {
+  } catch (err) {
+    noteFailure('access_token', (err as Error)?.message);
     return null; // 凭据未配 / 取 token 失败：降级无码
   }
 
@@ -89,13 +111,22 @@ export async function inviteQrcode(inviteCode: string, slot: QrSlot): Promise<st
       signal: controller.signal,
     });
     const type = res.headers.get('content-type') || '';
-    if (!res.ok || !type.includes('image')) return null; // 出错时微信返回 JSON（如 41030 / 45009 限流）
+    if (!res.ok || !type.includes('image')) {
+      // 微信出错时返回 JSON（41030 page 未发布 / 45009 限流 / 40001 token 失效…）。
+      // 把 errcode 读出来——这是唯一能区分「限流」和「接口变更」的线索。
+      let code = '';
+      try { code = String(((await res.json()) as { errcode?: unknown })?.errcode ?? ''); } catch { /* 非 JSON */ }
+      noteFailure(`wx_${code || res.status}`);
+      return null;
+    }
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 100) return null;
+    if (buf.length < 100) { noteFailure('empty_body', `${buf.length}B`); return null; }
     const uri = `data:image/png;base64,${buf.toString('base64')}`;
     await cacheSet(key, uri, TTL_MS).catch(() => {}); // 缓存写失败不影响本次返回
     return uri;
-  } catch {
+  } catch (err) {
+    // AbortError = 8s 超时；其余多是网络层问题
+    noteFailure((err as Error)?.name === 'AbortError' ? 'timeout' : 'network', (err as Error)?.message);
     return null;
   } finally {
     clearTimeout(timer);

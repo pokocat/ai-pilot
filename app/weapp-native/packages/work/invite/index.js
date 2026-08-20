@@ -44,6 +44,29 @@ function trackProvision(slot, act) {
   } catch (_) { /* 埋点不可用：页面照常 */ }
 }
 
+/**
+ * 把服务端给的 data URI 落成本地临时文件。
+ *
+ * **为什么必须落盘**（2026-08-20 codex 审出）：旧版 `CanvasContext.drawImage` 只认
+ * 本地路径 / 临时文件，直接喂 `data:image/png;base64,...` 在真机上会画不出来
+ * ——症状很阴：页面上 `<image>` 能正常显示二维码（image 组件认 data URI），
+ * 但点「生成邀请卡」导出的图里码是空白的，而空白码印出去就是一批废物料。
+ * 仓库里 `packages/work/poster/creative.js` 已有同样的落盘写法，这里照它做。
+ *
+ * 失败返回空串，由调用方降级成「没有码的大字版」——绝不能把空白码画进图里。
+ */
+function qrToLocalFile(dataUri) {
+  if (!dataUri || dataUri.indexOf('data:') !== 0) return '';
+  try {
+    const base64 = dataUri.slice(dataUri.indexOf(',') + 1);
+    const file = `${wx.env.USER_DATA_PATH}/invite-qr-${Date.now()}.png`;
+    wx.getFileSystemManager().writeFileSync(file, base64, 'base64');
+    return file;
+  } catch (_) {
+    return ''; // 当前环境不支持写文件：降级为无码版，不画空白码
+  }
+}
+
 Page(withShare({
   data: baseData({
     slots: SLOTS,
@@ -121,15 +144,19 @@ Page(withShare({
     this.setData({ busy: true });
     try {
       const slotLabel = (SLOTS.find((s) => s.key === this.data.slot) || {}).label || '通用';
+      // drawImage 只认本地文件，data URI 在真机上画不出来（页面 <image> 能显示是另一条路径）。
+      // 落盘失败就按无码版画，绝不把空白码印进图里。
+      const qrFile = qrToLocalFile(this.data.qr);
       const imgPath = await canvas.render(this, 'inviteCanvas', 750, 1000, (ctx, w, h) => paint.card(ctx, w, h, {
         code: this.data.inviteCode,
-        qr: this.data.qr,
+        qr: qrFile,
         slotLabel,
       }));
       this.setData({ imgPath });
       // 与 view 同一口径：**只有真拿到码才算投放**。降级卡（大字邀请码、没有二维码）
       // 也能出图，但它不是可扫的物料，报上去会让漏斗混进贴不出去的东西。
-      if (this.data.qr) trackProvision(this.data.slot, 'image');
+      // 按**图里真有码**判断，不是按页面显示有没有码：落盘失败时导出的是无码版。
+      if (qrFile) trackProvision(this.data.slot, 'image');
     } catch (_) {
       wx.showToast({ title: '出图失败，请重试', icon: 'none' });
     } finally {

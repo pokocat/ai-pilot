@@ -935,3 +935,30 @@ test('跨端 scene 形状对齐：服务端生成的每一种码，端上都必�
   // 脏物料位不该让整张码失效——位标识只是埋点维度
   assert.equal(invite.captureInvite({ query: { scene: `ic:${CODE}:BAD!` } }), CODE, '脏物料位不该让码失效');
 });
+
+test('出图必须把 data URI 落成本地文件：drawImage 不认 base64，真机会导出空白码', () => {
+  // codex 2026-08-20 审出：页面 <image> 认 data URI（所以屏上看得见码），
+  // 但旧版 CanvasContext.drawImage 只认本地路径——直接喂 base64 会导出**空白码**，
+  // 而空白码印到名片上就是一批废物料，且屏上完全看不出问题。
+  const src = read('packages/work/invite/index.js');
+  assert.match(src, /USER_DATA_PATH/, '必须落盘成本地文件再交给 canvas');
+  assert.match(src, /writeFileSync/, '要用 getFileSystemManager().writeFileSync 写 base64');
+  // 关键：交给 paint 的是落盘后的路径，不是原始 data URI
+  assert.match(src, /qr: qrFile/, 'paint 收到的必须是本地文件路径');
+  assert.doesNotMatch(src, /qr: this\.data\.qr,/, '不得再把 data URI 直接喂给 canvas');
+  // image 埋点要按「图里真有码」判断，落盘失败时导出的是无码版
+  assert.match(src, /if \(qrFile\) trackProvision/, 'image 埋点必须按落盘结果判断，不是按页面有没有码');
+});
+
+test('服务端失败必须留痕：限流/接口变更时不能只有用户看到降级', () => {
+  // codex 审出：此前 token/HTTP/超时全被吞成 null，45009 限流时服务端一点痕迹都没有。
+  const src = fs.readFileSync(
+    path.join(appRoot, '..', 'server/src/services/inviteQrcode.ts'), 'utf8',
+  );
+  assert.match(src, /noteFailure/, '各失败分支都要记原因');
+  for (const reason of ['access_token', 'empty_body', 'timeout', 'network']) {
+    assert.ok(src.includes(reason), `缺少失败原因分类：${reason}`);
+  }
+  assert.match(src, /errcode/, '微信错误要把 errcode 读出来——这是区分限流与接口变更的唯一线索');
+  assert.match(src, /REASON_LOG_TTL_MS|限频/, '必须限频：码页会被反复打开，真故障时每秒能刷几十条');
+});
