@@ -14,6 +14,8 @@
 
 .card { background: #FBFAF6; border-radius: 20rpx; padding: 40rpx 32rpx; text-align: center; }
 .qr { width: 420rpx; }
+// 出图后的成品预览：比二维码大一些，让人能看清印出去是什么样
+.made { width: 520rpx; border-radius: 12rpx; box-shadow: 0 8rpx 24rpx rgba(20, 55, 38, .18); }
 .ph { height: 420rpx; line-height: 420rpx; color: #8A8170; font-size: 26rpx; }
 .fallback { padding: 40rpx 0; }
 .fb-code { display: block; font-size: 88rpx; color: #143726; font-weight: 600; letter-spacing: 4rpx; }

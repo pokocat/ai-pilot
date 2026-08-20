@@ -164,6 +164,12 @@ Page(withShare({
     }
   },
 
+  /** 点图放大看：物料卡上的字小，出图后得让人能确认清楚再去印。 */
+  previewImage() {
+    if (!this.data.imgPath) return;
+    wx.previewImage({ urls: [this.data.imgPath], current: this.data.imgPath });
+  },
+
   saveImage() {
     if (!this.data.imgPath) return;
     // 存相册是这条链里最强的投放信号——图存下来才可能进 PPT / 交给设计做物料。

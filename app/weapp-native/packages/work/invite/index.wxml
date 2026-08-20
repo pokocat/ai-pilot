@@ -15,9 +15,18 @@
     <view wx:for="{{slots}}" wx:key="key" class="slot {{slot === item.key ? 'on' : ''}}" data-slot="{{item.key}}" bindtap="pickSlot">{{item.label}}</view>
   </scroll-view>
 
+  <!-- 出图后直接把成品换上来：原来生成完界面毫无变化，用户既看不到卡长什么样、
+       也不知道成没成，主按钮还写着「生成邀请卡」——像是没反应。 -->
   <view class="card">
-    <block wx:if="{{loading}}"><view class="ph">正在生成…</view></block>
-    <block wx:elif="{{qr}}"><image class="qr" src="{{qr}}" mode="widthFix" show-menu-by-longpress="true" /></block>
+    <block wx:if="{{imgPath}}">
+      <image class="made" src="{{imgPath}}" mode="widthFix" show-menu-by-longpress="true" bindtap="previewImage" />
+      <text class="code">邀请卡已生成 · 点图可放大看</text>
+    </block>
+    <block wx:elif="{{loading}}"><view class="ph">正在生成…</view></block>
+    <block wx:elif="{{qr}}">
+      <image class="qr" src="{{qr}}" mode="widthFix" show-menu-by-longpress="true" />
+      <text class="code" bindtap="copyCode">邀请码 {{inviteCode || '——'}} · 点击复制</text>
+    </block>
     <block wx:else>
       <!-- 降级：不给裂图，把邀请码做成主角 -->
       <view class="fallback">
@@ -25,15 +34,20 @@
         <text class="fb-tip">二维码暂时取不到，对方可在「主公」页手动输入这个邀请码</text>
         <text class="fb-retry" bindtap="retry">重试</text>
       </view>
+      <text class="code" bindtap="copyCode">邀请码 {{inviteCode || '——'}} · 点击复制</text>
     </block>
-    <text class="code" bindtap="copyCode">邀请码 {{inviteCode || '——'}} · 点击复制</text>
   </view>
 
   <view class="acts">
-    <view class="btn primary {{busy ? 'off' : ''}}" bindtap="makeImage">{{busy ? '出图中…' : '生成邀请卡'}}</view>
+    <!-- 出过图之后主动作变成「存到相册」：这才是用户接着要做的事；
+         「生成邀请卡」降级成次要按钮并改叫「重新生成」，免得看起来像没反应。 -->
     <block wx:if="{{imgPath}}">
-      <view class="btn" bindtap="saveImage">存到相册</view>
+      <view class="btn primary" bindtap="saveImage">存到相册</view>
       <view class="btn" bindtap="shareImage">发给朋友</view>
+      <view class="btn {{busy ? 'off' : ''}}" bindtap="makeImage">{{busy ? '出图中…' : '重新生成'}}</view>
+    </block>
+    <block wx:else>
+      <view class="btn primary {{busy ? 'off' : ''}}" bindtap="makeImage">{{busy ? '出图中…' : '生成邀请卡'}}</view>
     </block>
   </view>
 

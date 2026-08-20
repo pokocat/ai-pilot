@@ -988,3 +988,20 @@ test('二维码卡的文案：固定不随机，但同样要有召唤（不能�
   // 老口径不得回归
   assert.doesNotMatch(paint, /值得有人陪你想一遍/, '旧文案没有召唤，不得回归');
 });
+
+test('出图后界面必须变：给预览、主动作换成存相册、按钮改叫重新生成', () => {
+  // 真机反馈的问题：点「生成邀请卡」后界面毫无变化——卡片区还是原二维码、
+  // 主按钮还写着「生成邀请卡」，用户既看不到卡长什么样、也不知道成没成，像是没反应。
+  // （功能其实是好的：imgPath 有值，所以「存到相册/发给朋友」才会出现。）
+  const wxml = read('packages/work/invite/index.wxml');
+  const js = read('packages/work/invite/index.js');
+
+  // 出图后要把成品换上来预览
+  assert.match(wxml, /wx:if="\{\{imgPath\}\}"[\s\S]{0,200}class="made"/,
+    '出图后卡片区必须显示生成的成品，而不是继续显示原二维码');
+  assert.match(js, /previewImage\(\)/, '要能点图放大——物料卡字小，得让人确认清楚再去印');
+  // 主动作要让位给「存到相册」（那才是接下来要做的事）
+  assert.match(wxml, /btn primary" bindtap="saveImage"/,
+    '出过图之后主动作应是存到相册，不该还把「生成邀请卡」摆在主位');
+  assert.match(wxml, /重新生成/, '再次出图的按钮要改叫「重新生成」，否则看起来像上次没成功');
+});

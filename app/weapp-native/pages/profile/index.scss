@@ -59,3 +59,14 @@
 
 // 邀请码那行的二维码入口（静态传播链）
 .apm-more { color: #A07D2C; font-size: 22rpx; }
+
+// 邀请卡入口：原来把「二维码」硬塞在邀请码后面、没有视觉分隔，挤成一团像乱码。
+// 改成独立的可点胶囊，与邀请码之间用 space-between 分开，一眼能看出是个可点的东西。
+.apm-invite { display: flex; align-items: center; justify-content: space-between; }
+.apm-qr {
+  display: flex; align-items: center; gap: 6rpx;
+  padding: 6rpx 16rpx; margin-left: 16rpx;
+  border: 1rpx solid rgba(160, 125, 44, .45); border-radius: 999rpx;
+  flex-shrink: 0;
+}
+.apm-qr-t { color: #A07D2C; font-size: 22rpx; line-height: 1; }
