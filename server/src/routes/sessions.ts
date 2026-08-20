@@ -466,7 +466,7 @@ export async function sessionRoutes(app: FastifyInstance) {
 
   // 同步产出（跨端：H5 + 微信小程序均可用；前端做客户端渐进式呈现）。
   // 空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: GenerationRequestBody }>('/generate-sync', async (req, reply) => {
+  app.post<{ Body: GenerationRequestBody }>('/generate-sync', { config: { rateLimit: { max: 40, timeWindow: '1 minute' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const durableBody = durableGenerationBody(req.body);
     if (durableBody) {
@@ -736,8 +736,12 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
   });
 
+  // 生成是全站最贵的接口，必须有 route 级限流，不能只吃全局 600/min 的兜底值——
+  // 40/分钟对真人绰绰有余（一次产出通常要几十秒），对失控的客户端重试循环则是硬墙。
+  // 注意：它挡的是**外部刷接口**；worker 内部的接管抖动走不到 HTTP 层，由 generationJobs 的
+  // MAX_LEASE_TAKEOVERS 熔断负责（2026-08-19 事故就是后者，限流拦不住）。
   // 发送消息并流式产出（SSE；H5 ReadableStream / weapp chunk）。空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: GenerationRequestBody }>('/generate', async (req, reply) => {
+  app.post<{ Body: GenerationRequestBody }>('/generate', { config: { rateLimit: { max: 40, timeWindow: '1 minute' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const durableBody = durableGenerationBody(req.body);
     if (durableBody) {

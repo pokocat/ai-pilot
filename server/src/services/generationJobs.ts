@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { envNum } from '../env.js';
+import { noteLeaseThrashing } from './metrics.js';
 import {
   GenerationKind,
   GenerationClassificationStatus,
@@ -43,6 +45,34 @@ const TERMINAL: ReadonlySet<GenerationStatus> = new Set([
 ]);
 
 const DEFAULT_LEASE_MS = 15_000;
+
+/**
+ * 一个 job 最多被「租约过期接管」多少次。超过即判定为**接管抖动**（lease thrashing）直接判失败。
+ *
+ * 为什么必须有这个上限：2026-08-19 生产事故里，单个 chat job 的 `leaseVersion` 冲到 **644,208**
+ * ——16 小时里被重新领取 64 万次（11 次/秒），打出 23,239 条 attempt（其中 23,238 条
+ * `terminationReason='process_recovered'`，只有 1 条成功），把 28k token 的提示词往上游推了 1.7 万次，
+ * 并独占并发闸 12 小时。它不会自愈，最后是靠一次无关的部署重启才停下。
+ *
+ * 单次 processJob 有 `CHAT_JOB_MAX_RUNTIME_MS` 五分钟封顶，但**对「一个 job 被接管多少次」原本
+ * 没有任何上限**——这就是那 16 小时的由来。50 次相对正常值有极大余量（同期正常 job 的
+ * leaseVersion 是 2），够覆盖真实的进程重启/部署接管，又能在抖动的头几秒就刹住。
+ */
+const MAX_LEASE_TAKEOVERS = Math.max(3, envNum('GENERATION_MAX_LEASE_TAKEOVERS', 50));
+
+/** 同一用户同时在途（queued+running）的生成任务上限。见 createGenerationJob 里的说明。 */
+const MAX_INFLIGHT_PER_USER = Math.max(2, envNum('GENERATION_MAX_INFLIGHT_PER_USER', 8));
+
+/**
+ * 接管退避：第 n 次接管额外多给 `min(n, 10) × 2s` 的租约。
+ *
+ * 光有上限还不够——上限是「撞墙才停」，这一条是「越抖越慢」，让抖动在撞上限之前就自然衰减。
+ * 没有它时接管是热循环（观测到 11 次/秒）：租约一过期立刻被下一个领取者抢走，
+ * 而每一次抢走都会 abort 掉一个**已经把提示词发给上游、已经花了钱**的在途调用。
+ */
+function takeoverBackoffMs(leaseVersion: number): number {
+  return Math.min(leaseVersion, 10) * 2_000;
+}
 const MAX_EFFECT_ERROR = 2_000;
 const MAX_PRIORITY = 9;
 const DEFAULT_PRIORITY_AGING_SECONDS = 30;
@@ -120,6 +150,15 @@ export class GenerationIdempotencyMismatchError extends GenerationJobError {
 
 export class GenerationNotFoundError extends GenerationJobError {
   constructor() { super('生成任务不存在', 'GENERATION_NOT_FOUND', 404); }
+}
+
+/** 用户在途任务过多。429 语义：不是请求本身有问题，是攒得太多，等前面跑完再来。 */
+export class GenerationInflightLimitError extends Error {
+  readonly statusCode = 429;
+  readonly code = 'GENERATION_INFLIGHT_LIMIT';
+  constructor(readonly inflight: number, readonly limit: number) {
+    super(`你还有 ${inflight} 个产出正在进行，等前面跑完再发新的吧`);
+  }
 }
 
 export class GenerationLeaseLostError extends Error {
@@ -221,6 +260,16 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
       });
       if (!session) throw new GenerationNotFoundError();
       return { job: existing, session, createdSession: false, attached: true };
+    }
+
+    // 同一用户在途（queued + running）任务数上限。限流管「多快」，这条管「堆多少」——
+    // 幂等命中的重复点击走上面 existing 分支不到这里，所以触发它的一定是**真的在攒新单**。
+    // 交付流水线的多阶段是串行推进的（同一 planId 一次只有一个 stage 在跑），8 个余量足够。
+    const inflight = await tx.generationJob.count({
+      where: { userId: input.userId, status: { in: [GenerationStatus.queued, GenerationStatus.running] } },
+    });
+    if (inflight >= MAX_INFLIGHT_PER_USER) {
+      throw new GenerationInflightLimitError(inflight, MAX_INFLIGHT_PER_USER);
     }
 
     let createdSession = false;
@@ -681,16 +730,47 @@ export async function claimNextGenerationJob(
 ): Promise<GenerationJob | null> {
   return prisma.$transaction(async (tx) => {
     const at = now();
+    // 租约过期判断必须用**库端 UTC**（now() AT TIME ZONE 'UTC'），不能传 JS Date 参数：
+    // Prisma 类型化写入把 leaseExpiresAt 存成 UTC naive，而 raw SQL 的 Date 参数会被按
+    // **会话时区**落成本地 naive——生产库时区是 Asia/Shanghai，参数比列值快整整 8 小时，
+    // 于是任何 8 小时内到期的租约在这个比较里**永远算已过期**、任何在跑的 job 永远可被接管。
+    // 2026-08-19 单个 job 被接管 644,208 次的事故，土壤就是这行原来的 `< ${'${at}'}`（生产实测
+    // 偏移 +480 分钟）。库端 now() AT TIME ZONE 'UTC' 与列同为 UTC naive，在任何时区的库上都对。
     const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT "j".id FROM generation_job "j"
       WHERE (status = 'queued' AND "classificationStatus" IN ('not_required', 'completed', 'failed'))
-         OR (status = 'running' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${at}))
+         OR (status = 'running' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < (now() AT TIME ZONE 'UTC')))
       ORDER BY ${schedulingKeySql('j', priorityAgingSeconds())} ASC, "j"."createdAt" ASC, "j".id ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED`);
     const id = rows[0]?.id;
     if (!id) return null;
     const current = await tx.generationJob.findUniqueOrThrow({ where: { id } });
+
+    // 接管抖动熔断：接管次数超上限的 job 直接判失败，不再接管。
+    // 放在 findUniqueOrThrow 之后、接管之前——必须在**提升 leaseVersion 之前**拦住，
+    // 否则每熔断一次自己又加一次，永远追不上上限。
+    if (current.status === GenerationStatus.running && current.leaseVersion >= MAX_LEASE_TAKEOVERS) {
+      await tx.generationAttempt.updateMany({
+        where: { jobId: current.id, status: 'running' },
+        data: { status: 'failed', terminationReason: 'lease_thrashing', completedAt: at },
+      });
+      await tx.generationJob.update({
+        where: { id },
+        data: {
+          status: GenerationStatus.failed,
+          phase: GenerationPhase.finalize,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          terminationReason: 'lease_thrashing',
+          completedAt: at,
+        },
+      });
+      noteLeaseThrashing(current.agentKey);
+      console.error(`[generation] job ${current.id} 接管 ${current.leaseVersion} 次触发熔断，已判失败`);
+      return null; // 本拍不取单；下一拍会去拿别的
+    }
+
     if (current.status === GenerationStatus.running) {
       // 旧 worker 租约已经过期：把它留下的 running attempt 先封账，再提升 leaseVersion。
       // provider 不支持全局幂等，接管后可能再外呼一次；旧 attempt 也是真实成本，不能因为进程崩溃记 0。
@@ -721,7 +801,8 @@ export async function claimNextGenerationJob(
         phase: current.status === GenerationStatus.queued ? GenerationPhase.context : current.phase,
         leaseOwner: workerId,
         leaseVersion: { increment: 1 },
-        leaseExpiresAt: new Date(at.getTime() + leaseMs),
+        // 接管过的单额外加退避，越抖越慢（普通首次领取 leaseVersion=0，退避为 0，行为不变）。
+        leaseExpiresAt: new Date(at.getTime() + leaseMs + takeoverBackoffMs(current.leaseVersion)),
         heartbeatAt: at,
         startedAt: current.startedAt ?? at,
       },

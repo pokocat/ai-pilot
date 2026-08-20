@@ -45,6 +45,8 @@ const WORKER_POLL_MS = 300;
 // 分阶段续写），只算主生成就把 8 槽占满，那些二次外呼就得去闸门里排队等自己的兄弟让位。
 const DEFAULT_WORKER_CONCURRENCY = 4;
 const HEARTBEAT_MS = 5_000;
+/** 连续多少次心跳失败才判定租约丢失。见 processJob 里的说明。 */
+const HEARTBEAT_FAIL_TOLERANCE = 3;
 const SNAPSHOT_MS = 400;
 const SNAPSHOT_CHARS = 192;
 const THOUGHT_SNAPSHOT_MS = 200;
@@ -500,14 +502,28 @@ async function processJob(job: GenerationJob): Promise<void> {
     controller.abort(new Error('job_budget_exceeded'));
   }, hardMs);
   let heartbeatBusy = false;
+  // 心跳失败要连续 HEARTBEAT_FAIL_TOLERANCE 次才 abort，不是第一次就砍。
+  //
+  // 为什么容错：abort 掉的是一个**已经把整份提示词发给上游、已经产生成本**的在途调用，
+  // 而心跳失败最常见的原因是数据库一瞬间的抖动（heartbeatBusy 跳一拍就够让 15s 租约到期）。
+  // 为了一次抖动扔掉一次真实付费调用是亏的；而且 2026-08-19 的接管抖动正是这样自我强化的——
+  // 负载高 → 心跳慢 → 误判租约丢失 → abort 重来 → 负载更高。
+  // 租约 15s、心跳 5s，容忍 2 次连续失败后在第 3 次（约 15s）才 abort，与租约到期时刻基本对齐。
+  let heartbeatFails = 0;
   const heartbeat = setInterval(() => {
     if (heartbeatBusy) return;
     heartbeatBusy = true;
     void (async () => {
       await heartbeatGenerationLease(job.id, workerId, leaseVersion);
+      heartbeatFails = 0;
       const state = await prisma.generationJob.findUnique({ where: { id: job.id }, select: { cancelRequestedAt: true } });
       if (state?.cancelRequestedAt) controller.abort(new Error('user_cancelled'));
-    })().catch(() => controller.abort(new GenerationLeaseLostError())).finally(() => { heartbeatBusy = false; });
+    })().catch((err) => {
+      // 租约确实被别人抢走（版本不匹配）是确定性事实，不适用容错，立刻收手让新 owner 独占。
+      if (err instanceof GenerationLeaseLostError) { controller.abort(err); return; }
+      heartbeatFails += 1;
+      if (heartbeatFails >= HEARTBEAT_FAIL_TOLERANCE) controller.abort(new GenerationLeaseLostError());
+    }).finally(() => { heartbeatBusy = false; });
   }, HEARTBEAT_MS);
 
   let attemptNo: number | null = null;
