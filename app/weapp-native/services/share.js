@@ -45,6 +45,11 @@ const LANDING = '/pages/sessions/index';
 /**
  * 分享卡底图。**绝不能留空**。
  *
+ * 三套素材（2026-08-19 换掉原先构建期画的纯色块，用户评价「很丑」）：
+ * 均取自 Unsplash，**Unsplash License：可商用、无需署名**。出处记在 docs/CHANGELOG.md。
+ * 统一做过轻降饱和 + 往米底暖调偏，让三套看着像一个系列而不是三张不相干的库图。
+ * 单张 ≤ 100KB（本地图占主包额度，主包上限 2MB）。图上刻意无文字——文案由 title 承载。
+ *
  * 一开始把 image 留空、想让微信「自动截当前页」兜底，那是个隐私事故：从账本、档案、订单这些
  * 私密页转发时，缩略图会把个人经营数据直接带进分享卡，"分享内容与页面解耦"也就成了空话。
  * 现在固定用这两张品牌底图（`app/src/assets/share/`，构建时整目录拷进 `dist-native/assets/`）。
@@ -53,8 +58,8 @@ const LANDING = '/pages/sessions/index';
  * 拿 5:4 的图去发朋友圈会被裁掉两侧。图上刻意不写字——文案由 title 承载，
  * 免得出现「图上写的和标题不一样」，也不引入字体依赖。
  */
-const CARD_FRIEND = '/assets/share/card-friend.png';
-const CARD_TIMELINE = '/assets/share/card-timeline.png';
+const CARD_FRIEND = '/assets/share/card-a-friend.jpg';
+const CARD_TIMELINE = '/assets/share/card-a-timeline.jpg';
 
 /**
  * 内置海报素材池（运营出图前的兜底，也是服务端下发失败时的降级）。
@@ -108,7 +113,12 @@ const BUILTIN_COPY = [
  * 每套两张：转发给朋友按 5:4 原样显示，朋友圈按 1:1 **居中裁剪**，拿 5:4 去发朋友圈会裁掉两侧。
  */
 const BUILTIN_ART = [
-  { image: CARD_FRIEND, timelineImage: CARD_TIMELINE },
+  // A 墨山：浓墨山石、留白足，最有分量
+  { image: '/assets/share/card-a-friend.jpg', timelineImage: '/assets/share/card-a-timeline.jpg' },
+  // B 竹林：竹影与远山，雅致清透
+  { image: '/assets/share/card-b-friend.jpg', timelineImage: '/assets/share/card-b-timeline.jpg' },
+  // C 棋盘：落子前的停顿，唯一一张实物照（与两张水墨互补）
+  { image: '/assets/share/card-c-friend.jpg', timelineImage: '/assets/share/card-c-timeline.jpg' },
 ];
 
 /**

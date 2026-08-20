@@ -484,8 +484,15 @@ test('页面自定义分享回调漏了 imageUrl 时，withShare 必须兜上默
   assert.equal(friend.imageUrl, share.CARD_FRIEND, '漏图的自定义回调必须被补上品牌底图');
   assert.equal(friend.title, '我的命盘报告', '页面自己的标题不能被改掉');
   assert.equal(friend.path, '/packages/work/mingpan/index', '页面自己的落地页不能被改掉');
-  const timeline = leaky.onShareTimeline();
-  assert.equal(timeline.imageUrl, share.CARD_TIMELINE, '朋友圈要补 1:1 那张');
+  // 注意：上面的 leaky 只覆盖了 onShareAppMessage，onShareTimeline 仍是 mixin 的实现
+  // （自带随机图，走不到兜底）。要验朋友圈的兜底，得让页面把 onShareTimeline 也覆盖掉且漏图。
+  const tlImgs = new Set(share.BUILTIN_ART.map((a) => a.timelineImage));
+  assert.ok(tlImgs.has(leaky.onShareTimeline().imageUrl), 'mixin 的朋友圈图取自图池');
+
+  const leakyTl = share.withShare({
+    onShareTimeline() { return { title: '我的命盘报告', query: 'x=1' }; },
+  }, { timeline: true });
+  assert.equal(leakyTl.onShareTimeline().imageUrl, share.CARD_TIMELINE, '漏图的自定义朋友圈回调要补 1:1 那张');
 
   // 页面自己给了图就不许被覆盖（将来运营给某页配专属图时不能被兜底顶掉）
   const own = share.withShare({
@@ -539,9 +546,15 @@ test('分享曝光埋点：两个通道各报一条 share_expose，且回调返�
 
     // 返回值本身：路径与图不受随机影响，逐个钉死
     assert.equal(friend.path, `${share.LANDING}?ic=JS2K7P&src=friend`);
-    assert.equal(friend.imageUrl, share.CARD_FRIEND);
+    // 图池有 3 套、随机取，所以只能验「取自池内」而不是等于某一张固定图
+    const friendImgs = new Set(share.BUILTIN_ART.map((a) => a.image));
+    const tlImgs = new Set(share.BUILTIN_ART.map((a) => a.timelineImage));
+    assert.ok(friendImgs.has(friend.imageUrl), `转发封面必须来自图池：${friend.imageUrl}`);
     assert.equal(timeline.query, 'ic=JS2K7P&src=timeline');
-    assert.equal(timeline.imageUrl, share.CARD_TIMELINE);
+    assert.ok(tlImgs.has(timeline.imageUrl), `朋友圈封面必须来自图池：${timeline.imageUrl}`);
+    // 埋点的 art 序号也要对应本次真正用掉的那套
+    assert.equal(share.BUILTIN_ART[stub.calls[0].props.art].image, friend.imageUrl, 'friend 的 art 序号必须对应实际用图');
+    assert.equal(share.BUILTIN_ART[stub.calls[1].props.art].timelineImage, timeline.imageUrl, 'timeline 的 art 序号必须对应实际用图');
     // 内部字段绝不能漏给微信（分享回调返回值是有固定契约的）
     assert.equal(friend.__pick, undefined, '__pick 必须在返回微信前删掉');
     assert.equal(timeline.__pick, undefined, '__pick 必须在返回微信前删掉');
