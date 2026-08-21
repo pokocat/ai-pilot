@@ -652,3 +652,61 @@ select.ai-input { appearance: none; }
 .rf-b-ip-n { fill: var(--danger); font: 600 9.5px/1 var(--mono); }
 .rf-b-u { fill: var(--surface); stroke: var(--danger); }
 .rf-b-u-t { fill: var(--ink-2); font: 400 10.5px/1 var(--sans); }
+
+/* ══════════════ 统一时间筛选 / 分页 ══════════════ */
+.range-filter { display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
+.range-custom { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.range-custom label { display: flex; flex-direction: column; gap: 5px; color: var(--ink-3); font-size: 10.5px; }
+.range-date { height: 36px; min-width: 142px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 500 12px/1 var(--sans); }
+.range-date:focus { border-color: var(--accent); outline: 0; }
+.range-sep, .range-zone { align-self: center; color: var(--ink-3); font-size: 11px; }
+.range-zone { margin-left: auto; }
+.filter-search { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.filter-search .search-box { flex: 1; min-width: 180px; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 16px 0 6px; color: var(--ink-3); font: 500 11px/1.2 var(--sans); }
+.usage-row-button { display: block; width: 100%; text-align: left; font-family: inherit; color: inherit; cursor: pointer; }
+.usage-row-button:hover { border-color: var(--accent); }
+
+/* ══════════════ 跨用户会话工作台 ══════════════ */
+.session-filter { display: flex; flex-direction: column; gap: 2px; }
+.session-workbench .usage-summary { margin-bottom: 12px; }
+.session-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, auto); gap: 18px; align-items: center; padding: 13px 14px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); color: var(--ink); text-align: left; cursor: pointer; }
+.session-row:hover { border-color: var(--accent); }
+.session-main, .session-side { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.session-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-preview { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-meta, .session-side { color: var(--ink-3); font-size: 10.5px; }
+.session-side { align-items: flex-end; text-align: right; }
+.session-state { display: inline-flex; width: fit-content; padding: 3px 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font: 600 9.5px/1 var(--mono); }
+.session-state.live { background: var(--accent-soft); color: var(--accent-ink); }
+.session-state.bad { background: var(--warning-soft); color: var(--danger); }
+.session-detail .ad-db { padding-bottom: 40px; }
+.session-identity { margin-bottom: 10px; }
+.selectable { user-select: all; overflow-wrap: anywhere; }
+.session-actions { justify-content: flex-end; margin-bottom: 12px; }
+.detail-tabs { display: flex; flex-wrap: wrap; gap: 6px; position: sticky; top: 0; padding: 10px 0; background: var(--paper); z-index: var(--z-focus); }
+.message-timeline, .detail-list { display: flex; flex-direction: column; gap: 9px; }
+.load-older { align-self: center; min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.message-card { border: 1px solid var(--line); border-radius: 11px; padding: 11px 12px; background: var(--surface); }
+.message-card.role-user { background: var(--accent-soft); border-color: var(--accent-bright); }
+.message-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.message-card header b { font-size: 11.5px; }
+.message-card header span { color: var(--ink-3); font: 500 9.5px/1 var(--mono); }
+.message-card pre, .message-card details pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); font: 400 12.5px/1.65 var(--sans); }
+.message-card details, .detail-list details { margin-top: 9px; color: var(--ink-3); font-size: 11px; }
+.message-card summary, .detail-list summary { cursor: pointer; }
+.session-error { margin-top: 7px; padding: 7px 8px; border-radius: 7px; background: var(--warning-soft); color: var(--danger); font-size: 11.5px; overflow-wrap: anywhere; }
+.audit-summary-grid { margin: 10px 0 12px; }
+.audit-chain-actions { flex-wrap: wrap; margin-bottom: 12px; }
+.overview-range { margin-top: 14px; }
+
+@media (max-width: 700px) {
+  .range-custom { align-items: stretch; }
+  .range-custom label { flex: 1 1 128px; }
+  .range-date { width: 100%; min-width: 0; }
+  .range-sep { display: none; }
+  .range-zone { width: 100%; margin-left: 0; }
+  .filter-search { width: 100%; }
+  .session-row { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .session-side { align-items: flex-start; text-align: left; }
+}

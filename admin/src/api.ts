@@ -162,7 +162,7 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentType, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentType, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminAuditListView, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem, AdminDateRange, AdminSessionItem, AdminSessionListView, AdminSessionDetail } from '../../shared/contracts';
 export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert, ToolStatItem } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
@@ -181,7 +181,7 @@ export type {
 
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminSaying,
-  AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
+  AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminAuditListView, AdminSessionListView, AdminSessionDetail,
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView, ToolStatItem,
   AiEndpointTest, AiRoutingStatus, AiProbeReport, AiV2Status,
   AiV2View, AiEndpointUpsert, AiRouteUpsert, AiConfigIssue, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
@@ -250,7 +250,11 @@ function referralQs(q: { days?: number; tenantId?: string; roots?: number }): st
 }
 
 export const api = {
-  overview: () => req<Overview>('/admin/overview'),
+  overview: (range: { days?: number; from?: string; to?: string } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(range).forEach(([k, v]) => { if (v !== undefined && v !== '') p.set(k, String(v)); });
+    return req<Overview>(`/admin/overview${p.size ? `?${p}` : ''}`);
+  },
   users: () => req<AdminUserItem[]>('/admin/users'),
   userDetail: (id: string) => req<AdminUserDetail>(`/admin/users/${id}`),
   grantAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents`, 'POST', { agentKey }),
@@ -264,15 +268,39 @@ export const api = {
   delUserKnowledge: (id: string, kid: string) => req<{ ok: boolean }>(`/admin/users/${id}/knowledge/${kid}`, 'DELETE'),
   reembedUserKnowledge: (id: string, kid: string) => req<{ chunks: number }>(`/admin/users/${id}/knowledge/${kid}/reembed`, 'POST'),
   usage: () => req<AdminUsageView>('/admin/usage'),
-  tokenUsage: (days = 30) => req<AdminTokenUsageView>(`/admin/token-usage?days=${days}`),
+  tokenUsage: (range: number | { days?: number; from?: string; to?: string } = 30) => {
+    const p = new URLSearchParams();
+    if (typeof range === 'number') p.set('days', String(range));
+    else {
+      if (range.days) p.set('days', String(range.days));
+      if (range.from) p.set('from', range.from);
+      if (range.to) p.set('to', range.to);
+    }
+    return req<AdminTokenUsageView>(`/admin/token-usage?${p.toString()}`);
+  },
+  sessions: (q: { days?: number; from?: string; to?: string; q?: string; status?: string; agentKey?: string; page?: number; pageSize?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== '') p.set(k, String(v)); });
+    return req<AdminSessionListView>(`/admin/sessions${p.size ? `?${p}` : ''}`);
+  },
+  session: (id: string, q: { before?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.before) p.set('before', q.before);
+    if (q.limit) p.set('limit', String(q.limit));
+    return req<AdminSessionDetail>(`/admin/sessions/${id}${p.size ? `?${p}` : ''}`);
+  },
   knowledge: () => req<AdminKnowledgeView>('/admin/knowledge'),
   reembedKnowledge: () => req<ReembedResult>('/admin/knowledge/reembed', 'POST'),
   retrievalTest: (body: { userId: string; query: string; agentKey?: string }) => req<AdminRetrievalDebug>('/admin/retrieval-test', 'POST', body),
-  traces: (q: { days?: number; status?: string; agentKey?: string } = {}) => {
+  traces: (q: { days?: number; from?: string; to?: string; status?: string; agentKey?: string; page?: number; pageSize?: number } = {}) => {
     const p = new URLSearchParams();
     if (q.days) p.set('days', String(q.days));
     if (q.status) p.set('status', q.status);
     if (q.agentKey) p.set('agentKey', q.agentKey);
+    if (q.from) p.set('from', q.from);
+    if (q.to) p.set('to', q.to);
+    if (q.page) p.set('page', String(q.page));
+    if (q.pageSize) p.set('pageSize', String(q.pageSize));
     const qs = p.toString();
     return req<AdminTraceListView>(`/admin/observability${qs ? '?' + qs : ''}`);
   },
@@ -299,6 +327,11 @@ export const api = {
     if (q.userId) p.set('userId', q.userId);
     const qs = p.toString();
     return req<AdminAuditItem[]>(`/admin/audit-logs${qs ? '?' + qs : ''}`);
+  },
+  auditView: (q: { days?: number; from?: string; to?: string; includeAdmin?: boolean; includeMetrics?: boolean; action?: string; userId?: string; status?: string; q?: string; page?: number; pageSize?: number } = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== '' && v !== false) p.set(k, String(v)); });
+    return req<AdminAuditListView>(`/admin/audit-view${p.size ? `?${p}` : ''}`);
   },
   sayings: () => req<AdminSaying[]>('/admin/sayings'),
   addSaying: (text: string) => req<AdminSaying>('/admin/sayings', 'POST', { text }),

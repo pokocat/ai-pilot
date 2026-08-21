@@ -18,9 +18,9 @@
 // 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
 // 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
 
-/** 25 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 26 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
-  | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent'
+  | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
   | 'referral';
@@ -81,6 +81,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'retrieval', label: '检索调试', hint: '模拟一次召回，看命中了什么', icon: 'target', group: 'studio', aliases: ['召回', '检索', 'retrieval', 'debug', '命中'] },
 
   // —— 观测（只读：发生过什么） ——
+  { key: 'sessions', label: '会话工作台', hint: '跨用户检索消息、生成任务与关联调用', icon: 'chat', group: 'observe', aliases: ['会话', '对话', '消息', 'session', 'conversation', '生成任务', '客服排查'] },
   { key: 'trace', label: '调用诊断', hint: '每次 LLM 调用的耗时 / 状态 / 报错', icon: 'insight', group: 'observe', aliases: ['trace', '报错', '失败', '延迟', '诊断', 'llm', '稳定性'] },
   { key: 'moderation', label: '内容审核', hint: '输入输出审核拦截记录', icon: 'shield', group: 'observe', aliases: ['审核', '拦截', '合规', 'moderation'] },
   { key: 'audit', label: '审计日志', hint: '用户 API 与后台操作留痕', icon: 'clock', group: 'observe', aliases: ['日志', 'audit', '留痕', '问责', 'log'] },

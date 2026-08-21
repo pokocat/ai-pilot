@@ -6,7 +6,7 @@ import { env } from '../env.js';
 import { noteLlmCall } from './metrics.js';
 import type { Usage } from '../llm/schema.js';
 import type { UsageMeta } from './usage.js';
-import type { AdminTraceDetail, AdminTraceItem, AdminTraceListView, LlmContextTrace } from '../../../shared/contracts';
+import type { AdminDateRange, AdminTraceDetail, AdminTraceItem, AdminTraceListView, LlmContextTrace } from '../../../shared/contracts';
 
 const TEXT_MAX = 4000;
 function clip(s?: string | null): string | null {
@@ -135,17 +135,29 @@ function toItem(r: TraceRow, source: TraceSource = {}): AdminTraceItem {
 }
 
 /** trace 列表 + 概览统计（调用数/错误数/均延迟），可按状态、agent 过滤。 */
-export async function listTraces(opts: { days?: number; status?: string; agentKey?: string; limit?: number }): Promise<AdminTraceListView> {
-  const days = Math.min(90, Math.max(1, opts.days ?? 7));
-  const since = new Date(Date.now() - days * 86400_000);
+export async function listTraces(opts: {
+  days?: number;
+  from?: Date;
+  toExclusive?: Date;
+  range?: AdminDateRange;
+  status?: string;
+  agentKey?: string;
+  limit?: number;
+  page?: number;
+  pageSize?: number;
+}): Promise<AdminTraceListView> {
+  const days = opts.range?.days ?? Math.min(3660, Math.max(1, opts.days ?? 7));
+  const since = opts.from ?? new Date(Date.now() - days * 86400_000);
+  const toExclusive = opts.toExclusive ?? new Date();
   const where = {
-    createdAt: { gte: since },
+    createdAt: { gte: since, lt: toExclusive },
     ...(opts.status === 'ok' || opts.status === 'error' ? { status: opts.status } : {}),
     ...(opts.agentKey ? { agentKey: opts.agentKey } : {}),
   };
-  const limit = Math.min(500, Math.max(1, opts.limit ?? 200));
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const pageSize = Math.min(200, Math.max(1, Math.floor(opts.pageSize ?? opts.limit ?? 50)));
   const [rows, agg, errors] = await Promise.all([
-    prisma.llmTrace.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit }),
+    prisma.llmTrace.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
     prisma.llmTrace.aggregate({ where, _count: { _all: true }, _avg: { latencyMs: true } }),
     prisma.llmTrace.count({ where: { ...where, status: 'error' } }),
   ]);
@@ -168,6 +180,10 @@ export async function listTraces(opts: { days?: number; status?: string; agentKe
   const agentMap = new Map(agents.map((a) => [a.key, a.name]));
   return {
     windowDays: days,
+    ...(opts.range ? { range: opts.range } : {}),
+    page,
+    pageSize,
+    pages: Math.max(1, Math.ceil(agg._count._all / pageSize)),
     totals: { calls: agg._count._all, errors, avgLatencyMs: Math.round(agg._avg.latencyMs ?? 0) },
     items: rows.map((r) => {
       const user = r.userId ? userMap.get(r.userId) : null;

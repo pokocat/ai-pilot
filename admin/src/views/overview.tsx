@@ -6,24 +6,29 @@
 // 现在一屏收口，每格点进去就是筛好的那张清单；全零时明确显示「无待处理」，
 // 而不是留几个 0 让人猜是没事还是没加载出来。
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import Icon from '../Icon';
 import { api, type Overview, type AdminPaymentsView, type AdminTraceListView, type AdminModerationLogView, type AiRoutingStatus, type AdminUserItem } from '../api';
-import { PageHead, ViewState } from '../components';
+import { DateRangeFilter, type DateRangeValue, PageHead, ViewState } from '../components';
 import { useResource } from '../useResource';
 
 export function OverviewView({ onGo }: { onGo: (k: string) => void }) {
-  const res = useResource(api.overview, []);
+  const [range, setRange] = useState<DateRangeValue>({ days: 7, from: '', to: '' });
+  const res = useResource(
+    useCallback(() => api.overview(range.days ? { days: range.days } : { from: range.from, to: range.to }), [range]),
+    [range],
+  );
   return (
     <>
       <PageHead k="home" res={res} />
       <div className="pad">
         <TriageBoard onGo={onGo} />
+        <div className="overview-range"><DateRangeFilter value={range} onChange={setRange} /></div>
       </div>
       <ViewState res={res} skeleton="stats">
         {(data: Overview) => (
           <>
-            <div className="sec-h"><span className="t">今日经营</span><span className="s">近 7 天 vs 前 7 天</span></div>
+            <div className="sec-h"><span className="t">经营统计</span><span className="s">{data.range ? `${data.range.fromDate} 至 ${data.range.toDate} · 对比前一等长区间` : '所选区间对比'}</span></div>
             <div className="pad">
               <div className="stats">
                 {data.stats.map((s) => (

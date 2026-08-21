@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { verifyUserToken } from './userToken.js';
+import { actorOf } from './adminAuth.js';
 
 export function isoSecond(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -112,6 +113,17 @@ export function registerHttpAudit(app: FastifyInstance) {
     const durationMs = Math.max(0, Date.now() - (requestStart.get(req) ?? Date.now()));
     const authState = token ? (user ? 'user_resolved' : 'invalid_user_token') : 'anonymous';
     const action = path.startsWith('/api/admin/') ? 'admin.http' : path.startsWith('/api/auth/') ? 'auth.http' : 'user.http';
+    let adminActor: AuditJsonObject | null = null;
+    if (action === 'admin.http') {
+      try {
+        const actor = actorOf(req);
+        adminActor = actor.kind === 'account'
+          ? { kind: actor.kind, id: actor.id, username: actor.username, role: actor.role }
+          : { kind: actor.kind, id: actor.kind === 'legacyUser' ? actor.id : null, username: actor.kind === 'master' ? '主密钥' : '管理员' };
+      } catch {
+        // 登录/状态等公开 admin-auth 请求没有挂载 AdminActor；仍记录请求，但不伪造操作者。
+      }
+    }
     const query = summarizeForAudit(req.query);
     const body = summarizeForAudit(req.body);
 
@@ -128,6 +140,7 @@ export function registerHttpAudit(app: FastifyInstance) {
         userResolved: !!user,
         userRole: user?.role ?? null,
         adminTokenPresent: !!adminToken,
+        admin: adminActor,
       },
     };
     if (query && typeof query === 'object' && Object.keys(query as object).length > 0) payload.query = query;

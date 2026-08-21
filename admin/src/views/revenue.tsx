@@ -1,7 +1,7 @@
 // 经营：支付订单 / 处方漏斗 / 钻石消耗 / Token 成本。
 import { useCallback, useState } from 'react';
 import { api, downloadPaymentsCsv, type AdminUsageView, type AdminTokenUsageView, type AdminPrescriptionFunnel } from '../api';
-import { PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
+import { DateRangeFilter, type DateRangeValue, PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime, creditText, fmtTokens, fmtCny, fmtYuan } from '../format';
 // A3：支付订单列表——状态筛选 + 天数切换 + summary 四格 + 卡单清单（查单补账）+ 明细（金额分转元）。
@@ -290,10 +290,15 @@ export function UsageView() {
 }
 
 export function TokenUsageView({ onOpenUser }: { onOpenUser: (id: string) => void }) {
-  const res = useResource(useCallback(() => api.tokenUsage(30), []), []);
+  const [range, setRange] = useState<DateRangeValue>({ days: 30, from: '', to: '' });
+  const res = useResource(
+    useCallback(() => api.tokenUsage(range.days ? { days: range.days } : { from: range.from, to: range.to }), [range]),
+    [range],
+  );
   return (
     <>
-      <PageHead k="tokens" res={res} badge={res.data ? `近 ${res.data.windowDays} 天` : undefined} />
+      <PageHead k="tokens" res={res} badge={res.data?.range ? `${res.data.range.fromDate} 至 ${res.data.range.toDate}` : undefined} />
+      <div className="pad"><DateRangeFilter value={range} onChange={setRange} /></div>
       <ViewState res={res} skeleton="stats">
         {(data: AdminTokenUsageView) => <TokenUsageBody data={data} onOpenUser={onOpenUser} />}
       </ViewState>

@@ -308,3 +308,61 @@ export function SearchBox({ value, onChange, placeholder }: { value: string; onC
     </div>
   );
 }
+
+export interface DateRangeValue {
+  days: number | null;
+  from: string;
+  to: string;
+}
+
+/** 统一统计时间筛选：常用预设 + 北京时间自然日自定义，避免各页各造一套固定 chips。 */
+export function DateRangeFilter({ value, onChange, presets = [7, 30, 90, 365] }: {
+  value: DateRangeValue;
+  onChange: (value: DateRangeValue) => void;
+  presets?: number[];
+}) {
+  const [custom, setCustom] = useState(value.days === null);
+  const [from, setFrom] = useState(value.from);
+  const [to, setTo] = useState(value.to);
+  const apply = () => {
+    if (!from || !to || from > to) return;
+    onChange({ days: null, from, to });
+  };
+  return (
+    <div className="range-filter" aria-label="时间范围">
+      <div className="chip-row">
+        {presets.map((days) => (
+          <button
+            key={days}
+            type="button"
+            className={`chip ${value.days === days && !custom ? 'on' : ''}`}
+            onClick={() => { setCustom(false); onChange({ days, from: '', to: '' }); }}
+          >
+            {days === 365 ? '近 1 年' : `近 ${days} 天`}
+          </button>
+        ))}
+        <button type="button" className={`chip ${custom ? 'on' : ''}`} onClick={() => setCustom(true)}>自定义</button>
+      </div>
+      {custom && (
+        <div className="range-custom">
+          <label><span>开始</span><input className="range-date" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+          <span className="range-sep">至</span>
+          <label><span>结束</span><input className="range-date" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          <button type="button" className="mini-btn" disabled={!from || !to || from > to} onClick={apply}>应用</button>
+          <span className="range-zone">北京时间自然日</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Pager({ page, pages, total, onChange }: { page: number; pages: number; total: number; onChange: (page: number) => void }) {
+  if (pages <= 1) return total ? <div className="pager"><span>共 {total} 条</span></div> : null;
+  return (
+    <nav className="pager" aria-label="分页">
+      <button type="button" className="mini-btn" disabled={page <= 1} onClick={() => onChange(page - 1)}>上一页</button>
+      <span>第 {page} / {pages} 页 · 共 {total} 条</span>
+      <button type="button" className="mini-btn" disabled={page >= pages} onClick={() => onChange(page + 1)}>下一页</button>
+    </nav>
+  );
+}

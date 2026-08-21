@@ -50,6 +50,7 @@ export function parseAdminRange(query: AdminRangeQuery, defaultDays: number, max
     from = startOfShanghaiDate(query.from);
     toExclusive = new Date(startOfShanghaiDate(query.to).getTime() + DAY_MS);
     if (!Number.isFinite(from.getTime()) || !Number.isFinite(toExclusive.getTime())) badRange('日期无效');
+    if (shanghaiDate(from) !== query.from || shanghaiDate(new Date(toExclusive.getTime() - DAY_MS)) !== query.to) badRange('日期无效');
     if (from >= toExclusive) badRange('开始日期不能晚于结束日期');
     fromDate = query.from;
     toDate = query.to;
@@ -77,4 +78,3 @@ export function parseAdminRange(query: AdminRangeQuery, defaultDays: number, max
     },
   };
 }
-

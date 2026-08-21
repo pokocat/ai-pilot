@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-08-20 · 运营后台完整性重构：会话工作台、审计链与任意时间区间 · 影响面：admin、后台只读 API、共享契约、审计元数据
+
+- 新增「观测 → 会话工作台」：跨用户按日期/状态/会话/用户/手机号/租户/顾问/项目检索，列表回显消息角色、生成/失败/在途状态和最近消息；详情用游标读取更早消息，并同屏查看生成任务、额度结算与 LLM trace。
+- 新增分页版 `/admin/audit-view`：日期、行为范围、成功/失败、关键词、用户与 metrics 开关均在服务端筛选，返回精确总数；正式透出 request/session/operator，并提供同请求链、关联会话、关联用户下钻。新 `admin.http` 记录操作者类型/用户名/角色，不记录凭证；旧 `/admin/audit-logs` 保留兼容。
+- `services/adminRange.ts` 统一概览、Token、trace、会话和审计的时间边界；支持 7/30/90/365 天与北京时间自然日自定义区间（最长 3660 天）。概览改为所选区间对比前一等长区间，Token 日桶改按上海时区。
+- 前端按 `product-ui-completeness` 补齐 loading/empty/error/retry、服务端分页、长内容、移动响应式、原生按钮语义与 `useDialogFocus` 焦点闭环；审计方案见 `docs/ADMIN_CONSOLE_REFACTOR_2026-08-20.md`。
+- 验证与发布范围：server/admin build 通过，server 全量 1971/1971、admin UI lint + 79/79、后台工作台定向 31/31 通过；生产发布仅包含 server + admin，不含 H5/微信包。当前环境没有 Notion 连接器，里程碑日志待连接恢复后同步，已记入 AGENTS §13。
+
 ### 2026-08-20 · 修复：小程序码端点路径写错一个斜杠，两条码链一直静默无码 · 影响面：邀请码、B 级卡片页脚码
 
 生产部署 `7f26c72` 后按 SOP §4.2 在线上直接跑真实函数验收，发现 `inviteQrcode()` 恒回 `null`。

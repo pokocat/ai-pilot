@@ -2,8 +2,8 @@
 // 模型配置曾误放本组（见 nav.ts 顶部说明），已移入「配置」——那是写屏，不是观测屏。
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
-import { api, type AdminAuditItem, type AdminTraceListView, type AdminTraceDetail, type AdminModerationLogView } from '../api';
-import { PageHead, ViewState, ErrorState, Skeleton, SearchBox } from '../components';
+import { api, type AdminAuditItem, type AdminAuditListView, type AdminTraceListView, type AdminTraceDetail, type AdminModerationLogView } from '../api';
+import { DateRangeFilter, type DateRangeValue, PageHead, Pager, ViewState, ErrorState, Skeleton, SearchBox, useDialogFocus } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime, fmtShortTime, actorText, compactActorText, mobileAuditMeta, auditTarget, actionKind, statusClass, formatPayload, auditLabel } from '../format';
 
@@ -28,11 +28,13 @@ function traceEndpoint(t: { provider: string; model: string; endpointId: string 
 
 export function ObservabilityView() {
   const [status, setStatus] = useState<'' | 'ok' | 'error'>('');
+  const [range, setRange] = useState<DateRangeValue>({ days: 7, from: '', to: '' });
+  const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<AdminTraceDetail | null>(null);
   const [detailErr, setDetailErr] = useState('');
   const res = useResource(
-    useCallback(() => api.traces({ days: 7, status: status || undefined }), [status]),
-    [status],
+    useCallback(() => api.traces({ ...(range.days ? { days: range.days } : { from: range.from, to: range.to }), status: status || undefined, page, pageSize: 50 }), [range, status, page]),
+    [range, status, page],
   );
   const openTrace = (id: string) => {
     setDetailErr('');
@@ -40,11 +42,12 @@ export function ObservabilityView() {
   };
   return (
     <>
-      <PageHead k="trace" res={res} badge={res.data ? `近 ${res.data.windowDays} 天` : undefined} />
+      <PageHead k="trace" res={res} badge={res.data?.range ? `${res.data.range.fromDate} 至 ${res.data.range.toDate}` : undefined} />
       <div className="pad">
+        <DateRangeFilter value={range} onChange={(value) => { setPage(1); setRange(value); }} />
         <div className="chip-row">
           {([['', '全部'], ['ok', '成功'], ['error', '错误']] as const).map(([v, l]) => (
-            <button key={v} type="button" className={`chip ${status === v ? 'on' : ''}`} onClick={() => setStatus(v)}>{l}</button>
+            <button key={v} type="button" className={`chip ${status === v ? 'on' : ''}`} onClick={() => { setPage(1); setStatus(v); }}>{l}</button>
           ))}
         </div>
         {detailErr && <div className="result-count"><ErrorState msg={detailErr} /></div>}
@@ -62,23 +65,31 @@ export function ObservabilityView() {
               </div>
               {data.items.length === 0 && <div className="empty">近 {data.windowDays} 天{status === 'error' ? '没有失败调用' : '暂无调用记录'}。</div>}
               {data.items.map((t) => (
-                <div key={t.id} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => openTrace(t.id)}>
+                <button key={t.id} type="button" className="usage-row usage-row-button" onClick={() => openTrace(t.id)}>
                   <div className="usage-h">
                     <div className="usage-name">{traceAgent(t)}<span>{TRACE_KIND_LABEL[t.kind] ?? t.kind} · {traceEndpoint(t)}</span></div>
                     <div className={`usage-num ${t.status === 'error' ? '' : 'ok'}`}>{t.status === 'error' ? '错误' : `${t.latencyMs}ms`}</div>
                   </div>
                   <div className="usage-meta">来源：{traceUser(t)}{t.tenantName ? ` · ${t.tenantName}` : ''}</div>
                   <div className="usage-meta">{new Date(t.at).toLocaleString()} · {t.totalTokens} token{t.cachedInput ? ` · 缓存命中 ${t.cachedInput}` : ''}{t.toolCalls ? ` · 工具×${t.toolCalls}` : ''}{t.errorMessage ? ` · ${t.errorMessage.slice(0, 40)}` : ''}</div>
-                </div>
+                </button>
               ))}
+              <Pager page={data.page ?? 1} pages={data.pages ?? 1} total={data.totals.calls} onChange={setPage} />
             </div>
           );
         }}
       </ViewState>
-      {detail && (
-        <div className="ad-detail show" onClick={() => setDetail(null)}>
-          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">{traceAgent(detail)}</div><div className="s">{TRACE_KIND_LABEL[detail.kind] ?? detail.kind} · {traceEndpoint(detail)}</div></div></div>
-          <div className="ad-db" onClick={(e) => e.stopPropagation()}>
+      {detail && <TraceDetailPanel detail={detail} onClose={() => setDetail(null)} />}
+    </>
+  );
+}
+
+function TraceDetailPanel({ detail, onClose }: { detail: AdminTraceDetail; onClose: () => void }) {
+  const panelRef = useDialogFocus(onClose);
+  return (
+        <div ref={panelRef} className="ad-detail show" role="dialog" aria-modal="true" aria-label="调用详情" tabIndex={-1}>
+          <div className="ad-dh"><button type="button" className="bk" onClick={onClose} aria-label="关闭调用详情"><Icon name="arrow" size={18} /></button><div className="dt"><div className="t">{traceAgent(detail)}</div><div className="s">{TRACE_KIND_LABEL[detail.kind] ?? detail.kind} · {traceEndpoint(detail)}</div></div></div>
+          <div className="ad-db">
             <div className="usage-summary">
               <div><b>{detail.status === 'error' ? '错误' : '成功'}</b><span>状态</span></div>
               <div><b>{detail.latencyMs}ms</b><span>延迟</span></div>
@@ -110,8 +121,6 @@ export function ObservabilityView() {
             <pre className="trace-text">{detail.responseText ?? '（未捕获原文）'}</pre>
           </div>
         </div>
-      )}
-    </>
   );
 }
 
@@ -158,46 +167,58 @@ export function ModerationView({ onOpenUser }: { onOpenUser: (id: string) => voi
   );
 }
 
-export function AuditView() {
+export function AuditView({ onOpenUser, onOpenSession }: { onOpenUser: (id: string) => void; onOpenSession: (id: string) => void }) {
   const [selected, setSelected] = useState<AdminAuditItem | null>(null);
-  const [includeAdmin, setIncludeAdmin] = useState(false); // P2-11：可显式查看后台自身操作（多运营问责）
-  const [includeMetrics, setIncludeMetrics] = useState(false); // Prometheus /api/metrics 历史抓取默认隐藏，避免淹没用户动作
+  const [includeAdmin, setIncludeAdmin] = useState(false);
+  const [includeMetrics, setIncludeMetrics] = useState(false);
+  const [range, setRange] = useState<DateRangeValue>({ days: 30, from: '', to: '' });
+  const [status, setStatus] = useState('');
+  const [draftQ, setDraftQ] = useState('');
   const [q, setQ] = useState('');
-  const res = useResource(useCallback(() => api.auditLogs({ includeAdmin, includeMetrics }), [includeAdmin, includeMetrics]), [includeAdmin, includeMetrics]);
-  const all = res.data ?? [];
-  // 100 条日志里找一次特定动作/用户/IP，旧版只能靠眼扫；前端过滤足够（后端已限量返回）。
-  const list = q.trim()
-    ? all.filter((a) => {
-        const n = q.trim().toLowerCase();
-        return auditTarget(a).toLowerCase().includes(n)
-          || (a.summary ?? auditLabel(a.action)).toLowerCase().includes(n)
-          || actorText(a).toLowerCase().includes(n)
-          || (a.ip ?? '').includes(n)
-          || a.action.toLowerCase().includes(n);
-      })
-    : all;
+  const [page, setPage] = useState(1);
+  const res = useResource(
+    useCallback(() => api.auditView({
+      ...(range.days ? { days: range.days } : { from: range.from, to: range.to }),
+      includeAdmin,
+      includeMetrics,
+      status: status || undefined,
+      q: q || undefined,
+      page,
+      pageSize: 50,
+    }), [range, includeAdmin, includeMetrics, status, q, page]),
+    [range, includeAdmin, includeMetrics, status, q, page],
+  );
+  const resetPage = () => setPage(1);
   return (
     <>
-      <PageHead k="audit" res={res} badge={`${list.length}${q.trim() ? ` / ${all.length}` : ''} 条`} />
+      <PageHead k="audit" res={res} badge={res.data ? `${res.data.total} 条` : undefined} />
       <div className="pad audit-pad">
+        <DateRangeFilter value={range} onChange={(value) => { resetPage(); setRange(value); }} />
         <div className="filter-bar">
-          <SearchBox value={q} onChange={setQ} placeholder="接口 / 动作 / 用户 / IP…" />
+          <form className="filter-search" onSubmit={(e) => { e.preventDefault(); resetPage(); setQ(draftQ.trim()); }}>
+            <SearchBox value={draftQ} onChange={setDraftQ} placeholder="接口 / 动作 / 用户 / 请求 ID / 操作者…" />
+            <button type="submit" className="mini-btn">查询</button>
+          </form>
           <div className="chip-row">
             {([[false, '用户行为'], [true, '含后台操作']] as const).map(([v, l]) => (
-              <button key={String(v)} type="button" className={`chip ${includeAdmin === v ? 'on' : ''}`} onClick={() => setIncludeAdmin(v)}>{l}</button>
+              <button key={String(v)} type="button" className={`chip ${includeAdmin === v ? 'on' : ''}`} onClick={() => { resetPage(); setIncludeAdmin(v); }}>{l}</button>
             ))}
-            <button type="button" className={`chip ${includeMetrics ? 'on' : ''}`} onClick={() => setIncludeMetrics((v) => !v)}>含监控抓取</button>
+            {([['', '全部状态'], ['ok', '成功'], ['error', '失败']] as const).map(([value, label]) => (
+              <button key={value} type="button" className={`chip ${status === value ? 'on' : ''}`} onClick={() => { resetPage(); setStatus(value); }}>{label}</button>
+            ))}
+            <button type="button" className={`chip ${includeMetrics ? 'on' : ''}`} onClick={() => { resetPage(); setIncludeMetrics((v) => !v); }}>含监控抓取</button>
           </div>
         </div>
-        {res.error && all.length === 0 && <ErrorState msg={res.error} onRetry={res.reload} />}
+        {res.error && !res.data && <ErrorState msg={res.error} onRetry={res.reload} />}
         {res.initial ? <Skeleton /> : (
           <>
+            {res.data && <AuditSummary data={res.data} />}
             <div className="audit-table-wrap">
               <div className="audit-table">
                 <div className="audit-row audit-header-row">
                   <span>时间</span><span>状态</span><span>方法</span><span>接口/动作</span><span>用户</span><span>IP</span><span>摘要</span>
                 </div>
-                {list.map((a) => (
+                {(res.data?.items ?? []).map((a) => (
                   <button
                     key={a.id}
                     type="button"
@@ -217,20 +238,45 @@ export function AuditView() {
                 ))}
               </div>
             </div>
-            {!list.length && <div className="empty">{all.length ? '没有匹配的审计记录。' : '暂无审计记录'}</div>}
+            {!res.data?.items.length && <div className="empty">没有匹配的审计记录。可扩大日期、清除搜索或切换行为范围。</div>}
+            {res.data && <Pager page={res.data.page} pages={res.data.pages} total={res.data.total} onChange={setPage} />}
           </>
         )}
       </div>
-      {selected && <AuditDetailPanel item={selected} onClose={() => setSelected(null)} />}
+      {selected && <AuditDetailPanel
+        item={selected}
+        onClose={() => setSelected(null)}
+        onOpenUser={onOpenUser}
+        onOpenSession={onOpenSession}
+        onFilterRequest={(requestId) => { setDraftQ(requestId); setQ(requestId); setPage(1); setSelected(null); }}
+      />}
     </>
   );
 }
 
-function AuditDetailPanel({ item, onClose }: { item: AdminAuditItem; onClose: () => void }) {
+function AuditSummary({ data }: { data: AdminAuditListView }) {
+  return (
+    <div className="usage-summary audit-summary-grid">
+      <div><b>{data.summary.events}</b><span>事件</span></div>
+      <div><b>{data.summary.failed}</b><span>失败</span></div>
+      <div><b>{data.summary.users}</b><span>关联用户</span></div>
+      <div><b>{data.summary.operators}</b><span>关联操作者</span></div>
+    </div>
+  );
+}
+
+function AuditDetailPanel({ item, onClose, onOpenUser, onOpenSession, onFilterRequest }: {
+  item: AdminAuditItem;
+  onClose: () => void;
+  onOpenUser: (id: string) => void;
+  onOpenSession: (id: string) => void;
+  onFilterRequest: (requestId: string) => void;
+}) {
   const target = auditTarget(item);
   const summary = item.summary ?? auditLabel(item.action);
+  const panelRef = useDialogFocus(onClose);
   return (
-    <div className="ad-detail audit-detail show">
+    <div ref={panelRef} className="ad-detail audit-detail show" role="dialog" aria-modal="true" aria-label="审计详情" tabIndex={-1}>
       <div className="ad-dh">
         <button className="bk" type="button" onClick={onClose} aria-label="关闭审计详情"><Icon name="arrow" size={18} /></button>
         <div className="di"><Icon name="clock" size={18} /></div>
@@ -244,6 +290,13 @@ function AuditDetailPanel({ item, onClose }: { item: AdminAuditItem; onClose: ()
             <span>{fmtTime(item.at)}</span>
           </div>
         </div>
+        {(item.requestId || item.sessionId || item.userId) && (
+          <div className="crd-actions audit-chain-actions">
+            {item.requestId && <button type="button" className="mini-btn" onClick={() => onFilterRequest(item.requestId!)}>同一请求链</button>}
+            {item.sessionId && <button type="button" className="mini-btn" onClick={() => onOpenSession(item.sessionId!)}>打开关联会话</button>}
+            {item.userId && <button type="button" className="mini-btn" onClick={() => onOpenUser(item.userId!)}>查看关联用户</button>}
+          </div>
+        )}
 
         <div className="blk">
           <div className="blk-h"><Icon name="target" size={15} /><span className="t">请求与动作</span></div>
@@ -252,6 +305,8 @@ function AuditDetailPanel({ item, onClose }: { item: AdminAuditItem; onClose: ()
             <AuditDetailRow k="方法" v={item.method ?? actionKind(item.action)} />
             <AuditDetailRow k="接口" v={target} wide />
             <AuditDetailRow k="日志 ID" v={item.id} wide />
+            <AuditDetailRow k="请求 ID" v={item.requestId || '-'} wide />
+            <AuditDetailRow k="会话 ID" v={item.sessionId || '-'} wide />
           </div>
         </div>
 
@@ -261,6 +316,7 @@ function AuditDetailPanel({ item, onClose }: { item: AdminAuditItem; onClose: ()
             <AuditDetailRow k="用户" v={actorText(item)} wide />
             <AuditDetailRow k="租户" v={item.tenantName || item.tenantId || '-'} />
             <AuditDetailRow k="用户 ID" v={item.userId || '-'} wide />
+            <AuditDetailRow k="后台操作者" v={item.operator || '-'} wide />
           </div>
         </div>
 

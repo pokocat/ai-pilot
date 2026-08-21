@@ -7,7 +7,7 @@ import { estimateCostMicros } from '../data/modelPrices.js';
 import { resolveModelRate } from './aiConfig.js';
 import { noteUsageUnreported, noteTokenUsage } from './metrics.js';
 import type { Usage } from '../llm/schema.js';
-import type { AdminTokenUsageView } from '../../../shared/contracts';
+import type { AdminDateRange, AdminTokenUsageView } from '../../../shared/contracts';
 
 // 网关把会话上下文带进来，便于按用户/租户/会话归集。
 export interface UsageMeta {
@@ -150,22 +150,34 @@ const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD�
  * 近 windowDays 天的 token 用量聚合：总量 + 按模型 / 按天 / Top 用户。
  * v1 在内存里按取回的流水分桶（窗口内量级可控）；上量后改 SQL rollup。
  */
-export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsageView> {
-  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+export async function tokenUsageSummary(input: number | {
+  from: Date;
+  toExclusive: Date;
+  range: AdminDateRange;
+} = 30): Promise<AdminTokenUsageView> {
+  const windowDays = typeof input === 'number' ? input : input.range.days;
+  const since = typeof input === 'number' ? new Date(Date.now() - input * 24 * 60 * 60 * 1000) : input.from;
+  // 数字窗口沿用历史的「since 起、无上界」口径。这里不能用 Node 当前时间作为
+  // 上界：PostgreSQL 的 now() 可能比应用时钟快数毫秒，刚 await 写入的流水会被误排除。
+  // 只有显式自然日范围才使用确定的 [from, toExclusive) 闭开区间。
+  const toExclusive = typeof input === 'number' ? null : input.toExclusive;
+  const createdAt = toExclusive ? { gte: since, lt: toExclusive } : { gte: since };
   // P2-2：全部用 SQL 聚合（groupBy / aggregate / raw 按天截断），不再装载 ≤50k 行内存分桶——避免大窗口静默截断少算。
   const USER_KINDS = ['chat', 'deliverable'];
-  const userWhere = { createdAt: { gte: since }, kind: { in: USER_KINDS } };
+  const userWhere = { createdAt, kind: { in: USER_KINDS } };
   const [modelGroups, userGroups, infraGroups, totalAgg, dayRows] = await Promise.all([
     prisma.tokenUsage.groupBy({ by: ['model'], where: userWhere, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true } }),
     prisma.tokenUsage.groupBy({ by: ['userId'], where: { ...userWhere, userId: { not: null } }, _sum: { totalTokens: true, costMicros: true }, orderBy: { _sum: { costMicros: 'desc' } }, take: 8 }),
-    prisma.tokenUsage.groupBy({ by: ['kind', 'model'], where: { createdAt: { gte: since }, kind: { notIn: USER_KINDS } }, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true } }),
+    prisma.tokenUsage.groupBy({ by: ['kind', 'model'], where: { createdAt, kind: { notIn: USER_KINDS } }, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true } }),
     prisma.tokenUsage.aggregate({ where: userWhere, _sum: { inputTokens: true, outputTokens: true, totalTokens: true, costMicros: true }, _count: { _all: true } }),
     prisma.$queryRaw<{ day: string; totaltokens: bigint | number; costmicros: bigint | number }[]>`
-      SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day,
+      SELECT to_char(date_trunc('day', "createdAt" AT TIME ZONE 'Asia/Shanghai'), 'YYYY-MM-DD') AS day,
              COALESCE(SUM("totalTokens"), 0) AS totaltokens,
              COALESCE(SUM("costMicros"), 0) AS costmicros
       FROM token_usage
-      WHERE "createdAt" >= ${utcTimestamp(since)} AND "kind" IN ('chat', 'deliverable')
+      WHERE "createdAt" >= ${utcTimestamp(since)}
+        AND (${toExclusive ? utcTimestamp(toExclusive) : null}::timestamp IS NULL OR "createdAt" < ${toExclusive ? utcTimestamp(toExclusive) : null})
+        AND "kind" IN ('chat', 'deliverable')
       GROUP BY 1 ORDER BY 1`,
   ]);
 
@@ -202,5 +214,13 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
     totalTokens: g._sum.totalTokens ?? 0, costMicros: g._sum.costMicros ?? 0,
   })).sort((a, b) => b.totalTokens - a.totalTokens);
 
-  return { windowDays, totals, byModel, byDay, topUsers, infra };
+  return {
+    windowDays,
+    ...(typeof input === 'number' ? {} : { range: input.range }),
+    totals,
+    byModel,
+    byDay,
+    topUsers,
+    infra,
+  };
 }

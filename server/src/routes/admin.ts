@@ -29,6 +29,9 @@ import { startEvalRun, suggestTier, PRICING_TIERS, latestEvalScore } from '../se
 import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
+import { parseAdminRange } from '../services/adminRange.js';
+import { listAdminSessions, getAdminSession } from '../services/adminSessions.js';
+import { adminAuditView } from '../services/adminAuditView.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit, maskAuditPhone } from '../services/audit.js';
 import { getCreativeConfig, updateCreativeConfig, publicCreativeConfig } from '../services/creative/config.js';
@@ -62,7 +65,7 @@ import { deleteUserMemory, listAgentMemories, deleteAgentMemory } from '../servi
 import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } from '../services/knowledge.js';
 import type { AiEndpointTest } from '../llm/schema.js';
 import type {
-  AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
+  AdminAuditItem, AdminAuditListView, AdminSessionListView, AdminSessionDetail, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AdminImpersonateResult, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
   AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView,
@@ -482,19 +485,20 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— 概览看板 ——
-  app.get('/admin/overview', async () => {
+  app.get<{ Querystring: { days?: string; from?: string; to?: string } }>('/admin/overview', async (req) => {
     const at = now();
     const today = dayStart(at); // Asia/Shanghai 当日 00:00 对应的 UTC 瞬时
-    const d7 = new Date(at.getTime() - 7 * 864e5);
-    const d14 = new Date(at.getTime() - 14 * 864e5);
-    const d30 = new Date(at.getTime() - 30 * 864e5);
-    // 环比：近 7 天 vs 前 7 天真实计数；前期为 0 或无数据 → null（前端显示「—」，绝不硬编码箭头）。
+    const range = parseAdminRange(req.query, 7);
+    const span = range.toExclusive.getTime() - range.from.getTime();
+    const previousFrom = new Date(range.from.getTime() - span);
+    const previousTo = range.from;
+    // 环比：所选区间 vs 前一等长区间；前期为 0 或无数据 → null（前端显示「—」，绝不硬编码箭头）。
     const pct = (a: number, b: number): number | null => (b > 0 ? Math.round(((a - b) / b) * 100) : null);
     const sumSpent = (r: { _sum: { delta: number | null } }) => Math.abs(r._sum.delta ?? 0); // delta<0 的绝对值和
     const [
       tenants, users, deliverables, sessions, agents, activeToday, recentAudits,
-      usersL7, usersP7, delivL7, delivP7, spentTotal, spentL7, spentP7,
-      activeL7, activeP7, cost30, costL7, costP7,
+      usersInRange, usersPrevious, delivInRange, delivPrevious, spentTotal, spentInRange, spentPrevious,
+      activeInRange, activePrevious, costInRange, costPrevious,
     ] = await Promise.all([
       prisma.tenant.count(),
       prisma.user.count(),
@@ -503,28 +507,28 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.agent.count({ where: { enabled: true } }),
       prisma.session.findMany({ where: { updatedAt: { gte: today } }, select: { userId: true }, distinct: ['userId'] }),
       prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 4 }),
-      prisma.user.count({ where: { createdAt: { gte: d7 } } }),
-      prisma.user.count({ where: { createdAt: { gte: d14, lt: d7 } } }),
-      prisma.deliverable.count({ where: { createdAt: { gte: d7 } } }),
-      prisma.deliverable.count({ where: { createdAt: { gte: d14, lt: d7 } } }),
+      prisma.user.count({ where: { createdAt: { gte: range.from, lt: range.toExclusive } } }),
+      prisma.user.count({ where: { createdAt: { gte: previousFrom, lt: previousTo } } }),
+      prisma.deliverable.count({ where: { createdAt: { gte: range.from, lt: range.toExclusive } } }),
+      prisma.deliverable.count({ where: { createdAt: { gte: previousFrom, lt: previousTo } } }),
       prisma.creditLedger.aggregate({ where: { delta: { lt: 0 } }, _sum: { delta: true } }),
-      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: d7 } }, _sum: { delta: true } }),
-      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: d14, lt: d7 } }, _sum: { delta: true } }),
-      prisma.session.findMany({ where: { updatedAt: { gte: d7 } }, select: { userId: true }, distinct: ['userId'] }),
-      prisma.session.findMany({ where: { updatedAt: { gte: d14, lt: d7 } }, select: { userId: true }, distinct: ['userId'] }),
-      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d30 } }, _sum: { costMicros: true } }),
-      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d7 } }, _sum: { costMicros: true } }),
-      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d14, lt: d7 } }, _sum: { costMicros: true } }),
+      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: range.from, lt: range.toExclusive } }, _sum: { delta: true } }),
+      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: previousFrom, lt: previousTo } }, _sum: { delta: true } }),
+      prisma.session.findMany({ where: { updatedAt: { gte: range.from, lt: range.toExclusive } }, select: { userId: true }, distinct: ['userId'] }),
+      prisma.session.findMany({ where: { updatedAt: { gte: previousFrom, lt: previousTo } }, select: { userId: true }, distinct: ['userId'] }),
+      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: range.from, lt: range.toExclusive } }, _sum: { costMicros: true } }),
+      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: previousFrom, lt: previousTo } }, _sum: { costMicros: true } }),
     ]);
     const spent = sumSpent(spentTotal);
-    const cost30Micros = cost30._sum.costMicros ?? 0;
+    const rangeCostMicros = costInRange._sum.costMicros ?? 0;
     return {
+      range: range.view,
       stats: [
-        { t: '注册用户', v: String(users), deltaPct: pct(usersL7, usersP7), sub: `${tenants} 个租户` },
-        { t: '今日活跃用户', v: String(activeToday.length), deltaPct: pct(activeL7.length, activeP7.length), sub: `${sessions} 个会话` },
-        { t: '累计产出成果', v: String(deliverables), deltaPct: pct(delivL7, delivP7), sub: `${agents} 个功能上架` },
-        { t: '钻石消耗', v: String(spent), deltaPct: pct(sumSpent(spentL7), sumSpent(spentP7)), sub: '按流水统计' },
-        { t: '30 天 Token 成本', v: (cost30Micros / 1e6).toFixed(2), deltaPct: pct(costL7._sum.costMicros ?? 0, costP7._sum.costMicros ?? 0), sub: '近 30 天 · 元' },
+        { t: '区间新增用户', v: String(usersInRange), deltaPct: pct(usersInRange, usersPrevious), sub: `累计 ${users} · ${tenants} 个租户` },
+        { t: '区间活跃用户', v: String(activeInRange.length), deltaPct: pct(activeInRange.length, activePrevious.length), sub: `今日 ${activeToday.length} · 累计 ${sessions} 个会话` },
+        { t: '区间产出成果', v: String(delivInRange), deltaPct: pct(delivInRange, delivPrevious), sub: `累计 ${deliverables} · ${agents} 个功能上架` },
+        { t: '区间钻石消耗', v: String(sumSpent(spentInRange)), deltaPct: pct(sumSpent(spentInRange), sumSpent(spentPrevious)), sub: `累计 ${spent}` },
+        { t: '区间 Token 成本', v: (rangeCostMicros / 1e6).toFixed(2), deltaPct: pct(rangeCostMicros, costPrevious._sum.costMicros ?? 0), sub: `${range.view.days} 天 · 元` },
       ],
       live: { tenants, deliverables, sessions, agents },
       feed: recentAudits.length
@@ -558,6 +562,30 @@ export async function adminRoutes(app: FastifyInstance) {
       agentName: r.agent?.name ?? null, currentVersion: r.currentVersion, updatedAt: r.updatedAt.toISOString(),
     }));
   });
+
+  // —— 会话工作台：跨用户检索、状态筛选与消息/生成/调用链详情（只读）——
+  app.get<{ Querystring: {
+    days?: string; from?: string; to?: string; q?: string; status?: string; agentKey?: string; page?: string; pageSize?: string;
+  } }>('/admin/sessions', async (req): Promise<AdminSessionListView> => {
+    const range = parseAdminRange(req.query, 30);
+    return listAdminSessions({
+      ...range,
+      range: range.view,
+      q: req.query.q,
+      status: req.query.status,
+      agentKey: req.query.agentKey,
+      page: Number(req.query.page) || 1,
+      pageSize: Number(req.query.pageSize) || 30,
+    });
+  });
+  app.get<{ Params: { id: string }; Querystring: { before?: string; limit?: string } }>(
+    '/admin/sessions/:id',
+    async (req, reply): Promise<AdminSessionDetail | void> => {
+      const detail = await getAdminSession(req.params.id, req.query.before, Number(req.query.limit) || 80);
+      if (!detail) return reply.code(404).send({ error: '会话不存在' });
+      return detail;
+    },
+  );
 
   // —— 用户管理：小程序注册用户、账号来源、会话/成果/算力概览 ——
   app.get('/admin/users', async (): Promise<AdminUserItem[]> => {
@@ -1541,14 +1569,24 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— Token 用量看板（计费 P1·旁路统计，不参与按次扣费）：近 N 天 token 与估算成本，按模型/天/Top 用户 ——
-  app.get<{ Querystring: { days?: string } }>('/admin/token-usage', async (req): Promise<AdminTokenUsageView> => {
-    const days = Math.min(Math.max(Number(req.query.days ?? 30) || 30, 1), 90);
-    return tokenUsageSummary(days);
+  app.get<{ Querystring: { days?: string; from?: string; to?: string } }>('/admin/token-usage', async (req): Promise<AdminTokenUsageView> => {
+    const range = parseAdminRange(req.query, 30);
+    return tokenUsageSummary({ ...range, range: range.view });
   });
 
   // —— 可观测（调用诊断）：每次 LLM 调用的耗时/状态/错误/工具调用，含错误与 mock ——
-  app.get<{ Querystring: { days?: string; status?: string; agentKey?: string } }>('/admin/observability', async (req): Promise<AdminTraceListView> => {
-    return listTraces({ days: Number(req.query.days) || 7, status: req.query.status, agentKey: req.query.agentKey });
+  app.get<{ Querystring: {
+    days?: string; from?: string; to?: string; status?: string; agentKey?: string; page?: string; pageSize?: string;
+  } }>('/admin/observability', async (req): Promise<AdminTraceListView> => {
+    const range = parseAdminRange(req.query, 7);
+    return listTraces({
+      ...range,
+      range: range.view,
+      status: req.query.status,
+      agentKey: req.query.agentKey,
+      page: Number(req.query.page) || 1,
+      pageSize: Number(req.query.pageSize) || 50,
+    });
   });
   app.get<{ Params: { id: string } }>('/admin/observability/:id', async (req, reply): Promise<AdminTraceDetail | void> => {
     const t = await getTrace(req.params.id);
@@ -1559,6 +1597,26 @@ export async function adminRoutes(app: FastifyInstance) {
   // —— P1-B5：审核日志（此前 moderation_log 写完无读取入口，运营看不到拦了什么）——
   app.get<{ Querystring: { verdict?: string; refType?: string; limit?: string } }>('/admin/moderation-logs', async (req): Promise<AdminModerationLogView> => {
     return { items: await listModerationLogs({ verdict: req.query.verdict, refType: req.query.refType, limit: Number(req.query.limit) || 100 }) };
+  });
+
+  // 新审计工作台接口：服务端筛选 + 精确分页 + 自定义日期；旧数组接口保留给兼容调用与历史测试。
+  app.get<{ Querystring: {
+    days?: string; from?: string; to?: string; includeAdmin?: string; includeMetrics?: string;
+    action?: string; userId?: string; status?: string; q?: string; page?: string; pageSize?: string;
+  } }>('/admin/audit-view', async (req): Promise<AdminAuditListView> => {
+    const range = parseAdminRange(req.query, 30);
+    return adminAuditView({
+      ...range,
+      range: range.view,
+      includeAdmin: req.query.includeAdmin === 'true' || req.query.includeAdmin === '1',
+      includeMetrics: req.query.includeMetrics === 'true' || req.query.includeMetrics === '1',
+      action: req.query.action,
+      userId: req.query.userId,
+      status: req.query.status,
+      q: req.query.q,
+      page: Number(req.query.page) || 1,
+      pageSize: Number(req.query.pageSize) || 50,
+    });
   });
 
   // —— 审计日志：默认看用户 API / 登录尝试；后台自身行为可用 includeAdmin=true 显式查看 ——

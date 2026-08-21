@@ -244,7 +244,7 @@ Inputs are utilitarian and stable.
 
 ### Navigation
 
-Navigation is grouped by **operator task**, not by backend module. The 22 destinations live in seven
+Navigation is grouped by **operator task**, not by backend module. The 26 destinations live in seven
 scenario groups (`今日 / 用户 / 经营 / 智能体 / 观测 / 商品 / 配置`) declared once in `admin/src/nav.ts` —
 that file is the single source of truth for labels, hints, icons, group membership, and palette aliases.
 

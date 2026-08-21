@@ -24,6 +24,7 @@ import { PaymentsView, FunnelView, UsageView, TokenUsageView } from './views/rev
 // 邀请增长三视图单独成文件（手写 SVG 体量大，且 revenue.tsx 正被并行改动）——见该文件头注释。
 import { ReferralView } from './views/referral';
 import { ObservabilityView, ModerationView, AuditView } from './views/observe';
+import { SessionsView, SessionDetailPanel } from './views/sessions';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
 import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
@@ -96,6 +97,7 @@ export default function App() {
   const key = (invalid ? 'home' : section!.key) as SectionKey;
   const detailUser = key === 'users' ? route.id : '';
   const detailAgent = key === 'agent' ? route.id : '';
+  const detailSession = key === 'sessions' ? route.id : '';
 
   const logout = () => { adminAuth.logout(); clearAdminToken(); setAuthed(false); };
 
@@ -170,6 +172,7 @@ export default function App() {
               {key === 'funnel' && <FunnelView />}
               {key === 'referral' && <ReferralView />}
               {key === 'tokens' && <TokenUsageView onOpenUser={openUser} />}
+              {key === 'sessions' && <SessionsView onOpen={(id) => navigate('sessions', id)} />}
               {key === 'trace' && <ObservabilityView />}
               {key === 'say' && <SayingsView toast={showToast} />}
               {key === 'agent' && <AgentsView key={agentsKey} onOpen={(k) => navigate('agent', k)} toast={showToast} />}
@@ -177,7 +180,7 @@ export default function App() {
               {key === 'knowledge' && <KnowledgeView toast={showToast} />}
               {key === 'retrieval' && <RetrievalDebugView />}
               {key === 'account' && isOwner && <AccountsView toast={showToast} />}
-              {key === 'audit' && <AuditView />}
+              {key === 'audit' && <AuditView onOpenUser={openUser} onOpenSession={(id) => navigate('sessions', id)} />}
               {key === 'moderation' && <ModerationView onOpenUser={openUser} />}
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
@@ -206,6 +209,13 @@ export default function App() {
               isOwner={isOwner}
               onClose={() => navigate('users')}
               toast={showToast}
+            />
+          )}
+          {detailSession && (
+            <SessionDetailPanel
+              id={detailSession}
+              onClose={() => navigate('sessions')}
+              onOpenUser={openUser}
             />
           )}
         </div>

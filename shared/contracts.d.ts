@@ -1687,8 +1687,9 @@ export interface TodaySaying { text: string; date: string; }
 
 /* ────────────── 运营端看板 ────────────── */
 export interface Overview {
-  // t=标题 v=主数值(已格式化) deltaPct=近7天 vs 前7天真实环比(null=无前期数据) sub=副标签
+  // t=标题 v=主数值(已格式化) deltaPct=所选区间 vs 前一等长区间真实环比(null=无前期数据)
   stats: { t: string; v: string; deltaPct: number | null; sub: string }[];
+  range?: AdminDateRange;
   live: Record<string, number>;
   feed: { icon: string; t: string; m: string; v: string }[];
 }

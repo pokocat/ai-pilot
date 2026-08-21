@@ -240,7 +240,7 @@ describe('S2 · POST /admin/users/:id/plan-extend', () => {
 describe('S3 · GET /admin/overview 环比口径', () => {
   beforeEach(async () => { await cleanBusiness(); await seedBaseline(); });
 
-  test('stats 新形 {t,v,deltaPct,sub}，5 张卡；无前期数据 deltaPct=null；Token 成本卡为元', async () => {
+  test('stats 统一所选区间，5 张卡；无前期数据 deltaPct=null；Token 成本卡为元', async () => {
     const { tenantId, userId } = await mkTenantUser();
     await prisma.tokenUsage.create({ data: { tenantId, userId, kind: 'chat', provider: 'claude', model: 'm', totalTokens: 100, costMicros: 1_500_000, createdAt: new Date(Date.now() - 864e5) } });
     const r = await api('GET', '/api/admin/overview');
@@ -252,11 +252,13 @@ describe('S3 · GET /admin/overview 环比口径', () => {
       assert.ok(s.deltaPct === null || typeof s.deltaPct === 'number');
       assert.equal('trend' in s, false, 'trend 字段已删除');
     }
-    const cost = stats.find((s: { t: string }) => s.t === '30 天 Token 成本');
+    assert.equal(r.body.range.days, 7);
+    assert.equal(r.body.range.timeZone, 'Asia/Shanghai');
+    const cost = stats.find((s: { t: string }) => s.t === '区间 Token 成本');
     assert.equal(cost.v, '1.50'); // 1_500_000 微元 = 1.5 元
-    const diamond = stats.find((s: { t: string }) => s.t === '钻石消耗');
-    assert.ok(diamond, '「钻石消耗」卡存在');
-    // 无前期（前 7 天）数据 → deltaPct null
+    const diamond = stats.find((s: { t: string }) => s.t === '区间钻石消耗');
+    assert.ok(diamond, '「区间钻石消耗」卡存在');
+    // 无前一等长区间数据 → deltaPct null
     assert.equal(cost.deltaPct, null);
   });
 });
