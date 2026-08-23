@@ -814,7 +814,7 @@ function sampleChart() {
   const phases = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
   const turning = new Set([3, 7, 11]);
   return {
-    engineVersion: 'paipan-v4',
+    engineVersion: 'paipan-v6',
     hourKnown: true,
     pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
     dayMaster: { gan: '戊', element: '土', strength: '身强' },
@@ -824,21 +824,7 @@ function sampleChart() {
   };
 }
 
-const MOCK_CHART_CITIES = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '重庆', '西安', '哈尔滨', '乌鲁木齐', '拉萨', '长春', '长沙'];
-function matchChartCity(place) {
-  if (!place) return null;
-  const normalized = String(place).replace(/特别行政区|(?:壮族|回族|维吾尔族)?自治区|自治州|地区/g, '').replace(/[省市区县旗]/g, '').replace(/[，,、；;\s]+/g, '').trim();
-  if (normalized.length < 2) return null;
-  if (MOCK_CHART_CITIES.includes(normalized)) return normalized;
-  let best = null;
-  MOCK_CHART_CITIES.forEach((city) => {
-    const index = normalized.indexOf(city);
-    if (index >= 0 && (!best || index < best.index || index === best.index && city.length > best.city.length)) best = { city, index };
-  });
-  return best ? best.city : null;
-}
-
-function sampleChartReport(birthPlace, trueSolarApplied) {
+function sampleChartReport(birthPlace) {
   const year = new Date().getFullYear();
   const pillar = (ganZhi, shiShenGan, hideGan, shiShenZhi, naYin) => ({ ganZhi, shiShenGan, hideGan, shiShenZhi, naYin });
   const star = (name, brightness, mutagen) => ({ name, brightness, mutagen });
@@ -857,8 +843,8 @@ function sampleChartReport(birthPlace, trueSolarApplied) {
     { name: '兄弟', stem: '戊', branch: '辰', isSoul: false, isBody: false, majorStars: [star('天同', '平', null), star('天梁', '得', null)], minorStars: ['天钺'], adjectiveStars: ['天喜'], decadal: { start: 116, end: 125 } },
   ];
   return {
-    engineVersion: 'paipan-v4',
-    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied: Boolean(trueSolarApplied), birthPlace: birthPlace || null },
+    engineVersion: 'paipan-v6',
+    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, inputTime: '10:30', chartTime: '1990-06-18 10:30', timePrecision: 'exact', timeStandard: 'civil', dayBoundary: 'zichu', hourLabel: '巳时', trueSolarApplied: false, birthPlace: birthPlace || null },
     bazi: {
       pillars: {
         year: pillar('庚午', '偏财', ['丁', '己'], ['正印', '劫财'], '路旁土'),
@@ -897,7 +883,7 @@ function sampleChartReport(birthPlace, trueSolarApplied) {
         { star: '天梁', hua: '科', palace: '仆役' }, { star: '廉贞', hua: '忌', palace: '财帛' },
       ],
     },
-    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v4 · 数据由算法层确定性推算，${year} 年为准。`,
+    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v6 · 数据由算法层确定性推算，${year} 年为准。`,
   };
 }
 
@@ -909,14 +895,12 @@ function saveBazi(body) {
   const bazi = Object.assign({}, body || {});
   wx.setStorageSync(storageKey('bazi'), bazi);
   const believe = bazi.believe !== false;
-  const matchedCity = matchChartCity(bazi.birthPlace);
-  return Promise.resolve({ believe, chart: believe ? sampleChart() : null, matchedCity });
+  return Promise.resolve({ believe, chart: believe ? sampleChart() : null, matchedCity: null });
 }
 function chartReport() {
   const bazi = wx.getStorageSync(storageKey('bazi')) || null;
   if (!bazi) return Promise.resolve({ needBazi: true });
-  const matchedCity = matchChartCity(bazi.birthPlace);
-  return Promise.resolve(sampleChartReport(bazi.birthPlace, Boolean(matchedCity)));
+  return Promise.resolve(sampleChartReport(bazi.birthPlace));
 }
 function dossier() { return Promise.resolve(wx.getStorageSync(storageKey('dossier')) || { report: null }); }
 function generateDossier() { const report = { name: '主公', headline: '把复杂经营问题收成一条可验证的主线。', verse: '先定一事，再聚众力', sections: [{ key: 'main', no: '一', label: '当前判断', blocks: [{ type: 'para', text: '这是原生 mock 生成的完整履历。连接服务端后会根据真实档案、对话和案卷生成。' }] }] }; wx.setStorageSync(storageKey('dossier'), { report }); return Promise.resolve({ report, generatedAt: new Date().toISOString() }); }

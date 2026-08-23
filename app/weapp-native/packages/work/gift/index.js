@@ -3,10 +3,8 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const canvas = require('./canvas');
 const { withShare } = require('../../../services/share');
+const birthTime = require('../../../services/birth-time');
 
-const shichen = [
-  ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
-].map(([label, hour], index) => ({ label, hour, index }));
 
 function validDate(calendar, year, month, day) {
   const y = Number(year), m = Number(month), d = Number(day);
@@ -31,7 +29,7 @@ function paint(context, width, height, content) {
 }
 
 Page(withShare({
-  data: baseData({ shichen, name: '', calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', consent: false, valid: false, busy: false, imgPath: '', disabled: false, showLogin: false }),
+  data: baseData({ name: '', calendar: 'solar', year: '', month: '', day: '', timeKnown: false, birthTime: birthTime.DEFAULT_BIRTH_TIME, gender: 'male', place: '', consent: false, valid: false, busy: false, imgPath: '', disabled: false, showLogin: false }),
   onLoad() {
     const snapshot = store.snapshot();
     const disabled = Boolean(snapshot.me && snapshot.me.features && snapshot.me.features.fortune === false);
@@ -42,7 +40,9 @@ Page(withShare({
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); store.loadMe(); },
   input(event) { const field = event.currentTarget.dataset.field; this.setData({ [field]: event.detail.value }); this.refreshValid(); },
-  select(event) { const field = event.currentTarget.dataset.field; let value = event.currentTarget.dataset.value; if (field === 'hourIdx') value = Number(value); this.setData({ [field]: value }); this.refreshValid(); },
+  select(event) { const field = event.currentTarget.dataset.field; const value = event.currentTarget.dataset.value; this.setData({ [field]: value }); this.refreshValid(); },
+  setTimeKnown(event) { this.setData({ timeKnown: event.currentTarget.dataset.known === '1' }); },
+  changeBirthTime(event) { this.setData({ birthTime: event.detail.value }); },
   toggleConsent() { this.setData({ consent: !this.data.consent }); this.refreshValid(); },
   refreshValid() { setTimeout(() => this.setData({ valid: Boolean(String(this.data.name || '').trim() && validDate(this.data.calendar, this.data.year, this.data.month, this.data.day) && this.data.consent) }), 0); },
   async makeCard() {
@@ -50,7 +50,8 @@ Page(withShare({
     if (!store.isAuthed()) { this.setData({ showLogin: true }); return; }
     this.setData({ busy: true, imgPath: '' }); wx.showLoading({ title: '排盘出卡中…' });
     try {
-      const content = await api.fateCardPreview({ friendName: this.data.name.trim(), friendBazi: { calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: shichen[this.data.hourIdx].hour, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined }, consent: true });
+      const time = birthTime.parts(this.data.timeKnown, this.data.birthTime);
+      const content = await api.fateCardPreview({ friendName: this.data.name.trim(), friendBazi: { calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: time.hour, minute: time.minute, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined }, consent: true });
       const imgPath = await canvas.render(this, 'fateCanvas', 600, 880, (context, width, height) => paint(context, width, height, content));
       this.setData({ imgPath }); wx.showToast({ title: '卡已生成 · 保存或发给朋友', icon: 'none' });
     } catch (error) {

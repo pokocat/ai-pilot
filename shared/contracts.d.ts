@@ -273,6 +273,29 @@ export interface DossierView {
   generatedAt: string | null;
 }
 
+/** 命盘生辰输入 SSOT。minute 缺省只兼容旧版「时辰档位」数据；新端必须在 hour 已知时提交 0-59 的准确分钟。 */
+export interface BaziInput {
+  calendar?: 'solar' | 'lunar';
+  year?: number;
+  month?: number;
+  day?: number;
+  hour?: number | null;
+  minute?: number;
+  gender?: 'male' | 'female';
+  birthPlace?: string;
+  longitude?: number;             // 旧客户端兼容字段；paipan-v6 起忽略，不参与排盘
+  believe?: boolean;
+}
+
+/** 命盘档头的时间口径：直接使用出生钟表时间，并明确 23:00 子初换日。 */
+export interface MingpanTimeBasis {
+  inputTime: string | null;       // 用户出生钟表时间 HH:mm；缺时辰为 null
+  chartTime: string | null;       // 实际排盘时间 YYYY-MM-DD HH:mm；v6 起等于出生证明上的法定钟表时间
+  timePrecision: 'exact' | 'shichen' | 'unknown';
+  timeStandard: 'civil';          // 统一使用出生证明上的法定钟表时间，不自动换算真太阳时
+  dayBoundary: 'zichu';           // 23:00 起按第二天子时排盘
+}
+
 // —— 账本闭环（F-8/P-2）：决策账本 + 天机账本，App 可查可验证。服务端 decisionLog.ts/prophecyLog.ts 有同构镜像定义。——
 export interface DecisionView {
   id: string; seq: number; scene: string; decision: string; reasons: string[];

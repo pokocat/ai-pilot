@@ -4,10 +4,8 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const canvas = require('../gift/canvas');
 const { withShare, pathWithCode } = require('../../../services/share');
+const birthTime = require('../../../services/birth-time');
 
-const shichen = [
-  ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
-].map(([label, hour], index) => ({ label, hour, index }));
 const phaseHints = { 进攻: '签约、扩张、上新动作放这几个月', 平稳: '正常推进、练内功、补短板', 防守: '收缩保现金流，不宜重大决策' };
 
 function validDate(calendar, year, month, day) {
@@ -38,7 +36,7 @@ function paint(context, width, height, chart) {
 }
 
 Page(withShare({
-  data: baseData({ authed: false, chart: null, loaded: false, disabled: false, shichen, calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', valid: false, busy: false, imgPath: '', showLogin: false }),
+  data: baseData({ authed: false, chart: null, loaded: false, disabled: false, calendar: 'solar', year: '', month: '', day: '', timeKnown: false, birthTime: birthTime.DEFAULT_BIRTH_TIME, gender: 'male', place: '', valid: false, busy: false, imgPath: '', showLogin: false }),
   onShow() {
     const authed = store.isAuthed(); this.setData({ authed });
     if (!authed) { this.setData({ loaded: true }); return; }
@@ -54,14 +52,17 @@ Page(withShare({
     catch (error) { const code = String(error.code || error.data && error.data.code || ''); if (code === 'FEATURE_DISABLED') this.setData({ disabled: true, chart: null, loaded: true }); else { const kind = store.handleApiError(error, { silent: true }); this.setData({ chart: null, loaded: true, authed: kind !== 'unauthorized', showLogin: kind === 'unauthorized' }); } }
   },
   input(event) { this.setData({ [event.currentTarget.dataset.field]: event.detail.value }); this.refreshValid(); },
-  select(event) { const field = event.currentTarget.dataset.field; let value = event.currentTarget.dataset.value; if (field === 'hourIdx') value = Number(value); this.setData({ [field]: value }); this.refreshValid(); },
+  select(event) { const field = event.currentTarget.dataset.field; const value = event.currentTarget.dataset.value; this.setData({ [field]: value }); this.refreshValid(); },
+  setTimeKnown(event) { this.setData({ timeKnown: event.currentTarget.dataset.known === '1' }); },
+  changeBirthTime(event) { this.setData({ birthTime: event.detail.value }); },
   refreshValid() { setTimeout(() => this.setData({ valid: validDate(this.data.calendar, this.data.year, this.data.month, this.data.day) }), 0); },
   async saveBirth() {
     if (!this.data.valid || this.data.busy) return;
     this.setData({ busy: true }); wx.showLoading({ title: '排盘中…' });
     try {
-      const result = await api.saveBazi({ calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: shichen[this.data.hourIdx].hour, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined });
-      if (result.chart) { this.setData({ chart: normalizeChart(result.chart) }); const place = this.data.place.trim(); wx.showToast({ title: place ? result.matchedCity ? `已按${result.matchedCity}校正真太阳时` : `未识别「${place}」，按北京时间排盘` : '命盘已生成', icon: 'none' }); } else wx.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
+      const time = birthTime.parts(this.data.timeKnown, this.data.birthTime);
+      const result = await api.saveBazi({ calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: time.hour, minute: time.minute, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined });
+      if (result.chart) { this.setData({ chart: normalizeChart(result.chart) }); wx.showToast({ title: this.data.place.trim() ? '已按出生钟表时间排盘' : '命盘已生成', icon: 'none' }); } else wx.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
     } catch (error) { const code = String(error.code || error.data && error.data.code || ''); if (code === 'FEATURE_DISABLED') { this.setData({ disabled: true }); wx.showToast({ title: '命理能力已下线', icon: 'none' }); } else if (store.handleApiError(error, { silent: true }) === 'unauthorized') this.setData({ showLogin: true }); else wx.showToast({ title: '排盘失败，请重试', icon: 'none' }); }
     finally { wx.hideLoading(); this.setData({ busy: false }); }
   },

@@ -1684,10 +1684,10 @@ test('原生 mock 命盘按账号持久化并返回日历与报告可消费结�
     assert.deepEqual(await mock.chart(), { bazi: null, chart: null });
     assert.deepEqual(await mock.chartReport(), { needBazi: true });
 
-    const body = { calendar: 'solar', year: 1990, month: 6, day: 18, hour: 9, gender: 'male', birthPlace: '北京市朝阳区' };
+    const body = { calendar: 'solar', year: 1990, month: 6, day: 18, hour: 9, minute: 0, gender: 'male', birthPlace: '北京市朝阳区' };
     const saved = await mock.saveBazi(body);
     assert.equal(saved.believe, true);
-    assert.equal(saved.matchedCity, '北京');
+    assert.equal(saved.matchedCity, null);
     assert.equal(saved.chart.monthlyOutlook.months.length, 12);
     assert.ok(saved.chart.dayMaster.gan);
     assert.ok(saved.chart.pattern.name);
@@ -1698,7 +1698,9 @@ test('原生 mock 命盘按账号持久化并返回日历与报告可消费结�
 
     const report = await mock.chartReport();
     assert.equal(report.base.birthPlace, body.birthPlace);
-    assert.equal(report.base.trueSolarApplied, true);
+    assert.equal(report.base.trueSolarApplied, false);
+    assert.equal(report.base.timeStandard, 'civil');
+    assert.equal(report.base.dayBoundary, 'zichu');
     assert.ok(report.bazi.pillars.year.ganZhi);
     assert.ok(Array.isArray(report.bazi.pillars.year.hideGan));
     assert.equal(typeof report.bazi.wuxingCount.counts.木, 'number');

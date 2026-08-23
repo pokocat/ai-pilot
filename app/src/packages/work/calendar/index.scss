@@ -59,7 +59,7 @@
   background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
 }
 .tc-date { display: flex; gap: 8px; margin-top: 12px; }
-/* 出生地行：独占一行（真太阳时校正用） */
+/* 出生地行：独占一行，仅作档案记录。 */
 .tcal .tc-place { width: 100%; box-sizing: border-box; margin-top: 10px; }
 .tc-date .tc-y { flex: 1.4; }
 .tc-date .tc-md { flex: 1; }

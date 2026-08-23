@@ -292,7 +292,7 @@
 .mp-date .mp-y { flex: 1.4; }
 .mp-date .mp-md { flex: 1; }
 .mp-form-tip { display: block; margin-top: 12px; font-size: 11px; line-height: 1.7; color: var(--ink-3); }
-/* 出生地行：与日期行同宽独占一行（真太阳时校正用） */
+/* 出生地行：与日期行同宽独占一行，仅作档案记录。 */
 .mp-place { width: 100%; box-sizing: border-box; margin-top: 10px; }
 .mp-region { min-height: 48px; margin-top: 10px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; }
 .mp-region-copy { min-width: 0; display: flex; align-items: center; gap: 12px; }
@@ -312,17 +312,6 @@
 .mp-sg-body { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; }
 .mp-sg-item { font-size: var(--fs-14); color: var(--ink); background: var(--surface-2); padding: 4px 12px; border-radius: 8px; }
 .mp-sg-none { font-size: var(--fs-13); color: var(--ink-3); }
-
-/* 未做真太阳时校正的提示条（档头下方）——只在有时辰且未校正时出现，点开补生辰表单。
-   只亮「已校正」徽章、未校正时一片沉默，等于默认让用户以为自己的盘已经是最准的。 */
-.mp-truesolar-hint {
-  margin-top: 12px; padding: 10px 12px;
-  border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface-2);
-}
-.mp-truesolar-hint:active { opacity: .85; }
-.mp-tsh-t { display: block; font-size: var(--fs-12); font-weight: 600; color: var(--ink-2); }
-.mp-tsh-s { display: block; margin-top: 3px; font-size: 11px; color: var(--accent-deep); font-weight: 600; }
 
 /* 显式转发按钮：重置微信 Button 默认样式，与 .mp-btn.ghost 同形 */
 .mp .mp-share {

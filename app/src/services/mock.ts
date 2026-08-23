@@ -314,7 +314,7 @@ function sampleChartM(): ChartSummary {
   const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
   const TURN = new Set([3, 7, 11]);
   return {
-    engineVersion: 'paipan-v4',
+    engineVersion: 'paipan-v6',
     hourKnown: true,
     pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
     dayMaster: { gan: '戊', element: '土', strength: '身强' },
@@ -326,24 +326,7 @@ function sampleChartM(): ChartSummary {
 
 // 确定性样例命盘报告（mock 专用 UI 预览假数据，结构对齐 MingpanReport；非真排盘）——
 // 让「命盘报告」页在本地 mock/H5 下可完整走查六大区块（含 12 宫 / 四化 / 时间轴）。
-// 出生地 → 城市（mock）：镜像服务端 server/src/data/cityLongitude.ts 收紧后的口径——
-// 精确匹配优先、再按文本出现顺序取第一个城市、单字一律不匹配。只取常用几座城做本地走查，
-// 不复制整表（真值以服务端为准，这里只为让「已识别 / 未识别」两条 UI 分支都能在 H5 下走到）。
-const MOCK_CITIES = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '重庆', '西安', '哈尔滨', '乌鲁木齐', '拉萨', '长春', '长沙'];
-function mockMatchCity(place?: string): string | null {
-  if (!place) return null;
-  const s = place.replace(/特别行政区|(?:壮族|回族|维吾尔族)?自治区|自治州|地区/g, '').replace(/[省市区县旗]/g, '').replace(/[，,、；;\s]+/g, '').trim();
-  if (s.length < 2) return null;
-  if (MOCK_CITIES.includes(s)) return s;
-  let best: { city: string; index: number } | null = null;
-  for (const c of MOCK_CITIES) {
-    const index = s.indexOf(c);
-    if (index >= 0 && (!best || index < best.index || (index === best.index && c.length > best.city.length))) best = { city: c, index };
-  }
-  return best?.city ?? null;
-}
-
-function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanReport {
+function sampleReportM(birthPlace?: string): MingpanReport {
   const yr = new Date().getFullYear();
   const P = (ganZhi: string, sg: string, hide: string[], sz: string[], ny: string) =>
     ({ ganZhi, shiShenGan: sg, hideGan: hide, shiShenZhi: sz, naYin: ny });
@@ -364,8 +347,8 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
     { name: '兄弟', stem: '戊', branch: '辰', isSoul: false, isBody: false, majorStars: [M('天同', '平', null), M('天梁', '得', null)], minorStars: ['天钺'], adjectiveStars: ['天喜'], decadal: { start: 116, end: 125 } },
   ];
   return {
-    engineVersion: 'paipan-v4',
-    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied, birthPlace },
+    engineVersion: 'paipan-v6',
+    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, inputTime: '10:30', chartTime: '1990-06-18 10:30', timePrecision: 'exact', timeStandard: 'civil', dayBoundary: 'zichu', hourLabel: '巳时', trueSolarApplied: false, birthPlace },
     bazi: {
       pillars: {
         year: P('庚午', '偏财', ['丁', '己'], ['正印', '劫财'], '路旁土'),
@@ -416,7 +399,7 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
         { star: '廉贞', hua: '忌', palace: '财帛' },
       ],
     },
-    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v4 · 数据由算法层确定性推算，${yr} 年为准。`,
+    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v6 · 数据由算法层确定性推算，${yr} 年为准。`,
   };
 }
 
@@ -1595,11 +1578,8 @@ export const mock = {
     const { token, d } = current();
     (d as { bazi?: object }).bazi = body; save(token, d);
     const believe = (body as { believe?: boolean }).believe !== false;
-    // 出生地要真的被消费：以前 mock 只把 body 整包存下、返回与入参无关的固定样例盘，
-    // 于是「表单没传 birthPlace」这个缺口在本地/H5 走查里完全看不出来——正是它藏了这么久的原因。
-    // （ChartSummary 没有 trueSolarApplied 字段，校正态只体现在命盘报告的 base 上，见 myChartReport。）
-    const matchedCity = mockMatchCity((body as { birthPlace?: string }).birthPlace);
-    return delay({ believe, chart: believe ? sampleChartM() : null, matchedCity });
+    // v6 统一按法定钟表时间排盘；出生地仅留档，不再返回“已校正城市”的误导回执。
+    return delay({ believe, chart: believe ? sampleChartM() : null, matchedCity: null });
   },
   // bazi 用 BaziBody 而不是 object：调用方（命盘页「修改生辰」）要按字段回填表单，
   // 返回 object 会让 api.myChart() 的联合类型被拖宽成 object，取 .year 直接编译不过。
@@ -1612,10 +1592,7 @@ export const mock = {
   async myChartReport(): Promise<MingpanReport | { needBazi: true }> {
     const bazi = (current().d as { bazi?: { believe?: boolean; birthPlace?: string } }).bazi ?? null;
     if (!bazi) return delay({ needBazi: true } as { needBazi: true });
-    // 校正态跟着用户实际填的出生地走，不再写死 true——写死会把「未校正」那条提示的 UI 整个盖掉，
-    // 而未校正恰恰是存量用户 100% 会遇到的状态。
-    const matchedCity = mockMatchCity(bazi.birthPlace);
-    return delay(sampleReportM(bazi.birthPlace, !!matchedCity));
+    return delay(sampleReportM(bazi.birthPlace));
   },
   // 战略档案（mock）：谶语门槛与真实端同一条（有八字且信命理 → 当年有谶），
   // 老板页「年度谶语」卡两态（出谶 / 求谶引导）才能在本地 mock 下都走查到——

@@ -1,13 +1,12 @@
-// 排盘引擎 v4：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
+// 排盘引擎 v6：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
 // 铁律：算 → 存 → 拼指令，AI 只负责行文。本文件产出的所有结论都是可复算的（同输入同输出），
 // 引擎带版本号（升级后可按版本批量复算）；启发式规则（身强弱/喜用/攻守）在 basis 字段写明依据，
 // 属 v1 简化口径，后续版本细化时以版本号区分，不悄悄改变历史命盘。
 //
-// 引擎边界（v4）：
-// - 真太阳时：经度平太阳时（(经度-120)×4 分钟）+ 均时差（Spencer 级数，见 equationOfTimeMinutes），
-//   合成后误差降到分钟级；仅在有经度时叠加（无经度不校正）。
-// - 子初换日：EightChar.setSect(1)——23:00 起进入次日子时，日柱与命理日期均按次日计算；
-//   前端时辰表拆分子正(hour 0)/子初(hour 23)，避免把两个子时入口拍平成同一个小时。
+// 引擎边界（v6）：
+// - 时间口径：统一使用出生证明上的法定钟表时间；出生地仅作档案信息，不自动换算真太阳时。
+// - 换日口径：EightChar.setSect(1)——23:00-23:59 自动按第二天子时排盘；
+//   只取消出生地校时，不改变产品已确认的 23:00 子初换日规则。
 // - 旺衰/格局/调候：移植子平法加权算法（services/baziEnrich.ts，MIT 出处见该文件头），
 //   月令权重最高、透根分层；格局按月令藏干透干取格；新增调候用神。仍不处理从格/化格等特殊格局
 //   （极旺/极弱会在结论标「可能从强/从弱」提示，但正格照常论）。
@@ -21,10 +20,9 @@ import {
   type SiZhu, type Tiangan, type Dizhi, type WangShuaiVerdict,
 } from './baziEnrich.js';
 
-// v4 将此前 v3 的晚子时当日口径改为命理界更常用的 23:00 子初换日，并让报告公历/农历展示
-// 与日柱共用同一有效日期。存量 v3 在首次 loadChart 时惰性重算，避免报告与对话拿到两套日柱；
-// 更早的 v1/v2 仍原样读取，不静默改写历史快照。新排/主动重排一律写 v4。
-export const PAIPAN_ENGINE_VERSION = 'paipan-v4';
+// v6 在保留 v5 精确分钟与 23:00 子初换日的基础上统一产品流派：法定钟表时间，不换真太阳时。
+// 存量 v3/v4/v5 首读重算为 v6，v1/v2 继续保留历史快照。
+export const PAIPAN_ENGINE_VERSION = 'paipan-v6';
 
 export interface PaipanInput {
   calendar: 'solar' | 'lunar';
@@ -33,9 +31,10 @@ export interface PaipanInput {
   day: number;
   hour?: number | null;   // 0-23；null/undefined = 时辰不确定
   minute?: number;
+  timePrecision?: 'exact' | 'shichen' | 'unknown'; // minute 缺省的旧端按时辰代表值兼容
   gender: 'male' | 'female';
   birthPlace?: string;
-  longitude?: number;     // 东经；提供则做真太阳时校正
+  longitude?: number;     // 旧客户端兼容字段；v6 不参与排盘
 }
 
 export type PaipanValidation = { ok: true; input: PaipanInput } | { ok: false; error: string };
@@ -56,15 +55,17 @@ export function validatePaipanInput(b: Partial<PaipanInput> | undefined, maxYear
   if (hourKnown && (!Number.isInteger(Number(raw.hour)) || Number(raw.hour) < 0 || Number(raw.hour) > 23)) {
     return { ok: false, error: '时辰不合法（0-23，或不填表示不确定）' };
   }
-  // 出生地：只做长度上限。命盘页 region picker 会提交省/市/区全称，40 字覆盖最长行政区组合；
-  // 内容不校验——城市识别由 matchCity 负责，
-  // 识别不出就是不校正，不该在这里把用户挡回去。
+  const minuteProvided = raw.minute !== null && raw.minute !== undefined;
+  if (minuteProvided && (!Number.isInteger(Number(raw.minute)) || Number(raw.minute) < 0 || Number(raw.minute) > 59)) {
+    return { ok: false, error: '出生分钟不合法（0-59）' };
+  }
+  // 出生地只作档案记录并做长度上限。命盘页 region picker 会提交省/市/区全称，
+  // 40 字覆盖最长行政区组合；v6 不根据它换算时间。
   if (raw.birthPlace !== undefined && raw.birthPlace !== null) {
     if (typeof raw.birthPlace !== 'string') return { ok: false, error: '出生地格式不合法' };
     if (raw.birthPlace.length > 40) return { ok: false, error: '出生地过长（不超过 40 字）' };
   }
-  // 经度：以前原样透传，字符串 "121.5" 会静默不校正、NaN 会一路落库让 Prisma 抛错，
-  // 最后被外层 catch 成「生辰无法排盘，请检查日期」——错误信息与真实原因完全无关。
+  // 经度仅为旧客户端兼容输入；虽不参与 v6 排盘，仍拒绝非法值，避免脏数据穿透接口。
   if (raw.longitude !== undefined && raw.longitude !== null) {
     const lng = Number(raw.longitude);
     if (!Number.isFinite(lng) || lng < -180 || lng > 180) return { ok: false, error: '经度不合法' };
@@ -74,7 +75,9 @@ export function validatePaipanInput(b: Partial<PaipanInput> | undefined, maxYear
     ok: true,
     input: {
       calendar: raw.calendar, year: yearNum, month: monthNum, day: dayNum,
-      hour: hourKnown ? Number(raw.hour) : null, minute: raw.minute ?? 0,
+      hour: hourKnown ? Number(raw.hour) : null,
+      minute: hourKnown ? (minuteProvided ? Number(raw.minute) : representativeMinute(Number(raw.hour))) : 0,
+      timePrecision: hourKnown ? (minuteProvided ? 'exact' : 'shichen') : 'unknown',
       gender: raw.gender,
       birthPlace: place || undefined,
       longitude: raw.longitude === undefined || raw.longitude === null ? undefined : Number(raw.longitude),
@@ -100,9 +103,14 @@ export interface MonthOutlook {
 
 export interface ChartView {
   engineVersion: string;
-  solarDate: string;      // 真太阳时校正 + 子初换日后用于排盘的公历有效日期 YYYY-MM-DD
-  lunarDate: string;      // 与日柱共用同一有效日期的农历（中文）
+  solarDate: string;      // 法定钟表时间 + 23:00 子初换日后的排盘有效日期 YYYY-MM-DD
+  lunarDate: string;      // 与日柱共用同一排盘有效日期的农历（中文）
   hourKnown: boolean;
+  inputTime: string | null;       // 用户出生钟表时间 HH:mm；旧时辰档位为代表值
+  chartTime: string | null;       // 实际排盘时间 YYYY-MM-DD HH:mm（法定钟表时间）
+  timePrecision: 'exact' | 'shichen' | 'unknown';
+  timeStandard: 'civil';
+  dayBoundary: 'zichu';
   trueSolarApplied: boolean;
   gender: '男' | '女';
   pillars: { year: PillarView; month: PillarView; day: PillarView; time: PillarView | null };
@@ -154,6 +162,15 @@ function hourToTimeIndex(hour: number): number {
 
 function pad2(n: number): string { return `${n}`.padStart(2, '0'); }
 
+/** 旧端只选择时辰档位时的代表分钟：两段半时辰取中点，其余两小时档位的代表 hour 已在中点。 */
+export function representativeMinute(hour: number | null | undefined): number {
+  return hour === 0 || hour === 23 ? 30 : 0;
+}
+
+function dateTimeOf(solar: Solar): string {
+  return `${solar.getYear()}-${pad2(solar.getMonth())}-${pad2(solar.getDay())} ${pad2(solar.getHour())}:${pad2(solar.getMinute())}`;
+}
+
 /** 纯日历加一天：用 UTC 避开宿主时区/DST，保留时分秒。 */
 function nextCalendarDay(solar: Solar): Solar {
   const utc = new Date(Date.UTC(
@@ -166,63 +183,23 @@ function nextCalendarDay(solar: Solar): Solar {
   );
 }
 
-/**
- * 均时差（equation of time），单位分钟：真太阳时 = 平太阳时 + EoT。
- * 采用 Spencer(1971) 级数近似（年内日序驱动），全年误差 <0.5 分钟，远小于时辰颗粒度。
- * 符号约定：视太阳超前于平太阳为正——11 月初 ≈ +16 分钟，2 月中 ≈ -14 分钟。
- * 纯函数、无副作用，便于单测锚定。
- */
-export function equationOfTimeMinutes(year: number, month: number, day: number): number {
-  // 年内日序 N（1 = 元旦），用 UTC 差避免时区/夏令时污染。
-  const n = Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 1)) / 86400000) + 1;
-  const b = (2 * Math.PI * (n - 1)) / 365;
-  return 229.18 * (
-    0.000075
-    + 0.001868 * Math.cos(b) - 0.032077 * Math.sin(b)
-    - 0.014615 * Math.cos(2 * b) - 0.040849 * Math.sin(2 * b)
-  );
-}
-
-/** 解析输入 → 排盘用公历时刻（含农历转换与真太阳时校正）。 */
-function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boolean; hourKnown: boolean } {
+/** 解析输入 → 排盘用公历时刻。v6 统一按出生证明上的法定钟表时间，不做真太阳时校正。 */
+function resolveSolar(input: PaipanInput): { solar: Solar; hourKnown: boolean } {
   const hourKnown = input.hour !== null && input.hour !== undefined;
   const hour = hourKnown ? (input.hour as number) : 12; // 缺时辰按正午近似（时柱不输出）
-  const minute = input.minute ?? 0;
+  const minute = input.minute ?? representativeMinute(input.hour);
   let solar: Solar;
   if (input.calendar === 'lunar') {
     solar = Lunar.fromYmdHms(input.year, input.month, input.day, hour, minute, 0).getSolar();
   } else {
     solar = Solar.fromYmdHms(input.year, input.month, input.day, hour, minute, 0);
   }
-  // 真太阳时（v3）：中国标准时按东经 120° 定，经度平太阳时（每偏 1° 校正 4 分钟）+ 均时差（EoT）。
-  // 只在有经度时叠加（无经度不校正，与既有口径一致）。EoT 按校正前的公历日取（同日内差异可忽略）。
-  let trueSolarApplied = false;
-  if (hourKnown && typeof input.longitude === 'number' && input.longitude > 70 && input.longitude < 140) {
-    const eot = equationOfTimeMinutes(solar.getYear(), solar.getMonth(), solar.getDay());
-    const offsetMin = Math.round((input.longitude - 120) * 4 + eot);
-    // 分钟溢出借 Date 做进位（跨时/跨日/跨月/跨年），但必须走 UTC 而不是本地时间。
-    // 本地时间构造 `new Date(y, m-1, d, h, min+off)` 会掉进服务器时区的 DST 缺口：
-    // 实测 TZ=America/Los_Angeles 下 2021-03-14 02:57 被静默平移成 03:57（整整一小时，
-    // 足以改时柱）。生产在 Asia/Shanghai（1991 年后无夏令时）碰不到，但这与本文件
-    // 「同输入同输出、可复算」的承诺矛盾，且换台机器跑测试就会出现两套四柱。
-    // UTC 构造与回读全程不经过任何时区规则，纯日历算术。
-    if (offsetMin !== 0) {
-      const utc = new Date(Date.UTC(solar.getYear(), solar.getMonth() - 1, solar.getDay(), solar.getHour(), solar.getMinute() + offsetMin, 0));
-      solar = Solar.fromYmdHms(
-        utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate(),
-        utc.getUTCHours(), utc.getUTCMinutes(), 0,
-      );
-    }
-    // 有经度就是「已按经度校正」，哪怕这一天的偏移恰好抵消为 0（杭州 120.2° 全年有约十天如此）。
-    // 旧实现把 offsetMin===0 也算作未校正，前端徽记会显示「未校正」，是错的暗示。
-    trueSolarApplied = true;
-  }
-  return { solar, trueSolarApplied, hourKnown };
+  return { solar, hourKnown };
 }
 
 /**
  * 紫微全盘（十二宫展开）：与 computeChart 内命宫/身宫主星同一调用口径——
- * 同样的真太阳时校正后本地时间、同样的 hourToTimeIndex（含子初映射）、fixLeap=true、zh-CN。
+ * 同样的法定钟表时间、同样的 hourToTimeIndex（含早/晚子时映射）、fixLeap=true、zh-CN。
  * 缺时辰返回 null（紫微必须有时辰立盘）。命盘报告层（mingpan.ts）复用此函数展开全盘，
  * 保证与对话简报里的命宫/身宫主星逐字一致，不产生第二套排盘口径。
  * 返回类型由 iztro 推断（FunctionalAstrolabe），下游用 ReturnType 取用，避免深路径类型导入。
@@ -230,6 +207,9 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
 export function buildZiweiAstrolabe(input: PaipanInput) {
   const { solar, hourKnown } = resolveSolar(input);
   if (!hourKnown) return null;
+  // iztro 的 dayDivide 是进程级全局配置，不能只依赖当前版本默认值。
+  // 产品流派已固定为 23:00 晚子计次日；每次立盘前显式恢复 forward，避免其他调用或升级把紫微悄悄切回当天。
+  astro.config({ dayDivide: 'forward' });
   return astro.bySolar(
     `${solar.getYear()}-${solar.getMonth()}-${solar.getDay()}`,
     hourToTimeIndex(solar.getHour()),
@@ -241,13 +221,11 @@ export function buildZiweiAstrolabe(input: PaipanInput) {
 
 /** 排盘主入口：同输入必同输出（monthlyOutlook 按 targetYear 计算，由调用方传入）。 */
 export function computeChart(input: PaipanInput, targetYear: number): ChartView {
-  const { solar, trueSolarApplied, hourKnown } = resolveSolar(input);
+  const { solar, hourKnown } = resolveSolar(input);
   const lunar = solar.getLunar();
   const ec = lunar.getEightChar();
-  // 子初换日：显式 setSect(1)——23:00-23:59 的日柱按次日算，时柱也随次日日干起子时。
-  // lunar-typescript@1.8.6 默认是 sect 2（晚子仍算当天），必须显式固化，防库升级或默认值漂移。
+  // 用户确认：23:00-23:59 自动计为第二天子时。显式固化 sect 1，避免依赖库默认值。
   ec.setSect(1);
-  // 报告上的公历/农历也必须与日柱同日。否则会出现“日柱已换、农历仍停在前一天”的半修复。
   const effectiveSolar = hourKnown && solar.getHour() === 23 ? nextCalendarDay(solar) : solar;
   const effectiveLunar = effectiveSolar.getLunar();
 
@@ -338,7 +316,12 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
     solarDate: `${effectiveSolar.getYear()}-${pad2(effectiveSolar.getMonth())}-${pad2(effectiveSolar.getDay())}`,
     lunarDate: `${effectiveLunar.getYearInChinese()}年${effectiveLunar.getMonthInChinese()}月${effectiveLunar.getDayInChinese()}`,
     hourKnown,
-    trueSolarApplied,
+    inputTime: hourKnown ? `${pad2(solar.getHour())}:${pad2(solar.getMinute())}` : null,
+    chartTime: hourKnown ? dateTimeOf(solar) : null,
+    timePrecision: hourKnown ? (input.timePrecision ?? (input.minute === undefined ? 'shichen' : 'exact')) : 'unknown',
+    timeStandard: 'civil',
+    dayBoundary: 'zichu',
+    trueSolarApplied: false,
     gender: input.gender === 'male' ? '男' : '女',
     pillars,
     dayMaster: {
@@ -376,8 +359,8 @@ export async function computeAndStoreChart(args: {
     birthHour: args.input.hour ?? null,
     birthMinute: args.input.minute ?? null,
     birthPlace: args.input.birthPlace ?? null,
-    longitude: args.input.longitude ?? null,
-    trueSolarApplied: chart.trueSolarApplied,
+    longitude: null,
+    trueSolarApplied: false,
     chartJson: chart as unknown as object,
   };
   await prisma.natalChart.upsert({
@@ -393,14 +376,21 @@ export async function loadChart(userId: string): Promise<ChartView | null> {
   const row = await prisma.natalChart.findUnique({ where: { userId } });
   if (!row) return null;
   const stored = row.chartJson as unknown as ChartView;
-  // v4 是日柱正确性修复，不允许报告页现算 v4、对话却继续读 v3。仅对上一版 v3 惰性升级；
-  // v1/v2 可能还承载更早算法差异，继续保持可追溯，不在读路径无边界重排。
-  if (row.engineVersion !== 'paipan-v3') return stored;
+  // v6 统一法定钟表时间并保留 23:00 子初换日，不允许报告现算 v6、对话继续读 v3/v4/v5。
+  // v1/v2 仍承载更早算法差异，继续保持可追溯，不在读路径无边界重排。
+  if (row.engineVersion !== 'paipan-v3' && row.engineVersion !== 'paipan-v4' && row.engineVersion !== 'paipan-v5') return stored;
+  const profile = await prisma.profile.findFirst({ where: { tenantId: row.tenantId }, orderBy: { updatedAt: 'desc' } });
+  const savedBazi = (profile?.extraJson as { bazi?: { minute?: unknown } } | null)?.bazi;
+  const exactMinute = savedBazi && Object.prototype.hasOwnProperty.call(savedBazi, 'minute')
+    ? Number(savedBazi.minute)
+    : undefined;
   const [year, month, day] = row.birthDate.split('-').map(Number);
   const input: PaipanInput = {
     calendar: row.calendar === 'lunar' ? 'lunar' : 'solar',
     year, month, day,
-    hour: row.birthHour, minute: row.birthMinute ?? 0,
+    hour: row.birthHour,
+    minute: Number.isInteger(exactMinute) ? exactMinute : undefined,
+    timePrecision: row.birthHour == null ? 'unknown' : Number.isInteger(exactMinute) ? 'exact' : 'shichen',
     gender: row.gender === 'female' ? 'female' : 'male',
     birthPlace: row.birthPlace ?? undefined,
     longitude: row.longitude ?? undefined,
@@ -410,7 +400,9 @@ export async function loadChart(userId: string): Promise<ChartView | null> {
     where: { id: row.id },
     data: {
       engineVersion: PAIPAN_ENGINE_VERSION,
-      trueSolarApplied: upgraded.trueSolarApplied,
+      birthMinute: input.hour == null ? null : input.minute ?? representativeMinute(input.hour),
+      longitude: null,
+      trueSolarApplied: false,
       chartJson: upgraded as unknown as object,
     },
   });

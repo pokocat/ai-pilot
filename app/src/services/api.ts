@@ -27,6 +27,7 @@ import type {
   GenerationView,
   FactConfirmationRequest, FactConfirmationResult,
   AccountDeletionResult,
+  BaziInput, MingpanTimeBasis,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -123,14 +124,7 @@ export type ActivationSource = 'prescription' | 'catalog' | 'market';
 export interface ActivationAttribution { source?: ActivationSource; refId?: string }
 
 // 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
-export interface BaziBody {
-  calendar?: 'solar' | 'lunar';
-  year?: number; month?: number; day?: number;
-  hour?: number | null; minute?: number;
-  gender?: 'male' | 'female';
-  birthPlace?: string; longitude?: number;
-  believe?: boolean;
-}
+export type BaziBody = BaziInput;
 // 服务端已返回完整 StrategicProfile；前端仍宽松消费，兼容旧数据/旧包时不空屏。
 export type StrategicProfileView = Partial<StrategicProfile>;
 export type { ReviewLogItem, ReviewsResult };
@@ -198,11 +192,11 @@ export interface MpPalace {
   decadal: { start: number; end: number } | null;   // 大限虚岁区间
 }
 export interface MingpanReport {
-  engineVersion: string;               // 当前新盘为 'paipan-v4'；存量快照可为 v1/v2/v3
-  base: {
+  engineVersion: string;               // 当前新盘为 'paipan-v6'；存量快照可为 v1-v5
+  base: MingpanTimeBasis & {
     solarDate: string; lunarDate: string; gender: '男' | '女';
-    hourKnown: boolean; hourLabel: string | null;  // 时辰名（如「巳时」「子时（子初换日）」）；缺时辰为 null
-    trueSolarApplied: boolean; birthPlace?: string | null;
+    hourKnown: boolean; hourLabel: string | null;  // 按出生钟表时间确定的时辰；缺时辰为 null
+    trueSolarApplied: boolean; birthPlace?: string | null; // 兼容旧快照；v6 恒为 false
   };
   bazi: {
     pillars: { year: MpPillar; month: MpPillar; day: MpPillar; time: MpPillar | null };
@@ -568,8 +562,7 @@ export const api = {
   getProfile: () => (useMockApi() ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (useMockApi() ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
   // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角。
-  // matchedCity：出生地命中的城市名（未命中/未填 = null）——前端据此回执「已按杭州校正」
-  // 或「未识别，按北京时间排盘」，不让「填了但没生效」这种事悄悄发生。
+  // matchedCity 为旧客户端兼容字段；v6 统一按出生钟表时间排盘，服务端恒回 null。
   saveBazi: (body: BaziBody) =>
     useMockApi() ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null; matchedCity?: string | null }>('/profile/bazi', 'PUT', body),
   myChart: () =>

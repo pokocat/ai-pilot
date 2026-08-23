@@ -10,6 +10,7 @@ import {
   computeChart, buildZiweiAstrolabe, PAIPAN_ENGINE_VERSION,
   type ChartView, type PaipanInput,
 } from './paipan.js';
+import type { MingpanTimeBasis } from '../../../shared/contracts';
 import type { WuXing } from './baziEnrich.js';
 
 // —— 干支五行常量（本气口径，与 paipan.ts 内部私有表一致；此处独立声明以自洽） ——
@@ -23,12 +24,12 @@ const HUA_ORDER: Record<string, number> = { 禄: 0, 权: 1, 科: 2, 忌: 3 };
 const SHICHEN_ZHI = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
 
 /**
- * 由原始录入 birthHour 推时辰名（档头显示用户录入口径，非真太阳时校正后钟点——校正另有徽记说明）。
- * 0=子正、23=子初（23 点换日）；其余 (hour+1)/2 取地支（1-2丑…21-22亥）。null → null。
+ * 由出生钟表 hour 推时辰名；23 点明确标出子初换日。
+ * 0=早子、23=子初（23 点换日）；其余 (hour+1)/2 取地支（1-2丑…21-22亥）。null → null。
  */
 export function hourLabelOf(hour: number | null | undefined): string | null {
   if (hour == null) return null;
-  if (hour === 0) return '子时（子正）';
+  if (hour === 0) return '子时（早子）';
   if (hour === 23) return '子时（子初换日）';
   return `${SHICHEN_ZHI[Math.floor((hour + 1) / 2)]}时`;
 }
@@ -122,13 +123,13 @@ export interface MingpanPalace {
 
 export interface MingpanReport {
   engineVersion: string;
-  base: {
+  base: MingpanTimeBasis & {
     solarDate: string;
     lunarDate: string;
     gender: '男' | '女';
     hourKnown: boolean;
-    hourLabel: string | null; // 时辰名（由原始录入 birthHour 推，非真太阳时校正后钟点）；缺时辰为 null
-    trueSolarApplied: boolean;
+    hourLabel: string | null; // 按出生钟表时间确定的时辰；缺时辰为 null
+    trueSolarApplied: boolean; // 兼容旧快照；v6 恒为 false
     birthPlace?: string | null;
   };
   bazi: {
@@ -343,7 +344,12 @@ export function buildMingpanReport(input: PaipanInput, targetYear: number): Ming
     lunarDate: chart.lunarDate,
     gender: chart.gender,
     hourKnown: chart.hourKnown,
-    hourLabel: hourLabelOf(input.hour), // 原始录入口径（真太阳时校正另有徽记说明）
+    inputTime: chart.inputTime,
+    chartTime: chart.chartTime,
+    timePrecision: chart.timePrecision,
+    timeStandard: chart.timeStandard,
+    dayBoundary: chart.dayBoundary,
+    hourLabel: chart.chartTime ? hourLabelOf(Number(chart.chartTime.slice(11, 13))) : null,
     trueSolarApplied: chart.trueSolarApplied,
     birthPlace: input.birthPlace ?? null,
   };

@@ -1,12 +1,18 @@
-// 十二时辰选项（生辰采集共享常量）——三处录入界面（入场 Picker / 天时日历 / 送你一卦）同一份，
-// 免得三张表各自漂移。子时分子正（0:00-0:59）与子初（23:00-23:59）；
-// 子初从 23:00 起按次日排日柱，不能与子正拍平成同一个 hour:0。
-// hour=null 表示时辰不确定 → 三柱排盘。值为该时辰代表小时，交服务端排盘引擎。
-export const SHICHEN: { label: string; hour: number | null }[] = [
-  { label: '不确定', hour: null },
-  { label: '子正 0-1', hour: 0 }, { label: '丑 1-3', hour: 2 }, { label: '寅 3-5', hour: 4 },
-  { label: '卯 5-7', hour: 6 }, { label: '辰 7-9', hour: 8 }, { label: '巳 9-11', hour: 10 },
-  { label: '午 11-13', hour: 12 }, { label: '未 13-15', hour: 14 }, { label: '申 15-17', hour: 16 },
-  { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
-  { label: '子初 23-24（换日）', hour: 23 },
-];
+// v5 起用户端改收准确钟表时间。新表单统一复用以下 helpers；v6 不做真太阳时换算，
+// 并固定 23:00–23:59 为第二天子时，防止各入口再次漂移。
+export const DEFAULT_BIRTH_TIME = '12:00';
+
+export function birthTimeParts(known: boolean, value: string): { hour: number | null; minute?: number } {
+  if (!known) return { hour: null };
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  const hour = match ? Number(match[1]) : 12;
+  const minute = match ? Number(match[2]) : 0;
+  return { hour, minute };
+}
+
+export function birthTimeValue(hour: number | null | undefined, minute: number | null | undefined): string {
+  if (hour == null) return DEFAULT_BIRTH_TIME;
+  // 旧版只记时辰档位：子正/子初各是半时辰，代表值取中点；其余 hour 本来就是两小时档位中点。
+  const resolvedMinute = minute == null ? (hour === 0 || hour === 23 ? 30 : 0) : minute;
+  return `${String(hour).padStart(2, '0')}:${String(resolvedMinute).padStart(2, '0')}`;
+}

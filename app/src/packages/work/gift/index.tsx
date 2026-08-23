@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Input, Canvas, Image } from '@tarojs/components';
+import { View, Text, Input, Canvas, Image, Picker } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type FateCardContent } from '../../../services/api';
-import { SHICHEN } from '../../../data/shichen';
+import { DEFAULT_BIRTH_TIME, birthTimeParts } from '../../../data/shichen';
 import { IS_WEAPP } from '../../../services/config';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
@@ -14,7 +14,7 @@ import './index.scss';
 // 朋友生辰 → 服务端现算命盘（不落库、无公开链接）→ 返回卡文本 → 小程序端 canvas 画卡导出**图片**。
 // 图片由用户自己发给朋友/存相册（文件点对点，无可爬取的公开 URL）；采集第三人生辰前必须勾选「已获对方同意」（PIPL）。
 
-// 十二时辰选项见共享常量 ../../../data/shichen（子时分早/晚）。
+// 第三人生辰同样精确到分钟，避免 23:00 边界因默认分钟而误排。
 
 // 卡片逻辑尺寸（画布按 dpr 放大）
 const CW = 600;
@@ -39,9 +39,10 @@ export default function Gift() {
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [day, setDay] = useState('');
-  const [hourIdx, setHourIdx] = useState(0);
+  const [timeKnown, setTimeKnown] = useState(false);
+  const [birthTime, setBirthTime] = useState(DEFAULT_BIRTH_TIME);
   const [gender, setGender] = useState<'male' | 'female'>('male');
-  const [place, setPlace] = useState(''); // 朋友的出生地 → 真太阳时校正（不落库，仅本次现算）
+  const [place, setPlace] = useState(''); // 朋友的出生地仅作本次卡片信息，不参与四柱时间换算。
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imgPath, setImgPath] = useState<string | null>(null);
@@ -66,9 +67,10 @@ export default function Gift() {
     setImgPath(null);
     Taro.showLoading({ title: '排盘出卡中…' });
     try {
+      const time = birthTimeParts(timeKnown, birthTime);
       const content = await api.fateCardPreview({
         friendName: name.trim(),
-        friendBazi: { calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender, birthPlace: place.trim() || undefined },
+        friendBazi: { calendar, year: +year, month: +month, day: +day, hour: time.hour, minute: time.minute, gender, birthPlace: place.trim() || undefined },
         consent: true,
       });
       const path = await renderCardToImage('fateCanvas', CW, CH, (ctx) => paintFateCard(ctx, content));
@@ -127,16 +129,12 @@ export default function Gift() {
         </View>
 
         <View className="pf-q">
-          <Text className="pf-qt">3. 时辰（不确定也没关系）</Text>
+          <Text className="pf-qt">3. 出生时间（请尽量精确到分钟）</Text>
           <View className="pf-opts">
-            {SHICHEN.map((t, i) => (
-              <View key={t.label} className={`pf-opt ${hourIdx === i ? 'on' : ''}`}
-                style={hourIdx === i ? { background: accent, borderColor: accent } : {}}
-                onClick={() => setHourIdx(i)}>
-                <Text>{t.label}</Text>
-              </View>
-            ))}
+            <View className={`pf-opt ${!timeKnown ? 'on' : ''}`} style={!timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(false)}><Text>不确定</Text></View>
+            <View className={`pf-opt ${timeKnown ? 'on' : ''}`} style={timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(true)}><Text>知道准确时间</Text></View>
           </View>
+          {timeKnown ? <Picker mode="time" value={birthTime} onChange={(e) => setBirthTime(String(e.detail.value))}><View className="pf-input gf-place"><Text>出生钟表时间　{birthTime}　›</Text></View></Picker> : null}
         </View>
 
         <View className="pf-q">
@@ -156,7 +154,7 @@ export default function Gift() {
             className="pf-input gf-place"
             value={place}
             maxlength={20}
-            placeholder="出生城市（选填，用于真太阳时校正）"
+            placeholder="出生城市（选填，仅作信息记录）"
             onInput={(e) => setPlace(e.detail.value)}
           />
         </View>

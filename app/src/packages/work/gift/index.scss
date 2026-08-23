@@ -74,5 +74,5 @@
 /* 离屏画布：保留可渲染尺寸但移出可视区 */
 .gf-canvas { position: fixed; left: -9999px; top: 0; }
 
-/* 出生地行（并入「性别与出生地」组，真太阳时校正用） */
+/* 出生地行（并入「性别与出生地」组，仅作信息记录） */
 .gift .gf-place { width: 100%; box-sizing: border-box; margin-top: 10px; }

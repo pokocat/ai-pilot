@@ -6,8 +6,8 @@ import { computeAndStoreChart, loadChart, validatePaipanInput, type PaipanInput 
 import { buildMingpanReport } from '../services/mingpan.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { loadStrategicProfile, upsertStrategicProfile, ensureAnnualVerse } from '../services/strategicProfile.js';
-import { matchCity } from '../data/cityLongitude.js';
 import { yearOf } from '../services/clock.js';
+import type { BaziInput } from '../../../shared/contracts';
 
 export async function profileRoutes(app: FastifyInstance) {
   // 建档问卷（运营可配，首登动态渲染）
@@ -55,14 +55,7 @@ export async function profileRoutes(app: FastifyInstance) {
 
   // —— 八字采集（M1 PR-2）：录入生辰 → 引擎排盘落库 → 下一轮对话即带【天势档案】 ——
   // hour 传 null/缺省 = 时辰不确定（三柱排盘）；believe=false = 不信命理（只存偏好、跳过排盘，注入降级指令）。
-  app.put<{ Body: {
-    calendar?: 'solar' | 'lunar';
-    year?: number; month?: number; day?: number;
-    hour?: number | null; minute?: number;
-    gender?: 'male' | 'female';
-    birthPlace?: string; longitude?: number;
-    believe?: boolean;
-  } }>('/profile/bazi', async (req, reply) => {
+  app.put<{ Body: BaziInput }>('/profile/bazi', async (req, reply) => {
     if (await fortuneDisabledGuard(reply)) return reply; // P0-2：命理下线 → 排盘/采集 403
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const b = req.body ?? {};
@@ -82,22 +75,18 @@ export async function profileRoutes(app: FastifyInstance) {
     // 校验（与「送你一卦」fate 预览同一口径，抽成 validatePaipanInput；日期合法性由历法库把关）
     const v = validatePaipanInput(b, yearOf());
     if (!v.ok) return reply.code(400).send({ error: v.error });
-    // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）。
-    // matchedCity 回执给前端——识别不出要明说识别不出，别静默吞：这是用户唯一能发现
-    // 「我填了出生地但没生效」的途径。
-    const matched = v.input.longitude === undefined ? matchCity(v.input.birthPlace) : undefined;
     try {
       const chart = await computeAndStoreChart({
         tenantId: user.tenantId,
         userId: user.id,
-        input: { ...v.input, longitude: v.input.longitude ?? matched?.longitude },
+        input: v.input,
         targetYear: yearOf(),
       });
       await recordAudit({
         tenantId: user.tenantId, userId: user.id, action: 'user.bazi.chart',
         payload: { engine: chart.engineVersion, hourKnown: chart.hourKnown, trueSolar: chart.trueSolarApplied },
       });
-      return { believe: true, chart, matchedCity: matched?.city ?? null };
+      return { believe: true, chart, matchedCity: null };
     } catch {
       return reply.code(400).send({ error: '生辰无法排盘，请检查日期是否存在（如农历大小月/闰月）' });
     }
@@ -117,17 +106,27 @@ export async function profileRoutes(app: FastifyInstance) {
   app.get('/profile/chart/report', async (req, reply) => {
     if (await fortuneDisabledGuard(reply)) return reply; // 命理下线 → 403 FEATURE_DISABLED
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const row = await prisma.natalChart.findUnique({ where: { userId: user.id } });
+    const [row, profile] = await Promise.all([
+      prisma.natalChart.findUnique({ where: { userId: user.id } }),
+      prisma.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' } }),
+    ]);
     if (!row) return { needBazi: true };
-    // 从落库的原始生辰字段重建排盘入参（longitude 落库时已按城市解析，直接沿用；不再二次查表）。
+    // v4 及更早的前端只传「时辰档位」，Profile.extraJson 里没有 minute；NatalChart.birthMinute
+    // 虽落了 0，也只是服务端旧默认，不能冒充用户真的填过 xx:00。v5 把缺分钟交给引擎按档位
+    // 代表值处理（23 点/0 点取 :30），并在报告标 timePrecision=shichen，提示用户确认准确时间。
+    const savedBazi = (profile?.extraJson as { bazi?: { minute?: unknown } } | null)?.bazi;
+    const hasSavedMinute = !!savedBazi && Object.prototype.hasOwnProperty.call(savedBazi, 'minute');
+    const savedMinute = hasSavedMinute ? Number(savedBazi?.minute) : undefined;
+    // 从落库的原始生辰字段重建排盘入参。v6 不消费 longitude，出生地只作档案信息。
     const [y, m, d] = row.birthDate.split('-').map((s) => Number(s));
     const input: PaipanInput = {
       calendar: row.calendar === 'lunar' ? 'lunar' : 'solar',
       year: y, month: m, day: d,
-      hour: row.birthHour, minute: row.birthMinute ?? 0,
+      hour: row.birthHour,
+      minute: Number.isInteger(savedMinute) ? savedMinute : (savedBazi ? undefined : row.birthMinute ?? 0),
+      timePrecision: row.birthHour == null ? 'unknown' : Number.isInteger(savedMinute) ? 'exact' : 'shichen',
       gender: row.gender === 'female' ? 'female' : 'male',
       birthPlace: row.birthPlace ?? undefined,
-      longitude: row.longitude ?? undefined,
     };
     return buildMingpanReport(input, yearOf());
   });

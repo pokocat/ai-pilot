@@ -39,10 +39,15 @@ describe('命盘报告 GET /profile/chart/report', () => {
     const rep = r.body;
 
     // —— 档头 ——
-    assert.equal(rep.engineVersion, 'paipan-v4');
+    assert.equal(rep.engineVersion, 'paipan-v6');
     assert.equal(rep.base.gender, '男');
     assert.equal(rep.base.hourKnown, true);
-    assert.equal(rep.base.hourLabel, '巳时'); // 原始录入 10:30 → 巳时（9-10 时）
+    assert.equal(rep.base.inputTime, '10:30');
+    assert.equal(rep.base.chartTime, '1988-03-15 10:30');
+    assert.equal(rep.base.timePrecision, 'exact');
+    assert.equal(rep.base.timeStandard, 'civil');
+    assert.equal(rep.base.dayBoundary, 'zichu');
+    assert.equal(rep.base.hourLabel, '巳时');
     assert.equal(rep.base.solarDate, '1988-03-15');
     assert.equal(rep.disclaimer, MINGPAN_DISCLAIMER);
     assert.match(rep.disclaimer, /不构成任何决策依据/);
@@ -171,5 +176,17 @@ describe('命盘报告计算层 buildMingpanReport（纯函数）', () => {
     assert.equal(rep.yinzheng, null);
     assert.equal(rep.bazi.pillars.time, null);
     assert.equal(rep.base.hourKnown, false);
+  });
+
+  test('出生地不再改钟表时间，23:00 直接按第二天子时排盘', () => {
+    const rep = buildMingpanReport({
+      calendar: 'solar', year: 1987, month: 3, day: 16, hour: 23, minute: 0,
+      timePrecision: 'exact', gender: 'female', longitude: 120.7,
+    }, 2026);
+    assert.equal(rep.base.inputTime, '23:00');
+    assert.equal(rep.base.chartTime, '1987-03-16 23:00');
+    assert.equal(rep.base.hourLabel, '子时（子初换日）');
+    assert.equal(rep.base.solarDate, '1987-03-17');
+    assert.equal(rep.bazi.pillars.time?.ganZhi, '丙子');
   });
 });

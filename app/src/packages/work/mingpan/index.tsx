@@ -8,7 +8,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type MingpanReport, type MpPalace, type WuxingKey, type HuaKey } from '../../../services/api';
 import { navTo } from '../../../services/nav';
-import { SHICHEN } from '../../../data/shichen';
+import { DEFAULT_BIRTH_TIME, birthTimeParts, birthTimeValue } from '../../../data/shichen';
 import './index.scss';
 
 // 命盘报告（八字 × 紫微综合印证）——命理数据全部由服务端算法层确定性推算（零 LLM）。
@@ -68,11 +68,10 @@ export default function MingpanReportPage() {
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [day, setDay] = useState('');
-  const [hourIdx, setHourIdx] = useState(0);
+  const [timeKnown, setTimeKnown] = useState(false);
+  const [birthTime, setBirthTime] = useState(DEFAULT_BIRTH_TIME);
   const [gender, setGender] = useState<'male' | 'female'>('male');
-  // 出生地：服务端按城市查经度做真太阳时校正。这条链路服务端一直是通的
-  // （cityLongitude → paipan 真太阳时），但前端表单从没收集过，所以校正在生产里从未生效——
-  // 本页档头那枚「真太阳时已校正」徽章因此永远点不亮。
+  // 出生地仅作档案记录；v6 起不参与四柱时间换算。
   const [place, setPlace] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -120,11 +119,11 @@ export default function MingpanReportPage() {
     setBusy(true);
     Taro.showLoading({ title: '立盘中…' });
     try {
-      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender, birthPlace: place.trim() || undefined });
+      const time = birthTimeParts(timeKnown, birthTime);
+      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: time.hour, minute: time.minute, gender, birthPlace: place.trim() || undefined });
       Taro.hideLoading();
       if (r.chart) {
-        // 回执识别到的城市：填了但没识别出来必须让用户看见，否则「填了没生效」无从察觉。
-        Taro.showToast({ title: placeToast(place, r.matchedCity), icon: 'none' });
+        Taro.showToast({ title: placeToast(place), icon: 'none' });
         setEditing(false);
         loadReport(); // 成功分支里 loadReport 会把 showForm 关掉
       } else Taro.showToast({ title: '立盘未成，请核对生辰', icon: 'none' });
@@ -139,9 +138,8 @@ export default function MingpanReportPage() {
 
   // 打开「修改生辰」：先把已存的生辰回填进表单，再展开。
   //
-  // 必须读 api.myChart() 的 **bazi 原始输入**，不能拿 report.base 回填——base.solarDate 是
-  // 真太阳时校正**之后**用于排盘的日期（见 paipan.resolveSolar）。拿它回填等于把校正结果当成
-  // 用户输入再校正一次，改一次漂一次。
+  // 必须读 api.myChart() 的 **bazi 原始输入**，不能拿 report.base 回填：23:00–23:59 的
+  // report.base.solarDate 已按子初换日显示为次日，拿它回填会把原始生日整体推迟一天。
   const openEditBirth = async () => {
     if (busy) return;
     setBusy(true);
@@ -155,9 +153,9 @@ export default function MingpanReportPage() {
         if (typeof b.day === 'number') setDay(String(b.day));
         if (b.gender === 'male' || b.gender === 'female') setGender(b.gender);
         setPlace(b.birthPlace ?? '');
-        // hour → 时辰下标；hour 为 null/undefined 表示「不确定」（下标 0）。
-        const idx = SHICHEN.findIndex((t) => t.hour === (b.hour ?? null));
-        setHourIdx(idx >= 0 ? idx : 0);
+        // hour 为 null/undefined 表示「不确定」；旧记录缺分钟由 helper 显示代表值。
+        setTimeKnown(b.hour !== null && b.hour !== undefined);
+        setBirthTime(birthTimeValue(b.hour, b.minute));
       }
     } catch {
       // 拉不到就让用户从空表单重填——总好过卡在「打不开」。
@@ -287,14 +285,10 @@ export default function MingpanReportPage() {
           <Input className="mp-input mp-md" type="number" value={day} maxlength={2} placeholder="日" onInput={(e) => setDay(e.detail.value)} />
         </View>
         <View className="mp-opts" style={{ marginTop: '10px' }}>
-          {SHICHEN.map((t, i) => (
-            <View key={t.label} className={`mp-opt ${hourIdx === i ? 'on' : ''}`}
-              style={hourIdx === i ? { background: accent, borderColor: accent } : {}}
-              onClick={() => setHourIdx(i)}>
-              <Text>{t.label}</Text>
-            </View>
-          ))}
+          <View className={`mp-opt ${!timeKnown ? 'on' : ''}`} style={!timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(false)}><Text>时间不确定</Text></View>
+          <View className={`mp-opt ${timeKnown ? 'on' : ''}`} style={timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(true)}><Text>知道准确时间</Text></View>
         </View>
+        {timeKnown ? <Picker mode="time" value={birthTime} onChange={(e) => setBirthTime(String(e.detail.value))}><View className="mp-region selected"><View className="mp-region-copy"><Text className="mp-region-label">出生钟表时间</Text><Text className="mp-region-value">{birthTime}</Text></View><Text className="mp-region-arrow">›</Text></View></Picker> : null}
         <View className="mp-opts" style={{ marginTop: '10px' }}>
           {([['male', '男'], ['female', '女']] as const).map(([g, label]) => (
             <View key={g} className={`mp-opt ${gender === g ? 'on' : ''}`}
@@ -304,7 +298,7 @@ export default function MingpanReportPage() {
             </View>
           ))}
         </View>
-        {/* 原生 region picker 是省/市/区三级滚轮，减少手输别名导致的城市识别失败；仍保持选填。 */}
+        {/* 出生地区仍用省/市/区三级滚轮留档，但不参与四柱时间换算。 */}
         <Picker mode="region" onChange={(e) => changeRegion(e.detail.value)}>
           <View className={`mp-region ${place ? 'selected' : ''}`}>
             <View className="mp-region-copy">
@@ -321,21 +315,16 @@ export default function MingpanReportPage() {
         {editing ? (
           <View className="mp-form-cancel" onClick={closeEditBirth}><Text>取消</Text></View>
         ) : null}
-        <Text className="mp-form-tip">23:00 起按次日子时排盘；例如 3 月 16 日 23:30，日柱与农历按 3 月 17 日计算。</Text>
+        <Text className="mp-form-tip">请按出生证明精确到分钟填写；系统不换算真太阳时，23:00–23:59 自动按第二天子时排盘。</Text>
         <Text className="mp-form-tip">时辰不确定可选「不确定」——八字按三柱推演，紫微须时辰方可立盘。</Text>
-        <Text className="mp-form-tip">出生地越偏离东经 120°，真太阳时差得越多：成都约差 1 小时，乌鲁木齐超过 2 小时，足以改时柱。</Text>
+        <Text className="mp-form-tip">出生地区仅作档案记录，不参与四柱时间换算。</Text>
       </View>
     );
   }
 }
 
-// 立盘后的出生地回执：没填不提；填了识别到就说识别到哪座城；填了识别不出必须明说，
-// 否则用户以为校正生效了，而实际上是按北京时间排的盘。
-function placeToast(place: string, matchedCity?: string | null): string {
-  const p = place.trim();
-  if (!p) return '生辰已录，正在立盘';
-  if (matchedCity) return `已按${matchedCity}校正真太阳时`;
-  return `未识别「${p}」，按北京时间排盘`;
+function placeToast(place: string): string {
+  return place.trim() ? '已按出生钟表时间排盘' : '生辰已录，正在立盘';
 }
 
 // —— 1. 命主档头 ——
@@ -347,26 +336,19 @@ function renderHead(r: MingpanReport, seal: string, onEditBirth: () => void) {
       <Text className="mp-kicker">命盘报告 · 八字紫微印证</Text>
       <Text className="mp-head-title serif">{r.bazi.pattern.name} · {b.gender}命</Text>
       <View className="mp-head-meta">
-        <View className="mp-hm-row"><Text className="mp-hm-k">公历</Text><Text className="mp-hm-v serif">{b.solarDate}</Text></View>
+        <View className="mp-hm-row"><Text className="mp-hm-k">排盘日</Text><Text className="mp-hm-v serif">{b.solarDate}</Text></View>
         <View className="mp-hm-row"><Text className="mp-hm-k">农历</Text><Text className="mp-hm-v serif">{b.lunarDate}</Text></View>
         {b.birthPlace ? <View className="mp-hm-row"><Text className="mp-hm-k">出生地</Text><Text className="mp-hm-v serif">{b.birthPlace}</Text></View> : null}
+        {b.inputTime ? <View className="mp-hm-row"><Text className="mp-hm-k">出生时间</Text><Text className="mp-hm-v serif">{b.inputTime}{b.timePrecision === 'shichen' ? '（旧记录代表值）' : ''}</Text></View> : null}
+        {b.chartTime ? <View className="mp-hm-row"><Text className="mp-hm-k">排盘时间</Text><Text className="mp-hm-v serif">{b.chartTime}</Text></View> : null}
         <View className="mp-hm-row"><Text className="mp-hm-k">时辰</Text><Text className="mp-hm-v serif">{b.hourLabel ? b.hourLabel : '待定 · 三柱推演'}</Text></View>
       </View>
       <View className="mp-badges">
-        {b.trueSolarApplied ? <Text className="mp-badge">真太阳时已校正</Text> : null}
+        <Text className="mp-badge">法定钟表时间</Text>
         <Text className="mp-badge">子初换日 · 23:00</Text>
+        {b.timePrecision === 'shichen' ? <Text className="mp-badge warn">旧记录分钟待确认</Text> : null}
         {!b.hourKnown ? <Text className="mp-badge warn">时辰未定 · 三柱推演</Text> : null}
       </View>
-      {/* 未校正态必须显式说出来。只在 true 时亮徽章、false 时一片沉默，等于让用户默认自己
-          「已经是最准的盘」——而存量用户 100% 落在未校正态（前端从没收集过出生地）。
-          缺时辰时经度根本不参与计算（paipan 里 hourKnown 是第一个与条件），此时不提出生地，
-          免得用户补了地址却发现没有任何变化。 */}
-      {!b.trueSolarApplied && b.hourKnown ? (
-        <View className="mp-truesolar-hint" onClick={onEditBirth}>
-          <Text className="mp-tsh-t">按北京时间排盘 · 未做真太阳时校正</Text>
-          <Text className="mp-tsh-s">补出生城市可提升时柱准确度 ›</Text>
-        </View>
-      ) : null}
       {/* 常驻「修改生辰」：此前只有「缺时辰」和「未校正」两种残缺态才有入口，
           盘一旦完整就再也改不了——录错一个数字就是永久错。生辰是整盘的唯一输入，必须始终可改。 */}
       <View className="mp-edit-birth" onClick={onEditBirth}>

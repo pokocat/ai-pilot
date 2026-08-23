@@ -64,7 +64,7 @@ test('对话注入：有命盘 → stable 段带【天势档案】与禁止自�
   const { ctx } = await buildGenContext({ userId: user.id, tenantId: user.tenantId, agentKey: 'strat', userMessage: '帮我看看今年节奏' });
   assert.ok(ctx.tianshiLine, '应组装天势档案');
   const { stable } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
-  assert.match(stable, /【天势档案（系统排盘引擎 paipan-v4 计算）】/);
+  assert.match(stable, /【天势档案（系统排盘引擎 paipan-v6 计算）】/);
   assert.match(stable, /戊辰 乙卯 己巳 己巳/);
   assert.match(stable, /七杀格/);
   assert.match(stable, /调候（寒暖燥湿之需）/); // v2 新增调候注入行

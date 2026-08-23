@@ -1,4 +1,4 @@
-// 战略档案（M1 PR-3 统一状态层）测试：提取规则、认可回写、注入优先级、手动校准、隔离、城市经度。
+// 战略档案（M1 PR-3 统一状态层）测试：提取规则、认可回写、注入优先级、手动校准、隔离、旧城市经度兼容表。
 // 另含年度谶语 #16 M1：verseYear 盖章 / 一年一句守卫 / 报告封面兜底。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -339,20 +339,23 @@ test('命理开关关闭 → 有八字也不出谶（谶语属命理内容，不
   }
 });
 
-test('城市经度映射：常见写法命中，未知城市不校正；采集时自动生效', async () => {
+test('城市经度表保留兼容查询，但 v6 采集排盘不再消费出生地经度', async () => {
   assert.equal(cityLongitude('杭州'), 120.2);
   assert.equal(cityLongitude('浙江省杭州市'), 120.2);
   assert.equal(cityLongitude('乌鲁木齐'), 87.6);
   assert.equal(cityLongitude('某个小地方'), undefined);
   assert.equal(cityLongitude(''), undefined);
 
-  // 端到端：出生地=乌鲁木齐、正午 → 真太阳时校正生效（午 → 巳）
+  // 端到端：出生地=乌鲁木齐、正午仍按出生证明 12:00 排为午时。
   const token = await login(uniquePhone(), '经度用户');
   const r = await api('PUT', '/api/profile/bazi', {
     token,
     body: { calendar: 'solar', year: 1988, month: 3, day: 15, hour: 12, minute: 0, gender: 'male', birthPlace: '乌鲁木齐' },
   });
   assert.equal(r.status, 200);
-  assert.equal(r.body.chart.trueSolarApplied, true);
-  assert.equal(r.body.chart.pillars.time.ganZhi, '己巳');
+  assert.equal(r.body.matchedCity, null);
+  assert.equal(r.body.chart.trueSolarApplied, false);
+  assert.equal(r.body.chart.timeStandard, 'civil');
+  assert.equal(r.body.chart.chartTime, '1988-03-15 12:00');
+  assert.equal(r.body.chart.pillars.time.ganZhi, '庚午');
 });

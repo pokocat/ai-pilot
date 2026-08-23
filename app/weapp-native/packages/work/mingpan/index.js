@@ -3,10 +3,8 @@ const { navTo } = require('../../../services/nav');
 const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 const { withShare, pathWithCode } = require('../../../services/share');
+const birthTime = require('../../../services/birth-time');
 
-const shichen = [
-  ['不确定', null], ['子正 0-1', 0], ['丑 1-3', 2], ['寅 3-5', 4], ['卯 5-7', 6], ['辰 7-9', 8], ['巳 9-11', 10], ['午 11-13', 12], ['未 13-15', 14], ['申 15-17', 16], ['酉 17-19', 18], ['戌 19-21', 20], ['亥 21-23', 22], ['子初 23-24（换日）', 23],
-].map(([label, hour], index) => ({ label, hour, index }));
 const branchClass = { 巳: 'mp-b-si', 午: 'mp-b-wu', 未: 'mp-b-wei', 申: 'mp-b-shen', 辰: 'mp-b-chen', 酉: 'mp-b-you', 卯: 'mp-b-mao', 戌: 'mp-b-xu', 寅: 'mp-b-yin', 丑: 'mp-b-chou', 子: 'mp-b-zi', 亥: 'mp-b-hai' };
 const huaClass = { 禄: 'lu', 权: 'quan', 科: 'ke', 忌: 'ji' };
 const sealByColor = { green: '绿', gold: '金', red: '朱', blue: '黛', purple: '绛', iron: '玄' };
@@ -32,7 +30,7 @@ function normalizeReport(report) {
 }
 
 Page(withShare({
-  data: baseData({ authed: false, report: null, needBazi: false, loaded: false, disabled: false, showForm: false, editing: false, showLogin: false, activePalace: null, shichen, calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: 'male', place: '', valid: false, busy: false, scrollIntoView: '', seal: '绿' }),
+  data: baseData({ authed: false, report: null, needBazi: false, loaded: false, disabled: false, showForm: false, editing: false, showLogin: false, activePalace: null, calendar: 'solar', year: '', month: '', day: '', timeKnown: false, birthTime: birthTime.DEFAULT_BIRTH_TIME, gender: 'male', place: '', valid: false, busy: false, scrollIntoView: '', seal: '绿' }),
   onShow() {
     const snapshot = store.snapshot(); const authed = store.isAuthed(); this.setData({ authed, themeClass: snapshot.themeClass, colorKey: snapshot.colorKey, seal: sealByColor[snapshot.colorKey] || '绿' });
     if (!authed) { this.setData({ loaded: true }); return; }
@@ -56,21 +54,24 @@ Page(withShare({
     const region = Array.isArray(event.detail.value) ? event.detail.value.filter(Boolean) : [];
     this.setData({ place: region.join(' / ') });
   },
-  select(event) { const field = event.currentTarget.dataset.field; let value = event.currentTarget.dataset.value; if (field === 'hourIdx') value = Number(value); this.setData({ [field]: value }); this.refreshValid(); },
+  setTimeKnown(event) { this.setData({ timeKnown: event.currentTarget.dataset.known === '1' }); },
+  changeBirthTime(event) { this.setData({ birthTime: event.detail.value }); },
+  select(event) { const field = event.currentTarget.dataset.field; const value = event.currentTarget.dataset.value; this.setData({ [field]: value }); this.refreshValid(); },
   refreshValid() { setTimeout(() => this.setData({ valid: validDate(this.data.calendar, this.data.year, this.data.month, this.data.day) }), 0); },
   async saveBirth() {
     if (!this.data.valid || this.data.busy) return;
     this.setData({ busy: true }); wx.showLoading({ title: '立盘中…' });
     try {
-      const result = await api.saveBazi({ calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: shichen[this.data.hourIdx].hour, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined });
-      if (result.chart) { const place = this.data.place.trim(); wx.showToast({ title: !place ? '生辰已录，正在立盘' : result.matchedCity ? `已按${result.matchedCity}校正真太阳时` : `未识别「${place}」，按北京时间排盘`, icon: 'none' }); this.setData({ editing: false }); await this.loadReport(); } else wx.showToast({ title: '立盘未成，请核对生辰', icon: 'none' });
+      const time = birthTime.parts(this.data.timeKnown, this.data.birthTime);
+      const result = await api.saveBazi({ calendar: this.data.calendar, year: Number(this.data.year), month: Number(this.data.month), day: Number(this.data.day), hour: time.hour, minute: time.minute, gender: this.data.gender, birthPlace: this.data.place.trim() || undefined });
+      if (result.chart) { wx.showToast({ title: this.data.place.trim() ? '已按出生钟表时间排盘' : '生辰已录，正在立盘', icon: 'none' }); this.setData({ editing: false }); await this.loadReport(); } else wx.showToast({ title: '立盘未成，请核对生辰', icon: 'none' });
     } catch (error) { const code = String(error.code || error.data && error.data.code || ''); if (code === 'FEATURE_DISABLED') { this.setData({ disabled: true }); wx.showToast({ title: '命理能力已下线', icon: 'none' }); } else if (store.handleApiError(error, { silent: true }) === 'unauthorized') this.setData({ showLogin: true }); else wx.showToast({ title: '立盘失败，请重试', icon: 'none' }); }
     finally { wx.hideLoading(); this.setData({ busy: false }); }
   },
   async openEditBirth() {
     if (this.data.busy) return;
     this.setData({ busy: true });
-    try { const result = await api.chart(); const bazi = result && result.bazi; if (bazi) { const idx = shichen.findIndex((item) => item.hour === (bazi.hour === undefined ? null : bazi.hour)); this.setData({ calendar: bazi.calendar === 'lunar' ? 'lunar' : 'solar', year: typeof bazi.year === 'number' ? String(bazi.year) : '', month: typeof bazi.month === 'number' ? String(bazi.month) : '', day: typeof bazi.day === 'number' ? String(bazi.day) : '', gender: bazi.gender === 'female' ? 'female' : 'male', place: bazi.birthPlace || '', hourIdx: idx >= 0 ? idx : 0 }); } } catch (_) { /* 空表单仍可编辑 */ }
+    try { const result = await api.chart(); const bazi = result && result.bazi; if (bazi) { const known = bazi.hour !== null && bazi.hour !== undefined; this.setData({ calendar: bazi.calendar === 'lunar' ? 'lunar' : 'solar', year: typeof bazi.year === 'number' ? String(bazi.year) : '', month: typeof bazi.month === 'number' ? String(bazi.month) : '', day: typeof bazi.day === 'number' ? String(bazi.day) : '', gender: bazi.gender === 'female' ? 'female' : 'male', place: bazi.birthPlace || '', timeKnown: known, birthTime: birthTime.valueOf(bazi.hour, bazi.minute) }); } } catch (_) { /* 空表单仍可编辑 */ }
     this.setData({ busy: false, editing: true, showForm: true, scrollIntoView: '' }); this.refreshValid(); setTimeout(() => this.setData({ scrollIntoView: 'mingpan-birth-form' }), 40);
   },
   closeEditBirth() { this.setData({ showForm: false, editing: false, scrollIntoView: '' }); },

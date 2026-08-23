@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, ScrollView } from '@tarojs/components';
+import { View, Text, Input, ScrollView, Picker as TimePicker } from '@tarojs/components';
 import { COLORS, colorIndex } from '../../data/colors';
-import { SHICHEN } from '../../data/shichen';
+import { DEFAULT_BIRTH_TIME, birthTimeParts } from '../../data/shichen';
 import { api, type SurveyQ } from '../../services/api';
 import { store } from '../../services/store';
 import { useStore } from '../../hooks/useStore';
@@ -22,7 +22,7 @@ const DEFAULT_SURVEY: SurveyQ[] = [
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
 
-// 十二时辰选项抽到共享常量 app/src/data/shichen.ts（三处录入同一份，子时分早/晚）。
+// 生辰时间统一用系统 time picker 精确到分钟；不知道时间则传 hour=null 走三柱排盘。
 
 // 入场仪式：选本命色 →（首登）30 秒建档 → 天势档案（选填）→ 入局。对齐原型 picker 流程。
 export default function Picker({ open, first, onClose, onConfirm }: Props) {
@@ -33,8 +33,8 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [company, setCompany] = useState('');
-  const [bz, setBz] = useState<{ calendar: 'solar' | 'lunar'; year: string; month: string; day: string; hourIdx: number; gender: 'male' | 'female' | ''; place: string }>({
-    calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: '', place: '',
+  const [bz, setBz] = useState<{ calendar: 'solar' | 'lunar'; year: string; month: string; day: string; timeKnown: boolean; birthTime: string; gender: 'male' | 'female' | ''; place: string }>({
+    calendar: 'solar', year: '', month: '', day: '', timeKnown: false, birthTime: DEFAULT_BIRTH_TIME, gender: '', place: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -99,9 +99,10 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     if (!bz.gender) return; // 排盘必须有性别（按钮态提示）
     setSaving(true);
     try {
+      const time = birthTimeParts(bz.timeKnown, bz.birthTime);
       await api.saveBazi({
         calendar: bz.calendar, year: y, month: m, day: d,
-        hour: SHICHEN[bz.hourIdx].hour, gender: bz.gender,
+        hour: time.hour, minute: time.minute, gender: bz.gender,
         birthPlace: bz.place.trim() || undefined,
       });
       confirmColor();
@@ -248,19 +249,21 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
               </View>
 
               <View className="pf-q">
-                <Text className="pf-qt">2. 时辰（不确定也没关系）</Text>
+                <Text className="pf-qt">2. 出生时间（请尽量精确到分钟）</Text>
                 <View className="pf-opts">
-                  {SHICHEN.map((t, i) => (
-                    <View
-                      key={t.label}
-                      className={`pf-opt ${bz.hourIdx === i ? 'on' : ''}`}
-                      style={bz.hourIdx === i ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
-                      onClick={() => setBz((v) => ({ ...v, hourIdx: i }))}
-                    >
-                      <Text>{t.label}</Text>
-                    </View>
-                  ))}
+                  <View className={`pf-opt ${!bz.timeKnown ? 'on' : ''}`}
+                    style={!bz.timeKnown ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
+                    onClick={() => setBz((v) => ({ ...v, timeKnown: false }))}><Text>不确定</Text></View>
+                  <View className={`pf-opt ${bz.timeKnown ? 'on' : ''}`}
+                    style={bz.timeKnown ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
+                    onClick={() => setBz((v) => ({ ...v, timeKnown: true }))}><Text>知道准确时间</Text></View>
                 </View>
+                {bz.timeKnown ? (
+                  <TimePicker mode="time" value={bz.birthTime} onChange={(e) => setBz((v) => ({ ...v, birthTime: String(e.detail.value) }))}>
+                    <View className="pf-input"><Text>出生钟表时间　{bz.birthTime}　›</Text></View>
+                  </TimePicker>
+                ) : null}
+                <Text className="pk-skip">请按出生证明填写；23:00–23:59 自动按第二天子时排盘。</Text>
               </View>
 
               <View className="pf-q">
@@ -277,7 +280,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
                     </View>
                   ))}
                 </View>
-                <Input className="pf-input" value={bz.place} maxlength={20} placeholder="出生城市（选填，用于真太阳时校正）" onInput={(e) => setBz((v) => ({ ...v, place: e.detail.value }))} />
+                <Input className="pf-input" value={bz.place} maxlength={20} placeholder="出生城市（选填，仅作档案记录）" onInput={(e) => setBz((v) => ({ ...v, place: e.detail.value }))} />
               </View>
             </View>
 

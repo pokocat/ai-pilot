@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { View, Text, Input, Canvas, Image, Button } from '@tarojs/components';
+import { View, Text, Input, Canvas, Image, Button, Picker } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type ChartSummary } from '../../../services/api';
-import { SHICHEN } from '../../../data/shichen';
+import { DEFAULT_BIRTH_TIME, birthTimeParts } from '../../../data/shichen';
 import { IS_WEAPP } from '../../../services/config';
 import { navTo } from '../../../services/nav';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
@@ -22,7 +22,7 @@ const CH = 940;
 // 转发落地约束：被转发者是冷启动直达本页——未登录不外弹（本页自己承接 Login），
 // 401 一律 silent 处理不跳走；返回键无页面栈时兜底切回战局 tab。
 
-// 十二时辰选项见共享常量 ../../../data/shichen（子时分早/晚）。
+// 生辰时间精确到分钟；直接按出生证明钟表时间排盘，23:00–23:59 算第二天子时。
 
 const PHASE_HINT: Record<string, string> = {
   进攻: '签约、扩张、上新动作放这几个月',
@@ -50,9 +50,10 @@ export default function TianshiCalendar() {
   const [year, setYear] = useState('');
   const [month, setMonth] = useState('');
   const [day, setDay] = useState('');
-  const [hourIdx, setHourIdx] = useState(0);
+  const [timeKnown, setTimeKnown] = useState(false);
+  const [birthTime, setBirthTime] = useState(DEFAULT_BIRTH_TIME);
   const [gender, setGender] = useState<'male' | 'female'>('male');
-  // 出生地 → 服务端查城市经度做真太阳时校正（详见 mingpan 页同名 state 的说明）。
+  // 出生地仅作档案记录，不参与四柱时间换算。
   const [place, setPlace] = useState('');
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
@@ -98,12 +99,12 @@ export default function TianshiCalendar() {
     setBusy(true);
     Taro.showLoading({ title: '排盘中…' });
     try {
-      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender, birthPlace: place.trim() || undefined });
+      const time = birthTimeParts(timeKnown, birthTime);
+      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: time.hour, minute: time.minute, gender, birthPlace: place.trim() || undefined });
       Taro.hideLoading();
       if (r.chart) {
         setChart(r.chart);
-        const p = place.trim();
-        Taro.showToast({ title: p ? (r.matchedCity ? `已按${r.matchedCity}校正真太阳时` : `未识别「${p}」，按北京时间排盘`) : '命盘已生成', icon: 'none' });
+        Taro.showToast({ title: place.trim() ? '已按出生钟表时间排盘' : '命盘已生成', icon: 'none' });
       } else Taro.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
@@ -239,14 +240,10 @@ export default function TianshiCalendar() {
                 <Input className="pf-input tc-md" type="number" value={day} maxlength={2} placeholder="日" onInput={(e) => setDay(e.detail.value)} />
               </View>
               <View className="pf-opts" style={{ marginTop: '10px' }}>
-                {SHICHEN.map((t, i) => (
-                  <View key={t.label} className={`pf-opt ${hourIdx === i ? 'on' : ''}`}
-                    style={hourIdx === i ? { background: accent, borderColor: accent } : {}}
-                    onClick={() => setHourIdx(i)}>
-                    <Text>{t.label}</Text>
-                  </View>
-                ))}
+                <View className={`pf-opt ${!timeKnown ? 'on' : ''}`} style={!timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(false)}><Text>时间不确定</Text></View>
+                <View className={`pf-opt ${timeKnown ? 'on' : ''}`} style={timeKnown ? { background: accent, borderColor: accent } : {}} onClick={() => setTimeKnown(true)}><Text>知道准确时间</Text></View>
               </View>
+              {timeKnown ? <Picker mode="time" value={birthTime} onChange={(e) => setBirthTime(String(e.detail.value))}><View className="pf-input tc-place"><Text>出生钟表时间　{birthTime}　›</Text></View></Picker> : null}
               <View className="pf-opts" style={{ marginTop: '10px' }}>
                 {([['male', '男'], ['female', '女']] as const).map(([g, label]) => (
                   <View key={g} className={`pf-opt ${gender === g ? 'on' : ''}`}
@@ -256,12 +253,12 @@ export default function TianshiCalendar() {
                   </View>
                 ))}
               </View>
-              {/* 出生地（选填）：不填按北京时间排盘；识别不出会在 toast 里明说，不静默 */}
+              {/* 出生地选填，仅作档案记录，不参与四柱时间换算。 */}
               <Input
                 className="pf-input tc-place"
                 value={place}
                 maxlength={20}
-                placeholder="出生城市（选填，用于真太阳时校正）"
+                placeholder="出生城市（选填，仅作档案记录）"
                 onInput={(e) => setPlace(e.detail.value)}
               />
               <View className={`tc-btn ${valid && !busy ? '' : 'off'}`} style={valid ? { background: accent } : {}} onClick={saveBirth}>

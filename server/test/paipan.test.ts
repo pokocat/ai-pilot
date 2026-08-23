@@ -1,10 +1,11 @@
 // 排盘引擎 v1 回归测试（M1 PR-1）：已知八字校验、两次排盘一致、农历输入等价、
-// 缺时辰兜底、真太阳时校正、命盘落库 upsert。铁律验证：全部结论由代码算出、可复算。
+// 缺时辰兜底、法定钟表时间、23:00 子初换日、命盘落库 upsert。铁律验证：全部结论由代码算出、可复算。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { astro } from 'iztro';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { chartBriefing, computeChart, computeAndStoreChart, loadChart, equationOfTimeMinutes, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
+import { buildZiweiAstrolabe, chartBriefing, computeChart, computeAndStoreChart, loadChart, validatePaipanInput, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
 
 before(async () => {
   await getApp();
@@ -102,15 +103,15 @@ test('缺时辰：三柱排盘 + 时柱/紫微为空 + 大运标注近似，格�
   assert.equal(c.pillars.day.ganZhi, '己巳');
 });
 
-test('真太阳时：乌鲁木齐(东经87.6°)正午出生 → 校正约-130分钟，时辰午变巳', () => {
+test('统一法定钟表时间：出生地和经度不再改变四柱', () => {
   const noon = computeChart({ ...KNOWN, hour: 12, minute: 0 }, 2026);
   const urumqi = computeChart({ ...KNOWN, hour: 12, minute: 0, longitude: 87.6 }, 2026);
   assert.equal(noon.trueSolarApplied, false);
   assert.equal(noon.pillars.time?.ganZhi, '庚午');
-  assert.equal(urumqi.trueSolarApplied, true);
-  assert.equal(urumqi.pillars.time?.ganZhi, '己巳');
-  // 时柱之外（年月日柱）不受影响
-  assert.equal(urumqi.pillars.day.ganZhi, noon.pillars.day.ganZhi);
+  assert.equal(urumqi.trueSolarApplied, false);
+  assert.equal(urumqi.timeStandard, 'civil');
+  assert.equal(urumqi.chartTime, '1988-03-15 12:00');
+  assert.deepEqual(urumqi.pillars, noon.pillars);
 });
 
 test('子初换日(sect 1)：3月16日23:30 按 3月17日 / 农历二月十八 / 次日日柱排盘', () => {
@@ -124,15 +125,102 @@ test('子初换日(sect 1)：3月16日23:30 按 3月17日 / 农历二月十八 /
   assert.equal(late.pillars.time?.ganZhi, nextEarly.pillars.time?.ganZhi);
 });
 
-test('子初换日以真太阳时为准：22:45 经度校正跨到 23 点后换日', () => {
+test('22:45 不因出生地点提前跨入子时，统一按钟表时间排盘', () => {
   const standard = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 22, minute: 45, gender: 'male' }, 2026);
-  const corrected = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 22, minute: 45, gender: 'male', longitude: 126.6 }, 2026);
+  const withPlace = computeChart({ calendar: 'solar', year: 2025, month: 3, day: 16, hour: 22, minute: 45, gender: 'male', longitude: 126.6, birthPlace: '黑龙江' }, 2026);
   assert.equal(standard.solarDate, '2025-03-16');
   assert.equal(standard.pillars.day.ganZhi, '甲申');
-  assert.equal(corrected.solarDate, '2025-03-17');
-  assert.equal(corrected.lunarDate, '二〇二五年二月十八');
-  assert.equal(corrected.pillars.day.ganZhi, '乙酉');
-  assert.equal(corrected.pillars.time?.ganZhi, '丙子');
+  assert.equal(withPlace.solarDate, standard.solarDate);
+  assert.deepEqual(withPlace.pillars, standard.pillars);
+});
+
+test('用户反馈回归：1987-03-16 23:30 瑞安直接按钟表时间，并从 23:00 计第二天子时', () => {
+  const exact = validatePaipanInput({
+    calendar: 'solar', year: 1987, month: 3, day: 16, hour: 23, minute: 30,
+    gender: 'female', birthPlace: '浙江省 / 温州市 / 瑞安市', longitude: 120.7,
+  }, 2026);
+  assert.equal(exact.ok, true);
+  if (!exact.ok) return;
+  const chart = computeChart(exact.input, 2026);
+  assert.equal(chart.inputTime, '23:30');
+  assert.equal(chart.chartTime, '1987-03-16 23:30');
+  assert.equal(chart.timePrecision, 'exact');
+  assert.equal(chart.timeStandard, 'civil');
+  assert.equal(chart.dayBoundary, 'zichu');
+  assert.equal(chart.trueSolarApplied, false);
+  assert.equal(chart.solarDate, '1987-03-17');
+  assert.equal(chart.lunarDate, '一九八七年二月十八');
+  assert.equal(chart.pillars.day.ganZhi, '乙丑');
+  assert.equal(chart.pillars.time?.ganZhi, '丙子');
+});
+
+test('换日边界逐分钟锁定：22:59 当日亥时，23:00/23:59 次日子时，次日 00:00 仍为同一日早子', () => {
+  const base = { calendar: 'solar', year: 1987, month: 3, day: 16, gender: 'female' } as const;
+  const at2259 = computeChart({ ...base, hour: 22, minute: 59 }, 2026);
+  const at2300 = computeChart({ ...base, hour: 23, minute: 0 }, 2026);
+  const at2359 = computeChart({ ...base, hour: 23, minute: 59 }, 2026);
+  const next0000 = computeChart({ ...base, day: 17, hour: 0, minute: 0 }, 2026);
+
+  assert.equal(at2259.solarDate, '1987-03-16');
+  assert.equal(at2259.pillars.day.ganZhi, '甲子');
+  assert.equal(at2259.pillars.time?.ganZhi, '乙亥');
+  for (const lateZi of [at2300, at2359]) {
+    assert.equal(lateZi.solarDate, '1987-03-17');
+    assert.equal(lateZi.pillars.day.ganZhi, '乙丑');
+    assert.equal(lateZi.pillars.time?.ganZhi, '丙子');
+  }
+  assert.equal(next0000.solarDate, '1987-03-17');
+  assert.equal(next0000.pillars.day.ganZhi, '乙丑');
+  assert.equal(next0000.pillars.time?.ganZhi, '丙子');
+});
+
+test('紫微晚子口径不依赖 iztro 全局默认：即使先污染为当天，立盘仍恢复 forward 并与次日早子同盘', () => {
+  astro.config({ dayDivide: 'current' });
+  const late = buildZiweiAstrolabe({
+    calendar: 'solar', year: 1987, month: 3, day: 16, hour: 23, minute: 30, gender: 'female',
+  });
+  const nextEarly = buildZiweiAstrolabe({
+    calendar: 'solar', year: 1987, month: 3, day: 17, hour: 0, minute: 30, gender: 'female',
+  });
+  assert.ok(late);
+  assert.ok(nextEarly);
+  assert.equal(astro.getConfig().dayDivide, 'forward');
+  assert.equal(late.chineseDate, '丁卯 癸卯 乙丑 丙子');
+  assert.equal(late.chineseDate, nextEarly.chineseDate);
+  assert.equal(late.earthlyBranchOfSoulPalace, nextEarly.earthlyBranchOfSoulPalace);
+  assert.equal(late.earthlyBranchOfBodyPalace, nextEarly.earthlyBranchOfBodyPalace);
+  assert.equal(late.fiveElementsClass, nextEarly.fiveElementsClass);
+  const palaceFacts = (astrolabe: NonNullable<ReturnType<typeof buildZiweiAstrolabe>>) => astrolabe.palaces.map((p) => ({
+    name: p.name,
+    heavenlyStem: p.heavenlyStem,
+    earthlyBranch: p.earthlyBranch,
+    isBodyPalace: p.isBodyPalace,
+    decadal: p.decadal,
+    ages: p.ages,
+    majorStars: p.majorStars.map((s) => ({ name: s.name, brightness: s.brightness, mutagen: s.mutagen })),
+    minorStars: p.minorStars.map((s) => ({ name: s.name, brightness: s.brightness, mutagen: s.mutagen })),
+    adjectiveStars: p.adjectiveStars.map((s) => s.name),
+  }));
+  assert.deepEqual(palaceFacts(late), palaceFacts(nextEarly));
+});
+
+test('旧时辰档位缺分钟时取半时辰中点，仍按 23:00 子初换日', () => {
+  const legacy = validatePaipanInput({
+    calendar: 'solar', year: 1987, month: 3, day: 16, hour: 23,
+    gender: 'female', longitude: 120.7,
+  }, 2026);
+  assert.equal(legacy.ok, true);
+  if (!legacy.ok) return;
+  assert.equal(legacy.input.minute, 30);
+  assert.equal(legacy.input.timePrecision, 'shichen');
+  const chart = computeChart(legacy.input, 2026);
+  assert.equal(chart.solarDate, '1987-03-17');
+  assert.equal(chart.pillars.time?.ganZhi, '丙子');
+
+  const exact2300 = computeChart({ ...legacy.input, minute: 0, timePrecision: 'exact' }, 2026);
+  assert.equal(exact2300.chartTime, '1987-03-16 23:00');
+  assert.equal(exact2300.solarDate, '1987-03-17');
+  assert.equal(exact2300.pillars.time?.ganZhi, '丙子');
 });
 
 test('立春换年：2000 立春(约 2/4 傍晚)前后各一天，10 时出生年柱切换 己卯→庚辰', () => {
@@ -147,54 +235,6 @@ test('节气交接：2000 惊蛰(约 3/5)前后，10 时出生月柱由寅月转
   const after = computeChart({ calendar: 'solar', year: 2000, month: 3, day: 6, hour: 10, gender: 'male' }, 2026);
   assert.equal(before.pillars.month.ganZhi, '戊寅'); // 惊蛰前寅月
   assert.equal(after.pillars.month.ganZhi, '己卯');  // 惊蛰后卯月
-});
-
-test('均时差纯函数：2 月中≈-14 分、11 月初≈+16 分（容差 ±1 分）', () => {
-  const feb = equationOfTimeMinutes(2025, 2, 14);
-  const nov = equationOfTimeMinutes(2025, 11, 3);
-  assert.ok(Math.abs(feb - (-14)) <= 1, `2/14 EoT=${feb} 应≈-14`);
-  assert.ok(Math.abs(nov - 16) <= 1, `11/3 EoT=${nov} 应≈+16`);
-  // 符号方向：11 月初视太阳超前(正)、2 月中滞后(负)
-  assert.ok(nov > 0 && feb < 0);
-});
-
-test('真太阳时叠加均时差：有经度才校正，trueSolarApplied 标注', () => {
-  const noLng = computeChart({ ...KNOWN, hour: 12 }, 2026);
-  const withLng = computeChart({ ...KNOWN, hour: 12, longitude: 87.6 }, 2026);
-  assert.equal(noLng.trueSolarApplied, false);   // 无经度不校正
-  assert.equal(withLng.trueSolarApplied, true);   // 有经度（含 EoT）校正
-  // 年月日柱不受时刻微调影响
-  assert.equal(withLng.pillars.day.ganZhi, noLng.pillars.day.ganZhi);
-});
-
-// —— 真太阳时校正的两个回归点（2026-08 修）——
-
-test('真太阳时：偏移恰为 0 也算已校正（有经度即 trueSolarApplied）', () => {
-  // 旧实现按 offsetMin!==0 判定，杭州这类近 120° 的城市全年有约十天偏移抵消为 0，
-  // 那几天前端会显示「未校正」，是错的暗示。有经度就是按经度算过。
-  const eot = equationOfTimeMinutes(1988, 3, 15);
-  const zeroLng = 120 - eot / 4; // 令 (lng-120)*4 + eot 恰好为 0
-  const c = computeChart({ ...KNOWN, hour: 12, longitude: zeroLng }, 2026);
-  assert.equal(Math.abs(Math.round((zeroLng - 120) * 4 + eot)), 0); // Math.round 可能给 -0，取绝对值再比
-  assert.equal(c.trueSolarApplied, true);
-});
-
-test('真太阳时：分钟进位走 UTC，不受服务器时区 DST 影响（可复算铁律）', () => {
-  // 用本地时间构造时，TZ=America/Los_Angeles 下 2021-03-14 02:57 会被静默平移成 03:57
-  // （美国夏令时跳变缺口），足以改时柱。这里在进程内切换 TZ 复算，两次必须逐字一致。
-  const input: PaipanInput = { calendar: 'solar', year: 2021, month: 3, day: 14, hour: 2, minute: 30, gender: 'male', longitude: 126.6 };
-  const orig = process.env.TZ;
-  try {
-    process.env.TZ = 'Asia/Shanghai';
-    const sh = computeChart(input, 2026);
-    process.env.TZ = 'America/Los_Angeles';
-    const la = computeChart(input, 2026);
-    assert.equal(la.pillars.time?.ganZhi, sh.pillars.time?.ganZhi);
-    assert.equal(la.pillars.day.ganZhi, sh.pillars.day.ganZhi);
-    assert.equal(la.solarDate, sh.solarDate);
-  } finally {
-    if (orig === undefined) delete process.env.TZ; else process.env.TZ = orig;
-  }
 });
 
 test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致', async () => {
@@ -214,7 +254,7 @@ test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致'
   assert.equal(loaded?.hourKnown, false);
 });
 
-test('v4 升级不静默覆盖存量 v2 快照；用户主动重排才写 v4', async () => {
+test('v6 升级不静默覆盖存量 v2 快照；用户主动重排才写 v6', async () => {
   const token = await login(uniquePhone(), '命盘版本用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   const legacy = { ...computeChart(KNOWN, 2026), engineVersion: 'paipan-v2' };
@@ -235,10 +275,10 @@ test('v4 升级不静默覆盖存量 v2 快照；用户主动重排才写 v4', a
 
   assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v2', '读取存量盘不得自动升级');
   await computeAndStoreChart({ tenantId: user.tenantId, userId: user.id, input: KNOWN, targetYear: 2026 });
-  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v4', '用户主动重排写当前 v4');
+  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v6', '用户主动重排写当前 v6');
 });
 
-test('存量 v3 首次读取惰性升级 v4，避免报告与对话日柱不一致', async () => {
+test('存量 v3 首次读取惰性升级 v6，避免报告与对话日柱不一致', async () => {
   const token = await login(uniquePhone(), '命盘v3升级用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   const input = { calendar: 'solar', year: 2025, month: 3, day: 16, hour: 23, minute: 30, gender: 'male' } as const;
@@ -248,9 +288,39 @@ test('存量 v3 首次读取惰性升级 v4，避免报告与对话日柱不一�
     birthDate: '2025-03-16', birthHour: 23, birthMinute: 30, trueSolarApplied: false, chartJson: old,
   } });
   const upgraded = await loadChart(user.id);
-  assert.equal(upgraded?.engineVersion, 'paipan-v4');
+  assert.equal(upgraded?.engineVersion, 'paipan-v6');
   assert.equal(upgraded?.solarDate, '2025-03-17');
   assert.equal(upgraded?.lunarDate, '二〇二五年二月十八');
   assert.equal(upgraded?.pillars.day.ganZhi, '乙酉');
-  assert.equal((await prisma.natalChart.findUniqueOrThrow({ where: { userId: user.id } })).engineVersion, 'paipan-v4');
+  assert.equal((await prisma.natalChart.findUniqueOrThrow({ where: { userId: user.id } })).engineVersion, 'paipan-v6');
+});
+
+test('存量 v5 真太阳时盘首读升级 v6，恢复出生证明钟表时间并清除经度计算标记', async () => {
+  const token = await login(uniquePhone(), '命盘v5钟表时间升级用户');
+  const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
+  const input = { calendar: 'solar', year: 1988, month: 3, day: 15, hour: 12, minute: 0, gender: 'male' } as const;
+  const old = {
+    ...computeChart(input, 2026),
+    engineVersion: 'paipan-v5',
+    chartTime: '1988-03-15 09:50',
+    trueSolarApplied: true,
+  };
+  const profile = await prisma.profile.findFirst({ where: { tenantId: user.tenantId } });
+  if (profile) await prisma.profile.update({ where: { id: profile.id }, data: { extraJson: { bazi: { ...input, birthPlace: '乌鲁木齐', minute: 0 } } } });
+  else await prisma.profile.create({ data: { tenantId: user.tenantId, extraJson: { bazi: { ...input, birthPlace: '乌鲁木齐', minute: 0 } } } });
+  await prisma.natalChart.create({ data: {
+    tenantId: user.tenantId, userId: user.id, engineVersion: 'paipan-v5', gender: 'male', calendar: 'solar',
+    birthDate: '1988-03-15', birthHour: 12, birthMinute: 0, birthPlace: '乌鲁木齐', longitude: 87.6,
+    trueSolarApplied: true, chartJson: old,
+  } });
+
+  const upgraded = await loadChart(user.id);
+  assert.equal(upgraded?.engineVersion, 'paipan-v6');
+  assert.equal(upgraded?.chartTime, '1988-03-15 12:00');
+  assert.equal(upgraded?.timeStandard, 'civil');
+  assert.equal(upgraded?.trueSolarApplied, false);
+  assert.equal(upgraded?.pillars.time?.ganZhi, '庚午');
+  const row = await prisma.natalChart.findUniqueOrThrow({ where: { userId: user.id } });
+  assert.equal(row.longitude, null);
+  assert.equal(row.trueSolarApplied, false);
 });
