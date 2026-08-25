@@ -83,7 +83,7 @@
     .sta { font-size:11.5px; color:var(--muted); }
 
     /* 主推模板：一眼看到成片长什么样、多长、讲什么 */
-    .mid { position:relative; z-index:2; flex:none; margin-top:16px; padding:0 22px; }
+    .mid { position:relative; z-index:2; flex:none; margin-top:14px; padding:0 22px; }
     .feat { margin-top:11px; display:flex; gap:14px; padding:12px; border-radius:18px;
       background:var(--surface); border:1px solid var(--lineSoft); box-shadow:0 8px 22px rgba(74,48,32,.09); }
     .cover { width:134px; height:174px; border-radius:12px; flex:none; position:relative; overflow:hidden;
@@ -108,11 +108,13 @@
     .kind.story { background:var(--br); }
     .ft { font-family:var(--serif); font-size:20px; font-weight:700; margin-top:9px; }
     .fs { font-size:11.5px; color:var(--ink3); line-height:1.7; margin-top:7px; }
-    /* 主卡的三个可信事实：成片时长 / 数字人出镜秒数 / 预计钻石。
+    /* 主卡的三个可信事实：成片时长（封面角标）/ 数字人出镜秒数 / 预计钻石。
        catalog.js templateMeta() 就是为了这三个数才改成从 segments 推导的，
-       任何一个对不上，整张卡就不可信 —— 不要在这里写死常量。 */
+       任何一个对不上，整张卡就不可信 —— 不要在这里写死常量。
+       右栏只有 172px：三项并排会折行，折下来的一行会把底部那条挤到 Tab 栏底下，
+       所以时长留在封面角标上，这里只排后两项。 */
     .facts { display:flex; align-items:center; gap:7px; margin-top:8px; font-size:10.5px;
-      color:var(--ink2); font-variant-numeric:tabular-nums; }
+      color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap; }
     .facts i { width:1px; height:9px; background:var(--line); display:block; }
     .beats { display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
     .bt { font-size:10.5px; color:var(--ink3); background:var(--sunken); border:1px solid var(--lineSoft);
@@ -134,7 +136,7 @@
     /* 真机用 scroll-view；这里必须声明可横滑，否则第 4 张是被裁掉而不是能滑出来 */
     .shelf { display:flex; gap:10px; margin-top:12px; overflow-x:auto; padding-right:22px; }
     .tp { width:96px; flex:none; }
-    .tpc { width:96px; height:122px; border-radius:10px; position:relative; overflow:hidden;
+    .tpc { width:96px; height:108px; border-radius:10px; position:relative; overflow:hidden;
       box-shadow:0 6px 14px rgba(74,48,32,.18); }
     .tp.on .tpc { outline:2px solid var(--av); outline-offset:2px; }
     .tag2 { position:absolute; left:6px; top:6px; font-size:9px; font-weight:700; color:#FFF;
@@ -145,7 +147,7 @@
     .tpm { display:block; font-size:10.5px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
 
     /* 语音起点降为兜底 */
-    .say { position:relative; z-index:2; flex:none; margin:14px 22px 0; height:50px;
+    .say { position:relative; z-index:2; flex:none; margin:10px 22px 0; height:46px;
       border-radius:15px; background:transparent; border:1px dashed var(--line);
       display:flex; align-items:center; gap:11px; padding:0 14px; }
     .mic { width:30px; height:30px; border-radius:10px; flex:none; background:var(--avSoft);
@@ -216,8 +218,7 @@
         <div class="fs">{{ desc }}</div>
         <sc-if value="{{ ready }}" hint-placeholder-val="{{ true }}">
           <div class="facts">
-            <span>成片 {{ dur }}</span><i></i>
-            <span>数字人出镜 {{ avatarSec }} 秒</span><i></i>
+            <span>数字人 {{ avatarSec }} 秒</span><i></i>
             <span>约 {{ credits }} 钻石</span>
           </div>
         </sc-if>

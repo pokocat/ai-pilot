@@ -36,6 +36,9 @@
     .navact { font-size:12px; color:var(--avDeep); font-weight:500; }
 
     /* 真机是 scroll-view；这里限高可滚，避免展开「更多方案」后被底栏裁掉 */
+    /* 内容整块可滚（§3.7.4 ③）：四个方案 + 段落卡 + 截取轨会超屏。
+       top/bottom 与导航行、底部操作栏（9 + 46 + 34 = 89）同源。 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
     .body { padding:6px 20px 0; display:flex; flex-direction:column; gap:8px;
       max-height:665px; overflow-y:auto; }
     .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
@@ -121,6 +124,7 @@
     <div class="ttl">调整画面</div>
   </div>
 
+  <div class="page">
   <div class="body">
     <div class="prob">
       <div class="probt">1 处画面待补充</div>
@@ -186,6 +190,7 @@
     </div>
   </div>
 
+  </div>
   <div class="footer">
     <div class="fm">
       <span class="a">{{ footA }}</span>
