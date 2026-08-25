@@ -1,0 +1,338 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --fixed:#9A8F84; --fixedInk:#6B6259; --fixedSoft:#EDE7E0;
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.06), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06); }
+    .ttl { flex:1; min-width:0; font-family:var(--serif); font-weight:600; font-size:17px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* 播放器 */
+    .stage { display:flex; justify-content:center; padding:4px 0 0; }
+    .player { width:196px; height:348px; border-radius:16px; overflow:hidden; position:relative;
+      background:#26221F; box-shadow:0 12px 30px rgba(69,54,44,.2); }
+    .vid { position:absolute; inset:0; }
+    .g-dawn   { background-image:radial-gradient(circle at 70% 20%, rgba(255,240,205,.8) 0 12%, transparent 36%), linear-gradient(148deg,#E0AC72,#7A5744,#2E2A27); }
+    .g-street { background-image:radial-gradient(circle at 74% 30%, rgba(244,214,178,.5) 0 12%, transparent 34%), linear-gradient(150deg,#C2A183,#7E6C5E,#43423F); }
+    .g-hand   { background-image:radial-gradient(circle at 26% 72%, rgba(233,186,130,.44) 0 16%, transparent 40%), linear-gradient(146deg,#9C7555,#5F4A3F,#2C2B2A); }
+    .g-shop   { background-image:radial-gradient(circle at 60% 26%, rgba(255,226,190,.4) 0 14%, transparent 40%), linear-gradient(154deg,#A98668,#6A554A,#302E2C); }
+    .g-avatar { background-image:radial-gradient(circle at 50% 32%, rgba(255,226,205,.86) 0 18%, transparent 46%), linear-gradient(160deg,#B9846A,#77564A,#2F2C2A); }
+    .g-tail   { background:linear-gradient(160deg,#5A544E,#2B2A28); }
+    .hatch { position:absolute; inset:0;
+      background-image:repeating-linear-gradient(135deg, rgba(18,14,12,.44) 0 9px, rgba(18,14,12,.15) 9px 18px); }
+    .phcard { position:absolute; left:14px; right:14px; top:50%; transform:translateY(-50%);
+      background:rgba(255,255,255,.94); border-radius:12px; padding:11px; text-align:center; }
+    .phk { display:block; font-size:9.5px; font-weight:700; letter-spacing:.08em; color:var(--avDeep); }
+    .pht { display:block; font-family:var(--serif); font-size:13px; font-weight:600; line-height:1.5; margin-top:5px; }
+    .clock { position:absolute; left:9px; top:9px; padding:3px 8px; border-radius:999px;
+      background:rgba(30,24,20,.56); color:#FFF; font-size:10.5px; font-variant-numeric:tabular-nums; }
+    .cap { position:absolute; left:10px; right:10px; bottom:12px; text-align:center; }
+    .cap span { display:inline-block; background:rgba(20,17,15,.62); color:#FFF; font-size:11.5px;
+      line-height:1.5; padding:4px 8px; border-radius:7px; }
+    .pbtn { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
+      border-radius:50%; background:rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center;
+      box-shadow:0 6px 18px rgba(0,0,0,.24); }
+    .pbtn.small { width:34px; height:34px; margin:-17px 0 0 -17px; background:rgba(255,255,255,.3); }
+
+    /* 时间线：一条轨道，像剪辑软件那样能一眼看完整条片子 */
+    .tl { margin-top:10px; }
+    .ruler { display:flex; padding:0 14px; margin-bottom:5px; }
+    .rk { font-size:9.5px; color:var(--faint); font-variant-numeric:tabular-nums; }
+    .rksp { flex:1; }
+    .trackwrap { position:relative; padding:0 14px; }
+    /* 播放头放在 .track 内部：绝对定位的包含块是轨道的内边距盒，会跟着横滑一起走。
+       挂到外层 .trackwrap 上的话，轨道一滑播放头就脱节。 */
+    .track { position:relative; display:flex; gap:3px; overflow-x:auto; padding-bottom:2px; }
+    .clip { flex:none; border-radius:7px; overflow:hidden; position:relative; height:62px;
+      border:2px solid transparent; background:var(--sunken); }
+    .clip.on { border-color:var(--ink); }
+    .clip .thumb { position:absolute; inset:0; }
+    .clip .role { position:absolute; left:0; right:0; top:0; height:3px; }
+    .role.avatar { background:var(--av); }
+    .role.broll { background:var(--br); }
+    .role.tail { background:var(--fixed); }
+    .clip .no { position:absolute; left:4px; top:6px; font-size:9px; font-weight:700; color:#FFF;
+      text-shadow:0 1px 3px rgba(0,0,0,.5); }
+    .clip .len { position:absolute; right:3px; bottom:3px; font-size:8.5px; color:rgba(255,255,255,.86);
+      background:rgba(20,14,11,.5); padding:1px 4px; border-radius:3px; font-variant-numeric:tabular-nums; }
+    .clip .pend { position:absolute; inset:0;
+      background-image:repeating-linear-gradient(135deg, rgba(240,100,53,.6) 0 4px, rgba(240,100,53,.12) 4px 8px); }
+    .head { position:absolute; top:-4px; bottom:2px; width:2px; background:var(--ink); border-radius:2px; z-index:3; }
+    .head::before { content:""; position:absolute; left:-4px; top:-3px; width:10px; height:10px;
+      border-radius:50%; background:var(--ink); }
+
+    /* 选中段：轨道下面直接给这一段的操作 */
+    .segbar { margin:12px 20px 0; background:var(--surface); border:1px solid var(--lineSoft);
+      border-radius:16px; box-shadow:0 4px 14px rgba(95,72,55,.06); padding:12px 13px; }
+    .segtop { display:flex; align-items:center; gap:8px; }
+    .tag { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
+      font-size:11px; font-weight:600; flex:none; }
+    .tag i { width:6px; height:6px; border-radius:2px; display:block; }
+    .tag.avatar { background:var(--avSoft); border:1px solid var(--avLine); color:var(--avDeep); }
+    .tag.avatar i { background:var(--av); }
+    .tag.broll { background:var(--brSoft); border:1px solid var(--brLine); color:var(--br); }
+    .tag.broll i { background:var(--br); }
+    .tag.tail { background:var(--fixedSoft); border:1px solid var(--line); color:var(--fixedInk); }
+    .tag.tail i { background:var(--fixed); }
+    .segno { flex:1; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .segtx { font-size:13px; line-height:1.65; color:var(--ink2); margin-top:9px; }
+    .seghint { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--br);
+      background:var(--brSoft); border:1px solid var(--brLine); border-radius:9px;
+      padding:7px 9px; margin-top:9px; }
+    .ops { display:flex; gap:8px; margin-top:11px; }
+    .op { flex:1; height:40px; border-radius:12px; border:1px solid var(--line); background:var(--bg);
+      display:flex; align-items:center; justify-content:center; gap:5px;
+      font-size:12.5px; color:var(--ink2); font-weight:500; }
+    .op.primary { background:var(--avSoft); border-color:var(--avLine); color:var(--avDeep); font-weight:600; }
+    .locked { margin-top:11px; height:40px; border-radius:12px; background:var(--fixedSoft);
+      border:1px solid var(--line); display:flex; align-items:center; justify-content:center;
+      font-size:12.5px; color:var(--fixedInk); }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:12px; font-weight:600; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 20px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">为实体发声 · 王记五金</div>
+  </div>
+
+  <div class="stage">
+    <div class="player" onClick="{{ togglePlay }}">
+      <div class="vid {{ cur.grain }}"></div>
+      <sc-if value="{{ cur.pending }}" hint-placeholder-val="{{ true }}">
+        <div class="hatch"></div>
+        <div class="phcard">
+          <span class="phk">{{ cur.pendKind }}</span>
+          <span class="pht">{{ cur.pendTitle }}</span>
+        </div>
+      </sc-if>
+      <div class="clock">{{ clock }}</div>
+      <div class="cap"><span>{{ cur.caption }}</span></div>
+      <sc-if value="{{ showPlay }}" hint-placeholder-val="{{ true }}">
+        <div class="pbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg></div>
+      </sc-if>
+      <sc-if value="{{ playing }}" hint-placeholder-val="{{ false }}">
+        <div class="pbtn small"><svg width="12" height="12" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div class="tl">
+    <div class="ruler">
+      <span class="rk">0:00</span><span class="rksp"></span>
+      <span class="rk">{{ half }}</span><span class="rksp"></span>
+      <span class="rk">{{ total }}</span>
+    </div>
+    <div class="trackwrap">
+      <div class="track">
+        <sc-for list="{{ clips }}" as="c" hint-placeholder-count="8">
+          <div class="clip {{ c.cls }}" style="width:{{ c.w }}px" onClick="{{ c.pick }}">
+            <div class="thumb {{ c.grain }}"></div>
+            <sc-if value="{{ c.pending }}" hint-placeholder-val="{{ false }}">
+              <div class="pend"></div>
+            </sc-if>
+            <div class="role {{ c.role }}"></div>
+            <span class="no">{{ c.no }}</span>
+            <span class="len">{{ c.len }}</span>
+          </div>
+        </sc-for>
+        <div class="head" style="left:{{ headPx }}px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="segbar">
+    <div class="segtop">
+      <span class="tag {{ cur.role }}"><i></i>{{ cur.roleName }}</span>
+      <span class="segno">第 {{ cur.no }} 段 · {{ cur.range }}</span>
+    </div>
+    <div class="segtx">{{ cur.text }}</div>
+    <sc-if value="{{ cur.hasHint }}" hint-placeholder-val="{{ true }}">
+      <div class="seghint">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#326B86" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>
+        {{ cur.hint }}
+      </div>
+    </sc-if>
+    <sc-if value="{{ cur.editable }}" hint-placeholder-val="{{ true }}">
+      <div class="ops">
+        <div class="op primary">{{ cur.op1 }}</div>
+        <div class="op">{{ cur.op2 }}</div>
+        <div class="op">{{ cur.op3 }}</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ cur.locked }}" hint-placeholder-val="{{ false }}">
+      <div class="locked">模板固定片段，不可修改</div>
+    </sc-if>
+  </div>
+
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ footA }}</span>
+      <span class="b">{{ footB }}</span>
+    </div>
+    <div class="cta">立即生成</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pick: 1, t: 0, playing: false };
+  }
+
+  componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+
+  // 取自 catalog.js 的 ct_shiti《为实体发声》真实脚本前 8 段
+  segs() {
+    return [
+      { no: 1, role: 'avatar', len: 7, grain: 'g-avatar', pending: true,
+        text: '百分之九十的实体店在边缘挣扎，但有的店却逆势生长。' },
+      { no: 2, role: 'broll', len: 9, grain: 'g-dawn',
+        text: '我们走遍全国，发现那些活得好的老板：要么凌晨四点还在揉面，只为一口让人惦记的老味道；',
+        hint: '这里放：清晨备货或街景空镜' },
+      { no: 3, role: 'broll', len: 7, grain: 'g-hand',
+        text: '要么对着手机一遍遍练习，把冰冷的屏幕捂热成新的门店。',
+        hint: '这里放：店主对着手机练习' },
+      { no: 4, role: 'broll', len: 5, grain: 'g-street',
+        text: '都说实体生意难做，这话不假。' },
+      { no: 5, role: 'broll', len: 8, grain: 'g-street',
+        text: '电商自媒体的洪流，卷走了太多熟悉的身影。',
+        hint: '这里放：冷清的街道或空店面' },
+      { no: 6, role: 'broll', len: 8, grain: 'g-shop',
+        text: '但绝处，总能逢生，这些滚烫的人生，这些城市的烟火气，不该沉默！' },
+      { no: 7, role: 'avatar', len: 10, grain: 'g-avatar', pending: true,
+        text: '我们团队发起百位实体创业者计划，想用镜头，把那些滚烫的人生，讲给世界听。' },
+      { no: 8, role: 'broll', len: 8, grain: 'g-dawn',
+        text: '记录下平凡岗位上的不凡，每一家凌晨亮灯的小店背后，是咬牙的坚持；',
+        hint: '这里放：凌晨亮灯的小店' },
+    ];
+  }
+
+  fmt(s) {
+    s = Math.max(0, Math.floor(s));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  renderVals() {
+    const PPS = 5.2;           // 每秒 5.2px：8 段刚好铺满一屏多一点，能滑
+    const segs = this.segs();
+    let acc = 0;
+    const laid = segs.map((s) => { const from = acc; acc += s.len; return { ...s, from, to: acc }; });
+    const total = acc;
+    const idx = Math.max(0, Math.min(laid.length - 1, this.state.pick - 1));
+    const cur = laid[idx];
+
+    const roleName = { avatar: '数字人出镜', broll: '配画面', tail: '固定片段' };
+    const ops = {
+      avatar: ['改文案', '换数字人', '试听'],
+      broll: ['换画面', '改时长', '裁剪'],
+      tail: [],            // 片尾不可改，不摆假按钮
+    };
+    const o = ops[cur.role];
+
+    const t = this.state.t;
+    const playing = this.state.playing;
+
+    return {
+      clock: this.fmt(t) + ' / ' + this.fmt(total),
+      half: this.fmt(total / 2),
+      total: this.fmt(total),
+      playing: playing,
+      showPlay: !playing,
+      headPx: t * PPS + (Math.floor(t / 8) * 3),   // 相对轨道内容起点，不含外层内边距
+      clips: laid.map((s, i) => ({
+        no: s.no,
+        w: Math.max(30, Math.round(s.len * PPS)),
+        len: s.len + 's',
+        grain: s.grain,
+        role: s.role,
+        pending: !!s.pending,
+        cls: (i === idx ? 'on' : ''),
+        pick: () => {
+          if (this.timer) { clearInterval(this.timer); this.timer = null; }
+          this.setState({ pick: s.no, t: s.from, playing: false });
+        },
+      })),
+      cur: {
+        no: cur.no,
+        role: cur.role,
+        roleName: roleName[cur.role],
+        range: this.fmt(cur.from) + '–' + this.fmt(cur.to),
+        text: cur.text,
+        hasHint: !!cur.hint,
+        hint: cur.hint || '',
+        grain: cur.grain,
+        caption: cur.text.length > 18 ? cur.text.slice(0, 18) + '…' : cur.text,
+        pending: !!cur.pending,
+        pendKind: '口型动作待生成',
+        pendTitle: '王老板 · 门店机位',
+        editable: cur.role !== 'tail',
+        locked: cur.role === 'tail',
+        op1: o[0], op2: o[1], op3: o[2],
+      },
+      footA: '待生成 17 秒 · 68 钻石',
+      footB: '数字人出镜 2 段需生成，其余用你的素材，免费',
+      togglePlay: () => {
+        if (playing) {
+          if (this.timer) { clearInterval(this.timer); this.timer = null; }
+          this.setState({ playing: false });
+        } else {
+          this.timer = setInterval(() => {
+            const nt = this.state.t + 0.25;
+            if (nt >= total) { clearInterval(this.timer); this.timer = null; this.setState({ t: 0, playing: false }); }
+            else {
+              const hit = laid.find((s) => nt >= s.from && nt < s.to);
+              this.setState({ t: nt, pick: hit ? hit.no : this.state.pick });
+            }
+          }, 250);
+          this.setState({ playing: true });
+        }
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>
