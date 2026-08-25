@@ -224,29 +224,69 @@ class Component extends DCLogic {
 
   componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
 
-  // 取自 catalog.js 的 ct_shiti《为实体发声》真实脚本前 8 段
+  // ct_shiti《为实体发声》全片 —— 段落、时长、角色全部取自 catalog.js 运行时真值
+  // （163 秒 / 22 段 / 数字人 32 秒，见 listBuiltInTemplates()）。
+  // 时长是 model.js 按字数算出来的，不是文件里那几个硬编码常量，别照抄常量。
   segs() {
     return [
-      { no: 1, role: 'avatar', len: 7, grain: 'g-avatar', pending: true,
+      { no:  1, role: 'avatar', len:  6, grain: 'g-avatar', pending: true,
         text: '百分之九十的实体店在边缘挣扎，但有的店却逆势生长。' },
-      { no: 2, role: 'broll', len: 9, grain: 'g-dawn',
+      { no:  2, role: 'broll', len: 11, grain: 'g-dawn',
         text: '我们走遍全国，发现那些活得好的老板：要么凌晨四点还在揉面，只为一口让人惦记的老味道；',
         hint: '这里放：清晨备货或街景空镜' },
-      { no: 3, role: 'broll', len: 7, grain: 'g-hand',
+      { no:  3, role: 'broll', len:  7, grain: 'g-hand',
         text: '要么对着手机一遍遍练习，把冰冷的屏幕捂热成新的门店。',
         hint: '这里放：店主对着手机练习' },
-      { no: 4, role: 'broll', len: 5, grain: 'g-street',
+      { no:  4, role: 'broll', len:  4, grain: 'g-street',
         text: '都说实体生意难做，这话不假。' },
-      { no: 5, role: 'broll', len: 8, grain: 'g-street',
+      { no:  5, role: 'broll', len:  5, grain: 'g-street',
         text: '电商自媒体的洪流，卷走了太多熟悉的身影。',
         hint: '这里放：冷清的街道或空店面' },
-      { no: 6, role: 'broll', len: 8, grain: 'g-shop',
+      { no:  6, role: 'broll', len:  8, grain: 'g-shop',
         text: '但绝处，总能逢生，这些滚烫的人生，这些城市的烟火气，不该沉默！' },
-      { no: 7, role: 'avatar', len: 10, grain: 'g-avatar', pending: true,
+      { no:  7, role: 'avatar', len:  9, grain: 'g-avatar', pending: true,
         text: '我们团队发起百位实体创业者计划，想用镜头，把那些滚烫的人生，讲给世界听。' },
-      { no: 8, role: 'broll', len: 8, grain: 'g-dawn',
+      { no:  8, role: 'broll', len:  8, grain: 'g-dawn',
         text: '记录下平凡岗位上的不凡，每一家凌晨亮灯的小店背后，是咬牙的坚持；',
         hint: '这里放：凌晨亮灯的小店' },
+      { no:  9, role: 'broll', len:  5, grain: 'g-hand',
+        text: '每一个轰鸣的车间里，藏着对品质的死磕；',
+        hint: '这里放：车间机器运转特写' },
+      { no: 10, role: 'broll', len:  7, grain: 'g-shop',
+        text: '每一个本土品牌的名字，都写满了从线下到线上的突围故事。',
+        hint: '这里放：本土品牌招牌' },
+      { no: 11, role: 'broll', len:  5, grain: 'g-dawn',
+        text: '这些故事很小，汇聚起来，就是刺破寒冬的光。',
+        hint: '这里放：微光/灯火的空镜' },
+      { no: 12, role: 'broll', len:  8, grain: 'g-street',
+        text: '这些故事就发生在你每天路过的街角，它们正在消失，像从未存在过。',
+        hint: '这里放：你每天路过的街角' },
+      { no: 13, role: 'avatar', len:  7, grain: 'g-avatar', pending: true,
+        text: '但今天，你能让故事活下去，把那些滚烫的人生，讲给世界听。' },
+      { no: 14, role: 'broll', len: 11, grain: 'g-shop',
+        text: '当你按下录制键，奇迹正在发生：你拯救了王阿姨的豆腐摊，视频播放量换来了新顾客的长队，',
+        hint: '这里放：顾客排队或摊位忙碌' },
+      { no: 15, role: 'broll', len:  6, grain: 'g-hand',
+        text: '你点燃了张叔眼里的光，机械厂故事引来海外订单。',
+        hint: '这里放：车间或工人特写' },
+      { no: 16, role: 'broll', len: 13, grain: 'g-street',
+        text: '加入为实体发声计划，不是要你当网红，而是邀请你成为城市故事的守护者，实体经济的点灯人，平凡生活的英雄。' },
+      { no: 17, role: 'broll', len:  8, grain: 'g-hand',
+        text: '用你的声音，替沉默的实体发声，让每部手机，都成为照亮街角的火把，',
+        hint: '这里放：手机拍摄的画面' },
+      { no: 18, role: 'broll', len:  6, grain: 'g-dawn',
+        text: '当十万支火把点燃，整座城市将不再有黑暗的角落。',
+        hint: '这里放：城市夜景灯火' },
+      { no: 19, role: 'broll', len:  4, grain: 'g-shop',
+        text: '别等到熟悉的店铺消失才后悔。',
+        hint: '这里放：卷闸门紧闭的店面' },
+      { no: 20, role: 'broll', len:  5, grain: 'g-shop',
+        text: '此刻，你指尖的温度，能融化冰封的招牌。',
+        hint: '这里放：招牌特写' },
+      { no: 21, role: 'avatar', len: 10, grain: 'g-avatar', pending: true,
+        text: '这不是商业计划，而是一场人文运动，让技术有了心跳，让奋斗有了观众，让城市有了记忆！' },
+      { no: 22, role: 'tail', len: 10, grain: 'g-tail',
+        text: '结尾：为实体发声计划' },
     ];
   }
 
@@ -256,7 +296,7 @@ class Component extends DCLogic {
   }
 
   renderVals() {
-    const PPS = 5.2;           // 每秒 5.2px：8 段刚好铺满一屏多一点，能滑
+    const PPS = 4.2;           // 每秒 4.2px：22 段共 163 秒 → 轨道约 750px，横滑两屏多
     const segs = this.segs();
     let acc = 0;
     const laid = segs.map((s) => { const from = acc; acc += s.len; return { ...s, from, to: acc }; });
@@ -281,7 +321,7 @@ class Component extends DCLogic {
       total: this.fmt(total),
       playing: playing,
       showPlay: !playing,
-      headPx: t * PPS + (Math.floor(t / 8) * 3),   // 相对轨道内容起点，不含外层内边距
+      headPx: t * PPS + (laid.filter((s) => s.to <= t).length * 3),   // 相对轨道内容起点，不含外层内边距
       clips: laid.map((s, i) => ({
         no: s.no,
         w: Math.max(30, Math.round(s.len * PPS)),
@@ -312,8 +352,8 @@ class Component extends DCLogic {
         locked: cur.role === 'tail',
         op1: o[0], op2: o[1], op3: o[2],
       },
-      footA: '待生成 17 秒 · 68 钻石',
-      footB: '数字人出镜 2 段需生成，其余用你的素材，免费',
+      footA: '已就绪 131 秒 · 待生成 32 秒 · 共 2:43',
+      footB: '数字人出镜 4 段共 32 秒待生成，其余用你的素材，免费；本条共计 35 钻石',
       togglePlay: () => {
         if (playing) {
           if (this.timer) { clearInterval(this.timer); this.timer = null; }
