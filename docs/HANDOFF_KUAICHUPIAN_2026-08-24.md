@@ -47,14 +47,18 @@ gh repo create product-ui-completeness --private --source ~/dev/product-ui-compl
 ln -s ~/dev/product-ui-completeness ~/.claude/skills/product-ui-completeness
 ```
 
-**(2) 原型的 2.4MB 打包产物没入库。**
-`docs/prototypes/v3-canvas/kuaichupian-flow-prototype.html` 已 gitignore。
-要看原型走已发布链接，不要在新机器上找这个文件：
+**(2) 原型的打包产物没入库。**
+`docs/prototypes/v3-canvas/kuaichupian-flow-prototype*.html` 已 gitignore（2.3MB 自包含编辑器包）。
+要看原型走已发布链接，不要在新机器上找这个文件。
 
-https://claude.ai/code/artifact/1588e454-03b6-4228-8fb4-cbe49d877304
+| 版本 | 链接 | 状态 |
+|---|---|---|
+| **v2（当前）** | https://claude.ai/code/artifact/2d7450b2-c7f7-49ad-bb26-18ca50783e7e | 2026-08-25 订正版，**评审看这个** |
+| v1 | https://claude.ai/code/artifact/1588e454-03b6-4228-8fb4-cbe49d877304 | 旧版，数字未订正、仍有 T2V 界面，只作留档 |
 
 改原型改同目录的 `*.dc.html` 和 `canvas.json`，重新打包要用 `/design` skill 的
-`seed-canvas.mjs`（不在本仓库里，随 skill 走）。
+`seed-canvas.mjs`（不在本仓库里，随 skill 走）。**改完要重发 v2 那个链接**，
+否则评审看到的还是上一次发布的内容。
 
 ---
 
@@ -64,7 +68,7 @@ https://claude.ai/code/artifact/1588e454-03b6-4228-8fb4-cbe49d877304
 |---|---|---|
 | 方案正文 | `docs/VIDEO_STANDALONE_MINIAPP_PLAN_2026-08-19.md` | v5.1，唯一产品事实源 |
 | 飞书同稿 | `https://qcni1ridpveu.feishu.cn/docx/SBcOdOH1foExsZx6L6ccA4sqnBb` | rev 102，与本地一致 |
-| 可点击原型 | `docs/prototypes/v3-canvas/` + 上面的 artifact 链接 | 13 块画板 |
+| 可点击原型 | `docs/prototypes/v3-canvas/` + §2 的 v2 链接 | 13 块画板，方案的可视化，**不是独立事实源** |
 
 `docs/prototypes/VIDEO_STANDALONE_MOBILE_FLOW_V1.svg` 和 `V2.svg` 是**未采纳**的探索稿，
 只做存档，不要拿去评审或当开发依据。
@@ -72,8 +76,19 @@ https://claude.ai/code/artifact/1588e454-03b6-4228-8fb4-cbe49d877304
 **双稿同步的命令**（改完本地正文后执行，整篇覆盖，不要 str_replace）：
 
 ```bash
-lark-cli docs +update --command overwrite --doc-format markdown --content - < docs/VIDEO_STANDALONE_MINIAPP_PLAN_2026-08-19.md
+lark-cli docs +update --doc "https://qcni1ridpveu.feishu.cn/docx/SBcOdOH1foExsZx6L6ccA4sqnBb" --command overwrite --doc-format markdown --content - < docs/VIDEO_STANDALONE_MINIAPP_PLAN_2026-08-19.md
 ```
+
+> ⚠️ **换机后第一次同步会失败**：bot 身份对这篇文档只有读权限，写会被
+> `degrade_code=4030004` 挡回来（`result: failed`，revision 不变）。
+> 必须先在这台机器上拿到 user 身份：
+>
+> ```bash
+> lark-cli auth login
+> ```
+>
+> 用 `lark-cli auth status` 确认 `user.status` 变成 `ready` 再跑同步。
+> **2026-08-25 的本地修订还没同步过去，飞书稿仍停在 rev 102。**
 
 飞书渲染有两个坑，写正文时就要避开：相对路径的 SVG 链接会挂，写成纯文本；
 `**加粗**：**加粗**` 这种紧邻会渲染成字面量 `\*\*`，一段里只留一个加粗跨度。
