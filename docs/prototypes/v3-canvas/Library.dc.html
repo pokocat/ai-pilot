@@ -67,6 +67,11 @@
     .mini { height:4px; border-radius:999px; background:var(--sunken); margin-top:8px; overflow:hidden; }
     .minif { height:4px; border-radius:999px; background:var(--av); }
 
+    .ph { padding:44px 18px 14px; display:flex; flex-direction:column; align-items:center; text-align:center; }
+    .phic { width:56px; height:56px; border-radius:20px; background:var(--sunken);
+      display:flex; align-items:center; justify-content:center; margin-bottom:13px; }
+    .pht { font-family:var(--serif); font-size:16px; font-weight:600; }
+    .phs { font-size:12px; color:var(--ink3); line-height:1.75; margin-top:7px; max-width:250px; }
     .add { border:1px dashed var(--line); background:transparent; box-shadow:none;
       justify-content:center; color:var(--ink3); font-size:13px; font-weight:500; gap:7px; padding:15px; }
 
@@ -103,35 +108,14 @@
 
   <div class="body">
     <sc-if value="{{ isGoods }}" hint-placeholder-val="{{ true }}">
-      <div class="card">
-        <div class="th g1"></div>
-        <div class="cb">
-          <span class="ct">加厚五金工具收纳箱</span>
-          <span class="cs">¥98 促销价 · 3 张实拍 · 已用于 2 条视频</span>
-        </div>
-        <div class="cact">去创作</div>
+      <div class="ph">
+        <span class="phic">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/><path d="M12 12v8"/></svg>
+        </span>
+        <span class="pht">还没有商品</span>
+        <span class="phs">商品要等带货模板上线才用得上。现在这里是空的，不是你少了一步。</span>
       </div>
-      <div class="card">
-        <div class="th g2"></div>
-        <div class="cb">
-          <span class="ct">充电式手电钻 20V</span>
-          <span class="cs">¥259 · 1 张主图 · 尚未使用</span>
-          <span class="pill run">建议补充 2 张实拍</span>
-        </div>
-        <div class="cact">去创作</div>
-      </div>
-      <div class="card">
-        <div class="th g3"></div>
-        <div class="cb">
-          <span class="ct">工具腰包 帆布</span>
-          <span class="cs">¥68 · 2 张实拍 · 已用于 1 条视频</span>
-        </div>
-        <div class="cact">去创作</div>
-      </div>
-      <div class="card add">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#686A6F" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-        粘贴链接，自动创建商品
-      </div>
+      <div class="note">商品要等带货模板上线后才用得上，到时候可以粘贴链接自动创建。</div>
     </sc-if>
 
     <sc-if value="{{ isAvatar }}" hint-placeholder-val="{{ false }}">
@@ -180,26 +164,26 @@
     <sc-if value="{{ isScript }}" hint-placeholder-val="{{ false }}">
       <div class="card">
         <div class="cb">
-          <span class="ct">收纳箱 · 强转化版</span>
-          <span class="cs">第 2 版 · 45 秒 · 已用于 2 条视频</span>
+          <span class="ct">王记五金 · 二十三年</span>
+          <span class="cs">第 2 版 · 22 段 · 已用于 2 条视频</span>
         </div>
         <div class="cact">新建版本</div>
       </div>
       <div class="card">
         <div class="cb">
-          <span class="ct">我这家店开了二十三年</span>
-          <span class="cs">第 1 版 · 2 分 42 秒 · 已用于 1 条视频</span>
+          <span class="ct">王记五金 · 老师傅</span>
+          <span class="cs">第 1 版 · 22 段 · 已用于 1 条视频</span>
         </div>
         <div class="cact">新建版本</div>
       </div>
       <div class="card">
         <div class="cb">
-          <span class="ct">今日到货 · 通用口播</span>
-          <span class="cs">改自官方脚本 · 30 秒 · 尚未使用</span>
+          <span class="ct">为实体发声 · 官方原稿</span>
+          <span class="cs">模板自带 · 22 段 · 未改动</span>
         </div>
         <div class="cact">去创作</div>
       </div>
-      <div class="note">新建版本不会覆盖旧版。已发布的视频仍使用当时的版本，不受影响。</div>
+      <div class="note">脚本都在「为实体发声」这套模板的 22 段骨架内，改的是每段说什么；段数、顺序和总时长由模板定。新建版本不会覆盖旧版，已发布的视频仍使用当时的版本。</div>
     </sc-if>
 
     <sc-if value="{{ isMedia }}" hint-placeholder-val="{{ false }}">
@@ -240,15 +224,17 @@
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { seg: 'goods' };
+    this.state = { seg: 'avatar' };
   }
 
   renderVals() {
+    // 商品排最后、默认不选它：首发三套模板没有一套消费商品，
+    // 让「资料库」第一眼就是空态是错的默认值。
     const segs = [
-      { id: 'goods', name: '商品', n: 3 },
       { id: 'avatar', name: '数字人', n: 3 },
       { id: 'script', name: '脚本', n: 3 },
       { id: 'media', name: '素材', n: 12 },
+      { id: 'goods', name: '商品', n: 0 },
     ];
     return {
       segs: segs.map((s) => ({
