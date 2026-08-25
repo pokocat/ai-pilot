@@ -108,12 +108,27 @@
     .kind.story { background:var(--br); }
     .ft { font-family:var(--serif); font-size:20px; font-weight:700; margin-top:9px; }
     .fs { font-size:11.5px; color:var(--ink3); line-height:1.7; margin-top:7px; }
+    /* 主卡的三个可信事实：成片时长 / 数字人出镜秒数 / 预计钻石。
+       catalog.js templateMeta() 就是为了这三个数才改成从 segments 推导的，
+       任何一个对不上，整张卡就不可信 —— 不要在这里写死常量。 */
+    .facts { display:flex; align-items:center; gap:7px; margin-top:8px; font-size:10.5px;
+      color:var(--ink2); font-variant-numeric:tabular-nums; }
+    .facts i { width:1px; height:9px; background:var(--line); display:block; }
     .beats { display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
     .bt { font-size:10.5px; color:var(--ink3); background:var(--sunken); border:1px solid var(--lineSoft);
       padding:3px 7px; border-radius:5px; }
     .use { margin-top:auto; height:38px; border-radius:12px; background:var(--av); color:#FFF;
       font-size:13.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
       box-shadow:0 8px 16px rgba(240,100,53,.26); }
+    .use.off { background:var(--sunken); color:var(--muted); box-shadow:none;
+      border:1px solid var(--lineSoft); }
+    /* 首发三套里有两套还没产出内容，封面直接压灰，不摆一张假成片 */
+    .cover.soon .cw, .tpc.soon .cw { opacity:.14; }
+    .cover.soon::after, .tpc.soon::after { content:''; position:absolute; inset:0;
+      background:rgba(28,25,23,.52); }
+    .soonlab { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
+      font-size:10.5px; font-weight:700; color:#FFF; letter-spacing:.08em;
+      background:rgba(20,14,11,.62); padding:4px 9px; border-radius:999px; white-space:nowrap; }
 
     /* 其余模板：横滑，点一下换到上面主推位 */
     /* 真机用 scroll-view；这里必须声明可横滑，否则第 4 张是被裁掉而不是能滑出来 */
@@ -169,7 +184,7 @@
     </div>
     <div class="lede">
       <div class="h1">挑套模板，改几句话</div>
-      <div class="h2">数字人替你把片子讲完。不用出镜，不用剪辑，一条 3 分钟做好。</div>
+      <div class="h2">数字人替你把片子讲完。不用出镜，不用剪辑，画面用你自己的实拍素材。</div>
     </div>
     <div class="fade"></div>
   </div>
@@ -178,37 +193,52 @@
     <div class="sect">
       <span class="sbar"></span>
       <span class="stt">现成模板</span>
-      <span class="sta">全部 8 套</span>
+      <span class="sta">{{ shelfCount }}</span>
     </div>
 
     <div class="feat">
-      <div class="cover {{ cover }}">
+      <div class="cover {{ cover }} {{ soonCls }}">
         <div class="cw"></div>
         <div class="cshade"></div>
-        <div class="play">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
-        </div>
-        <span class="dur">{{ dur }}</span>
+        <sc-if value="{{ ready }}" hint-placeholder-val="{{ true }}">
+          <div class="play">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
+          </div>
+          <span class="dur">{{ dur }}</span>
+        </sc-if>
+        <sc-if value="{{ soon }}" hint-placeholder-val="{{ false }}">
+          <span class="soonlab">即将上线</span>
+        </sc-if>
       </div>
       <div class="fb">
         <span class="kind {{ kindCls }}">{{ kind }}</span>
         <div class="ft">{{ name }}</div>
         <div class="fs">{{ desc }}</div>
+        <sc-if value="{{ ready }}" hint-placeholder-val="{{ true }}">
+          <div class="facts">
+            <span>成片 {{ dur }}</span><i></i>
+            <span>数字人出镜 {{ avatarSec }} 秒</span><i></i>
+            <span>约 {{ credits }} 钻石</span>
+          </div>
+        </sc-if>
         <div class="beats">
           <span class="bt">{{ b1 }}</span>
           <span class="bt">{{ b2 }}</span>
           <span class="bt">{{ b3 }}</span>
         </div>
-        <div class="use">用这套拍</div>
+        <div class="use {{ useCls }}">{{ useText }}</div>
       </div>
     </div>
 
     <div class="shelf">
       <sc-for list="{{ list }}" as="t" hint-placeholder-count="4">
         <div class="tp {{ t.cls }}" onClick="{{ t.pick }}">
-          <div class="tpc {{ t.cover }}">
+          <div class="tpc {{ t.cover }} {{ t.soonCls }}">
             <div class="cw"></div>
             <span class="tag2 {{ t.kindCls }}">{{ t.kind }}</span>
+            <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
+              <span class="soonlab">即将上线</span>
+            </sc-if>
           </div>
           <span class="tpn">{{ t.name }}</span>
           <span class="tpm">{{ t.dur }}</span>
@@ -221,7 +251,7 @@
     <span class="mic">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
     </span>
-    <span class="sayt">没有合适的？<b>说一句你想拍什么</b></span>
+    <span class="sayt">没有合适的？<b>告诉我们你想拍什么</b></span>
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
   </div>
 
@@ -287,39 +317,63 @@ class Component extends DCLogic {
     this.state = { pick: 0, todo: false };
   }
 
+  /**
+   * 首发三套模板（方案 §0.3 / §3.1）。**只有第一套真实存在。**
+   *
+   * `为实体发声` 的时长 / 出镜秒数 / 钻石取自 catalog.js 的 listBuiltInTemplates()
+   * 运行时真值：163 秒、数字人 32 秒（第 1、7、13、21 段）、35 钻石、22 段。
+   * 注意 catalog.js 文件里写死的 162 / 38 / 68 是设计稿残留，templateMeta() 会用
+   * segments 重算覆盖掉，**以运行时为准**。
+   *
+   * 另外两套按 §13.9 标注为什么还不存在，不摆假封面、不给假数字 ——
+   * 首页第一天的真实样子就是「三套里只有一套能点」，评审要看的正是这个。
+   */
   templates() {
     return [
-      { name: '开门三件事', short: '开门三件事', kind: '带货', kindCls: 'sell', cover: 'c1', dur: '45 秒',
-        desc: '新货到店当天就能发。三段式：一句钩子、三个卖点、一句下单。',
-        beats: ['3 秒钩子', '卖点 × 3', '行动号召'] },
-      { name: '今日到货', short: '今日到货', kind: '带货', kindCls: 'sell', cover: 'c2', dur: '30 秒',
-        desc: '最短的一套。摆出货、报个价、说清怎么买，发群里正好。',
-        beats: ['亮商品', '报价格', '怎么买'] },
-      { name: '我这家店', short: '我这家店', kind: '品牌故事', kindCls: 'story', cover: 'c3', dur: '2 分',
-        desc: '讲店的来历和手艺。数字人主讲，穿插门店实拍，结尾落到人。',
-        beats: ['开场', '转折', '收尾'] },
-      { name: '顾客常问', short: '顾客常问', kind: '品牌故事', kindCls: 'story', cover: 'c4', dur: '30 秒',
-        desc: '一个问题一条。把店里天天要解释的事，一次讲明白。',
-        beats: ['提问', '解答', '补一句'] },
+      { id: 'ct_shiti', name: '为实体发声', short: '为实体发声',
+        kind: '品牌故事', kindCls: 'story', cover: 'c1', dur: '2:43', ready: true,
+        avatarSec: 32, credits: 35,
+        desc: '纪实倡导片。走遍全国的实体店主群像，讲那些凌晨亮灯的坚持。',
+        beats: ['开场 · 九成实体店在挣扎', '中段 · 百位创业者计划', '收尾 · 替沉默的实体发声'] },
+      { id: 'ct_qiye', name: '企业宣传片', short: '企业宣传片',
+        kind: '品牌故事', kindCls: 'story', cover: 'c3', dur: '即将上线', ready: false,
+        desc: '骨架沿用「为实体发声」，但内容策划、剧本骨架和固定素材都还没产出（方案 §13.2）；模板生产线责任人待指派（§13.9 第 7 项）。',
+        beats: ['内容未产出', '责任人待指派', '不进 P0-a 验收'] },
+      { id: 'ct_daihuo', name: '短视频带货', short: '短视频带货',
+        kind: '带货', kindCls: 'sell', cover: 'c2', dur: '即将上线', ready: false,
+        desc: '明星切片混剪，与前两套不是同一套子系统。肖像授权链条未定（§13.9 第 10 项）——授权范围、能否商用、撤销后历史成片怎么处理都没有结论。',
+        beats: ['走 mixcut 子系统', '肖像授权未定', '两套目录如何合并未定'] },
     ];
   }
 
   renderVals() {
     const list = this.templates();
     const cur = list[this.state.pick] || list[0];
+    const usable = list.filter((t) => t.ready).length;
     return {
+      shelfCount: '共 ' + list.length + ' 套 · ' + usable + ' 套可用',
       cover: cur.cover,
       dur: cur.dur,
+      ready: cur.ready,
+      soon: !cur.ready,
+      soonCls: cur.ready ? '' : 'soon',
+      avatarSec: cur.avatarSec,
+      credits: cur.credits,
       kind: cur.kind,
       kindCls: cur.kindCls,
       name: cur.name,
       desc: cur.desc,
       b1: cur.beats[0], b2: cur.beats[1], b3: cur.beats[2],
+      // 按钮词表见 §3.7.3，只用「开始制作」；没产出的模板不摆一个点了没反应的主按钮。
+      useText: cur.ready ? '开始制作' : '这套还没上线',
+      useCls: cur.ready ? '' : 'off',
       todo: this.state.todo,
       openTodo: () => this.setState({ todo: true }),
       closeTodo: () => this.setState({ todo: false }),
       list: list.map((t, i) => ({
         name: t.short, dur: t.dur, cover: t.cover, kind: t.kind, kindCls: t.kindCls,
+        soon: !t.ready,
+        soonCls: t.ready ? '' : 'soon',
         cls: this.state.pick === i ? 'on' : '',
         pick: () => this.setState({ pick: i }),
       })),

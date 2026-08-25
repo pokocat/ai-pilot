@@ -183,11 +183,11 @@
       <div class="card">
         <div class="rowh">制作信息</div>
         <div class="trace">
-          <span class="tg">模板 · 带货三段式 v4</span>
-          <span class="tg">剧本 · 收纳箱强转化 第 2 版</span>
-          <span class="tg">商品 · 五金收纳箱（¥98 版本）</span>
+          <span class="tg">模板 · 为实体发声</span>
+          <span class="tg">脚本 · 王记五金 第 2 版</span>
           <span class="tg">数字人 · 王老板门店机位</span>
-          <span class="tg">素材 · 3 条实拍</span>
+          <span class="tg">素材 · 17 段实拍</span>
+          <span class="tg">时长 · 2:43</span>
         </div>
       </div>
       <div class="acts">
@@ -238,14 +238,18 @@ class Component extends DCLogic {
     const bad = st === 'failed';
     const busy = st === 'running';
 
+    // ct_shiti 全片：数字人 4 段共 32 秒，其中第 1 段上一轮已先行生成，本轮只做第 7、13、21 段。
+    // 没有「AI 画面」这一档 —— T2V/I2V 已整块移出 P0（方案 §0.0、§4.4）。
     const jobs = [
-      { name: 'AI 开场画面 5 秒', sub: bad ? '生成超时，该段未完成' : (busy ? '生成中 · 约 40 秒' : '已生成 · 已存入素材库'),
-        cls: bad ? 'bad' : (busy ? 'run' : 'ok'), isBad: bad, isRun: busy, isOk: done, val: '18 钻石' },
-      { name: '数字人出镜 10 秒', sub: '用的是上次已生成的片段，未重新生成',
+      { name: '数字人出镜 26 秒 · 第 7、13、21 段', sub: bad ? '第 13 段生成超时，该段未完成' : (busy ? '生成中 · 约 90 秒' : '已生成 · 已存入素材库'),
+        cls: bad ? 'bad' : (busy ? 'run' : 'ok'), isBad: bad, isRun: busy, isOk: done, val: '26 钻石' },
+      { name: '数字人出镜 6 秒 · 第 1 段', sub: '用的是上次已生成的片段，未重新生成',
         cls: 'ok', isOk: true, isBad: false, isRun: false, val: '0 钻石' },
+      { name: '口播配音 2:33', sub: '进预览前已生成，与你听到的是同一条',
+        cls: 'ok', isOk: true, isBad: false, isRun: false, val: '3 钻石' },
       { name: '字幕 · 音乐 · 转场', sub: '与你确认的预览为同一版本',
         cls: 'ok', isOk: true, isBad: false, isRun: false, val: '免费' },
-      { name: '合成高清成片 1080×1920', sub: bad ? '等待上一段完成后开始' : (busy ? '排队中' : '完成 · 45.2 秒'),
+      { name: '合成高清成片 1080×1920', sub: bad ? '等待上一段完成后开始' : (busy ? '排队中' : '完成 · 163.0 秒'),
         cls: (bad || busy) ? 'wait' : 'ok', isOk: done, isBad: false, isRun: false, val: '' },
     ];
 
@@ -255,14 +259,14 @@ class Component extends DCLogic {
       busy: busy,
       notDone: !done,
       pct: 62,
-      heroTitle: done ? '收纳箱 · 45 秒带货视频' : (bad ? '1 段生成失败' : '正在生成这 5 秒'),
+      heroTitle: done ? '为实体发声 · 2 分 43 秒' : (bad ? '1 段生成失败' : '正在生成这 26 秒'),
       heroSub: done
-        ? '与你确认的版本完全一致，只有这 5 秒为新生成。'
+        ? '与你确认的版本完全一致，只有这 26 秒为新生成。'
         : (bad
           ? '其余片段均已完成。仅按成功部分扣费，重新生成这一段不影响其他片段。'
-          : '其余片段均已就绪，仅等这一段。'),
+          : '其余片段均已就绪，仅等这三段。'),
       pillCls: done ? 'ok' : (bad ? 'bad' : 'run'),
-      pillText: done ? '00:45 · 已完成' : (bad ? '1 段失败 · 该段未扣费' : '预计还需 40 秒'),
+      pillText: done ? '02:43 · 已完成' : (bad ? '1 段失败 · 该段未扣费' : '预计还需 90 秒'),
       jobs: jobs.map((j) => ({
         name: j.name, sub: j.sub, cls: j.cls,
         isOk: j.isOk, isBad: j.isBad, isRun: j.isRun,
@@ -272,8 +276,8 @@ class Component extends DCLogic {
           this.timer = setTimeout(() => this.setState({ stage: 'done' }), 1400);
         },
       })),
-      footA: done ? '实际扣费 18 钻石' : (bad ? '已冻结 18 钻石 · 失败部分退回' : '已冻结 18 钻石'),
-      footB: done ? '余额 222 钻石' : '生成成功才结算，失败自动退回',
+      footA: done ? '实际扣费 29 钻石' : (bad ? '已冻结 29 钻石 · 失败部分退回' : '已冻结 29 钻石'),
+      footB: done ? '余额 211 钻石' : '生成成功才结算，失败自动退回',
       ctaText: done ? '再做一条' : '返回预览',
       ctaCls: done ? '' : 'ghost',
     };

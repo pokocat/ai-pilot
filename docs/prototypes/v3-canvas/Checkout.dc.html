@@ -111,17 +111,17 @@
 
   <div class="body">
     <div class="card">
-      <div class="lede">45 秒中，40 秒已是成片效果</div>
-      <div class="ledes">仅剩 5 秒 AI 开场待生成，费用只用在这一段。其余部分与你刚才看到的预览完全一致。</div>
+      <div class="lede">2 分 43 秒中，137 秒已是成片效果</div>
+      <div class="ledes">仅剩 3 段数字人出镜共 26 秒待生成，费用只用在这几段。其余部分与你刚才看到的预览完全一致。</div>
       <div class="meter">
-        <div class="m1" style="width:66.7%"></div>
-        <div class="m2" style="width:22.2%"></div>
-        <div class="m3" style="width:11.1%"></div>
+        <div class="m1" style="width:80.4%"></div>
+        <div class="m2" style="width:3.7%"></div>
+        <div class="m3" style="width:15.9%"></div>
       </div>
       <div class="mleg">
-        <span class="ml"><i style="background:#326B86"></i>实拍素材 30 秒</span>
-        <span class="ml"><i style="background:#F06435"></i>已生成 10 秒</span>
-        <span class="ml"><i style="background:#FFD9C9"></i>待生成 5 秒</span>
+        <span class="ml"><i style="background:#326B86"></i>实拍素材与固定片段 131 秒</span>
+        <span class="ml"><i style="background:#F06435"></i>已生成 6 秒</span>
+        <span class="ml"><i style="background:#FFD9C9"></i>待生成 26 秒</span>
       </div>
     </div>
 
@@ -133,7 +133,7 @@
         </span>
         <span class="lib">
           <span class="lit">画面、字幕、音乐、剪辑</span>
-          <span class="lis">共 30 秒</span>
+          <span class="lis">实拍 17 段共 121 秒，加固定尾片 10 秒</span>
         </span>
         <span class="liv free">免费</span>
       </div>
@@ -142,7 +142,7 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
         </span>
         <span class="lib">
-          <span class="lit">王老板数字人出镜 10 秒</span>
+          <span class="lit">王老板数字人出镜 6 秒 · 第 1 段</span>
           <span class="lis">上次已生成，本次不再扣费</span>
         </span>
         <span class="liv free">0 钻石</span>
@@ -152,10 +152,20 @@
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></svg>
         </span>
         <span class="lib">
-          <span class="lit">AI 开场画面 5 秒</span>
-          <span class="lis">本次仅生成这一段，失败不扣费</span>
+          <span class="lit">王老板数字人出镜 26 秒 · 第 7、13、21 段</span>
+          <span class="lis">本次生成这三段，失败不扣费</span>
         </span>
-        <span class="liv paid">18 钻石</span>
+        <span class="liv paid">26 钻石</span>
+      </div>
+      <div class="li">
+        <span class="lic ph">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></svg>
+        </span>
+        <span class="lib">
+          <span class="lit">口播配音 2:33</span>
+          <span class="lis">进预览前已经全部生成，本次一并结算</span>
+        </span>
+        <span class="liv paid">3 钻石</span>
       </div>
 
       <div class="buy {{ buyCls }}" onClick="{{ toggleBuy }}">
@@ -163,24 +173,24 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
         </span>
         <span class="buyb">
-          <span class="buyt">先生成这 5 秒，确认后再导出整片</span>
-          <span class="buys">同样 18 钻石。已生成的片段会原样用于成片，不重复扣费。</span>
+          <span class="buyt">先只生成第 7 段这 9 秒，确认后再导出整片</span>
+          <span class="buys">9 钻石。已生成的片段会原样用于成片，不重复扣费。</span>
         </span>
       </div>
     </div>
 
     <div class="warn">
-      <div class="warnt">这 5 秒生成后可能与当前不同</div>
+      <div class="warnt">这 26 秒生成后可能与当前不同</div>
       <ul class="warnl">
-        <li>构图、光线、运镜由 AI 生成，与当前草图会有出入</li>
-        <li>时长、字幕、前后衔接不会变</li>
-        <li>商品、包装文字和价格不会出现在这 5 秒里</li>
+        <li>口型、眨眼和肢体动作由数字人生成，与当前样片会有出入</li>
+        <li>出镜的还是你训练的那个形象和声音，不会换人</li>
+        <li>配音、字幕、时长、前后衔接不会变</li>
       </ul>
       <div class="ack {{ ackCls }}" onClick="{{ toggleAck }}">
         <span class="box" style="{{ ackStyle }}">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
         </span>
-        <span class="ackt">已了解这 5 秒尚未生成</span>
+        <span class="ackt">已了解这 26 秒尚未生成</span>
       </div>
     </div>
 
@@ -211,8 +221,10 @@ class Component extends DCLogic {
       buyCls: buy ? 'on' : '',
       ackStyle: ack ? 'border-color:#F06435;background:#F06435' : '',
       ackCls: ack ? 'on' : '',
-      total: '18 钻石',
-      note: buy ? '先生成这 5 秒，导出整片时不再扣费' : '余额 240，本次消耗 18',
+      // 整条 35 钻石 = 数字人 32 + 配音 3。第 1 段 6 钻上一屏已先行生成，
+      // 本次导出整片结算 26（数字人）+ 3（配音）= 29；只先生成第 7 段则单算 9。
+      total: buy ? '9 钻石' : '29 钻石',
+      note: buy ? '先生成这 9 秒，导出整片时不再扣费' : '余额 240，本次消耗 29',
       ctaText: buy ? '仅生成这段' : '立即生成',
       ctaCls: ack ? '' : 'off',
       toggleBuy: () => this.setState({ buy: !this.state.buy }),

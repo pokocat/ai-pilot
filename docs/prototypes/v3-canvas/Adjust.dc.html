@@ -204,9 +204,12 @@ class Component extends DCLogic {
   }
 
   renderVals() {
+    // P0 的片段级生成只覆盖数字人段（方案 §P0-a：PreparedClip.kind = avatar | tts）。
+    // 「AI 生成一段场景画面」不在 P0：石榴网关没有 T2V/I2V，方案 §0.0 已把它整块移出。
+    // 所以这一屏的四个方案里，唯一要钱的是「数字人多出镜」——按 1 钻石/秒，口径见 model.js。
     const base = [
-      { id: 'talk', title: '数字人出镜延长 5 秒', sub: '由王老板补讲这一段，节奏连贯，不额外扣费', price: '免费', paid: 0 },
-      { id: 'gen', title: 'AI 生成场景画面', sub: '生成“顾客提箱进店”，商品本体仍用实拍', price: '+5 钻石', paid: 5 },
+      { id: 'talk', title: '数字人出镜延长 5 秒', sub: '由王老板补讲这一段，节奏连贯', price: '+5 钻石', paid: 5 },
+      { id: 'off', title: '用官方素材补上', sub: '同类场景的授权素材，画面通用，但不是你的门店', price: '免费', paid: 0 },
     ];
     const extra = [
       { id: 'lib', title: '从素材库选择', sub: '现有 3 条门店实拍，与本段匹配度一般', price: '免费', paid: 0 },
@@ -229,8 +232,8 @@ class Component extends DCLogic {
       })),
       footA: '已处理 · 本条共计 ' + total + ' 钻石',
       footB: cur.paid
-        ? ('较推荐方案多 ' + cur.paid + ' 钻石，生成前会再次确认')
-        : '此类修改免费，预览即时更新',
+        ? ('数字人多出镜 5 秒，按 1 钻石一秒；生成前会再次确认')
+        : '换画面不额外扣费，预览即时更新',
     };
   }
 }
