@@ -33,6 +33,9 @@
       box-shadow:0 4px 14px rgba(95,72,55,.06); }
     .ttl { flex:1; font-family:var(--serif); font-weight:600; font-size:17px; }
 
+    /* 内容整块可滚（§3.7.4 ③）：消耗明细四行 + 风险披露必然超屏。
+       top/bottom 与导航行、底部操作栏（9 + 46 + 34 = 89）同源，不得各写各的。 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
     .body { padding:6px 20px 0; display:flex; flex-direction:column; gap:6px; }
     .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
       box-shadow:0 4px 14px rgba(95,72,55,.06); padding:13px; }
@@ -109,6 +112,7 @@
     <div class="ttl">确认生成</div>
   </div>
 
+  <div class="page">
   <div class="body">
     <div class="card">
       <div class="lede">2 分 43 秒中，137 秒已是成片效果</div>
@@ -195,6 +199,7 @@
     </div>
 
     <div class="bind">以你刚才预览的版本为准。若之后修改了内容，需重新预览确认后才能生成。</div>
+  </div>
   </div>
 
   <div class="footer">

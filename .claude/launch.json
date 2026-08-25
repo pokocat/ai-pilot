@@ -2,6 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "prototype-canvas",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8931",
+        "--directory",
+        "docs/prototypes/v3-canvas"
+      ],
+      "port": 8931
+    },
+    {
       "name": "h5-preview",
       "runtimeExecutable": "node",
       "runtimeArgs": [
