@@ -131,14 +131,14 @@
     <div class="scrim" onClick="{{ close }}"></div>
     <div class="sheet">
       <div class="grab"></div>
-      <div class="sht">收纳箱 · 春季促销</div>
-      <div class="shs">8 月 23 日 · 45 秒 · 已保存到相册，已分享至朋友圈</div>
+      <div class="sht">王记五金 · 二十三年</div>
+      <div class="shs">8 月 23 日 · 2:43 · 已保存到相册，已分享至朋友圈</div>
       <div class="trace">
-        <span class="tg">模板 · 带货三段式</span>
-        <span class="tg">文案 · 强转化版 第 2 版</span>
-        <span class="tg">商品 · 收纳箱（¥98）</span>
-        <span class="tg">出镜 · 王老板</span>
-        <span class="tg">实扣 18 钻石</span>
+        <span class="tg">模板 · 为实体发声</span>
+        <span class="tg">脚本 · 王记五金 第 2 版</span>
+        <span class="tg">出镜 · 王老板（4 段共 32 秒）</span>
+        <span class="tg">素材 · 17 段实拍</span>
+        <span class="tg">实扣 29 钻石</span>
       </div>
       <div class="acts">
         <div class="ab">
@@ -188,18 +188,22 @@ class Component extends DCLogic {
       { id: 'done', name: '已完成 5' },
       { id: 'partner', name: '来自军师 2' },
     ];
+    // 首发只有「为实体发声」一套模板（§0.3），所以作品页当然全是它 ——
+    // 这就是第一天的真实样子，不要靠编几条别的模板的成片把它填热闹。
+    // 时长一律 2:43（catalog.js 运行时真值 163 秒）；换素材换脚本都不改总时长，
+    // 因为模板定死了段数和每段多长（§3.1）。
     const all = [
-      { id: 'w1', title: '收纳箱 · 春季促销', meta: '8 月 23 日 · 存过相册', dur: '00:45',
+      { id: 'w1', title: '王记五金 · 二十三年', meta: '8 月 23 日 · 存过相册', dur: '2:43',
         grain: 'g1', state: 'done', variants: '', partner: false },
-      { id: 'w2', title: '开门三件事', meta: '生成中 · 约 40 秒', dur: '00:30',
+      { id: 'w2', title: '王记五金 · 街坊版', meta: '生成中 · 约 90 秒', dur: '2:43',
         grain: 'g2', state: 'run', variants: '', partner: false },
-      { id: 'w3', title: '我这家店开了二十三年', meta: '8 月 20 日 · 发过视频号', dur: '2:43',
+      { id: 'w3', title: '王记五金 · 老师傅', meta: '8 月 20 日 · 发过视频号', dur: '2:43',
         grain: 'g3', state: 'done', variants: '', partner: false },
-      { id: 'w4', title: '春季获客 · 门店宣传', meta: '8 月 19 日 · 已回传军师', dur: '00:45',
+      { id: 'w4', title: '巷口修鞋铺 · 张姐', meta: '8 月 19 日 · 已回传军师', dur: '2:43',
         grain: 'g4', state: 'done', variants: '3 条变体', partner: true },
-      { id: 'w5', title: '手电钻 · 到货通知', meta: '8 月 18 日', dur: '00:30',
+      { id: 'w5', title: '王记五金 · 清晨版', meta: '8 月 18 日', dur: '2:43',
         grain: 'g2', state: 'done', variants: '', partner: false },
-      { id: 'w6', title: '会员日 · 到店有礼', meta: '8 月 15 日 · 已回传军师', dur: '00:45',
+      { id: 'w6', title: '学院路面馆 · 李叔', meta: '8 月 15 日 · 已回传军师', dur: '2:43',
         grain: 'g1', state: 'done', variants: '', partner: true },
     ];
     const pick = this.state.chip;

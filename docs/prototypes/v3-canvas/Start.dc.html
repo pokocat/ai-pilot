@@ -96,13 +96,13 @@
     <div class="back">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
     </div>
-    <div class="ttl">语音输入</div>
+    <div class="ttl">这一条讲什么</div>
   </div>
 
   <div class="stage">
     <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}">
-      <div class="lede">说说要做什么视频</div>
-      <div class="sub">口语描述即可，系统会自动整理成脚本。</div>
+      <div class="lede">说说这条片子讲什么</div>
+      <div class="sub">已选「为实体发声」。说一句你的店，AI 在模板骨架内把 22 段脚本写出来。</div>
     </sc-if>
     <sc-if value="{{ rec }}" hint-placeholder-val="{{ false }}">
       <div class="lede">正在听</div>
@@ -126,8 +126,8 @@
       <div class="tags">
         <span class="tag"><b>主体</b><span>王记五金</span></span>
         <span class="tag"><b>目标</b><span>门店曝光</span></span>
-        <span class="tag"><b>风格</b><span>人文纪实</span></span>
-        <span class="tag"><b>时长</b><span>约 2 分钟</span></span>
+        <span class="tag"><b>模板</b><span>为实体发声</span></span>
+        <span class="tag"><b>时长</b><span>2:43 · 模板固定</span></span>
       </div>
     </sc-if>
 
@@ -154,12 +154,12 @@
       <div class="altk">也可以</div>
       <div class="altrow">
         <div class="alti">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4 4 0 0 0 5.7.3l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.4 1.4"/><path d="M14 10.5a4 4 0 0 0-5.7-.3l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.4-1.4"/></svg>
-          <span>粘贴链接</span>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h11l3 3v9H5z"/><path d="M8 10h7"/><path d="M8 14h5"/></svg>
+          <span>打字输入</span>
         </div>
         <div class="alti">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8l8-4 8 4-8 4z"/><path d="M4 8v8l8 4 8-4V8"/></svg>
-          <span>选择商品</span>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.7"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>
+          <span>从素材库选</span>
         </div>
         <div class="alti">
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>
@@ -193,10 +193,12 @@ class Component extends DCLogic {
 
   renderVals() {
     const p = this.state.phase;
+    // 三条示例是同一套模板（为实体发声）下的三种讲法，不是三套模板。
+    // §3.1 已定起点只有一个：选模板；这一屏是模板选定之后交代「这一条讲什么」。
     const egs = [
-      { k: '品牌故事', t: '给我的五金店做一条有情怀的宣传片，开了二十三年了' },
-      { k: '带货', t: '新到了一批收纳箱，拍条片子催一下老客' },
-      { k: '活动', t: '这周六会员日到店有礼，做条短的发群里' },
+      { k: '讲坚持', t: '给我的五金店做一条，开了二十三年了，早上六点就开门' },
+      { k: '讲手艺', t: '我们店修的东西别人修不了，老师傅干了三十年' },
+      { k: '讲街坊', t: '这条街的老邻居都在我这儿配钥匙，讲讲他们' },
     ];
     return {
       idle: p === 'idle',
@@ -209,12 +211,12 @@ class Component extends DCLogic {
       egs: egs.map((e) => ({ k: e.k, t: e.t, use: () => this.finish(e.t) })),
       toggle: () => {
         if (p === 'rec') {
-          this.finish('给我的五金店做一条有情怀的宣传片，开了二十三年了');
+          this.finish('给我的五金店做一条，开了二十三年了，早上六点就开门');
         } else {
           this.setState({ phase: 'rec' });
           if (this.timer) clearTimeout(this.timer);
           this.timer = setTimeout(() => {
-            this.finish('给我的五金店做一条有情怀的宣传片，开了二十三年了');
+            this.finish('给我的五金店做一条，开了二十三年了，早上六点就开门');
           }, 2600);
         }
       },
