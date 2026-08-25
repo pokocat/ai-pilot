@@ -46,52 +46,52 @@
       border-radius:999px; background:var(--av); border:1.5px solid var(--bg); color:#FFF;
       font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center; }
 
-    /* 竖向流：一屏两张多，滑得动（§3.7.4 ③ 真实滚动容器） */
+    /* 两列宫格（§3.7.4 ③ 真实滚动容器）。
+       成片规格是 9:16（config.js 的 OUTPUT），所以封面本身就是 9:16 竖图 ——
+       手机上一屏并排放两张竖图，比一张横图更接近成片长什么样。 */
     .feed { position:absolute; left:0; right:0; top:132px; bottom:84px; overflow-y:auto;
-      padding:2px 22px 14px; display:flex; flex-direction:column; gap:16px; }
+      padding:2px 22px 16px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:18px 10px; align-content:start; }
 
-    /* 成片是 9:16（config.js OUTPUT），所以封面里居中放一块 9:16 的画面，
-       两侧用同色虚化底衬满 —— 用横图当封面会把竖屏产品说成横屏。 */
-    .cov { height:196px; border-radius:15px; overflow:hidden; position:relative;
-      background:#1E1B19; box-shadow:0 8px 20px rgba(74,48,32,.14); }
-    /* 衬底压暗压虚，中间那块 9:16 才立得起来；不压的话整张封面是三条同色竖带 */
-    .back { position:absolute; inset:-30px; filter:blur(26px) saturate(.7) brightness(.42); }
-    .frame { position:absolute; left:50%; top:0; bottom:0; width:110px; margin-left:-55px;
-      overflow:hidden; border-radius:2px;
-      box-shadow:0 0 0 1px rgba(255,255,255,.16), 0 6px 20px rgba(0,0,0,.4); }
+    /* 列宽 = (390 - 22×2 - 10) / 2 = 168；9:16 → 168 × 16 / 9 ≈ 298。
+       这两个数与 .feed 的 padding / gap 同源，改一个另一个跟着改。 */
+    .cov { height:298px; border-radius:13px; overflow:hidden; position:relative;
+      background:#1E1B19; box-shadow:0 6px 16px rgba(74,48,32,.13); }
+    .shot { position:absolute; inset:0; }
     .grain { position:absolute; inset:0;
       background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, transparent 1px 3px); }
+    .shade { position:absolute; left:0; right:0; bottom:0; height:76px;
+      background:linear-gradient(180deg, transparent, rgba(20,14,11,.62)); }
     .c1 { background-image:radial-gradient(circle at 68% 26%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
     .c2 { background-image:radial-gradient(circle at 30% 70%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
     .c3 { background-image:radial-gradient(circle at 56% 32%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
-    .play { position:absolute; left:50%; top:50%; width:38px; height:38px; margin:-19px 0 0 -19px;
-      border-radius:50%; background:rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center; }
-    .dur { position:absolute; right:9px; bottom:9px; font-size:10.5px; color:#FFF; font-weight:600;
-      background:rgba(20,14,11,.6); padding:2px 8px; border-radius:999px; font-variant-numeric:tabular-nums; }
-    .ratio { position:absolute; left:9px; bottom:9px; font-size:9.5px; color:rgba(255,255,255,.82);
-      background:rgba(20,14,11,.42); padding:2px 7px; border-radius:999px; }
+    .play { position:absolute; left:50%; top:50%; width:34px; height:34px; margin:-17px 0 0 -17px;
+      border-radius:50%; background:rgba(255,255,255,.88); display:flex; align-items:center; justify-content:center; }
+    /* 分类标签挪到封面上：168px 的列宽放不下「标题 + 右侧标签」那种横排 */
+    .ktag { position:absolute; left:7px; top:7px; z-index:2; font-size:9.5px; font-weight:700;
+      color:#FFF; padding:2px 7px; border-radius:5px; background:rgba(20,14,11,.55); }
+    .dur { position:absolute; right:7px; bottom:7px; z-index:2; font-size:10.5px; color:#FFF; font-weight:600;
+      font-variant-numeric:tabular-nums; text-shadow:0 1px 3px rgba(0,0,0,.5); }
     /* 没产出的模板不摆假封面：压灰 + 说清楚 */
-    .cov.soon .back { filter:blur(26px) saturate(.25) brightness(.3); }
-    .cov.soon .frame { filter:saturate(.2) brightness(.5); }
-    .cov.soon::after { content:''; position:absolute; inset:0; background:rgba(22,20,18,.34); }
+    .cov.soon .shot { filter:saturate(.32) brightness(.52); }
     .soonlab { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
       font-size:11px; font-weight:700; color:#FFF; letter-spacing:.08em;
-      background:rgba(20,14,11,.62); padding:5px 11px; border-radius:999px; white-space:nowrap; }
+      background:rgba(20,14,11,.66); padding:5px 11px; border-radius:999px; white-space:nowrap; }
 
-    .cb { margin-top:9px; }
-    .cbh { display:flex; align-items:center; gap:9px; }
-    .cbt { flex:1; min-width:0; font-family:var(--serif); font-size:17px; font-weight:700;
+    .cb { margin-top:8px; }
+    .cbt { font-family:var(--serif); font-size:14.5px; font-weight:700; line-height:1.35;
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .kind { flex:none; font-size:10px; font-weight:600; padding:3px 8px; border-radius:6px;
-      border:1px solid var(--lineSoft); color:var(--ink2); background:var(--surface); }
-    .cbs { font-size:11.5px; color:var(--ink3); line-height:1.65; margin-top:5px; }
+    /* 说明在 168px 里必然多行，夹到两行；夹不住就是标题写太长了 */
+    .cbs { font-size:11px; color:var(--ink3); line-height:1.6; margin-top:4px;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     /* 三个可信事实：成片时长（封面角标）/ 数字人出镜秒数 / 预计钻石。
        catalog.js templateMeta() 就是为了这三个数才改成从 segments 推导的 —— 别写死常量。 */
-    .facts { display:flex; align-items:center; gap:7px; margin-top:7px; font-size:10.5px;
+    .facts { display:flex; align-items:center; gap:6px; margin-top:6px; font-size:10px;
       color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap; }
-    .facts i { width:1px; height:9px; background:var(--line); display:block; }
-    .blocked { font-size:11px; color:var(--avDeep); line-height:1.6; margin-top:6px;
-      background:var(--avSoft); border:1px solid var(--avLine); border-radius:9px; padding:6px 9px; }
+    .facts i { width:1px; height:8px; background:var(--line); display:block; }
+    .blocked { font-size:10.5px; color:var(--avDeep); line-height:1.55; margin-top:5px;
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+    .empty { grid-column:1 / -1; }
 
     .empty { padding:38px 8px; text-align:center; font-size:12.5px; color:var(--muted); line-height:1.8; }
 
@@ -128,13 +128,13 @@
     <sc-for list="{{ list }}" as="t" hint-placeholder-count="3">
       <div class="card" onClick="{{ t.open }}">
         <div class="cov {{ t.soonCls }}">
-          <div class="back {{ t.cover }}"></div>
-          <div class="frame {{ t.cover }}"><div class="grain"></div></div>
+          <div class="shot {{ t.cover }}"><div class="grain"></div></div>
+          <span class="ktag">{{ t.kind }}</span>
           <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
+            <div class="shade"></div>
             <div class="play">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
             </div>
-            <span class="ratio">竖屏 9:16</span>
             <span class="dur">{{ t.dur }}</span>
           </sc-if>
           <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
@@ -142,16 +142,12 @@
           </sc-if>
         </div>
         <div class="cb">
-          <div class="cbh">
-            <span class="cbt">{{ t.name }}</span>
-            <span class="kind">{{ t.kind }}</span>
-          </div>
+          <div class="cbt">{{ t.name }}</div>
           <div class="cbs">{{ t.desc }}</div>
           <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
             <div class="facts">
               <span>数字人 {{ t.avatarSec }} 秒</span><i></i>
-              <span>约 {{ t.credits }} 钻石</span><i></i>
-              <span>{{ t.segmentCount }} 段</span>
+              <span>{{ t.credits }} 钻石</span>
             </div>
           </sc-if>
           <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
@@ -211,10 +207,10 @@ class Component extends DCLogic {
         desc: '纪实倡导片。走遍全国的实体店主群像，讲那些凌晨亮灯的坚持。' },
       { id: 'ct_qiye', name: '企业宣传片', kind: '品牌故事', cover: 'c3', dur: '', ready: false,
         desc: '骨架沿用「为实体发声」，讲企业的来历、产线和人。',
-        blocked: '还在做。这套模板要先写好剧本骨架、备齐固定素材，再用真实门店的片子验收过才上线。' },
+        blocked: '还在做。要先写好剧本骨架、备齐固定素材，再用真实门店的片子验收。' },
       { id: 'ct_daihuo', name: '短视频带货', kind: '带货', cover: 'c2', dur: '', ready: false,
         desc: '明星切片混剪，与前两套不是同一套子系统。',
-        blocked: '还在做。这套用明星切片混剪，授权谈妥之前不会上线。' },
+        blocked: '还在做。明星切片的授权谈妥之前不会上线。' },
     ];
   }
 
