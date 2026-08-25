@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .board {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#ECE9E3; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:880px; height:820px; box-sizing:border-box; padding:34px 38px;
+      color:var(--ink); font-family:var(--sans); background:var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .board * { box-sizing:border-box; }
+    .kicker { font-size:11.5px; font-weight:700; letter-spacing:.14em; color:var(--avDeep); }
+    .h1 { font-family:var(--serif); font-size:27px; font-weight:600; line-height:1.35; margin-top:8px; }
+    .sub { font-size:13px; color:var(--ink3); line-height:1.7; margin-top:8px; max-width:660px; }
+
+    .cols { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:18px; margin-top:22px; }
+    .col { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px; padding:20px;
+      box-shadow:0 8px 24px rgba(95,72,55,.07); }
+    .colh { display:flex; align-items:baseline; gap:8px; }
+    .colt { font-family:var(--serif); font-size:18px; font-weight:600; }
+    .cold { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+    .meter { display:flex; height:16px; border-radius:5px; overflow:hidden; gap:2px; margin-top:14px; }
+    .m-exact { background:var(--br); }
+    .m-ready { background:var(--av); }
+    .m-ph { background:#FFD9C9;
+      background-image:repeating-linear-gradient(135deg, rgba(199,73,32,.5) 0 5px, rgba(199,73,32,.1) 5px 10px); }
+    .mleg { display:flex; flex-wrap:wrap; gap:10px; margin-top:9px; }
+    .ml { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--ink3); }
+    .ml i { width:9px; height:9px; border-radius:2px; display:block; }
+    .verdict { margin-top:14px; padding:11px 13px; border-radius:13px; font-size:12.5px; line-height:1.65; }
+    .verdict.good { background:var(--okSoft); color:#1F5C42; }
+    .verdict.risk { background:var(--avSoft); color:#8C3A18; }
+
+    .kv { display:flex; gap:10px; padding:11px 0; border-bottom:1px solid var(--lineSoft); }
+    .kv:last-child { border-bottom:none; padding-bottom:0; }
+    .kvk { width:88px; flex:none; font-size:11.5px; color:var(--muted); line-height:1.6; }
+    .kvv { flex:1; font-size:12.5px; line-height:1.7; color:var(--ink2); }
+    .kvv b { font-weight:600; color:var(--ink); }
+
+    .rail { margin-top:22px; background:var(--surface); border:1px solid var(--lineSoft);
+      border-radius:18px; padding:16px 20px; box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .railh { font-size:12px; color:var(--muted); }
+    .steps { display:flex; align-items:center; gap:8px; margin-top:11px; }
+    .st { flex:1; text-align:center; padding:9px 6px; border-radius:11px; background:var(--sunken);
+      font-size:11.5px; font-weight:600; color:var(--ink2); }
+    .st.hot { background:var(--avSoft); color:var(--avDeep); border:1px solid var(--avLine); }
+    .arw { flex:none; color:var(--faint); font-size:11px; }
+    .railn { font-size:11.5px; color:var(--ink3); line-height:1.7; margin-top:11px; }
+  </style>
+</helmet>
+
+<div class="board">
+  <div class="kicker">两条主链对照</div>
+  <div class="h1">同一套交互骨架，看片权的含金量差三倍</div>
+  <div class="sub">带货片待生成 5 秒、叙事片待生成 96 秒。骨架、组件和扣费规则完全共用；真正要分别设计的，是「用户在扣费前到底看到了多少真东西」怎么说清楚。</div>
+
+  <div class="cols">
+    <div class="col">
+      <div class="colh"><span class="colt">数字人带货</span><span class="cold">45 秒</span></div>
+      <div class="meter">
+        <div class="m-exact" style="width:66.7%"></div>
+        <div class="m-ready" style="width:22.2%"></div>
+        <div class="m-ph" style="width:11.1%"></div>
+      </div>
+      <div class="mleg">
+        <span class="ml"><i style="background:#326B86"></i>实拍素材 30 秒</span>
+        <span class="ml"><i style="background:#F06435"></i>已生成 10 秒</span>
+        <span class="ml"><i style="background:#FFD9C9"></i>待生成 5 秒</span>
+      </div>
+      <div class="verdict good">89% 的时长在扣费前已是最终效果。界面上一句「已就绪 40 秒 · 待生成 5 秒」就够。</div>
+      <div style="margin-top:14px">
+        <div class="kv"><span class="kvk">必须确认</span><span class="kvv"><b>当前价格与优惠</b>、不可编造的参数、购买路径、是否保留商品原声</span></div>
+        <div class="kv"><span class="kvk">预览优先看</span><span class="kvv">商品看不看得清、包装文字是否真实、卖点与画面对不对得上、价格字幕准不准</span></div>
+        <div class="kv"><span class="kvk">行动号召</span><span class="kvv">下单、领券、进店咨询</span></div>
+        <div class="kv"><span class="kvk">扣费</span><span class="kvv">一次确认 18 钻石，只为那 5 秒</span></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="colh"><span class="colt">数字人叙事</span><span class="cold">2 分 42 秒</span></div>
+      <div class="meter">
+        <div class="m-exact" style="width:40.7%"></div>
+        <div class="m-ph" style="width:59.3%"></div>
+      </div>
+      <div class="mleg">
+        <span class="ml"><i style="background:#326B86"></i>实拍素材 66 秒</span>
+        <span class="ml"><i style="background:#FFD9C9"></i>待生成 96 秒（数字人 84 + AI 12）</span>
+      </div>
+      <div class="verdict risk">超过一半时长还没做。所以叙事片不能沿用带货片那句话——必须逐类说清楚，并且配音、字幕、时长、顺序都得是真的，否则用户等于没看过片。</div>
+      <div style="margin-top:14px">
+        <div class="kv"><span class="kvk">必须确认</span><span class="kvv"><b>谁在发声</b>、哪些事件真实、要不要放地址联系方式、多方代表是否出镜</span></div>
+        <div class="kv"><span class="kvk">预览优先看</span><span class="kvv">叙事节奏、情绪递进、数字人与真实素材交替是否自然、结尾有没有过度拔高</span></div>
+        <div class="kv"><span class="kvk">行动号召</span><span class="kvv">了解品牌、到店、关注后续、参与倡议</span></div>
+        <div class="kv"><span class="kvk">扣费</span><span class="kvv">7 段待生成，共 200 钻石，支持分段先行生成</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="railh">共用的七阶段主链（方案 §3.6.2）——两条链只在第 4、6 阶段的文案上分叉</div>
+    <div class="steps">
+      <div class="st">开始 / 接任务</div>
+      <div class="arw">›</div>
+      <div class="st">确认信息</div>
+      <div class="arw">›</div>
+      <div class="st">自动准备</div>
+      <div class="arw">›</div>
+      <div class="st hot">看预览</div>
+      <div class="arw">›</div>
+      <div class="st">局部修改</div>
+      <div class="arw">›</div>
+      <div class="st hot">确认扣费</div>
+      <div class="arw">›</div>
+      <div class="st">生成成片</div>
+    </div>
+    <div class="railn">分叉只有两处：第 4 阶段「哪几秒已就绪」怎么写，第 6 阶段「一次生成 vs 分段生成」哪个是默认。其余阶段的页面、组件、状态机和扣费规则完全一致——这也是这套骨架值不值得做的判据。</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":880,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

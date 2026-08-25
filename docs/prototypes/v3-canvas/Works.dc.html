@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:44px; display:flex; align-items:center; gap:10px; padding:0 20px; }
+    .brand { flex:1; font-family:var(--serif); font-size:21px; font-weight:600; }
+    .icobtn { width:34px; height:34px; border-radius:12px; flex:none; display:flex; align-items:center;
+      justify-content:center; background:var(--surface); border:1px solid var(--lineSoft);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+
+    .chips { display:flex; gap:7px; padding:6px 20px 0; align-items:center; }
+    .chipbtn { width:30px; height:30px; flex:none; border-radius:10px; display:flex; align-items:center;
+      justify-content:center; background:var(--sunken); margin-left:auto; }
+    .ch { height:30px; padding:0 12px; border-radius:999px; display:flex; align-items:center;
+      font-size:12.5px; color:var(--ink3); background:var(--sunken); font-weight:500; }
+    .ch.on { background:var(--ink); color:#FFF; font-weight:600; }
+
+    .grid { padding:12px 20px 0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:11px; }
+    .w { border-radius:16px; overflow:hidden; background:var(--surface); border:1px solid var(--lineSoft);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .cover { height:172px; position:relative; }
+    .g1 { background-image:radial-gradient(circle at 22% 76%, rgba(229,179,121,.4) 0 16%, transparent 38%), linear-gradient(145deg,#9C7555,#2F3332); }
+    .g2 { background-image:linear-gradient(150deg,#C9A682,#4A4C4C); }
+    .g3 { background-image:linear-gradient(145deg,#E8B679,#6D554B); }
+    .g4 { background-image:radial-gradient(circle at 50% 34%, rgba(255,226,205,.9) 0 18%, transparent 46%), linear-gradient(160deg,#B9846A,#33302E); }
+    .dur { position:absolute; right:7px; bottom:7px; font-size:10px; color:#FFF; font-weight:600;
+      background:rgba(20,17,15,.55); padding:2px 7px; border-radius:999px; font-variant-numeric:tabular-nums; }
+    .src { position:absolute; left:7px; top:7px; font-size:10px; font-weight:600; color:#FFF;
+      background:rgba(50,107,134,.9); padding:2px 7px; border-radius:999px; }
+    .vari { position:absolute; left:7px; bottom:7px; font-size:10px; font-weight:600; color:var(--ink);
+      background:rgba(255,255,255,.9); padding:2px 7px; border-radius:999px; }
+    .veil { position:absolute; inset:0; background:rgba(26,22,19,.6); display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:9px; }
+    .spin { width:22px; height:22px; border-radius:50%; border:2.5px solid rgba(255,255,255,.28);
+      border-top-color:#FFF; animation:sp 1s linear infinite; }
+    @keyframes sp { to { transform:rotate(360deg); } }
+    .veil span { font-size:11px; color:#FFF; font-weight:600; }
+    .meta { padding:9px 10px 11px; }
+    .wt { display:block; font-size:12.5px; font-weight:600; line-height:1.45;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ws { display:block; font-size:10.5px; color:var(--muted); margin-top:4px; }
+
+    .sheet { position:absolute; left:0; right:0; bottom:0; background:var(--surface);
+      border-radius:22px 22px 0 0; box-shadow:0 -18px 44px rgba(69,54,44,.22); padding:16px 20px 20px; z-index:9; }
+    .grab { width:36px; height:4px; border-radius:999px; background:var(--line); margin:0 auto 13px; }
+    .sht { font-family:var(--serif); font-size:17px; font-weight:600; }
+    .shs { font-size:12px; color:var(--ink3); line-height:1.7; margin-top:6px; }
+    .trace { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+    .tg { font-size:11.5px; padding:5px 10px; border-radius:999px; background:var(--sunken);
+      color:var(--ink3); border:1px solid var(--lineSoft); }
+    .acts { display:flex; gap:9px; margin-top:14px; }
+    .ab { flex:1; height:46px; border-radius:15px; display:flex; align-items:center; justify-content:center;
+      gap:6px; font-size:13.5px; font-weight:500; border:1px solid var(--line); background:var(--surface); color:var(--ink2); }
+    .ab.solid { background:var(--av); color:#FFF; border-color:transparent; font-weight:700;
+      box-shadow:0 8px 18px rgba(240,100,53,.22); }
+    .scrim { position:absolute; inset:0; background:rgba(30,24,20,.34); z-index:8; }
+
+    .tabbar { position:absolute; left:0; right:0; bottom:0; height:84px; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -8px 24px rgba(69,54,44,.06);
+      display:flex; align-items:flex-start; padding:9px 0 0; }
+    .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .tab span { font-size:10.5px; color:var(--faint); }
+    .tab.on span { color:var(--av); font-weight:600; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="brand">作品</div>
+  </div>
+
+  <div class="chips">
+    <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4">
+      <div class="ch {{ c.cls }}" onClick="{{ c.pick }}">{{ c.name }}</div>
+    </sc-for>
+    <div class="chipbtn">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+    </div>
+  </div>
+
+  <div class="grid">
+    <sc-for list="{{ works }}" as="w" hint-placeholder-count="4">
+      <div class="w" onClick="{{ w.open }}">
+        <div class="cover {{ w.grain }}">
+          <sc-if value="{{ w.busy }}" hint-placeholder-val="{{ false }}">
+            <div class="veil"><div class="spin"></div><span>{{ w.busyText }}</span></div>
+          </sc-if>
+          <sc-if value="{{ w.fromPartner }}" hint-placeholder-val="{{ false }}">
+            <div class="src">军师</div>
+          </sc-if>
+          <sc-if value="{{ w.hasVariants }}" hint-placeholder-val="{{ false }}">
+            <div class="vari">{{ w.variants }}</div>
+          </sc-if>
+          <div class="dur">{{ w.dur }}</div>
+        </div>
+        <div class="meta">
+          <span class="wt">{{ w.title }}</span>
+          <span class="ws">{{ w.meta }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ sheet }}" hint-placeholder-val="{{ false }}">
+    <div class="scrim" onClick="{{ close }}"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="sht">收纳箱 · 春季促销</div>
+      <div class="shs">8 月 23 日 · 45 秒 · 已保存到相册，已分享至朋友圈</div>
+      <div class="trace">
+        <span class="tg">模板 · 带货三段式</span>
+        <span class="tg">文案 · 强转化版 第 2 版</span>
+        <span class="tg">商品 · 收纳箱（¥98）</span>
+        <span class="tg">出镜 · 王老板</span>
+        <span class="tg">实扣 18 钻石</span>
+      </div>
+      <div class="acts">
+        <div class="ab">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4"/><path d="M15.4 6.5l-6.8 4"/></svg>
+          分享
+        </div>
+        <div class="ab solid">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          复制并修改
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <div class="tabbar">
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span>创作</span>
+    </div>
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h4l2 2.5h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>资料库</span>
+    </div>
+    <div class="tab on">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#F06435" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+      <span>作品</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { chip: 'all', sheet: false };
+  }
+
+  renderVals() {
+    const chips = [
+      { id: 'all', name: '全部 6' },
+      { id: 'run', name: '生成中 1' },
+      { id: 'done', name: '已完成 5' },
+      { id: 'partner', name: '来自军师 2' },
+    ];
+    const all = [
+      { id: 'w1', title: '收纳箱 · 春季促销', meta: '8 月 23 日 · 存过相册', dur: '00:45',
+        grain: 'g1', state: 'done', variants: '', partner: false },
+      { id: 'w2', title: '开门三件事', meta: '生成中 · 约 40 秒', dur: '00:30',
+        grain: 'g2', state: 'run', variants: '', partner: false },
+      { id: 'w3', title: '我这家店开了二十三年', meta: '8 月 20 日 · 发过视频号', dur: '2:42',
+        grain: 'g3', state: 'done', variants: '', partner: false },
+      { id: 'w4', title: '春季获客 · 门店宣传', meta: '8 月 19 日 · 已回传军师', dur: '00:45',
+        grain: 'g4', state: 'done', variants: '3 条变体', partner: true },
+      { id: 'w5', title: '手电钻 · 到货通知', meta: '8 月 18 日', dur: '00:30',
+        grain: 'g2', state: 'done', variants: '', partner: false },
+      { id: 'w6', title: '会员日 · 到店有礼', meta: '8 月 15 日 · 已回传军师', dur: '00:45',
+        grain: 'g1', state: 'done', variants: '', partner: true },
+    ];
+    const pick = this.state.chip;
+    const list = all.filter((w) =>
+      pick === 'all' ? true :
+      pick === 'run' ? w.state === 'run' :
+      pick === 'done' ? w.state === 'done' : w.partner);
+
+    return {
+      chips: chips.map((c) => ({
+        name: c.name,
+        cls: pick === c.id ? 'on' : '',
+        pick: () => this.setState({ chip: c.id }),
+      })),
+      works: list.slice(0, 4).map((w) => ({
+        title: w.title, meta: w.meta, dur: w.dur, grain: w.grain,
+        busy: w.state === 'run',
+        busyText: '生成中',
+        fromPartner: w.partner,
+        hasVariants: !!w.variants,
+        variants: w.variants,
+        open: () => this.setState({ sheet: true }),
+      })),
+      sheet: this.state.sheet,
+      close: () => this.setState({ sheet: false }),
+    };
+  }
+}
+</script>
+</body>
+</html>

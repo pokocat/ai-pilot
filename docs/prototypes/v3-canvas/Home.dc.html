@@ -1,0 +1,331 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F4F1EA; --surface:#FFFFFF; --sunken:#EAE6DD;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.08);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans); background:var(--bg);
+      display:flex; flex-direction:column; -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+
+    /* 头区：一句话说清能干啥，不放需要持续更新的内容 */
+    .hero { position:relative; flex:none; height:186px; overflow:hidden;
+      background-image:
+        radial-gradient(92% 66% at 76% 12%, rgba(255,228,182,.58) 0%, transparent 56%),
+        linear-gradient(158deg, #D2894F 0%, #A85B39 42%, #63412F 74%, #332823 100%); }
+    .weave { position:absolute; inset:0; opacity:.5;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, transparent 1px 3px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,.045) 0 1px, transparent 1px 4px); }
+    .vig { position:absolute; inset:0;
+      background:radial-gradient(102% 76% at 32% 26%, transparent 40%, rgba(28,18,14,.46) 100%); }
+    .fade { position:absolute; left:0; right:0; bottom:0; height:72px;
+      background:linear-gradient(180deg, rgba(244,241,234,0) 0%, rgba(244,241,234,.6) 60%, #F4F1EA 100%); }
+
+    .topbar { position:relative; padding:46px 22px 0; display:flex; align-items:center; gap:10px; }
+    .mark { flex:1; display:flex; align-items:baseline; gap:9px; }
+    .markn { font-family:var(--serif); font-size:19px; font-weight:700; color:#FFF; letter-spacing:.06em; }
+    .markr { width:24px; height:1px; background:rgba(255,255,255,.42); }
+    .marks { font-size:10.5px; color:rgba(255,255,255,.7); letter-spacing:.16em; }
+    /* 微信胶囊按钮占住右上 y44–88，那一片不能放控件；这两个圆挪到胶囊下面 */
+    .ctrls { position:absolute; z-index:3; right:22px; top:96px; display:flex; gap:9px; }
+    .cbtn { width:36px; height:36px; border-radius:50%; position:relative; display:flex;
+      align-items:center; justify-content:center;
+      background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3); }
+    .badge { position:absolute; right:-1px; top:-1px; min-width:16px; height:16px; padding:0 4px;
+      border-radius:999px; background:var(--av); border:1.5px solid #B4653F; color:#FFF;
+      font-size:9.5px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+    .lede { position:relative; padding:18px 22px 0; }
+    .h1 { font-family:var(--serif); font-size:25px; font-weight:700; color:#FFF; line-height:1.4;
+      text-shadow:0 2px 18px rgba(40,24,16,.3); }
+    .h2 { font-size:12px; color:rgba(255,238,222,.86); line-height:1.65; margin-top:8px; max-width:270px; }
+
+    /* 待办面板：从右上铃铛点开 */
+    .scrim { position:absolute; inset:0; background:rgba(30,24,20,.36); z-index:8; }
+    .sheet { position:absolute; left:0; right:0; bottom:0; z-index:9; background:var(--surface);
+      border-radius:22px 22px 0 0; box-shadow:0 -18px 44px rgba(69,54,44,.24); padding:14px 20px 34px; }
+    .grab { width:36px; height:4px; border-radius:999px; background:var(--line); margin:0 auto 14px; }
+    .sh { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
+    .sht { flex:1; font-family:var(--serif); font-size:17px; font-weight:600; }
+    .sha { font-size:12px; color:var(--muted); }
+    .ti { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--lineSoft); }
+    .ti:last-child { border-bottom:none; padding-bottom:4px; }
+    .tic { width:36px; height:36px; border-radius:12px; flex:none; display:flex; align-items:center; justify-content:center; }
+    .tic.a { background:var(--avSoft); }
+    .tic.b { background:var(--brSoft); }
+    .tic.c { background:#EAF5EF; }
+    .tb2 { flex:1; min-width:0; }
+    .tit { display:block; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .tis { display:block; font-size:11.5px; color:var(--ink3); margin-top:4px; }
+    .tig { flex:none; font-size:12.5px; font-weight:600; color:var(--avDeep); padding:6px 12px;
+      border-radius:999px; background:var(--avSoft); border:1px solid var(--avLine); }
+
+    .sect { display:flex; align-items:center; gap:9px; }
+    .sbar { width:3px; height:15px; border-radius:2px; background:var(--av); flex:none; }
+    .stt { flex:1; font-family:var(--serif); font-size:16px; font-weight:600; }
+    .sta { font-size:11.5px; color:var(--muted); }
+
+    /* 主推模板：一眼看到成片长什么样、多长、讲什么 */
+    .mid { position:relative; z-index:2; flex:none; margin-top:16px; padding:0 22px; }
+    .feat { margin-top:11px; display:flex; gap:14px; padding:12px; border-radius:18px;
+      background:var(--surface); border:1px solid var(--lineSoft); box-shadow:0 8px 22px rgba(74,48,32,.09); }
+    .cover { width:134px; height:174px; border-radius:12px; flex:none; position:relative; overflow:hidden;
+      box-shadow:0 8px 18px rgba(74,48,32,.22); }
+    .cw { position:absolute; inset:0; opacity:.4;
+      background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.06) 0 1px, transparent 1px 3px); }
+    .cshade { position:absolute; left:0; right:0; bottom:0; height:66px;
+      background:linear-gradient(180deg, transparent, rgba(22,15,11,.7)); }
+    .play { position:absolute; left:50%; top:50%; width:34px; height:34px; margin:-17px 0 0 -17px;
+      border-radius:50%; background:rgba(255,255,255,.9); display:flex; align-items:center; justify-content:center; }
+    .dur { position:absolute; right:7px; bottom:7px; font-size:10px; color:#FFF; font-weight:600;
+      background:rgba(20,14,11,.55); padding:2px 7px; border-radius:999px; font-variant-numeric:tabular-nums; }
+    .c1 { background-image:radial-gradient(circle at 68% 26%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
+    .c2 { background-image:radial-gradient(circle at 30% 70%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
+    .c3 { background-image:radial-gradient(circle at 56% 32%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
+    .c4 { background-image:radial-gradient(circle at 40% 24%, rgba(255,236,214,.4) 0 14%, transparent 42%), linear-gradient(150deg,#B98C6B,#3A3330); }
+
+    .fb { flex:1; min-width:0; display:flex; flex-direction:column; }
+    .kind { align-self:flex-start; font-size:10px; font-weight:700; letter-spacing:.06em; color:#FFF;
+      padding:3px 8px; border-radius:5px; }
+    .kind.sell { background:var(--av); }
+    .kind.story { background:var(--br); }
+    .ft { font-family:var(--serif); font-size:20px; font-weight:700; margin-top:9px; }
+    .fs { font-size:11.5px; color:var(--ink3); line-height:1.7; margin-top:7px; }
+    .beats { display:flex; flex-wrap:wrap; gap:5px; margin-top:9px; }
+    .bt { font-size:10.5px; color:var(--ink3); background:var(--sunken); border:1px solid var(--lineSoft);
+      padding:3px 7px; border-radius:5px; }
+    .use { margin-top:auto; height:38px; border-radius:12px; background:var(--av); color:#FFF;
+      font-size:13.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 8px 16px rgba(240,100,53,.26); }
+
+    /* 其余模板：横滑，点一下换到上面主推位 */
+    /* 真机用 scroll-view；这里必须声明可横滑，否则第 4 张是被裁掉而不是能滑出来 */
+    .shelf { display:flex; gap:10px; margin-top:12px; overflow-x:auto; padding-right:22px; }
+    .tp { width:96px; flex:none; }
+    .tpc { width:96px; height:122px; border-radius:10px; position:relative; overflow:hidden;
+      box-shadow:0 6px 14px rgba(74,48,32,.18); }
+    .tp.on .tpc { outline:2px solid var(--av); outline-offset:2px; }
+    .tag2 { position:absolute; left:6px; top:6px; font-size:9px; font-weight:700; color:#FFF;
+      padding:2px 6px; border-radius:4px; }
+    .tag2.sell { background:rgba(240,100,53,.94); }
+    .tag2.story { background:rgba(50,107,134,.94); }
+    .tpn { display:block; font-size:12px; font-weight:600; margin-top:7px; }
+    .tpm { display:block; font-size:10.5px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+
+    /* 语音起点降为兜底 */
+    .say { position:relative; z-index:2; flex:none; margin:14px 22px 0; height:50px;
+      border-radius:15px; background:transparent; border:1px dashed var(--line);
+      display:flex; align-items:center; gap:11px; padding:0 14px; }
+    .mic { width:30px; height:30px; border-radius:10px; flex:none; background:var(--avSoft);
+      border:1px solid var(--avLine); display:flex; align-items:center; justify-content:center; }
+    .sayt { flex:1; font-size:12.5px; color:var(--ink2); }
+    .sayt b { font-weight:600; }
+
+    .tabbar { position:absolute; z-index:5; left:0; right:0; bottom:0; height:84px;
+      background:rgba(252,250,246,.97); border-top:1px solid var(--lineSoft);
+      box-shadow:0 -8px 26px rgba(74,48,32,.07); display:flex; align-items:flex-start; padding:8px 0 0; }
+    .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .tab span { font-size:10.5px; color:var(--faint); letter-spacing:.04em; }
+    .tab.on span { color:var(--av); font-weight:700; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="hero">
+    <div class="weave"></div>
+    <div class="vig"></div>
+    <div class="topbar">
+      <div class="mark">
+        <span class="markn">快出片</span>
+        <span class="markr"></span>
+        <span class="marks">王记五金</span>
+      </div>
+    </div>
+    <div class="ctrls">
+      <div class="cbtn" onClick="{{ openTodo }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.94)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="badge">3</span>
+      </div>
+      <div class="cbtn">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.94)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      </div>
+    </div>
+    <div class="lede">
+      <div class="h1">挑套模板，改几句话</div>
+      <div class="h2">数字人替你把片子讲完。不用出镜，不用剪辑，一条 3 分钟做好。</div>
+    </div>
+    <div class="fade"></div>
+  </div>
+
+  <div class="mid">
+    <div class="sect">
+      <span class="sbar"></span>
+      <span class="stt">现成模板</span>
+      <span class="sta">全部 8 套</span>
+    </div>
+
+    <div class="feat">
+      <div class="cover {{ cover }}">
+        <div class="cw"></div>
+        <div class="cshade"></div>
+        <div class="play">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
+        </div>
+        <span class="dur">{{ dur }}</span>
+      </div>
+      <div class="fb">
+        <span class="kind {{ kindCls }}">{{ kind }}</span>
+        <div class="ft">{{ name }}</div>
+        <div class="fs">{{ desc }}</div>
+        <div class="beats">
+          <span class="bt">{{ b1 }}</span>
+          <span class="bt">{{ b2 }}</span>
+          <span class="bt">{{ b3 }}</span>
+        </div>
+        <div class="use">用这套拍</div>
+      </div>
+    </div>
+
+    <div class="shelf">
+      <sc-for list="{{ list }}" as="t" hint-placeholder-count="4">
+        <div class="tp {{ t.cls }}" onClick="{{ t.pick }}">
+          <div class="tpc {{ t.cover }}">
+            <div class="cw"></div>
+            <span class="tag2 {{ t.kindCls }}">{{ t.kind }}</span>
+          </div>
+          <span class="tpn">{{ t.name }}</span>
+          <span class="tpm">{{ t.dur }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div class="say">
+    <span class="mic">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+    </span>
+    <span class="sayt">没有合适的？<b>说一句你想拍什么</b></span>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+  </div>
+
+  <sc-if value="{{ todo }}" hint-placeholder-val="{{ false }}">
+    <div class="scrim" onClick="{{ closeTodo }}"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="sh"><span class="sht">待办</span><span class="sha">3 条</span></div>
+      <div class="ti">
+        <span class="tic a">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h9l5 5v11H5z"/><path d="M14 4v5h5"/></svg>
+        </span>
+        <span class="tb2">
+          <span class="tit">五金收纳箱 · 春季促销</span>
+          <span class="tis">草稿 · 还差确认费用</span>
+        </span>
+        <span class="tig">继续</span>
+      </div>
+      <div class="ti">
+        <span class="tic b">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#326B86" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+        </span>
+        <span class="tb2">
+          <span class="tit">春季获客 · 门店宣传片</span>
+          <span class="tis">来自军师 · 资料已带入</span>
+        </span>
+        <span class="tig">去做</span>
+      </div>
+      <div class="ti">
+        <span class="tic c">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#2F7D5B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </span>
+        <span class="tb2">
+          <span class="tit">王老板 · 户外机位</span>
+          <span class="tis">数字人训练完成，可以用了</span>
+        </span>
+        <span class="tig">查看</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <div class="tabbar">
+    <div class="tab on">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#F06435" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span>创作</span>
+    </div>
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h4l2 2.5h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>资料库</span>
+    </div>
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+      <span>作品</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pick: 0, todo: false };
+  }
+
+  templates() {
+    return [
+      { name: '开门三件事', short: '开门三件事', kind: '带货', kindCls: 'sell', cover: 'c1', dur: '45 秒',
+        desc: '新货到店当天就能发。三段式：一句钩子、三个卖点、一句下单。',
+        beats: ['3 秒钩子', '卖点 × 3', '行动号召'] },
+      { name: '今日到货', short: '今日到货', kind: '带货', kindCls: 'sell', cover: 'c2', dur: '30 秒',
+        desc: '最短的一套。摆出货、报个价、说清怎么买，发群里正好。',
+        beats: ['亮商品', '报价格', '怎么买'] },
+      { name: '我这家店', short: '我这家店', kind: '品牌故事', kindCls: 'story', cover: 'c3', dur: '2 分',
+        desc: '讲店的来历和手艺。数字人主讲，穿插门店实拍，结尾落到人。',
+        beats: ['开场', '转折', '收尾'] },
+      { name: '顾客常问', short: '顾客常问', kind: '品牌故事', kindCls: 'story', cover: 'c4', dur: '30 秒',
+        desc: '一个问题一条。把店里天天要解释的事，一次讲明白。',
+        beats: ['提问', '解答', '补一句'] },
+    ];
+  }
+
+  renderVals() {
+    const list = this.templates();
+    const cur = list[this.state.pick] || list[0];
+    return {
+      cover: cur.cover,
+      dur: cur.dur,
+      kind: cur.kind,
+      kindCls: cur.kindCls,
+      name: cur.name,
+      desc: cur.desc,
+      b1: cur.beats[0], b2: cur.beats[1], b3: cur.beats[2],
+      todo: this.state.todo,
+      openTodo: () => this.setState({ todo: true }),
+      closeTodo: () => this.setState({ todo: false }),
+      list: list.map((t, i) => ({
+        name: t.short, dur: t.dur, cover: t.cover, kind: t.kind, kindCls: t.kindCls,
+        cls: this.state.pick === i ? 'on' : '',
+        pick: () => this.setState({ pick: i }),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

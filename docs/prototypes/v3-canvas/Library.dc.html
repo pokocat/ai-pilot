@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF; --danger:#B94B3C; --dangerSoft:#FBEDEA;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:44px; display:flex; align-items:center; gap:10px; padding:0 20px; }
+    .brand { flex:1; font-family:var(--serif); font-size:21px; font-weight:600; }
+    .icobtn { width:34px; height:34px; border-radius:12px; flex:none; display:flex; align-items:center;
+      justify-content:center; background:var(--surface); border:1px solid var(--lineSoft);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+
+    .segs { display:flex; gap:7px; padding:6px 20px 0; align-items:center; }
+    .segbtn { width:34px; height:34px; flex:none; border-radius:11px; display:flex; align-items:center;
+      justify-content:center; background:var(--sunken); }
+    .sg { flex:1; height:34px; border-radius:11px; display:flex; align-items:center; justify-content:center;
+      gap:4px; font-size:12.5px; color:var(--ink3); background:var(--sunken); font-weight:500; }
+    .sg.on { background:var(--ink); color:#FFF; font-weight:600; }
+    .sg b { font-weight:600; font-size:11px; opacity:.7; }
+
+    .body { padding:12px 20px 0; display:flex; flex-direction:column; gap:9px; }
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:18px; padding:12px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); display:flex; align-items:center; gap:12px; }
+    .th { width:52px; height:52px; border-radius:13px; flex:none; position:relative; overflow:hidden; }
+    .th.round { border-radius:50%; }
+    .g1 { background-image:radial-gradient(circle at 22% 76%, rgba(229,179,121,.4) 0 16%, transparent 38%), linear-gradient(145deg,#9C7555,#2F3332); }
+    .g2 { background-image:linear-gradient(150deg,#C9A682,#4A4C4C); }
+    .g3 { background-image:linear-gradient(145deg,#E8B679,#6D554B); }
+    .g4 { background-image:radial-gradient(circle at 50% 34%, rgba(255,226,205,.9) 0 18%, transparent 46%), linear-gradient(160deg,#B9846A,#33302E); }
+    .g5 { background:linear-gradient(160deg,#F4EFE7,#DED2C0); }
+    .cb { flex:1; min-width:0; }
+    .ct { display:block; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .cs { display:block; font-size:11.5px; color:var(--ink3); margin-top:4px; line-height:1.55; }
+    .cact { flex:none; font-size:12px; color:var(--avDeep); font-weight:600;
+      padding:7px 10px; margin:-7px -10px -7px 0; }
+
+    .pill { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:999px;
+      font-size:10.5px; font-weight:600; margin-top:6px; }
+    .pill.ok { background:var(--okSoft); color:var(--ok); }
+    .pill.run { background:var(--avSoft); color:var(--avDeep); }
+    .pill.bad { background:var(--dangerSoft); color:var(--danger); }
+    .pill.pub { background:var(--brSoft); color:var(--br); }
+
+    .mini { height:4px; border-radius:999px; background:var(--sunken); margin-top:8px; overflow:hidden; }
+    .minif { height:4px; border-radius:999px; background:var(--av); }
+
+    .add { border:1px dashed var(--line); background:transparent; box-shadow:none;
+      justify-content:center; color:var(--ink3); font-size:13px; font-weight:500; gap:7px; padding:15px; }
+
+    .note { font-size:11.5px; color:var(--muted); line-height:1.7; padding:2px 2px 0; }
+
+    .grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; }
+    .gi { border-radius:12px; height:96px; position:relative; overflow:hidden; }
+    .gi span { position:absolute; left:5px; bottom:5px; font-size:9.5px; color:#FFF;
+      background:rgba(20,17,15,.5); padding:2px 6px; border-radius:999px; }
+
+    .tabbar { position:absolute; left:0; right:0; bottom:0; height:84px; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -8px 24px rgba(69,54,44,.06);
+      display:flex; align-items:flex-start; padding:9px 0 0; }
+    .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .tab span { font-size:10.5px; color:var(--faint); }
+    .tab.on span { color:var(--av); font-weight:600; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="brand">资料库</div>
+  </div>
+
+  <div class="segs">
+    <sc-for list="{{ segs }}" as="s" hint-placeholder-count="4">
+      <div class="sg {{ s.cls }}" onClick="{{ s.pick }}">{{ s.name }} <b>{{ s.n }}</b></div>
+    </sc-for>
+    <div class="segbtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+    </div>
+  </div>
+
+  <div class="body">
+    <sc-if value="{{ isGoods }}" hint-placeholder-val="{{ true }}">
+      <div class="card">
+        <div class="th g1"></div>
+        <div class="cb">
+          <span class="ct">加厚五金工具收纳箱</span>
+          <span class="cs">¥98 促销价 · 3 张实拍 · 已用于 2 条视频</span>
+        </div>
+        <div class="cact">去创作</div>
+      </div>
+      <div class="card">
+        <div class="th g2"></div>
+        <div class="cb">
+          <span class="ct">充电式手电钻 20V</span>
+          <span class="cs">¥259 · 1 张主图 · 尚未使用</span>
+          <span class="pill run">建议补充 2 张实拍</span>
+        </div>
+        <div class="cact">去创作</div>
+      </div>
+      <div class="card">
+        <div class="th g3"></div>
+        <div class="cb">
+          <span class="ct">工具腰包 帆布</span>
+          <span class="cs">¥68 · 2 张实拍 · 已用于 1 条视频</span>
+        </div>
+        <div class="cact">去创作</div>
+      </div>
+      <div class="card add">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#686A6F" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        粘贴链接，自动创建商品
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAvatar }}" hint-placeholder-val="{{ false }}">
+      <div class="card">
+        <div class="th round g4"></div>
+        <div class="cb">
+          <span class="ct">王老板 · 门店机位</span>
+          <span class="cs">你的形象与声音 · 已用于 4 条视频</span>
+          <span class="pill ok">可用</span>
+        </div>
+        <div class="cact">管理</div>
+      </div>
+      <div class="card">
+        <div class="th round g5"></div>
+        <div class="cb">
+          <span class="ct">王老板 · 户外机位</span>
+          <span class="cs">已上传 46 秒素材 · 训练中</span>
+          <div class="mini"><div class="minif" style="width:62%"></div></div>
+        </div>
+        <div class="cact">看进度</div>
+      </div>
+      <div class="card">
+        <div class="th round" style="background:var(--sunken); display:flex; align-items:center; justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B94B3C" stroke-width="2" stroke-linecap="round"><path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+        </div>
+        <div class="cb">
+          <span class="ct">1 个数字人加载失败</span>
+          <span class="cs">网络异常，点击重试；数据未丢失。</span>
+          <span class="pill bad">加载失败</span>
+        </div>
+        <div class="cact">重试</div>
+      </div>
+      <div class="card">
+        <div class="th round" style="background:var(--brSoft); display:flex; align-items:center; justify-content:center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#326B86" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+        </div>
+        <div class="cb">
+          <span class="ct">公共形象 12 个</span>
+          <span class="cs">尚未创建专属形象？可先用公共形象出片</span>
+          <span class="pill pub">免费</span>
+        </div>
+        <div class="cact">选择</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isScript }}" hint-placeholder-val="{{ false }}">
+      <div class="card">
+        <div class="cb">
+          <span class="ct">收纳箱 · 强转化版</span>
+          <span class="cs">第 2 版 · 45 秒 · 已用于 2 条视频</span>
+        </div>
+        <div class="cact">新建版本</div>
+      </div>
+      <div class="card">
+        <div class="cb">
+          <span class="ct">我这家店开了二十三年</span>
+          <span class="cs">第 1 版 · 2 分 42 秒 · 已用于 1 条视频</span>
+        </div>
+        <div class="cact">新建版本</div>
+      </div>
+      <div class="card">
+        <div class="cb">
+          <span class="ct">今日到货 · 通用口播</span>
+          <span class="cs">改自官方脚本 · 30 秒 · 尚未使用</span>
+        </div>
+        <div class="cact">去创作</div>
+      </div>
+      <div class="note">新建版本不会覆盖旧版。已发布的视频仍使用当时的版本，不受影响。</div>
+    </sc-if>
+
+    <sc-if value="{{ isMedia }}" hint-placeholder-val="{{ false }}">
+      <div class="grid">
+        <div class="gi g1"><span>22 秒</span></div>
+        <div class="gi g2"><span>15 秒</span></div>
+        <div class="gi g3"><span>图片</span></div>
+        <div class="gi g4"><span>8 秒</span></div>
+        <div class="gi g5"><span>图片</span></div>
+        <div class="gi g2"><span>31 秒</span></div>
+      </div>
+      <div class="note">制作过程中生成的画面，收藏后长期保留；未收藏的将定期清理。</div>
+    </sc-if>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span>创作</span>
+    </div>
+    <div class="tab on">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#F06435" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h4l2 2.5h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>资料库</span>
+    </div>
+    <div class="tab">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+      <span>作品</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { seg: 'goods' };
+  }
+
+  renderVals() {
+    const segs = [
+      { id: 'goods', name: '商品', n: 3 },
+      { id: 'avatar', name: '数字人', n: 3 },
+      { id: 'script', name: '脚本', n: 3 },
+      { id: 'media', name: '素材', n: 12 },
+    ];
+    return {
+      segs: segs.map((s) => ({
+        name: s.name, n: s.n,
+        cls: this.state.seg === s.id ? 'on' : '',
+        pick: () => this.setState({ seg: s.id }),
+      })),
+      isGoods: this.state.seg === 'goods',
+      isAvatar: this.state.seg === 'avatar',
+      isScript: this.state.seg === 'script',
+      isMedia: this.state.seg === 'media',
+    };
+  }
+}
+</script>
+</body>
+</html>
