@@ -46,54 +46,51 @@
       border-radius:999px; background:var(--av); border:1.5px solid var(--bg); color:#FFF;
       font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center; }
 
-    /* 两列宫格（§3.7.4 ③ 真实滚动容器）。
-       成片规格是 9:16（config.js 的 OUTPUT），所以封面本身就是 9:16 竖图 ——
-       手机上一屏并排放两张竖图，比一张横图更接近成片长什么样。 */
+    /* 信息流按小红书的密度做（2026-08-26 定）：贴边窄缝 + 3:4 裁切封面 + 标题下置。
+       成片仍是 9:16（config.js 的 OUTPUT 不变），信息流封面只是裁掉上下取中段构图，
+       点进模板/预览才看全幅 —— 小红书对竖版视频也是这么裁的。
+       §3.7.4 ③：真实滚动容器，卡片压到底栏下缘属于「有更多」的信号，不是压栏缺陷。 */
     .feed { position:absolute; left:0; right:0; top:132px; bottom:84px; overflow-y:auto;
-      padding:2px 22px 16px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
-      gap:18px 10px; align-content:start; }
+      padding:2px 9px 14px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:13px 7px; align-content:start; align-items:start; }
 
-    /* 列宽 = (390 - 22×2 - 10) / 2 = 168；9:16 → 168 × 16 / 9 ≈ 298。
-       这两个数与 .feed 的 padding / gap 同源，改一个另一个跟着改。 */
-    .cov { height:298px; border-radius:13px; overflow:hidden; position:relative;
-      background:#1E1B19; box-shadow:0 6px 16px rgba(74,48,32,.13); }
+    /* 列宽 = (390 − 9×2 − 7) / 2 = 182.5；3:4 由 aspect-ratio 自算（≈243）。
+       这几个数与 .feed 的 padding / gap 同源，改一个另一个跟着改。 */
+    .cov { aspect-ratio:3 / 4; border-radius:9px; overflow:hidden; position:relative;
+      background:#1E1B19; box-shadow:0 2px 8px rgba(74,48,32,.10); }
     .shot { position:absolute; inset:0; }
     .grain { position:absolute; inset:0;
       background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, transparent 1px 3px); }
-    .shade { position:absolute; left:0; right:0; bottom:0; height:76px;
-      background:linear-gradient(180deg, transparent, rgba(20,14,11,.62)); }
-    .c1 { background-image:radial-gradient(circle at 68% 26%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
-    .c2 { background-image:radial-gradient(circle at 30% 70%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
-    .c3 { background-image:radial-gradient(circle at 56% 32%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
-    .play { position:absolute; left:50%; top:50%; width:34px; height:34px; margin:-17px 0 0 -17px;
-      border-radius:50%; background:rgba(255,255,255,.88); display:flex; align-items:center; justify-content:center; }
-    /* 分类标签挪到封面上：168px 的列宽放不下「标题 + 右侧标签」那种横排 */
-    .ktag { position:absolute; left:7px; top:7px; z-index:2; font-size:9.5px; font-weight:700;
-      color:#FFF; padding:2px 7px; border-radius:5px; background:rgba(20,14,11,.55); }
-    .dur { position:absolute; right:7px; bottom:7px; z-index:2; font-size:10.5px; color:#FFF; font-weight:600;
-      font-variant-numeric:tabular-nums; text-shadow:0 1px 3px rgba(0,0,0,.5); }
+    .c1 { background-image:radial-gradient(circle at 68% 30%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
+    .c2 { background-image:radial-gradient(circle at 30% 66%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
+    .c3 { background-image:radial-gradient(circle at 56% 34%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
+    /* 分类标签在封面上：182px 的列宽放不下「标题 + 右侧标签」那种横排 */
+    .ktag { position:absolute; left:6px; top:6px; z-index:2; font-size:9px; font-weight:700;
+      color:#FFF; padding:2px 6px; border-radius:4px; background:rgba(20,14,11,.55); }
+    /* 时长并进播放角标一颗胶囊，去掉居中大播放钮和整条压暗 —— 封面留给画面 */
+    .dur { position:absolute; right:6px; bottom:6px; z-index:2; display:flex; align-items:center;
+      gap:4px; padding:2.5px 7px; border-radius:999px; background:rgba(20,14,11,.55);
+      font-size:10px; color:#FFF; font-weight:600; font-variant-numeric:tabular-nums; }
     /* 没产出的模板不摆假封面：压灰 + 说清楚 */
     .cov.soon .shot { filter:saturate(.32) brightness(.52); }
     .soonlab { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
-      font-size:11px; font-weight:700; color:#FFF; letter-spacing:.08em;
-      background:rgba(20,14,11,.66); padding:5px 11px; border-radius:999px; white-space:nowrap; }
+      font-size:10.5px; font-weight:700; color:#FFF; letter-spacing:.08em;
+      background:rgba(20,14,11,.66); padding:4px 10px; border-radius:999px; white-space:nowrap; }
 
-    .cb { margin-top:8px; }
-    .cbt { font-family:var(--serif); font-size:14.5px; font-weight:700; line-height:1.35;
-      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    /* 说明在 168px 里必然多行，夹到两行；夹不住就是标题写太长了 */
-    .cbs { font-size:11px; color:var(--ink3); line-height:1.6; margin-top:4px;
+    /* 标题 = 一句话（模板名｜卖点），夹两行 —— 小红书的卡片就是「封面 + 两行标题 + 一行轻元信息」 */
+    .cb { margin-top:7px; padding:0 1px; }
+    .cbt { font-size:13px; font-weight:700; line-height:1.42;
       display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-    /* 三个可信事实：成片时长（封面角标）/ 数字人出镜秒数 / 预计钻石。
+    /* 元信息一行：数字人出镜秒数 + 预计钻石（成片时长在封面角标上）。
        catalog.js templateMeta() 就是为了这三个数才改成从 segments 推导的 —— 别写死常量。 */
-    .facts { display:flex; align-items:center; gap:6px; margin-top:6px; font-size:10px;
-      color:var(--ink2); font-variant-numeric:tabular-nums; white-space:nowrap; }
-    .facts i { width:1px; height:8px; background:var(--line); display:block; }
+    .meta { display:flex; align-items:center; margin-top:6px; font-size:10.5px;
+      color:var(--ink3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .meta b { margin-left:auto; font-weight:700; color:var(--avDeep); }
     .blocked { font-size:10.5px; color:var(--avDeep); line-height:1.55; margin-top:5px;
-      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-    .empty { grid-column:1 / -1; }
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 
-    .empty { padding:38px 8px; text-align:center; font-size:12.5px; color:var(--muted); line-height:1.8; }
+    .empty { grid-column:1 / -1; padding:38px 8px; text-align:center;
+      font-size:12.5px; color:var(--muted); line-height:1.8; }
 
     /* 底栏 §3.7.4 ②：10 + 40 + 34 = 84，与 .feed 的 bottom 同源 */
     .tabbar { position:absolute; z-index:5; left:0; right:0; bottom:0; height:84px;
@@ -131,23 +128,21 @@
           <div class="shot {{ t.cover }}"><div class="grain"></div></div>
           <span class="ktag">{{ t.kind }}</span>
           <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
-            <div class="shade"></div>
-            <div class="play">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg>
-            </div>
-            <span class="dur">{{ t.dur }}</span>
+            <span class="dur">
+              <svg width="7" height="8" viewBox="0 0 7 8" fill="#FFF"><path d="M0 0l7 4-7 4z"/></svg>
+              {{ t.dur }}
+            </span>
           </sc-if>
           <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
             <span class="soonlab">即将上线</span>
           </sc-if>
         </div>
         <div class="cb">
-          <div class="cbt">{{ t.name }}</div>
-          <div class="cbs">{{ t.desc }}</div>
+          <div class="cbt">{{ t.title }}</div>
           <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
-            <div class="facts">
-              <span>数字人 {{ t.avatarSec }} 秒</span><i></i>
-              <span>{{ t.credits }} 钻石</span>
+            <div class="meta">
+              <span>数字人出镜 {{ t.avatarSec }} 秒</span>
+              <b>{{ t.credits }} 钻石</b>
             </div>
           </sc-if>
           <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
@@ -199,17 +194,19 @@ class Component extends DCLogic {
    *
    * 另外两套按 §13.9 标注为什么还不存在，不摆假封面、不给假数字 ——
    * 首页第一天的真实样子就是「三套里只有一套能点」，评审要看的正是这个。
+   * 信息流按模板变多之后的密度设计（小红书两列卡），今天的三张卡摆不满一屏，
+   * 这不是布局缺陷，是货架的真实库存。
    */
   templates() {
     return [
       { id: 'ct_shiti', name: '为实体发声', kind: '品牌故事', cover: 'c1', dur: '2:43', ready: true,
         avatarSec: 32, credits: 35, segmentCount: 22,
-        desc: '纪实倡导片。走遍全国的实体店主群像，讲那些凌晨亮灯的坚持。' },
+        hook: '纪实倡导片，凌晨亮灯的实体店主群像' },
       { id: 'ct_qiye', name: '企业宣传片', kind: '品牌故事', cover: 'c3', dur: '', ready: false,
-        desc: '骨架沿用「为实体发声」，讲企业的来历、产线和人。',
+        hook: '同一套骨架，讲企业的来历、产线和人',
         blocked: '还在做。要先写好剧本骨架、备齐固定素材，再用真实门店的片子验收。' },
       { id: 'ct_daihuo', name: '短视频带货', kind: '带货', cover: 'c2', dur: '', ready: false,
-        desc: '明星切片混剪，与前两套不是同一套子系统。',
+        hook: '明星切片混剪，另一套子系统',
         blocked: '还在做。明星切片的授权谈妥之前不会上线。' },
     ];
   }
@@ -233,7 +230,9 @@ class Component extends DCLogic {
         pick: () => this.setState({ cat: c.key }),
       })),
       list: list.map((t) => ({
-        name: t.name, kind: t.kind, cover: t.cover, dur: t.dur, desc: t.desc,
+        // 标题下置成一句话：模板名｜一句卖点（小红书卡片没有独立的名称行 + 说明行）
+        title: t.name + '｜' + t.hook,
+        kind: t.kind, cover: t.cover, dur: t.dur,
         avatarSec: t.avatarSec, credits: t.credits, segmentCount: t.segmentCount,
         blocked: t.blocked || '',
         ready: t.ready, soon: !t.ready, soonCls: t.ready ? '' : 'soon',
