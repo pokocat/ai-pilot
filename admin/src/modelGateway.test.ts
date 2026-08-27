@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelGatewayField, modelSupportsThinking, auxReuseBlock, probeName, dialectLine, probeLine, auxMissingReason } from './modelGateway';
+import { modelGatewayField, modelSupportsThinking, auxReuseBlock, probeName, dialectLine, probeLine, auxMissingReason, routeMemberRow } from './modelGateway';
 
 describe('model gateway field', () => {
   test('Claude 自主定义必须显示 baseUrl，并提示 Anthropic 协议', () => {
@@ -146,6 +146,45 @@ describe('嵌入/重排的保存前拦截', () => {
 
   test('重排单独开启也要被覆盖到（别只判嵌入）', () => {
     assert.match(auxMissingReason(true, { ...aux, rerankEnabled: true }, saved), /重排/);
+  });
+});
+
+// 2026-08-27：「成果生成」用途里攒着一个被切走的 anthropic 端点，单端点模式下界面不列、也没有
+// 移出入口，运营一开「多路分流」就报混协议且无从下手。列出来 + 能移出是修法，这里锁住协议判据。
+describe('路由里的非生效成员', () => {
+  const dialects = [
+    { id: 'anthropic_gateway', protocol: 'anthropic' },
+    { id: 'anthropic_official', protocol: 'anthropic' },
+    { id: 'openai_chat', protocol: 'openai_chat' },
+  ];
+  const row = (ep: unknown, primary: unknown) =>
+    routeMemberRow({ endpointId: 'x' }, ep as never, primary as never, dialects);
+
+  test('同协议不同方言（官方直连 + 兼容网关）不算不同', () => {
+    assert.equal(row({ dialect: 'anthropic_gateway' }, { dialect: 'anthropic_official' }).sameProtocol, true);
+  });
+
+  test('协议不同要标出来——这正是开分流开不起来的原因', () => {
+    assert.equal(row({ dialect: 'openai_chat' }, { dialect: 'anthropic_gateway' }).sameProtocol, false);
+  });
+
+  test('判据是方言不是 provider：provider 相同但方言跨协议照样标出', () => {
+    // provider 都是 claude，其中一个被固化成 openai 方言——只看 provider 看不出来。
+    assert.equal(row({ dialect: 'openai_chat' }, { dialect: 'anthropic_gateway' }).sameProtocol, false);
+  });
+
+  test('没固化方言时退回 resolvedDialect', () => {
+    assert.equal(row({ dialect: null, resolvedDialect: 'openai_chat' }, { dialect: 'openai_chat' }).sameProtocol, true);
+  });
+
+  test('判不出协议时不诬告（端点已删 / 方言不在目录里）', () => {
+    assert.equal(row(undefined, { dialect: 'anthropic_gateway' }).sameProtocol, true);
+    assert.equal(row({ dialect: '未来新方言' }, { dialect: 'anthropic_gateway' }).sameProtocol, true);
+    assert.equal(row({ dialect: 'openai_chat' }, undefined).sameProtocol, true);
+  });
+
+  test('任何非生效成员都可移出——此前只有 chat 用途有出口', () => {
+    assert.equal(row({ dialect: 'openai_chat' }, { dialect: 'anthropic_gateway' }).removable, true);
   });
 });
 

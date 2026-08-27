@@ -20,7 +20,7 @@ import {
 } from '../api';
 import { Field } from '../format';
 import { PageHead, ErrorState, Skeleton, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
-import { modelGatewayField, modelSupportsThinking, auxReuseBlock } from '../modelGateway';
+import { modelGatewayField, modelSupportsThinking, auxReuseBlock, routeMemberRow } from '../modelGateway';
 
 /** 用途的中文名与说明。后台不该把 purpose 的英文枚举直接甩给运营。 */
 const PURPOSE_META: Record<string, { name: string; desc: string }> = {
@@ -121,6 +121,28 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
   const togglePool = (ep: AiEndpointView) => {
     const inPool = (chat?.members ?? []).some((m) => m.endpointId === ep.id && !m.primary);
     run(api.setAiEndpointPool(ep.id, !inPool), inPool ? `「${ep.label}」已移出分流池` : `「${ep.label}」已加入分流池`);
+  };
+
+  // 影子成员的出口。`setPrimary` 对可分流用途是「保留旧成员 + 追加新 primary」，所以切换过几次
+  // 生效接入点之后，路由里会攒下几个被切走的端点；单端点模式下它们不接流量、界面也不列，
+  // 直到运营打开「多路分流」——那一刻池子里凭空多出没人记得加过的成员，混协议还开不起来。
+  // 端点自身的「移出池」只管 chat 用途，其余用途此前压根没有移出的入口。
+  const removeMember = (r: AiRouteView, endpointId: string) => {
+    const ep = epById(endpointId);
+    setConfirmSpec({
+      title: `从「${purposeName(r.purpose)}」移出接入点`,
+      desc: '只解除这个用途对它的引用；接入点本身和它的 Key 都不动，之后把该用途的「生效接入点」切回来即可再用。',
+      echo: [
+        { k: '用途', v: purposeName(r.purpose) },
+        { k: '接入点', v: ep?.label ?? endpointId },
+        { k: '现在接不接流量', v: r.mode === 'pool' ? '接（分流成员）' : '不接（多路分流是关的）' },
+      ],
+      confirmText: '移出',
+      onConfirm: async () => {
+        await api.saveAiRoute(r.purpose, { members: r.members.filter((m) => m.endpointId !== endpointId) });
+        after(`已把「${ep?.label ?? endpointId}」从${purposeName(r.purpose)}移出`);
+      },
+    });
   };
 
   const probe = (ep: AiEndpointView) => {
@@ -441,6 +463,7 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
               api.saveAiRoute(r.purpose, { members: r.members.map((m) => (m.endpointId === endpointId ? { ...m, ...patch } : m)) }),
               '已保存分流参数',
             )}
+            onRemoveMember={(endpointId) => removeMember(r, endpointId)}
           />
         ))}
         {reuse.blocked && embRoute?.exists && (
@@ -511,7 +534,7 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
 }
 
 /** 一个用途的路由行。六个用途结构同构，所以只有一个组件——旧版嵌入/重排是另写的一套。 */
-function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMember }: {
+function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMember, onRemoveMember }: {
   route: AiRouteView;
   v2: AiV2View;
   busy: boolean;
@@ -520,10 +543,14 @@ function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMe
   onSticky: (sticky: boolean) => void;
   onBudget: (patch: Partial<AiRouteBudget>) => void;
   onMember: (endpointId: string, patch: { weight?: number; tier?: number; maxConcurrency?: number }) => void;
+  onRemoveMember: (endpointId: string) => void;
 }) {
   const meta = PURPOSE_META[route.purpose];
   const primary = route.members.find((m) => m.primary);
   const epById = (id: string) => v2.endpoints.find((e) => e.id === id);
+  const primaryEp = primary ? epById(primary.endpointId) : undefined;
+  const others = route.members.filter((m) => !m.primary);
+
   // 分流只对「对话 / 成果」有意义：抽取、嵌入、重排都是单端点调用，摊到多个端点没有收益。
   const poolable = route.purpose === 'chat' || route.purpose === 'deliverable';
   const [budget, setBudget] = useState({
@@ -599,23 +626,43 @@ function RouteRow({ route, v2, busy, onPrimary, onMode, onSticky, onBudget, onMe
               <Switch checked={route.sticky} onChange={onSticky} label="会话粘性" />
             </div>
           )}
-          {route.mode === 'pool' && route.members.filter((m) => !m.primary).map((m) => {
+          {/* 非 primary 成员**不分模式**都要列出来。切换生效接入点会把被切走的那个留在路由里，
+              只在分流开着时才显示等于让它隐形——运营看不见，也就没法在开分流之前把它清掉。 */}
+          {others.length > 0 && route.mode !== 'pool' && (
+            <div className="ai-note" style={{ marginTop: 0, marginBottom: 8 }}>
+              下面这些接入点还挂在这个用途上。多路分流是关的，它们现在<strong>不接流量</strong>；
+              但一开分流它们就参与，所以协议必须和生效接入点一致——不一致时分流开不起来，先把它们移出。
+              （切换过生效接入点的话，被切走的那个就留在这儿当备胎。）
+            </div>
+          )}
+          {others.map((m) => {
             const ep = epById(m.endpointId);
+            const { sameProtocol } = routeMemberRow(m, ep, primaryEp, v2.dialects);
             return (
               <div key={m.endpointId} className="usage-row">
-                <div className="usage-name">{ep?.label ?? m.endpointId}<div className="usage-meta">{ep?.model || '—'}</div></div>
-                <Field label="权重">
-                  <input className="ai-input" type="number" min={1} defaultValue={m.weight}
-                    onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== m.weight) onMember(m.endpointId, { weight: v }); }} />
-                </Field>
-                <Field label="备份层">
-                  <input className="ai-input" type="number" min={0} defaultValue={m.tier}
-                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.tier) onMember(m.endpointId, { tier: v }); }} />
-                </Field>
-                <Field label="并发/实例">
-                  <input className="ai-input" type="number" min={0} defaultValue={m.maxConcurrency}
-                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.maxConcurrency) onMember(m.endpointId, { maxConcurrency: v }); }} />
-                </Field>
+                <div className="usage-name">
+                  {ep?.label ?? m.endpointId}
+                  {!sameProtocol && <span className="tag off" style={{ marginLeft: 6 }}>协议与生效端点不同</span>}
+                  <div className="usage-meta">{ep?.model || '—'}</div>
+                </div>
+                {route.mode === 'pool' && (
+                  <>
+                    <Field label="权重">
+                      <input className="ai-input" type="number" min={1} defaultValue={m.weight}
+                        onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== m.weight) onMember(m.endpointId, { weight: v }); }} />
+                    </Field>
+                    <Field label="备份层">
+                      <input className="ai-input" type="number" min={0} defaultValue={m.tier}
+                        onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.tier) onMember(m.endpointId, { tier: v }); }} />
+                    </Field>
+                    <Field label="并发/实例">
+                      <input className="ai-input" type="number" min={0} defaultValue={m.maxConcurrency}
+                        onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.maxConcurrency) onMember(m.endpointId, { maxConcurrency: v }); }} />
+                    </Field>
+                  </>
+                )}
+                <button className="mini-btn danger" disabled={busy} title="把这个接入点从本用途移出（端点本身不删）"
+                  onClick={() => onRemoveMember(m.endpointId)}>移出</button>
               </div>
             );
           })}

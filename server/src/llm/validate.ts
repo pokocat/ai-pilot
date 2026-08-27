@@ -302,7 +302,8 @@ function routeShapeIssues(
     // 要知道」，而是这份配置压根表达不了运营的意图。
     out.push(issue('error', 'POOL_PROTOCOL_MISMATCH',
       `池内混用了不同协议：${desc}。运行时只在与生效端点同协议的成员之间分流，另一批永远收不到流量；`
-      + '请统一协议，或把它们拆到两个用途下'));
+      + '请在该用途的成员列表里把协议不同的那批「移出」（切换过生效接入点的话，被切走的那个会留在里面），'
+      + '或者统一协议'));
   }
 
   const noKey = members.filter((m) => m.provider !== 'mock' && !m.hasKey);

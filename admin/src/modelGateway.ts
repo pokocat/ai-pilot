@@ -111,3 +111,26 @@ export function auxMissingReason(
   if (aux.rerankEnabled && !saved.hasRerankKey && !aux.rerankApiKey.trim()) return '重排已开启，请填写独立的 API Key';
   return '';
 }
+
+/**
+ * 某用途路由里「非生效」的成员该怎么呈现。
+ *
+ * 这些成员是 `setPrimary` 攒下来的：对话/成果两个可分流用途在切换生效接入点时**保留旧成员**，
+ * 于是被切走的端点会留在路由里。旧版界面只在分流开着时才列它们——单端点模式下它们不接流量、
+ * 也不显示，运营看不见更删不掉，直到打开「多路分流」的那一刻池子里凭空多出一个混协议的成员。
+ * 协议判据取**方言的协议**而不是 provider：provider=claude 却被固化成 openai 方言的端点，
+ * 只看 provider 是看不出来的（与 server 端 validateRoute 同口径）。
+ */
+export function routeMemberRow(
+  member: { endpointId: string },
+  ep: { dialect?: string | null; resolvedDialect?: string } | undefined,
+  primaryEp: { dialect?: string | null; resolvedDialect?: string } | undefined,
+  dialects: { id: string; protocol: string }[],
+): { sameProtocol: boolean; removable: true } {
+  const protocolOf = (x?: { dialect?: string | null; resolvedDialect?: string }) =>
+    (x ? dialects.find((d) => d.id === (x.dialect || x.resolvedDialect))?.protocol : undefined);
+  const mine = protocolOf(ep);
+  const theirs = protocolOf(primaryEp);
+  // 判不出协议（端点已删、方言目录里没这条）时不诬告——说「不同」会让运营去移出一个没问题的成员。
+  return { sameProtocol: !mine || !theirs || mine === theirs, removable: true };
+}
