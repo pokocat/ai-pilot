@@ -77,3 +77,6 @@ app/dist-native-e2e-shots/
 
 # 部署全量日志（本地留痕，远端只记 .deploy-history 一行结论）
 .deploy-logs/
+
+# 闸门 A 的测量夹具产物，由 scripts/gen-gate-a-media.mjs 重新生成
+gate-a-media/

@@ -1,0 +1,67 @@
+<view class="gate">
+  <!-- 双缓冲：两路 video 叠着，靠 on 类切换显示层。切换时不动 src，所以不等解码。
+       两路都静音 —— 声音只从主音轨出，视频段只负责画面。 -->
+  <view class="stage">
+    <video
+      id="gv-a" data-key="a" class="layer {{activeKey === 'a' ? 'on' : ''}}"
+      src="{{srcA}}" muted="{{true}}" object-fit="cover"
+      controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}"
+      show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
+      bindplay="onVideoPlay" bindtimeupdate="onVideoTime" binderror="onVideoError" />
+    <video
+      id="gv-b" data-key="b" class="layer {{activeKey === 'b' ? 'on' : ''}}"
+      src="{{srcB}}" muted="{{true}}" object-fit="cover"
+      controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}"
+      show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
+      bindplay="onVideoPlay" bindtimeupdate="onVideoTime" binderror="onVideoError" />
+
+    <view wx:if="{{cueText}}" class="cue"><text>{{cueText}}</text></view>
+
+    <!-- 实时读数：录屏时这一片会被一起录进去，事后对帧用 -->
+    <view wx:if="{{phase === 'playing'}}" class="hud">
+      <text class="hud-t">{{audioSec}}s</text>
+      <text class="hud-s">第 {{segNo}} 段 · {{segRole}}</text>
+      <text class="hud-d {{driftMs > 125 || driftMs < -125 ? 'bad' : ''}}">漂移 {{driftMs}}ms</text>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+
+    <view wx:if="{{phase === 'idle' || phase === 'done'}}" class="meta">
+      <text class="meta-l">{{manifestLabel}}</text>
+      <text class="meta-s">{{segCount}} 段 · {{totalSec}} 秒</text>
+    </view>
+
+    <block wx:if="{{report}}">
+      <view class="rhead">
+        <text class="rtitle">{{report.passed ? '本次通过' : (report.incomplete ? '数据不全' : '本次不通过')}}</text>
+        <text class="rsub">间隙 {{report.counts.gaps}} · 漂移 {{report.counts.drift}} 个采样</text>
+      </view>
+      <view wx:for="{{report.checks}}" wx:key="name" class="row">
+        <text class="rn">{{item.name}}</text>
+        <text class="rv {{item.ok === false ? 'bad' : (item.ok ? 'good' : '')}}">
+          {{item.value === null ? '未采到' : item.value}}{{item.value === null ? '' : item.unit}}
+        </text>
+        <text class="rl">线 {{item.line}}{{item.unit}}</text>
+      </view>
+      <view class="rnote">下面两条是协议 §2.5 的修订建议，未拍板，不参与判定</view>
+      <view wx:for="{{report.proposed}}" wx:key="name" class="row dim">
+        <text class="rn">{{item.name}}</text>
+        <text class="rv">{{item.value === null ? '未采到' : item.value}}{{item.value === null ? '' : item.unit}}</text>
+        <text class="rl">建议 {{item.line}}{{item.unit}}</text>
+      </view>
+      <view class="rnote">埋点线。判定以 60fps 录屏逐帧为准，冲突时以录屏为准（协议 §1.6）</view>
+    </block>
+
+    <view class="acts">
+      <view wx:if="{{phase === 'idle' || phase === 'done'}}" class="btn main" bindtap="start">
+        {{phase === 'done' ? '再跑一次' : '开始连播'}}
+      </view>
+      <view wx:if="{{phase === 'priming'}}" class="btn main off">准备首帧…</view>
+      <view wx:if="{{phase === 'playing'}}" class="btn main" bindtap="stop">停止并出报告</view>
+      <view wx:if="{{reportJson}}" class="btn" bindtap="copyReport">复制 JSON</view>
+      <view class="btn" bindtap="back">返回</view>
+    </view>
+  </view>
+</view>

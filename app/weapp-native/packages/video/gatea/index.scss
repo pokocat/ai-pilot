@@ -1,0 +1,33 @@
+.gate { display:flex; flex-direction:column; height:100vh; background:#0E0F11; color:#F2F0EC; }
+.stage { position:relative; width:100%; height:56vh; background:#000; overflow:hidden; }
+.layer { position:absolute; left:0; top:0; width:100%; height:100%; opacity:0; z-index:1; }
+.layer.on { opacity:1; z-index:2; }
+.cue { position:absolute; left:0; right:0; bottom:24rpx; z-index:3; padding:0 40rpx; text-align:center;
+  font-size:30rpx; line-height:1.5; color:#FFF; text-shadow:0 2rpx 8rpx rgba(0,0,0,.9); }
+.hud { position:absolute; left:16rpx; top:16rpx; z-index:3; display:flex; flex-direction:column;
+  padding:10rpx 16rpx; border-radius:10rpx; background:rgba(0,0,0,.55); font-variant-numeric:tabular-nums; }
+.hud-t { font-size:30rpx; font-weight:700; }
+.hud-s { font-size:22rpx; color:#B9B6B0; margin-top:4rpx; }
+.hud-d { font-size:22rpx; color:#8ED6A6; margin-top:4rpx; }
+.hud-d.bad { color:#FF8A6B; }
+.panel { flex:1; padding:24rpx 32rpx calc(34px + 24rpx); overflow-y:auto; }
+.notice { padding:16rpx 20rpx; border-radius:12rpx; background:rgba(240,100,53,.14);
+  border:1rpx solid rgba(240,100,53,.4); color:#FFC0A8; font-size:24rpx; line-height:1.6; }
+.meta { display:flex; align-items:baseline; gap:16rpx; margin-top:20rpx; }
+.meta-l { font-size:28rpx; font-weight:600; }
+.meta-s { font-size:24rpx; color:#8E8B86; }
+.rhead { margin-top:24rpx; display:flex; align-items:baseline; gap:16rpx; }
+.rtitle { font-size:32rpx; font-weight:700; }
+.rsub { font-size:22rpx; color:#8E8B86; }
+.row { display:flex; align-items:center; gap:12rpx; padding:14rpx 0; border-bottom:1rpx solid rgba(255,255,255,.08); }
+.row.dim { opacity:.62; }
+.rn { flex:1; font-size:25rpx; }
+.rv { font-size:27rpx; font-weight:700; font-variant-numeric:tabular-nums; }
+.rv.good { color:#8ED6A6; } .rv.bad { color:#FF8A6B; }
+.rl { width:170rpx; text-align:right; font-size:21rpx; color:#77746F; }
+.rnote { margin-top:14rpx; font-size:21rpx; color:#77746F; line-height:1.6; }
+.acts { display:flex; flex-wrap:wrap; gap:16rpx; margin-top:28rpx; }
+.btn { padding:20rpx 30rpx; border-radius:14rpx; font-size:26rpx;
+  background:rgba(255,255,255,.09); border:1rpx solid rgba(255,255,255,.16); }
+.btn.main { flex:1; text-align:center; background:#F06435; border-color:#F06435; font-weight:600; }
+.btn.main.off { background:rgba(240,100,53,.35); border-color:transparent; }

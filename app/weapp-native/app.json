@@ -69,7 +69,8 @@
         "works/index",
         "assets/index",
         "avatar/index",
-        "voices/index"
+        "voices/index",
+        "gatea/index"
       ]
     }
   ],
