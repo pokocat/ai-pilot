@@ -18,6 +18,7 @@ import { resolveRoute, configForPurpose, __resetAiRoutes } from '../src/services
 import { getAiConfig } from '../src/services/aiConfig.js';
 import {
   checkEndpoint, checkEndpointRoutes, checkPoolMembershipPurpose, checkRoutePurpose, draftFromEndpointUpsert,
+  hasBlocking,
 } from '../src/services/aiValidation.js';
 import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
 
@@ -283,6 +284,58 @@ describe('保存前一致性校验', () => {
     assert.deepEqual(await updateCredential(cred.id, { vendor: 'custom' }), { ok: true });
     const afterIssues = await checkRoutePurpose('chat', { members: [{ endpointId: id, primary: true }] });
     assert.equal(afterIssues.some((i) => i.code === 'CREDENTIAL_VENDOR_UNCONFIRMED'), false);
+  });
+
+  // 2026-08-27 线上死局：混协议的池里，运营移出任何一个成员都被**剩下的成员**挡回去，
+  // 而删端点又要求先从路由移出 —— 一个坏池子把自己的每条修复路径都锁上了。
+  test('已经混协议的池：移出成员不再被剩下的成员挡回去', async () => {
+    const a = await createEndpoint({ ...QINIU, label: 'Anthropic 主端点' });
+    const a2 = await createEndpoint({ ...QINIU, label: 'Anthropic 备端点', model: 'claude-sonnet-4-6' });
+    const b = await createEndpoint({
+      label: 'OpenAI 端点', provider: 'openai', dialect: 'openai_chat',
+      baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: 'sk-deepseek',
+    });
+    // 这种池子确实存在：单端点模式下攒成员不校验池形状，一开分流整池就变成不可编辑。
+    await saveRoute('chat', {
+      mode: 'pool',
+      members: [{ endpointId: a, primary: true }, { endpointId: a2 }, { endpointId: b }],
+    });
+
+    // 移出同协议的那个：池子仍然混着，但这一步没让它更糟 → 只提醒，放行。
+    const removeSame = await checkPoolMembershipPurpose(a2, false);
+    assert.ok(removeSame.some((i) => i.code === 'POOL_PROTOCOL_MISMATCH'), '仍要说出来');
+    assert.equal(hasBlocking(removeSame), false, '收拾池子的动作不能被旧账挡回去');
+
+    // 移出协议不同的那个：一步就修好了。
+    assert.equal(hasBlocking(await checkPoolMembershipPurpose(b, false)), false);
+    // 但往这个坏池子里再塞一个成员，照旧拦死。
+    const add = await checkPoolMembershipPurpose(await createEndpoint({ ...QINIU, label: '再来一个' }), true);
+    assert.ok(add.some((i) => i.code === 'POOL_PROTOCOL_MISMATCH'));
+    assert.equal(hasBlocking(add), true);
+  });
+
+  test('已在路由里的未确认凭证只提醒；新加入的照旧拦死', async () => {
+    const inRoute = await createEndpoint({
+      label: '自建网关', provider: 'openai', dialect: 'openai_chat',
+      baseUrl: 'https://gateway.example.com/v1', model: 'custom-model', apiKey: 'sk-custom-1',
+    });
+    // 已经在跑的成员：换 Key 时新凭证是在校验之后才建的，运营能给自己造出这种状态。
+    await saveRoute('chat', { mode: 'single', members: [{ endpointId: inRoute, primary: true }] });
+    const cred = await prisma.aiCredential.findFirstOrThrow({ where: { endpoints: { some: { id: inRoute } } } });
+    assert.equal(cred.needsReview, true);
+
+    const editing = await checkRoutePurpose('chat', { sticky: false });
+    assert.ok(editing.some((i) => i.code === 'CREDENTIAL_VENDOR_UNCONFIRMED'), '黄标仍要说出来');
+    assert.equal(hasBlocking(editing), false, '不能让一条黄标把整条路由的编辑全锁住');
+
+    const joining = await createEndpoint({
+      label: '另一个自建网关', provider: 'openai', dialect: 'openai_chat',
+      baseUrl: 'https://gateway2.example.com/v1', model: 'custom-model-2', apiKey: 'sk-custom-2',
+    });
+    const issues = await checkRoutePurpose('chat', {
+      members: [{ endpointId: inRoute, primary: true }, { endpointId: joining }],
+    });
+    assert.equal(hasBlocking(issues), true, '新加入的必须先确认接入商');
   });
 
   test('非法用途预算在写库前被拦截', async () => {

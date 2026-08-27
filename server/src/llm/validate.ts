@@ -14,6 +14,11 @@
 //   info  — 提示性（方言还没固化）
 // 全部是**纯函数**：需要的事实由调用方查好传进来（模型范围、同名模型的价格集合……）。
 // 校验器不查库——它要能在保存前、探活前、单测里以同一种方式跑。
+//
+// ── 拦添乱，不锁死修复 ────────────────────────────────────────────────────────
+// 路由校验还能收到「库里已存的这条路由」（`validateRoute` 的 `prior`）。已经坏了的池子，运营
+// 的每个修复动作都不该被**剩下的成员**挡回去；而「开启分流」「加入不兼容的新成员」照旧拦死。
+// 详见 validateRoute 里的长注释——这是 2026-08-27 那个「怎么改都保存不了」的成因。
 
 import type { AiConfigIssue, AiProvider, AiThinkingMode } from './schema.js';
 import { resolveDialect, type Dialect } from './dialects.js';
@@ -218,10 +223,54 @@ export function validateAuxEndpoint(
   return out;
 }
 
-/** 路由 / 端点池的成员一致性。 */
+/** 路由成员在校验里用得到的事实。判据一律是成员**自身**的方言，不是任何全局拷贝值。 */
+export interface RouteMemberFacts {
+  id: string;
+  label: string;
+  provider: AiProvider;
+  baseUrl: string;
+  model: string;
+  dialect?: string | null;
+  hasKey: boolean;
+}
+
+/**
+ * 路由 / 端点池的成员一致性。
+ *
+ * `prior` 是**库里已存的这条路由**（可选）。给了它，校验器才分得清两件事：
+ * 「这次编辑添的乱」和「池子里本来就有、运营正在收拾的旧账」。见下方 leniency 段的长注释。
+ */
 export function validateRoute(
   route: { mode: 'single' | 'pool'; sticky?: boolean },
-  members: { id: string; label: string; provider: AiProvider; baseUrl: string; model: string; dialect?: string | null; hasKey: boolean }[],
+  members: RouteMemberFacts[],
+  prior?: { mode: 'single' | 'pool'; members: RouteMemberFacts[] },
+): AiConfigIssue[] {
+  const out = routeShapeIssues(route, members);
+  if (!prior) return out;
+
+  // ── 为什么要拿「已存状态」再判一遍 ─────────────────────────────────────────
+  // 拦错配是为了别让运营把池子改坏，**不是把已经坏了的池子锁死**。可一律按提议状态判 error，
+  // 结果就是：混协议的池里，移出任何一个成员都会被**剩下的成员**挡住（剩下的还是混的），
+  // 而「删端点」又要求先从路由移出——运营被夹死，唯一暗门是先把分流整个关掉。
+  // 2026-08-27 线上正是这个形状：一次 409 同时报「池内混协议」和「某成员接入商未确认」，
+  // 两条都指向别的成员，运营想动的那一下反而无论如何都保存不了。
+  //
+  // 规则：这次编辑**没有新增成员**、且报出来的问题**已存状态里就有**，就不阻断保存，只降为
+  // 提醒。于是「收拾池子」的每一步都走得通；而「开分流」「加不兼容的新成员」照旧拦得死——
+  // 那两种才是真的在添乱（已存状态是 single 时 routeShapeIssues 直接返回空，天然拦住开分流）。
+  const priorErrors = new Set(routeShapeIssues({ mode: prior.mode }, prior.members)
+    .filter((i) => i.level === 'error').map((i) => i.code));
+  if (!priorErrors.size) return out;
+  const priorIds = new Set(prior.members.map((m) => m.id));
+  if (members.some((m) => !priorIds.has(m.id))) return out;
+  return out.map((i) => (i.level === 'error' && priorErrors.has(i.code)
+    ? issue('warn', i.code, `${i.message}（这次改动没让它更糟，故不阻断保存；仍要修完）`, i.field)
+    : i));
+}
+
+function routeShapeIssues(
+  route: { mode: 'single' | 'pool'; sticky?: boolean },
+  members: RouteMemberFacts[],
 ): AiConfigIssue[] {
   const out: AiConfigIssue[] = [];
   if (route.mode !== 'pool') return out;
@@ -246,7 +295,14 @@ export function validateRoute(
   }
   if (byProtocol.size > 1) {
     const desc = [...byProtocol.entries()].map(([p, labels]) => `${p}（${labels.join('、')}）`).join(' vs ');
-    out.push(issue('error', 'POOL_PROTOCOL_MISMATCH', `池内混用了不同协议，请求形状对不上：${desc}`));
+    // 措辞按运行时的**实际**行为写，别照抄「请求形状对不上」——`resolveCandidates` 只在与本次
+    // 生效协议相同的成员里选（llmPool 的 compatible 过滤，有单测钉死），所以混池不会发错形状。
+    // 真正的后果是**少数协议的那批成员永远收不到流量**：运营以为有 3 路冗余、实际只有同协议的
+    // 那几个在分流，某个端点被限流时可转移的范围也比看上去小。仍然判 error——这不是「能跑但
+    // 要知道」，而是这份配置压根表达不了运营的意图。
+    out.push(issue('error', 'POOL_PROTOCOL_MISMATCH',
+      `池内混用了不同协议：${desc}。运行时只在与生效端点同协议的成员之间分流，另一批永远收不到流量；`
+      + '请统一协议，或把它们拆到两个用途下'));
   }
 
   const noKey = members.filter((m) => m.provider !== 'mock' && !m.hasKey);

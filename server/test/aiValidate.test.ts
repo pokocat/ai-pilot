@@ -252,3 +252,58 @@ describe('端点池成员一致性', () => {
     assert.ok(has(issues, 'POOL_PROTOCOL_MISMATCH'));
   });
 });
+
+// 2026-08-27 线上撞的死局：混协议的池里，运营想移出任何一个成员都会被**剩下的成员**挡回去
+// （剩下的还是混的），而删端点又要求先从路由移出 —— 没有出路，唯一暗门是先整个关掉分流。
+// 校验器该拦的是「你这次添的乱」，不是「你正在收拾的旧账」。
+describe('已存状态：拦添乱，不锁死修复动作', () => {
+  const anth = { id: 'a', label: '七牛Anthropic', provider: 'claude' as const, baseUrl: 'https://api.qnaigc.com', model: 'claude-x', dialect: null, hasKey: true };
+  const oai = { id: 'b', label: '硅基OpenAI', provider: 'openai' as const, baseUrl: 'https://api.siliconflow.cn/v1', model: 'qwen-x', dialect: null, hasKey: true };
+  const extra = { ...anth, id: 'c', label: '七牛Anthropic 2' };
+  const broken = { mode: 'pool' as const, members: [anth, oai] };
+
+  test('从已经混协议的池里移出一个成员：仍然报，但不再阻断保存', () => {
+    const issues = validateRoute({ mode: 'pool' }, [anth], broken);
+    assert.ok(has(issues, 'POOL_PROTOCOL_MISMATCH') === false, '只剩一种协议了，本轮压根不该再报');
+    assert.equal(hasBlocking(issues), false);
+  });
+
+  test('移出的是同协议那个、池子仍然混着：报错保留但降为提醒，运营动得了', () => {
+    const issues = validateRoute({ mode: 'pool' }, [anth, oai], { ...broken, members: [anth, oai, extra] });
+    assert.ok(has(issues, 'POOL_PROTOCOL_MISMATCH'), '仍要说出来');
+    assert.equal(hasBlocking(issues), false, '不能因为旧账把这次编辑挡回去');
+    assert.equal(blockingMessage(issues), '', 'error 级已清空');
+  });
+
+  test('往已经混协议的池里再加成员：照旧拦死（这才是添乱）', () => {
+    const issues = validateRoute({ mode: 'pool' }, [anth, oai, extra], broken);
+    assert.ok(has(issues, 'POOL_PROTOCOL_MISMATCH'));
+    assert.equal(hasBlocking(issues), true);
+  });
+
+  test('已存是单端点、这次要开分流：照旧拦死（旧账不能拿来蒙过去）', () => {
+    const issues = validateRoute({ mode: 'pool' }, [anth, oai], { mode: 'single', members: [anth, oai] });
+    assert.equal(hasBlocking(issues), true);
+    assert.ok(errs(issues).includes('POOL_PROTOCOL_MISMATCH'));
+  });
+
+  test('已存状态本来是干净的：这次把某个成员改成另一种协议就必须拦', () => {
+    // 成员集合没变（没新增），但其中一个被编辑成了 openai 协议——这正是「编辑端点」那条路径。
+    const issues = validateRoute(
+      { mode: 'pool' },
+      [anth, { ...extra, provider: 'openai' as const, dialect: 'openai_chat' }],
+      { mode: 'pool', members: [anth, extra] },
+    );
+    assert.equal(hasBlocking(issues), true);
+    assert.ok(errs(issues).includes('POOL_PROTOCOL_MISMATCH'));
+  });
+
+  test('把最后一个成员也移走：POOL_EMPTY 是新问题，照旧拦', () => {
+    const issues = validateRoute({ mode: 'pool' }, [], broken);
+    assert.ok(errs(issues).includes('POOL_EMPTY'));
+  });
+
+  test('不给已存状态时行为完全不变（保存端点、单测等调用方照旧）', () => {
+    assert.equal(hasBlocking(validateRoute({ mode: 'pool' }, [anth, oai])), true);
+  });
+});

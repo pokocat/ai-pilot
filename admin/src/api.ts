@@ -490,8 +490,9 @@ export const api = {
   testAiEndpoint: (body: AiEndpointTest) => req<AiTestResult>('/admin/ai-endpoints/test', 'POST', body),
   /** 深度检测：结果直接写端点表并回填能力标记。 */
   probeAiEndpoint: (id: string, kinds: string[]) => req<AiProbeReport>(`/admin/ai-endpoints/${id}/probe`, 'POST', { kinds }),
-  /** 入池 / 出池 ＝ chat 路由的成员增删。 */
-  setAiEndpointPool: (id: string, inPool: boolean) => req<{ ok: boolean }>(`/admin/ai-endpoints/${id}/pool`, 'POST', { inPool }),
+  /** 入池 / 出池 ＝ chat 路由的成员增删。issues 里可能带非阻断提醒（如池子仍在混协议）。 */
+  setAiEndpointPool: (id: string, inPool: boolean) =>
+    req<{ ok: boolean; issues: AiConfigIssue[] }>(`/admin/ai-endpoints/${id}/pool`, 'POST', { inPool }),
 
   /** 换 key 的唯一入口：改这一条，它下面所有端点一起生效。 */
   updateAiCredential: (id: string, body: { label?: string; vendor?: string; apiKey?: string }) =>
@@ -501,7 +502,7 @@ export const api = {
     req<{ ok: boolean; issues: AiConfigIssue[] }>(`/admin/ai-routes/${purpose}`, 'PUT', body),
   /** 「设为生效」＝把某用途的 primary 指针指过去，没有任何字段拷贝。 */
   setAiRoutePrimary: (purpose: string, endpointId: string) =>
-    req<{ ok: boolean }>(`/admin/ai-routes/${purpose}/primary/${endpointId}`, 'POST'),
+    req<{ ok: boolean; issues: AiConfigIssue[] }>(`/admin/ai-routes/${purpose}/primary/${endpointId}`, 'POST'),
 
   // —— 当前登录者（按角色显隐账户管理 / 过滤 agent）——
   me: () => req<AdminMe>('/admin/auth/me'),

@@ -16,6 +16,7 @@ import NumInput from '../NumInput';
 import {
   api, type AiProvider, type AiThinkingMode, type AiV2View, type AiEndpointView,
   type AiRouteView, type AiRoutingStatus, type AiEndpointUpsert, type AiProbeReport, type AiRouteBudget,
+  type AiConfigIssue,
 } from '../api';
 import { Field } from '../format';
 import { PageHead, ErrorState, Skeleton, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
@@ -102,9 +103,15 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
 
   const after = (msg: string) => { toast(msg); load(); loadRouting(); };
   const fail = (e: unknown) => toast((e as Error)?.message || '操作失败');
+  // 非阻断提醒必须跟着这次操作说出来。校验器的口径是「warn＝能跑，但结果不是运营以为的那样」，
+  // 可这些入口此前把 issues 整个丢掉——于是「池子还在混协议、少数协议的成员收不到流量」这种
+  // 保存成功但没达到意图的事，运营在界面上一个字都看不到。
   const run = (p: Promise<unknown>, msg: string) => {
     setBusy(true);
-    p.then(() => after(msg)).catch(fail).finally(() => setBusy(false));
+    p.then((r) => {
+      const warns = ((r as { issues?: AiConfigIssue[] } | null)?.issues ?? []).filter((i) => i.level !== 'error');
+      after(warns.length ? `${msg}；仍有提醒：${warns.map((w) => w.message).join('；')}` : msg);
+    }).catch(fail).finally(() => setBusy(false));
   };
 
   /* ── 端点操作 ── */

@@ -87,9 +87,14 @@ export async function checkRoutePurpose(
   })) ?? [];
   const ids = wanted.filter((m) => m.enabled !== false).map((m) => m.endpointId);
   const uniqueIds = [...new Set(ids)];
-  const eps = ids.length
-    ? await prisma.aiEndpoint.findMany({ where: { id: { in: uniqueIds } }, include: { credential: true } })
+  // 库里**已存**的启用成员：校验器要靠它区分「这次编辑添的乱」和「运营正在收拾的旧账」，
+  // 否则一个坏池子会把自己的每一个修复动作都挡回去（见 validateRoute 里 prior 的长注释）。
+  const priorIds = [...new Set((route?.members ?? []).filter((m) => m.enabled).map((m) => m.endpointId))];
+  const allIds = [...new Set([...uniqueIds, ...priorIds])];
+  const rows = allIds.length
+    ? await prisma.aiEndpoint.findMany({ where: { id: { in: allIds } }, include: { credential: true } })
     : [];
+  const eps = rows.filter((e) => uniqueIds.includes(e.id));
   const endpointDrafts = eps.map((e): EndpointDraft => e.id === override?.id ? override : ({
     id: e.id, label: e.label, provider: (e.provider as AiProvider) ?? 'mock',
     baseUrl: e.baseUrl, model: e.model, dialect: e.dialect, capsJson: e.capsJson,
@@ -103,7 +108,15 @@ export async function checkRoutePurpose(
     model: e.model, dialect: e.dialect, hasKey: e.hasKey,
   }));
   const mode = patch.mode ?? (route?.mode === 'pool' ? 'pool' : 'single');
-  const out = validateRoute({ mode }, members);
+  // prior 用库里的原值，**不套 override**：它要回答的是「保存前这条路由是什么样」。
+  const priorMembers = rows.filter((e) => priorIds.includes(e.id)).map((e) => ({
+    id: e.id, label: e.label, provider: (e.provider as AiProvider) ?? 'mock',
+    baseUrl: e.baseUrl, model: e.model, dialect: e.dialect,
+    hasKey: isRealKey(readAiCredential(e.credential.apiKey)),
+  }));
+  const out = validateRoute({ mode }, members, route
+    ? { mode: route.mode === 'pool' ? 'pool' : 'single', members: priorMembers }
+    : undefined);
   if (patch.budget !== undefined && patch.budget !== null) {
     const parsed = parseRouteBudget(patch.budget);
     if (!parsed.value) out.push({ level: 'error', code: 'ROUTE_BUDGET_INVALID', message: parsed.issue });
@@ -119,10 +132,16 @@ export async function checkRoutePurpose(
   if (wanted.filter((m) => m.enabled !== false && m.primary).length > 1) {
     out.push({ level: 'error', code: 'ROUTE_MULTIPLE_PRIMARY', message: `「${purpose}」用途只能有一个生效接入点` });
   }
+  // 「确认接入商」这道闸把的是**新加入**（见 resolveCredential 的注释：确认前不能加入用途路由）。
+  // 已经在这条路由里跑着的成员只提醒不阻断：黄标本身并不影响请求发不发得出去（vendor 字段除了
+  // 后台展示没有任何消费者，能力判定用的是 baseUrl），可判成 error 就会让「移出池」「改个展示名」
+  // 这类只会让配置变好的编辑也保存不了——而且换 Key 时新凭证是在校验之后才建的，等于运营能给
+  // 自己造出一个「保存完才拦得住」的死局。
+  const priorEnabled = new Set(priorIds);
   for (const e of eps) {
     if (e.credential.needsReview) {
       out.push({
-        level: 'error', code: 'CREDENTIAL_VENDOR_UNCONFIRMED',
+        level: priorEnabled.has(e.id) ? 'warn' : 'error', code: 'CREDENTIAL_VENDOR_UNCONFIRMED',
         message: `「${e.label}」的接入商尚未确认；请先在凭证区确认厂商或选择“自定义 / 其它”`,
       });
     }
