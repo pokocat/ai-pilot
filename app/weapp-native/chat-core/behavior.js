@@ -1565,6 +1565,33 @@ const methods = {
     clearInterval(this._streamAutoScrollTimer);
     this._streamAutoScrollTimer = null;
   },
+
+  /**
+   * 页面切到后台（tabBar 页切走 / navigateTo 盖住）。
+   *
+   * ⚠️ 不要在这里调 `chatCoreUnload()` —— 那是彻底拆解：abort 流式、递增 epoch 作废在途
+   * 请求。切个 tab 就把对话掐断，是把一个 bug 换成另一个。
+   *
+   * 这里只停「看不见的时候做了也是白做」的部分：自动滚底每 180ms 一次 `toBottom()` + setData，
+   * 页面已经不可见还在滚，纯属烧内存和 CPU，而且在隐藏页 setData 会触发微信的后台
+   * setData 告警。流式本身继续收，切回来内容是连着的。
+   *
+   * 背景：**tabBar 页切走只触发 onHide，不触发 onUnload**。而本 behavior 的清理原来
+   * 全绑在 onUnload 上，于是问策页一旦进过流式对话，那个 180ms 定时器就再也停不下来，
+   * 来回切 tab 会不断累积。
+   */
+  chatCoreHide() {
+    this._hiddenWithTyping = this.data.messages.some((item) => item && item.typing);
+    this.stopStreamAutoScroll();
+  },
+
+  /** 切回前台：还在打字就把自动滚底接上，否则保持停着。 */
+  chatCoreShow() {
+    if (!this._alive) return;
+    const typing = this.data.messages.some((item) => item && item.typing);
+    if (typing) this.startStreamAutoScroll();
+    this._hiddenWithTyping = false;
+  },
   onStreamTypingFinish(event) {
     const streamRenderId = textOf(event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.streamId);
     const index = this.data.messages.findIndex((item) => item && item.streamRenderId === streamRenderId);

@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-28 · 修复真机点 Tab 小程序直接退出 · 影响面：问策页 chat-core 生命周期
+
+用户真机上点底部 Tab，小程序整个退出（不是跳转、不是白屏）。根因：**微信 tabBar 页切走只触发 `onHide`，页面被缓存、`onUnload` 根本不跑**，而问策页把 chat-core 的全部拆解绑在 `onUnload` 上。`chatCoreUnload()` 是唯一把 `_alive` 置 `false` 的地方，而 `_alive` 是所有 `safeSetData` 的总闸——切走之后它仍是 `true`，那个每 180ms 一次的自动滚底 `setInterval` 就在一个看不见的页面上继续跑，一秒五次 `toBottom()` + `setData`，每回一次问策页再叠一层。真机内存吃满被系统杀掉；开发者工具内存宽裕看不出来。
+
+修法不是在 `onHide` 调 `chatCoreUnload()`——那会 abort 流式、递增 epoch 作废在途请求，变成「切个 tab 对话就断」。新增一对 `chatCoreHide()` / `chatCoreShow()`：切走只停自动滚底，流式继续收；切回来若仍在打字就接上。顺带补了 `_searchTimer`（原来也只在 `onUnload` 清）。另外四个 tab 页查过，均无 `setInterval`、生命周期未失衡。
+
+**排查过程里两条弯路值得记。** ① 唯一的现场日志 `21 listeners of WindowInfoChanged` 是**无害的**：基础库阈值 20，微信自身注册点正好占满 20 个且全在冷启动模块求值期，本项目对这个桶的贡献是 0，而且它在开发者工具里同样会打——它是唯一线索，但不是病根。② 当时用 `reLaunch` 逐个开 tab 的自动化验证得出"五个 tab 全正常"，这条证据**无效**：`reLaunch` 走 `onUnload`，恰好把要查的泄漏清干净了，那套方法在结构上就复现不了。
+
+回归由 `native-weapp.test.mjs` 新增用例守：扫所有 tabBar 页，`onUnload` 里每处清理动作，`onHide` 必须有对应收口；做过变异验证（撤掉修复即变红）。
+
 ### 2026-08-28 · 快出片界面文案去 AI 味（shuorenhua skill） · 影响面：分包 14 页全部界面文案与术语
 
 用第三方 skill [shuorenhua](https://github.com/MrGeDiao/shuorenhua) 过了一遍 14 个页面的界面文案。判定：场景 `chat`、档位 `minimal` 为主、**scope `in-place`**（界面文案一句一个位置，删了就是开天窗）。127 条逐条改写走 `FILE/FROM/TO` 精确替换，另做「分身 / 数字分身 → 数字人」术语 sweep 32 行。
