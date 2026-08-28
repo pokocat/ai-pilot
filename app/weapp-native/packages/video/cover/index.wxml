@@ -28,7 +28,7 @@
         <view class="cv-switch vd-card">
           <view class="cv-switch-copy">
             <text class="cv-switch-title">给这条片子加封面</text>
-            <text class="cv-switch-sub">可选步骤；不加也能正常出片</text>
+            <text class="cv-switch-sub">不加也能正常出片</text>
           </view>
           <view class="cv-switch-control">
             <text class="cv-switch-state">{{enabled ? '已开启' : '已关闭'}}</text>
@@ -50,7 +50,7 @@
             </view>
             <text class="cv-sign {{preview.signatureGhost ? 'ghost' : ''}}">{{preview.signature}}</text>
           </view>
-          <text class="cv-stage-note">灰字是占位示例，不会印进封面。成片里关键词用毛笔书法体，这里用宋体近似。</text>
+          <text class="cv-stage-note">灰字是占位示例，不会印进封面。成片里关键词用毛笔书法体，这里用宋体代替。</text>
         </view>
 
         <view class="cv-form vd-card">
@@ -99,7 +99,7 @@
 
         <view class="cv-bg-card vd-card">
           <text class="cv-bg-title">封面底图</text>
-          <text class="cv-bg-sub">默认从成片里自动取一帧形象出镜的画面；也可以选素材库里的图。</text>
+          <text class="cv-bg-sub">默认从成片里自动取一帧数字人出镜的画面；也可以选素材库里的图。</text>
           <scroll-view class="cv-bg-strip" scroll-x enable-flex>
             <view class="cv-bg-item {{backgroundAssetId ? '' : 'on'}}" bindtap="useAutoFrame">
               <view class="cv-bg-auto"><native-icon name="spark" tone="ink" size="18"></native-icon></view>
@@ -121,7 +121,7 @@
         </view>
 
         <text class="cv-note">
-          封面不占播放内容：它只在成片最前面停留一两帧，观众几乎察觉不到，但平台抓缩略图时拿到的就是这张。留空的槽位不会印出来；四个都空就等于不加封面。
+          封面不占正片时长：它只在成片最前面停留一两帧，观众几乎察觉不到，但平台抓缩略图时拿到的就是这张。没填的不会印出来；四项都空就等于不加封面。
         </text>
       </block>
 

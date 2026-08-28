@@ -335,7 +335,7 @@ module.exports = {
       }, 2500);
     }
     const targetIndex = payload.avatarId ? avatars.findIndex((item) => item.id === payload.avatarId) : -1;
-    const target = avatars[targetIndex] || Object.assign({}, clone(AVATAR), { id: `av_mock_${Date.now()}`, name: payload.name || `数字分身 ${avatars.length + 1}` });
+    const target = avatars[targetIndex] || Object.assign({}, clone(AVATAR), { id: `av_mock_${Date.now()}`, name: payload.name || `数字人 ${avatars.length + 1}` });
     const avatar = Object.assign({}, target, kind === 'voice'
       ? { voiceStatus: 'training', voiceSource: 'dedicated', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
       : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '', voiceStatus: 'training', voiceSource: 'video', voiceProgress: 6, voiceMessage: null, voiceTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
@@ -358,7 +358,7 @@ module.exports = {
   usageLogs: () => delay(clone(usageHistory)),
   deleteAvatar: () => {
     avatars = [];
-    usageHistory.unshift({ id: `cu_mock_${Date.now()}`, createdText: '刚刚', action: '删除数字分身', status: '完成' });
+    usageHistory.unshift({ id: `cu_mock_${Date.now()}`, createdText: '刚刚', action: '删除数字人', status: '完成' });
     return delay({ ok: true });
   },
   deleteAvatarById: (id) => { avatars = avatars.filter((item) => item.id !== id); return delay({ ok: true }); },

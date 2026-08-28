@@ -30,7 +30,7 @@ Page(withShare({
 
   onLoad(options) {
     const projectId = String((options && options.projectId) || '');
-    if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
+    if (!projectId) { host.toast('打不开这个项目'); host.back(); return; }
     this.setData({ projectId });
     this.newRenderRequestId();
     this.load();
@@ -84,7 +84,7 @@ Page(withShare({
           this.setData({
             estimate: null,
             quoteReady: false,
-            quoteError: error && error.message ? error.message : '暂时无法取得服务端报价，请重试',
+            quoteError: error && error.message ? error.message : '价格核算失败，请重试',
           });
         });
     }).catch((error) => {

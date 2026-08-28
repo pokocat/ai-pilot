@@ -22,13 +22,13 @@
 
       <view wx:elif="{{!loggedIn}}" class="vd-empty">
         <text class="t">登录后查看你的声音</text>
-        <text class="s">声音训练完成后会一直留在这里，随时可以复用到新的数字分身上。</text>
+        <text class="s">声音训练完成后会一直留在这里，随时能用在新的数字人上。</text>
         <view class="vd-btn vc-empty-btn" bindtap="startVoice">去录一段</view>
       </view>
 
       <view wx:elif="{{!voices.length}}" class="vd-empty">
         <text class="t">还没有专属声音</text>
-        <text class="s">录一段 8~15 秒的清晰说话就能训练。训好的声音可以给多个数字分身复用，不用重复录。</text>
+        <text class="s">录一段 8~15 秒的话，声音清晰就能训练。训好的声音可以给多个数字人用，不用重复录。</text>
         <view class="vd-btn vc-empty-btn" bindtap="startVoice">录一段声音</view>
       </view>
 
@@ -74,10 +74,10 @@
         </view>
 
         <view class="vc-rows">
-          <view class="vc-row" bindtap="openAvatars"><text class="vr-t">我的数字分身</text><native-icon class="vr-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="vc-row" bindtap="openAvatars"><text class="vr-t">我的数字人</text><native-icon class="vr-a" name="arrow" tone="neutral" size="15"></native-icon></view>
         </view>
 
-        <text class="vc-note">请只使用本人或已获合法使用权的声音素材。声音可随时重录覆盖，重录后新的出片会使用新音色。</text>
+        <text class="vc-note">请只使用本人或已获合法使用权的声音素材。声音可以随时重录覆盖，重录后出的片子会用新音色。</text>
       </block>
 
       <view class="vd-footer-space"></view>

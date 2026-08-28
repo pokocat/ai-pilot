@@ -104,10 +104,13 @@ try {
   await mini.screenshot({ path: path.join(SHOTS, '01-home-guest.png') });
 
   /* ── 分身四态：读失败绝不能说成"你还没有" ──────────────────────── */
+  // 守的是四态**各说各的话**（尤其 failed 不能被说成 missing），措辞本身可以变。
+  // 2026-08-28 按 shuorenhua 去 AI 味统一了术语与动词：光秃秃的「分身」→「数字人」，
+  // 「没读到」「看进度」这类自造口语/动词截断 → 通用词。
   const GATE_CASES = [
-    ['missing', '还没有数字分身', '去创建'],
-    ['training', '数字分身训练中', '看进度'],
-    ['failed', '分身状态没读到', '重试'],
+    ['missing', '还没有数字人', '去创建'],
+    ['training', '数字人训练中', '查看进度'],
+    ['failed', '数字人状态加载失败', '重试'],
   ];
   // 必须先真登录：guest 与「已登录但没有分身」在 home/index.wxml 里是两套副文案
   // （`{{guest ? '登录后上传…' : '上传一段 5 秒以上…'}}`），只 setData({avatarState})

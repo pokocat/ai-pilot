@@ -69,7 +69,7 @@ Page(withShare({
 
   onLoad(options) {
     const workId = String((options && options.workId) || '');
-    if (!workId) { host.toast('缺少作品参数'); host.back(); return; }
+    if (!workId) { host.toast('打不开这条片子'); host.back(); return; }
     this.setData({ workId });
     this.load();
   },
@@ -170,19 +170,19 @@ Page(withShare({
       success: (res) => {
         if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
           host.hideLoading(); this.setData({ savingCover: false });
-          host.toast('封面下载没有完成，请稍后重试');
+          host.toast('封面下载失败，请稍后重试');
           return;
         }
         wx.saveImageToPhotosAlbum({
           filePath: res.tempFilePath,
-          success: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面已存到相册', 'success'); },
+          success: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面已保存到相册', 'success'); },
           fail: (error) => {
             host.hideLoading(); this.setData({ savingCover: false });
             const message = String(error && error.errMsg || '');
             // 与 saveToAlbum 同一套：拒过权限只能引导去设置页，不能只 toast 一句失败
             if (/auth|deny|denied|permission|writePhotosAlbum/i.test(message)) { this.openAlbumSetting(); return; }
             if (/cancel/i.test(message)) return;
-            host.toast('封面写入相册失败，请检查手机存储空间');
+            host.toast('封面保存到相册失败，请检查手机存储空间');
           },
         });
       },
@@ -202,13 +202,13 @@ Page(withShare({
       success: (res) => {
         if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
           host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
-          host.toast(Number(res.statusCode) === 401 ? '登录态已失效，请重新登录后保存' : '成片下载没有完成，请稍后重试');
+          host.toast(Number(res.statusCode) === 401 ? '登录态已失效，请重新登录' : '成片下载失败，请稍后重试');
           return;
         }
-        host.loading('写入相册');
+        host.loading('保存到相册');
         wx.saveVideoToPhotosAlbum({
           filePath: res.tempFilePath,
-          success: () => { host.hideLoading(); this.setData({ saving: false, saveProgress: 100 }); host.toast('已存到相册', 'success'); },
+          success: () => { host.hideLoading(); this.setData({ saving: false, saveProgress: 100 }); host.toast('已保存到相册', 'success'); },
           fail: (error) => {
             host.hideLoading();
             this.setData({ saving: false, saveProgress: 0 });
@@ -217,14 +217,14 @@ Page(withShare({
               this.openAlbumSetting();
               return;
             }
-            host.toast(/invalid video|format/i.test(message) ? '成片文件暂时无法识别，请联系运营' : '写入相册失败，请检查手机存储空间');
+            host.toast(/invalid video|format/i.test(message) ? '成片文件暂时无法识别，请联系运营' : '保存到相册失败，请检查手机存储空间');
           },
         });
       },
       fail: (error) => {
         host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
         const message = String(error && error.errMsg || '');
-        host.toast(/domain|合法域名/i.test(message) ? '下载域名配置未生效，请联系运营' : '成片下载失败，请检查网络后重试');
+        host.toast(/domain|合法域名/i.test(message) ? '视频下载还没配置好，请联系运营' : '成片下载失败，请检查网络后重试');
       },
     });
     if (task && typeof task.onProgressUpdate === 'function') task.onProgressUpdate((event) => {
@@ -237,14 +237,14 @@ Page(withShare({
     const key = String(event.currentTarget.dataset.key || '');
     const platform = PLATFORMS.find((item) => item.key === key);
     // 上游未接入时直接说清楚，不走确认框也不打接口（见 PUBLISH_READY 注释）。
-    if (!PUBLISH_READY) { host.toast('平台代发还在接入，先保存到相册自己发'); return; }
+    if (!PUBLISH_READY) { host.toast('还不能帮你发到平台，先保存到相册自己发'); return; }
     if (!host.requireLogin(this, 'video')) return;
     if (!platform || this.data.publishing) return;
     host.confirm({
       title: `发布到${platform.label}`,
       content: this.data.work && this.data.work.aiWatermark
         ? '成片会保留你已开启的「AI 生成」水印，并提交到对应平台。确定继续吗？'
-        : '将把这条成片提交到对应平台。确定继续吗？',
+        : '这条成片会提交到对应平台。确定继续吗？',
       confirmText: '确认发布',
     }).then((ok) => {
       if (!ok) return;

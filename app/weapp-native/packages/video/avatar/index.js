@@ -43,7 +43,7 @@ function decorateAvatar(avatar) {
         ? '专属声音已完成，后续口播会优先使用这版音色'
         : voiceStatus === 'ready'
           ? '当前使用视频原声，补录后音色会更稳定'
-          : '不影响形象创建；补录后口播会更像你';
+          : '不影响创建形象，补录后口播会更像你';
   return Object.assign({}, avatar, {
     imageStatusText: statusText(avatar.imageStatus, avatar.imageProgress, '已就绪', '需重拍'),
     voiceStatusText: statusText(avatar.voiceStatus, avatar.voiceProgress, '已增强', '可重录'),
@@ -52,7 +52,7 @@ function decorateAvatar(avatar) {
     voiceDesc,
     voiceActionText: voiceStatus === 'training'
       ? '训练中'
-      : (dedicatedVoice || voiceStatus === 'failed') ? '重新录制' : voiceStatus === 'ready' ? '提升' : '去录制',
+      : (dedicatedVoice || voiceStatus === 'failed') ? '重新录制' : voiceStatus === 'ready' ? '补录提升' : '去录制',
     voiceCompletedText: dedicatedVoice && voiceStatus === 'ready' ? formatCompletedAt(avatar.voiceTrainedText) : '',
   });
 }
@@ -179,7 +179,7 @@ Page(withShare({
     const avatarId = String(event.currentTarget.dataset.id || '');
     const target = this.data.avatars.find((item) => item.id === avatarId);
     host.confirm({
-      title: `删除${target ? `「${target.name}」` : '这个数字分身'}`,
+      title: `删除${target ? `「${target.name}」` : '这个数字人'}`,
       content: '删除后形象和声音立即停用，已出的片子不受影响。要重新用就得再采集一次。',
       confirmText: '删除',
     }).then((ok) => {
@@ -190,7 +190,7 @@ Page(withShare({
           host.hideLoading();
           this.stopPolling();
           this.setData({ avatars: this.data.avatars.filter((item) => item.id !== avatarId) });
-          host.toast('数字分身已删除', 'success');
+          host.toast('数字人已删除', 'success');
         })
         .catch((error) => {
           host.hideLoading();
@@ -214,7 +214,7 @@ Page(withShare({
     this.setData({
       demoVideoOpen: true,
       demoVideoUrl: avatar.demoVideoUrl,
-      demoVideoName: avatar.name || '这个分身',
+      demoVideoName: avatar.name || '这个数字人',
     });
   },
 
@@ -227,7 +227,7 @@ Page(withShare({
     const id = String(event.currentTarget.dataset.id || '');
     const avatar = (this.data.avatars || []).find((item) => item.id === id);
     if (!host.requireLogin(this, 'video')) return;
-    if (!avatar || !avatar.linkedVoiceId) { host.toast('这个分身还没关联声音'); return; }
+    if (!avatar || !avatar.linkedVoiceId) { host.toast('这个数字人还没关联声音'); return; }
     host.setOverlay(true, 'video-voice-preview');
     this.setData({
       voicePreviewOpen: true,

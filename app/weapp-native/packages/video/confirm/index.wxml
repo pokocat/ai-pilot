@@ -38,7 +38,7 @@
             <text class="cf-pv-sub">竖屏 · 带字幕</text>
             <view class="cf-stats">
               <view class="cf-stat"><text class="k">成片时长</text><text class="v">{{totalText}}</text></view>
-              <view class="cf-stat"><text class="k">分身出镜</text><text class="v">{{summary.avatarSec}} 秒 · {{summary.avatarCount}} 段</text></view>
+              <view class="cf-stat"><text class="k">数字人出镜</text><text class="v">{{summary.avatarSec}} 秒 · {{summary.avatarCount}} 段</text></view>
               <view class="cf-stat"><text class="k">配画面</text><text class="v">{{summary.brollCount}} 段</text></view>
               <view class="cf-stat"><text class="k">结尾固定段</text><text class="v">{{summary.tailSec}} 秒</text></view>
             </view>
@@ -79,7 +79,7 @@
         <!-- 积分明细 -->
         <view wx:if="{{estimate}}" class="cf-bill vd-card">
           <text class="cb-kicker">费用明细</text>
-          <text class="cb-title">只为实际生成的内容计费</text>
+          <text class="cb-title">只按实际生成的内容计费</text>
           <view wx:for="{{estimate.items}}" wx:key="key" class="cb-row">
             <text class="cb-k">{{item.label}}</text>
             <text class="cb-v {{item.freeText ? 'free' : ''}}">{{item.freeText || item.credits}}</text>
@@ -94,13 +94,13 @@
           </view>
         </view>
         <view wx:else class="cf-quote-error vd-card">
-          <text class="cp-title">还没拿到可确认的价格</text>
-          <text class="cp-text">{{quoteError || '正在向服务端核算，请稍等。'}}</text>
+          <text class="cp-title">价格核算失败</text>
+          <text class="cp-text">{{quoteError || '正在核算价格，稍等一下。'}}</text>
           <view class="cf-retry" bindtap="load">重新核算</view>
         </view>
 
         <text class="cf-note">
-          AI 生成水印默认关闭，只有你主动开启时才会写入成片。声音和形象来自你本人授权的分身；出片后不满意可以改文案重出，只按新的出镜时长收费。
+          AI 生成水印默认关闭，只有你主动开启时才会写入成片。声音和形象来自你本人授权的数字人；出片后不满意可以改文案重出，只按新的数字人出镜时长收费。
         </text>
       </block>
 
@@ -114,7 +114,7 @@
       class="vd-btn {{(loading || !quoteReady || problems.length || submitting || watermarkSaving) ? 'disabled' : ''}}"
       style="flex:1"
       bindtap="submit"
-    >{{loading || !quoteReady ? '等待服务端报价…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分'))}}</view>
+    >{{loading || !quoteReady ? '正在核算价格…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分'))}}</view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

@@ -19,22 +19,22 @@
     <view class="rows">
       <view class="price-bar">
         <view class="pb-copy">
-          <text class="pb-kicker">当前方案</text>
+          <text class="pb-kicker">预计花费</text>
           <view class="pb-main"><text class="pb-num">{{credits}}</text><text class="pb-unit">积分</text></view>
         </view>
         <view wx:if="{{flash}}" class="pb-flash"><text class="pb-delta">{{flash.delta}}</text><text class="pb-flash-text">{{flash.text}}</text></view>
-        <view wx:else class="pb-stat"><text class="strong">{{totalText}}</text><text>预计成片</text><text class="strong">{{avatarSec}} 秒</text><text>分身出镜</text></view>
+        <view wx:else class="pb-stat"><text class="strong">{{totalText}}</text><text>预计成片</text><text class="strong">{{avatarSec}} 秒</text><text>数字人出镜</text></view>
       </view>
       <view class="group-tool">
         <view class="gt-icon"><native-icon name="layers" tone="blue" size="21"></native-icon></view>
-        <view class="gt-copy"><text class="gt-title">已自动整理成 {{groupCount}} 个画面段</text><text class="gt-sub">在每段右上角调整组合，原文不会被删改</text></view>
+        <view class="gt-copy"><text class="gt-title">已自动整理成 {{groupCount}} 个画面段</text><text class="gt-sub">在每段右上角调整组合，不会删改你的文案</text></view>
       </view>
       <view class="avatar-choice" bindtap="openAvatarPicker">
         <view class="ac-face {{selectedAvatar && selectedAvatar.imagePreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{selectedAvatar && selectedAvatar.imagePreviewUrl}}" src="{{selectedAvatar.imagePreviewUrl}}" mode="aspectFill"></image></view>
         <view class="ac-copy"><text class="ac-kicker">本片数字人</text><text class="ac-name">{{selectedAvatar ? selectedAvatar.name : '还没有可用数字人'}}</text><text class="ac-voice">{{selectedAvatar && selectedAvatar.linkedVoiceName ? '声音 · ' + selectedAvatar.linkedVoiceName : '未关联声音'}}</text></view>
         <view class="ac-action">{{selectedAvatar ? '更换' : '去创建'}}</view>
       </view>
-      <view class="rows-head"><view><text class="rh-kicker">画面清单</text><text class="rh-title">逐段检查</text></view><text class="rh-help">点标签可切换出镜方式</text></view>
+      <view class="rows-head"><view><text class="rh-kicker">画面清单</text><text class="rh-title">逐段检查</text></view><text class="rh-help">点标签可切换数字人出镜或配画面</text></view>
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
       <view wx:for="{{rows}}" wx:key="id" class="row {{item.roleClass}}">
         <view class="row-body">
@@ -60,13 +60,13 @@
           <view wx:elif="{{item.roleClass === 'broll' && item.hasAsset}}" class="row-asset">
             <view class="ra-open" data-asset-id="{{item.assetId}}" bindtap="previewSelectedAsset">
               <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">{{item.assetTypeText === '视频素材' ? '播放' : '预览'}}</text></view>
-              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · {{item.needText}} · 点开预览</text><text wx:if="{{item.assetTooShort}}" class="ra-short">素材只有 {{item.assetSeconds}} 秒，短于本段 {{item.seconds}} 秒，画面会重复播放</text><text wx:elif="{{item.assetTooLong}}" class="ra-note">素材 {{item.assetSeconds}} 秒，成片只会用前 {{item.seconds}} 秒</text></view>
+              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · {{item.needText}} · 点开预览</text><text wx:if="{{item.assetTooShort}}" class="ra-short">素材只有 {{item.assetSeconds}} 秒，不够这段的 {{item.seconds}} 秒，画面会重复播放</text><text wx:elif="{{item.assetTooLong}}" class="ra-note">素材 {{item.assetSeconds}} 秒，成片只会用前 {{item.seconds}} 秒</text></view>
             </view>
             <text class="ra-change" data-id="{{item.id}}" bindtap="pickAsset">更换</text>
           </view>
           <view wx:elif="{{item.roleClass === 'tail' && item.hasAsset}}" class="row-asset tail-asset" data-asset-id="{{item.assetId}}" bindtap="previewSelectedAsset">
             <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">播放</text></view>
-            <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">固定视频 · {{item.seconds}} 秒 · 点开预览</text></view>
+            <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">固定片段 · {{item.seconds}} 秒 · 点开预览</text></view>
           </view>
           <view wx:elif="{{item.roleClass === 'avatar'}}" class="row-avatar" bindtap="openAvatarPicker"><view class="ra-face"><image wx:if="{{avatarPreviewUrl}}" src="{{avatarPreviewUrl}}" mode="aspectFill"></image></view><view class="ra-avatar-copy"><text class="ra-label">{{selectedAvatar ? selectedAvatar.name : '选择数字人'}}</text><text wx:if="{{item.avatarSpanText}}" class="ra-sub">{{item.avatarSpanText}}</text></view><view class="ra-avatar-swap"><native-icon name="swap" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text>换数字人</text></view></view>
         </view>
@@ -92,7 +92,7 @@
 
   <view wx:if="{{storyboardOpen}}" class="pv-mask" catchtap="closeStoryboard">
     <view class="pv-sheet" catchtap="swallow">
-      <view class="pv-head"><view><text class="pv-title">分镜清单</text><text class="pv-sub">这里只核对顺序和画面，成片效果以出片为准</text></view><view class="pv-close" bindtap="closeStoryboard"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="pv-head"><view><text class="pv-title">分镜清单</text><text class="pv-sub">这里只核对顺序和画面，成片效果要等出片才看得到</text></view><view class="pv-close" bindtap="closeStoryboard"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
       <scroll-view class="pv-scroll" scroll-y enable-flex>
         <view class="pv-list">
           <view wx:for="{{rows}}" wx:key="id" class="pv-row {{item.roleClass}}">
@@ -102,7 +102,7 @@
         </view>
       </scroll-view>
       <view class="pv-actions">
-        <view class="pv-total"><text>预计 {{totalText}}</text><text>分身 {{avatarSec}} 秒</text><text>{{credits}} 积分</text></view>
+        <view class="pv-total"><text>预计 {{totalText}}</text><text>数字人出镜 {{avatarSec}} 秒</text><text>{{credits}} 积分</text></view>
         <view class="pv-btns">
           <view class="vd-btn ghost" bindtap="startPlayback">连着看一遍</view>
           <view class="vd-btn" style="flex:1" bindtap="closeStoryboard">确认画面安排</view>
@@ -154,11 +154,11 @@
   </view>
   <view wx:if="{{avatarPickerOpen}}" class="avatar-picker-mask" catchtap="closeAvatarPicker">
     <view class="avatar-picker-sheet" catchtap="swallow">
-      <view class="ap-head"><view><text class="ap-title">选择本片数字人</text><text class="ap-sub">形象、场景和装扮可以不同；关联声音会自动带入</text></view><view class="ap-close" bindtap="closeAvatarPicker"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="ap-head"><view><text class="ap-title">选择本片数字人</text><text class="ap-sub">每个数字人的形象、场景和装扮可以不同，选好会自动带上它关联的声音</text></view><view class="ap-close" bindtap="closeAvatarPicker"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
       <scroll-view class="ap-list" scroll-y enable-flex>
         <view wx:for="{{avatars}}" wx:key="id" class="ap-row {{project.avatarId === item.id ? 'selected' : ''}} {{item.imageStatus !== 'ready' ? 'disabled' : ''}}" data-id="{{item.id}}" bindtap="chooseAvatar">
           <view class="ap-photo {{item.imagePreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.imagePreviewUrl}}" src="{{item.imagePreviewUrl}}" mode="aspectFill"></image></view>
-          <view class="ap-copy"><text class="ap-name">{{item.name}}</text><text class="ap-meta">{{item.imageStatus === 'ready' ? (item.linkedVoiceName ? '声音 · ' + item.linkedVoiceName : '可用 · 尚未关联声音') : (item.imageStatus === 'training' ? '正在训练' : '暂不可用')}}</text></view>
+          <view class="ap-copy"><text class="ap-name">{{item.name}}</text><text class="ap-meta">{{item.imageStatus === 'ready' ? (item.linkedVoiceName ? '声音 · ' + item.linkedVoiceName : '可用 · 未关联声音') : (item.imageStatus === 'training' ? '正在训练' : '暂不可用')}}</text></view>
           <view class="ap-check"><native-icon wx:if="{{project.avatarId === item.id}}" name="check" tone="white" size="12"></native-icon></view>
         </view>
       </scroll-view>

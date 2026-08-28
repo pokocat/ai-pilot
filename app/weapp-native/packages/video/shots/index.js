@@ -18,7 +18,7 @@ function rangeSelectionState(rows) {
     invalid: !contiguous,
     text: !selected.length
       ? '全部取消后，每句话都会单独成段'
-      : (contiguous ? `已选 ${selected.length} 句继续共用一个画面` : '保留在一起的句子需要连续'),
+      : (contiguous ? `已选 ${selected.length} 句继续共用一个画面` : '共用一个画面的句子必须连续'),
   };
 }
 
@@ -42,7 +42,7 @@ Page(withShare({
 
   onLoad(options) {
     const projectId = String((options && options.projectId) || '');
-    if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
+    if (!projectId) { host.toast('打不开这个项目'); host.back(); return; }
     this.setData({ projectId });
     this.saveTimer = null; this.flashTimer = null; this.load();
   },
@@ -133,7 +133,7 @@ Page(withShare({
       seconds, sentenceCount: count, multi: count > 1,
       rangeText: `第 ${range} 句`,
       roleClass: isTail ? 'tail' : (isAvatar ? 'avatar' : 'broll'),
-      roleLabel: isTail ? '固定片段' : (isAvatar ? '分身出镜' : '配画面'),
+      roleLabel: isTail ? '固定片段' : (isAvatar ? '数字人出镜' : '配画面'),
       metaText: isTail
         ? `${shot.durationSec} 秒 · 可整段替换`
         : (isAvatar ? `出镜 ${seconds} 秒`
@@ -160,7 +160,7 @@ Page(withShare({
         && Math.round(Number(asset.durationSec)) > seconds + 1,
       assetPreviewUrl: asset && asset.previewUrl ? asset.previewUrl : '',
       framePreviewUrl: isAvatar ? this.data.avatarPreviewUrl : (asset && asset.previewUrl ? asset.previewUrl : ''),
-      previewMeta: isTail ? '固定片段' : (isAvatar ? '分身出镜' : (assetKind === 'image' ? '已选图片素材' : '已选视频素材')),
+      previewMeta: isTail ? '固定片段' : (isAvatar ? '数字人出镜' : (assetKind === 'image' ? '已选图片素材' : '已选视频素材')),
       avatarSpanText: count > 1 ? `连续 ${count} 句出镜` : '',
       hasAsset: Boolean(shot.assetId), switchable: !isTail,
       canMergeNext: !isTail && Boolean(following && following.role !== ROLE.TAIL),
@@ -180,7 +180,7 @@ Page(withShare({
   showFlash(id, delta) {
     if (!delta) return;
     const row = this.data.rows.find((item) => item.id === id);
-    const action = row && row.role === ROLE.AVATAR ? '改成分身出镜' : '改回配画面';
+    const action = row && row.role === ROLE.AVATAR ? '改成数字人出镜' : '改回配画面';
     this.setData({ flash: { text: `${row ? row.rangeText : '这一段'}${action}`, delta: `${delta > 0 ? '+' : ''}${delta}` } });
     if (this.flashTimer) clearTimeout(this.flashTimer);
     this.flashTimer = setTimeout(() => this.setData({ flash: null }), 3000);
@@ -314,7 +314,7 @@ Page(withShare({
     const project = Object.assign({}, this.data.project, { avatarId: id, voiceId: selectedAvatar.linkedVoiceId || null });
     this.setData({ project, selectedAvatar, avatarPreviewUrl: selectedAvatar.imagePreviewUrl || '' });
     this.closeAvatarPicker(); this.recompute(); this.scheduleSave();
-    host.toast(selectedAvatar.linkedVoiceId ? '已切换数字人，关联声音也已带入' : '已切换数字人，请先为它关联声音', 'success');
+    host.toast(selectedAvatar.linkedVoiceId ? '已切换数字人，关联的声音也一起带上了' : '已切换数字人，请先为它关联声音', 'success');
   },
 
   /**
@@ -351,7 +351,7 @@ Page(withShare({
     if (!id) return;
     const asset = this.data.assetsById[id];
     const contentUrl = asset && (asset.contentUrl || asset.previewUrl);
-    if (!contentUrl) { host.toast('这个素材暂时没有可预览文件'); return; }
+    if (!contentUrl) { host.toast('这个素材暂时预览不了'); return; }
     host.setOverlay(true, 'video-asset-preview');
     this.setData({ assetPreviewOpen: true, previewAsset: Object.assign({}, asset, { contentUrl }) });
   },
@@ -492,8 +492,8 @@ Page(withShare({
       seconds: 2,
       videoUrl: '',
       imageUrl,
-      note: '成片里封面只占第一帧，用作平台缩略图，不占正片时长',
-      blankText: '封面底图会从成片里自动抽一帧',
+      note: '成片里封面只占第一帧，是发到平台后显示的封面图，不占正片时长',
+      blankText: '封面底图会自动从成片里截一张',
     }];
   },
 
@@ -519,7 +519,7 @@ Page(withShare({
         imageUrl: kind === 'image' ? (isAvatar ? avatarUrl : assetUrl) : '',
         // 静帧顶替的地方必须说清楚，不能让用户以为成片也是一张不动的图
         note: isAvatar
-          ? '成片里这一段是数字人真人口播'
+          ? '成片里这一段是数字人口播'
           : (isTail ? '模板自带的固定结尾' : (kind === 'blank' ? '这一段还没配画面' : '')),
         /* 占位文案要按角色说各自的话。三种「这里没图」的原因完全不同：
              出镜段  —— 数字人还没选好形象预览图，不是「没配画面」

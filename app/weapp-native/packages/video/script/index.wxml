@@ -19,7 +19,7 @@
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="script-body">
       <view class="script-tools">
-        <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : '整稿优化'}}</view>
+        <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : 'AI 改整篇'}}</view>
         <view class="st-btn ghost" bindtap="restoreTemplate">恢复模板</view>
         <text class="st-count">{{rows.length}} 段</text>
       </view>
@@ -44,12 +44,12 @@
 
         <view class="bulk-helper">
           <view class="bh-btn" bindtap="autoSplit"><native-icon name="layers" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text>自动分段</text></view>
-          <text class="bh-tip">整篇粘进来后点它，按句子自动分好段</text>
+          <text class="bh-tip">粘贴后点左边的「自动分段」，按句子分好段</text>
         </view>
 
         <view wx:if="{{bulkStats}}" class="bulk-stats {{bulkStats.droppedAssets ? 'warn' : ''}}">
           <text class="bs-line">原来 {{bulkStats.before}} 段，改后 {{bulkStats.after}} 段</text>
-          <text wx:if="{{bulkStats.droppedAssets}}" class="bs-warn">有 {{bulkStats.droppedAssets}} 句已配的画面会失效，需要重新配</text>
+          <text wx:if="{{bulkStats.droppedAssets}}" class="bs-warn">有 {{bulkStats.droppedAssets}} 句已配的画面会被清掉，需要重新配</text>
           <text wx:elif="{{bulkStats.changed}}" class="bs-line dim">已配的画面不受影响</text>
           <text wx:else class="bs-line dim">还没有改动</text>
         </view>
@@ -64,7 +64,7 @@
       <view class="sb-head">
         <view><text class="sb-kicker">当前成稿</text><text class="sb-title">口播文案</text></view>
         <view class="sb-actions">
-          <text class="sb-help">点任一段即可细改</text>
+          <text class="sb-help">点任意一段就能改</text>
           <text class="sb-bulk" bindtap="enterBulk">整段编辑</text>
         </view>
       </view>
@@ -129,13 +129,13 @@
         <view class="aw-identity">
           <view class="aw-orb"><native-icon name="pen" tone="white" size="19"></native-icon></view>
           <view>
-            <text class="aw-kicker">AI 文案搭档</text>
-            <text class="aw-title">聊着改，成稿会留在原处</text>
+            <text class="aw-kicker">AI 改稿</text>
+            <text class="aw-title">边聊边改，成稿留在正文里</text>
           </view>
         </view>
         <view class="aw-close" bindtap="closeAi"><native-icon name="close" tone="white" size="18"></native-icon></view>
       </view>
-      <text class="aw-intro">说你想改哪里。它会结合模板和当前稿追问，确认后直接更新文案。</text>
+      <text class="aw-intro">说你想改哪里。它会结合模板和当前稿追问，你确认后直接更新文案。</text>
 
       <scroll-view class="aw-thread" scroll-y scroll-top="{{chatScrollTop}}">
         <view class="aw-thread-inner">
@@ -146,7 +146,7 @@
             <text>{{item.content}}</text>
             <text wx:if="{{item.role === 'assistant' && item.applied}}" class="aw-applied">已更新文案</text>
           </view>
-          <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿整理…</text></view>
+          <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿修改…</text></view>
         </view>
       </scroll-view>
 

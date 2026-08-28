@@ -3,7 +3,7 @@
     <view class="vd-safe"></view>
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">选模板</text>
+      <text class="vd-title">选择模板</text>
       <text class="vd-headact"> </text>
     </view>
   </view>
@@ -11,7 +11,7 @@
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="tl-body">
 
-      <text class="tl-lead">每套模板是一条写好的故事线。挑一套，把里面的店名和经历换成你自己的。</text>
+      <text class="tl-lead">每套模板是一条写好的故事线。选一套，把里面的店名和经历换成你自己的。</text>
 
       <view wx:if="{{loading}}" class="tl-list">
         <view wx:for="{{[1,2]}}" wx:key="*this" class="tl-card skeleton">
@@ -21,14 +21,14 @@
       </view>
 
       <view wx:elif="{{state === 'failed'}}" class="vd-empty">
-        <text class="t">模板没读到</text>
-        <text class="s">网络没通，点下面重试。这不代表模板没有了。</text>
+        <text class="t">模板加载失败</text>
+        <text class="s">网络异常，点下方重试。这不代表模板没有了。</text>
         <view class="vd-btn tl-retry" bindtap="retry">重试</view>
       </view>
 
       <view wx:elif="{{state === 'empty'}}" class="vd-empty">
         <text class="t">暂时没有可用模板</text>
-        <text class="s">新模板会陆续上架，过阵子再来看看。</text>
+        <text class="s">新模板会陆续上架，过段时间再来看看。</text>
       </view>
 
       <view wx:else class="tl-list">
@@ -41,7 +41,7 @@
             <text class="tc-name">{{item.name}}</text>
             <text class="tc-desc">{{item.description}}</text>
             <view class="tc-facts">
-              <text class="tc-fact"><text class="k">出镜</text>{{item.avatarText}}</text>
+              <text class="tc-fact"><text class="k">数字人出镜</text>{{item.avatarText}}</text>
               <text class="tc-dot">·</text>
               <text class="tc-fact"><text class="k">约</text>{{item.creditText}}</text>
             </view>

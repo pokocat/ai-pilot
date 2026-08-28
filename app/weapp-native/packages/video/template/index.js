@@ -37,7 +37,7 @@ Page(withShare({
 
   onLoad(options) {
     const templateId = String((options && options.templateId) || '');
-    if (!templateId) { host.toast('缺少模板参数'); host.back(); return; }
+    if (!templateId) { host.toast('打不开这个模板'); host.back(); return; }
     this.setData({ templateId });
     this.loadAvatar();
     api.template(templateId)
@@ -84,10 +84,10 @@ Page(withShare({
     const avatar = this.data.avatar;
     if (!avatar || avatar.imageStatus !== 'ready') {
       if (avatar && avatar.imageStatus === 'training') {
-        host.toast('数字分身还在训练，先看看进度');
+        host.toast('数字人还在训练，先看看进度');
         host.go('avatar/index');
       } else {
-        host.toast('先创建数字分身，再开始出片');
+        host.toast('先创建数字人，再开始出片');
         host.go('clone/index');
       }
       return;

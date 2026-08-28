@@ -41,13 +41,13 @@ Page(withShare({
     chatInput: '',
     chatMessages: [],
     chatScrollTop: 0,
-    chatSuggestions: ['写得更口语一点', '突出我的手艺和可信感', '开头更抓人，但别像广告'],
+    chatSuggestions: ['写得更口语一点', '突出我的手艺，让人信得过', '开头更抓人，但别像广告'],
     showLogin: false,
   }),
 
   onLoad(options) {
     const projectId = String((options && options.projectId) || '');
-    if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
+    if (!projectId) { host.toast('打不开这个项目'); host.back(); return; }
     this.setData({ projectId });
     this.saveTimer = null;
     this.load();
@@ -162,7 +162,7 @@ Page(withShare({
         });
         this.recompute(segments);
         if (result.audioUrl) this.playAudio(result.audioUrl);
-        else host.toast('试听音频待接入');
+        else host.toast('暂时没有试听音频');
       })
       .catch((error) => {
         this.setData({ previewing: false });
@@ -203,7 +203,7 @@ Page(withShare({
           this.recompute(result.segments);
           this.scheduleSave();
         } else {
-          host.toast('整段改写结果待接入');
+          host.toast('整篇改写没有结果，请重试');
         }
       })
       .catch((error) => {
@@ -247,7 +247,7 @@ Page(withShare({
         this.setData({ chatting: false, project, chatMessages: project.scriptChat, chatScrollTop: this.data.chatScrollTop + 999999 });
         this.recompute(project.segments);
         host.writeDraft(this.data.projectId, { project, step: 1 });
-        if (result.applied) host.toast('新稿已放进下方，可继续聊着改', 'success');
+        if (result.applied) host.toast('新稿已写进正文，可继续聊着改', 'success');
       })
       .catch((error) => {
         this.setData({ chatting: false, chatMessages: this.data.project.scriptChat || [], chatInput: message });
@@ -277,7 +277,7 @@ Page(withShare({
     if (String(this.data.bulkText || '') !== String(this.data.bulkOriginal || '')) {
       host.confirm({
         title: '放弃这次修改？',
-        content: '你在整段编辑里改的内容还没应用，返回就没了。',
+        content: '你在整段编辑里改的内容还没用上，返回就没了。',
         confirmText: '放弃',
         cancelText: '继续编辑',
       }).then((ok) => { if (ok) this.doExitBulk(); });
@@ -296,7 +296,7 @@ Page(withShare({
     const pieces = model.splitScriptText(this.data.bulkText);
     if (!pieces.length) { host.toast('先粘贴一段文案'); return; }
     const bulkText = pieces.join('\n');
-    if (bulkText === this.data.bulkText) { host.toast('已经是分好段的了'); return; }
+    if (bulkText === this.data.bulkText) { host.toast('已经分好段了'); return; }
     const project = this.data.project;
     this.setData({ bulkText, bulkStats: model.applyBulkScript(project.segments, project.shots, bulkText).stats });
     host.toast(`分成 ${pieces.length} 段`, 'success');
@@ -334,7 +334,7 @@ Page(withShare({
       this.setData({ bulkSaving: true });
       host.confirm({
         title: '有画面会被清掉',
-        content: `改动会让 ${result.stats.droppedAssets} 句已配好的画面失效（素材还在素材库，只是要重新配）。继续吗？`,
+        content: `改动会让 ${result.stats.droppedAssets} 句已配好的画面被清掉（素材还在素材库，只是要重新配）。继续吗？`,
         confirmText: '继续',
       }).then((ok) => {
         if (!ok) { this.setData({ bulkSaving: false }); return; }
@@ -346,14 +346,14 @@ Page(withShare({
   },
 
   restoreTemplate() {
-    host.confirm({ title: '恢复模板原文', content: '你改过的文字会被覆盖，确定吗？' }).then((ok) => {
+    host.confirm({ title: '恢复模板原文', content: '你改过的文字会换回模板原文，确定吗？' }).then((ok) => {
       if (!ok) return;
       host.loading('正在恢复');
       api.resetScript(this.data.projectId)
         .then((result) => {
           host.hideLoading();
           const segments = result && result.segments;
-          if (!Array.isArray(segments)) throw new Error('恢复结果不完整');
+          if (!Array.isArray(segments)) throw new Error('恢复失败，请重试');
           const shots = Array.isArray(result.shots) && result.shots.length ? result.shots : model.defaultShots(segments);
           const project = Object.assign({}, this.data.project, { segments, shots });
           this.setData({ project, editingNo: null, previewedText: null });

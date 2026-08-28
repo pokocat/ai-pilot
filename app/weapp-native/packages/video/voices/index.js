@@ -37,7 +37,7 @@ function decorate(voice) {
     sourceText: dedicated ? '专属录制' : '视频原声',
     sourceDesc: dedicated
       ? '你单独录制的音色，出片时优先使用这一版'
-      : '从形象视频里提取的基础音色，补录后会更稳',
+      : '从形象视频里提取的基础音色，补录后会更稳定',
     completedText: status === 'ready' ? formatCompletedAt(voice && voice.trainedText) : '',
     actionText: status === 'training' ? '训练中' : status === 'failed' ? '重新录制' : '重录提升',
   });

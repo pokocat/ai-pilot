@@ -29,7 +29,7 @@
              深链打开一条 status=generating 的作品，页面照样恭喜你已经成片。 -->
         <view class="wd-ready" wx:if="{{done}}">
           <view class="wdr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
-          <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">你的故事，已经成片</text></view>
+          <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">这条片子已经出好了</text></view>
         </view>
         <view class="wd-ready wd-ready-wip" wx:else>
           <view class="wdr-icon wdr-icon-wip"><native-icon name="clock" tone="white" size="18"></native-icon></view>
@@ -58,7 +58,7 @@
                  （server/src/routes/video.ts），结算发生在任务轮询那条路径上。 -->
             <view wx:else class="inner vd-grain wd-pending">
               <text class="wd-pending-t">{{done ? '暂时放不出来' : '还没出好'}}</text>
-              <text class="wd-pending-s">{{done ? '片子已经出好了，只是这会儿取不到播放地址。' : '这条片子还在生成，稍后再回来看看。'}}</text>
+              <text class="wd-pending-s">{{done ? '片子已经出好了，只是现在取不到播放地址。' : '这条片子还在生成，稍后再回来看看。'}}</text>
               <!-- 取不到播放地址是典型的瞬时故障，retryLoad 早就存在（work/index.js），
                    却只让用户「过一会儿再来」——等于有解法不给。生成中不给刷新：
                    那不是故障，刷了也还是在生成。 -->
@@ -69,8 +69,8 @@
         </view>
 
         <text class="wd-title">{{work.title}}</text>
-        <text wx:if="{{done}}" class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
-        <text wx:else class="wd-meta">{{durationText}} · 竖屏 · 出镜 {{work.avatarSec}} 秒</text>
+        <text wx:if="{{done}}" class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 数字人出镜 {{work.avatarSec}} 秒</text>
+        <text wx:else class="wd-meta">{{durationText}} · 竖屏 · 数字人出镜 {{work.avatarSec}} 秒</text>
         <!-- 只有完成态才敢说「已扣」：没出好的单子扣费可能还没结算。 -->
         <text wx:if="{{done && work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
 
@@ -80,7 +80,7 @@
           <image class="wd-cover-img" src="{{work.thumbnailUrl}}" mode="aspectFill"></image>
           <view class="wd-cover-copy">
             <text class="wd-cover-title">这条片子的封面</text>
-            <text class="wd-cover-sub">它是视频的第一帧，也是平台缩略图，不占正片时长。有的平台不会自动取，存下来就能在发布时手动设。</text>
+            <text class="wd-cover-sub">它是视频的第一帧，也是平台缩略图，不占正片时长。有的平台不会自动取这一帧，先存下来，发布时就能手动设置。</text>
             <view class="wd-cover-act" catchtap="saveCover">{{savingCover ? '保存中…' : '保存封面图'}}</view>
           </view>
         </view>
@@ -91,7 +91,7 @@
           <text class="wd-sec-kicker">下一步</text>
           <!-- 标题跟着能力走：代发没接通时不许承诺「直接发布」（上游恒 503，见 index.js 的 PUBLISH_READY）。 -->
           <text class="wd-sec-title">{{publishReady ? '保存，或者直接发布' : '先保存下来，自己发'}}</text>
-          <text wx:if="{{!publishReady}}" class="wd-sec-note">一键代发到下面这些平台还在接入，暂时点不了</text>
+          <text wx:if="{{!publishReady}}" class="wd-sec-note">还不能帮你发到下面这些平台，暂时点不了</text>
           <view class="wd-platforms">
             <view
               wx:for="{{platforms}}"
@@ -110,7 +110,7 @@
         <view class="wd-again vd-card" bindtap="again">
           <view class="wa-body">
             <text class="wa-t">再出一条</text>
-            <text class="wa-s">换个店名或一两句话，1 分钟复制一条新的</text>
+            <text class="wa-s">换个店名或一两句话，就能再出一条</text>
           </view>
           <native-icon class="wa-arrow" name="arrow" tone="neutral" size="15"></native-icon>
         </view>

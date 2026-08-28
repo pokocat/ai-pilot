@@ -23,7 +23,7 @@
             <text class="tp-industry">{{template.industry}} · 竖屏故事</text>
             <text class="tp-name">{{template.name}}</text>
             <text class="tp-desc">{{template.description}}</text>
-            <view class="tp-chips"><text>带字幕</text><text>可改稿</text><text>可换画面</text></view>
+            <view class="tp-chips"><text>带字幕</text><text>可改文案</text><text>可换画面</text></view>
           </view>
         </view>
 
@@ -31,17 +31,17 @@
         <view class="tp-struct vd-card">
           <text class="ts-kicker">成片结构</text>
           <text class="ts-title">三种画面，已经替你排好</text>
-          <text class="ts-sub">你只需要决定哪些段由自己出镜，哪些段放店铺画面。</text>
+          <text class="ts-sub">你只需要决定哪些段由数字人出镜，哪些段放店铺画面。</text>
 
           <view class="ts-row">
             <text class="ts-no">01</text>
-            <text class="vd-tag avatar"><text class="sq"></text>分身出镜</text>
+            <text class="vd-tag avatar"><text class="sq"></text>数字人出镜</text>
             <text class="ts-text">约 {{template.avatarSecHint}} 秒 · 开头一段，中段再穿插一次</text>
           </view>
           <view class="ts-row">
             <text class="ts-no">02</text>
             <text class="vd-tag broll"><text class="sq"></text>配画面</text>
-            <text class="ts-text">其余句子用你自己拍的店铺画面，声音继续念</text>
+            <text class="ts-text">其余句子用你自己拍的店铺画面，数字人的声音继续念</text>
           </view>
           <view class="ts-row">
             <text class="ts-no">03</text>
@@ -50,16 +50,16 @@
           </view>
           <view class="ts-tail-preview {{template.tailCoverUrl ? '' : 'vd-grain'}}" bindtap="openTailPreview">
             <image wx:if="{{template.tailCoverUrl}}" class="ts-tail-image" src="{{template.tailCoverUrl}}" mode="aspectFill"></image>
-            <view class="ts-tail-copy"><text class="ts-tail-name">{{template.tailLabel}}</text><text class="ts-tail-meta">固定视频 · {{template.tailDurationSec}} 秒</text></view>
+            <view class="ts-tail-copy"><text class="ts-tail-name">{{template.tailLabel}}</text><text class="ts-tail-meta">固定片段 · {{template.tailDurationSec}} 秒</text></view>
             <view class="ts-tail-play"><native-icon name="play" tone="white" size="14"></native-icon><text>预览</text></view>
           </view>
 
-          <text class="ts-note">模板是一版可以直接用的起点。下一步可以让 AI 和你聊几句，再改成真正属于你的稿。</text>
+          <text class="ts-note">模板是一版可以直接用的起点。下一步可以让 AI 和你聊几句，再改成属于你自己的文案。</text>
         </view>
 
         <view class="tp-price vd-card">
           <view><text class="tpp-label">本模板预估</text><view class="tpp-main"><text class="num">{{template.creditHint}}</text><text class="unit">积分起</text></view></view>
-          <view class="tpp-side"><text class="tpp-value">{{durationText}}</text><text class="tpp-sub">预计成片 · {{template.segmentCount}} 个内容段</text></view>
+          <view class="tpp-side"><text class="tpp-value">{{durationText}}</text><text class="tpp-sub">预计成片 · {{template.segmentCount}} 个片段</text></view>
         </view>
       </block>
 
@@ -68,7 +68,7 @@
   </scroll-view>
 
   <view class="vd-footer">
-    <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '用这个模板开始'}}</view>
+    <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '开始制作'}}</view>
   </view>
 
   <view wx:if="{{tailPreviewOpen && template}}" class="tail-preview-mask" catchtap="closeTailPreview">

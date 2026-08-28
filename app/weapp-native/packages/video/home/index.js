@@ -22,8 +22,8 @@ const { withShare } = require('../../../services/share');
  * 只写「自动合成」等于把产品的核心机制藏起来了。
  */
 const STEPS = [
-  { key: 'script', name: '改文案', desc: '套模板改几句' },
-  { key: 'shots', name: '配画面', desc: '拍或选素材' },
+  { key: 'script', name: '改文案', desc: '套用模板改几句' },
+  { key: 'shots', name: '配画面', desc: '拍摄或选择素材' },
   { key: 'render', name: '出片', desc: '数字人开口' },
 ];
 

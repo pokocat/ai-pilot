@@ -203,7 +203,7 @@ Page(withShare({
       voiceNoteText: imageMode
         ? (hasReusable
           ? '照片里没有声音，成片用你选的这条已有声音说话，复用不额外扣费。'
-          : '照片里没有声音，需要先有一条声音才能建分身 —— 去录一段或传一个音频训练一条。')
+          : '照片里没有声音，需要先有一条声音才能创建数字人 —— 去录一段或传一个音频训练一条。')
         : (hasReusable
           ? '已默认复用你现有的声音，复用不额外扣费。只有主动选「视频原声」才会新训练一条并扣费。'
           : '还没有可复用的声音，这段视频会用来训练一条新的声音。'),
@@ -560,7 +560,7 @@ Page(withShare({
 
     if (stillAlive) {
       // 上一个请求还在服务端跑着。这不是失败，别让用户以为白传了、更别让他再传一遍。
-      host.toast('上一次提交还在受理中，稍等一下到分身管理里看');
+      host.toast('上一次提交还在受理中，稍等一下到数字人管理里看');
       return;
     }
 
@@ -577,7 +577,7 @@ Page(withShare({
 
   updateSubmitPhase(phase) {
     const text = {
-      preparing: '正在确认上传条件', uploading: '正在上传素材', verifying: '正在校验素材', processing: '军师正在受理训练',
+      preparing: '正在确认上传条件', uploading: '正在上传素材', verifying: '正在校验素材', processing: '军师正在受理',
     }[phase] || '正在处理';
     this.setData({ submitPhaseText: text });
   },
@@ -688,7 +688,7 @@ Page(withShare({
   openUsageDoc() {
     host.alert({
       title: '数字分身素材使用说明',
-      content: '请只上传你本人或已经获得合法使用权的声音和视频。素材仅用于你的账号创建、训练和使用数字分身；你可以在分身管理中随时删除，删除后停止新的生成。',
+      content: '请只上传你本人或已经获得合法使用权的声音和视频。素材仅用于在你的账号内创建、训练和使用数字人；你可以在「我的数字人」里随时删除，删除后停止新的生成。',
     });
   },
 

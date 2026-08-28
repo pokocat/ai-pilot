@@ -163,7 +163,7 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
     '分身门槛必须排在次级入口之前');
   assert.doesNotMatch(home, /class="vd-headact" bindtap="openWorks"/, '作品入口不能继续藏在导航角落');
   assert.match(templateJs, /avatar\.imageStatus !== 'ready'/);
-  assert.match(templateJs, /先创建数字分身，再开始出片/);
+  assert.match(templateJs, /先创建数字人，再开始出片/);
   const work = read('work');
   const workScss = fs.readFileSync(path.join(videoRoot, 'work/index.scss'), 'utf8');
   assert.match(work, /class="wd-player-wrap"/);
@@ -219,7 +219,9 @@ test('模板详情、工程初始镜头和固定片段共用同一时长真源',
   assert.match(templateView, /bindtap="openTailPreview"/);
   assert.match(templateView, /src="\{\{template\.tailMediaUrl\}\}"/);
   assert.match(templateSource, /setOverlay\(true, 'video-template-tail'\)/);
-  assert.match(shotsView, /固定视频 · \{\{item\.seconds\}\} 秒/);
+  // 守的是「这一行用同一个时长真源渲染固定片段」，不是某个具体措辞。
+  // 「固定视频」2026-08-28 按项目对外名统一成「固定片段」（index.js 与 AGENTS 一直用后者）。
+  assert.match(shotsView, /固定片段 · \{\{item\.seconds\}\} 秒/);
   assert.match(shotsView, /item\.framePreviewUrl/);
 });
 
@@ -235,7 +237,9 @@ test('多数字人可复用声音，并在配画面时按项目选择且自动�
   assert.match(shotsSource, /voiceId: selectedAvatar\.linkedVoiceId/);
   assert.match(shotsSource, /api\.saveProject\(this\.data\.projectId, \{ avatarId:/);
   assert.match(shotsView, /选择本片数字人/);
-  assert.match(shotsView, /关联声音会自动带入/);
+  // 守的是「界面说清了换数字人会自动带上它的声音」，措辞可以变。
+  // 原文「关联声音会自动带入」主语悬空且「带入」是文档动作词，2026-08-28 改写。
+  assert.match(shotsView, /自动带上它关联的声音/);
   assert.match(shotsView, /imagePreviewUrl/);
 });
 
