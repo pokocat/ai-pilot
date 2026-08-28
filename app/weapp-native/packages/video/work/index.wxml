@@ -12,10 +12,25 @@
     <view class="wd-body">
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
 
+      <!-- 没读到就说没读到。以前这里没有分支，读失败会掉进下面的成功版式，
+           页面照样写着「生成完成 · 你的故事，已经成片」——把一次网络失败说成了出片成功。
+           同 home 页那条「读失败不能说成你还没有」。 -->
+      <view wx:elif="{{loadFailed}}" class="vd-empty wd-failed">
+        <text class="s">没能打开这条片子</text>
+        <text class="wd-failed-s">{{loadError || '网络没通，或者这条片子不在当前账号里。'}}</text>
+        <view wx:if="{{canRetry}}" class="wd-failed-act" bindtap="retryLoad">重试</view>
+      </view>
+
       <block wx:else>
-        <view class="wd-ready">
+        <!-- 「读到了」不等于「出好了」。这块以前对任何取回来的作品都写「生成完成」，
+             深链打开一条 status=generating 的作品，页面照样恭喜你已经成片。 -->
+        <view class="wd-ready" wx:if="{{done}}">
           <view class="wdr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
           <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">你的故事，已经成片</text></view>
+        </view>
+        <view class="wd-ready wd-ready-wip" wx:else>
+          <view class="wdr-icon wdr-icon-wip"><native-icon name="clock" tone="white" size="18"></native-icon></view>
+          <view><text class="wdr-kicker">还在生成</text><text class="wdr-title">这条片子还没出好</text></view>
         </view>
         <!-- 成片固定用真实 9:16 容器；外层控制宽度，内层 padding 比例不能再被固定高度覆盖。 -->
         <view class="wd-player-wrap">
@@ -28,14 +43,26 @@
               show-fullscreen-btn="{{true}}"
               poster="{{work.thumbnailUrl}}"
             ></video>
-            <view wx:else class="inner vd-grain"></view>
+            <!-- 成片地址可能为空：契约里 videoUrl 本就是可选（shared/contracts.d.ts 的
+                 ClipWorkDetail），下载接口对同一状态给的是 CLIP_WORK_NOT_READY「成片还没有
+                 准备好」。观看这条路以前只铺一块底纹，等于让用户对着「已经成片」和一个黑框
+                 自己猜——和首页「读失败不能说成你还没有」是同一类问题，这里也要说出来。 -->
+            <view wx:else class="inner vd-grain wd-pending">
+              <text class="wd-pending-t">还播不了</text>
+              <!-- 不在这里对积分下结论：详情接口只透传作品、不做结算（server/src/routes/video.ts），
+                   结算发生在任务轮询那条路径上，本页无从判断这一单结没结。
+                   写「积分已结过」在读到的是 generating、或结算还没推进时就是假话。 -->
+              <text class="wd-pending-s">成片还没有准备好，过一会儿再回来看看。</text>
+            </view>
             <view wx:if="{{work.aiWatermark}}" class="vd-ai-badge wd-badge">AI 生成</view>
           </view>
         </view>
 
         <text class="wd-title">{{work.title}}</text>
-        <text class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
-        <text wx:if="{{work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
+        <text wx:if="{{done}}" class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
+        <text wx:else class="wd-meta">{{durationText}} · 竖屏 · 出镜 {{work.avatarSec}} 秒</text>
+        <!-- 只有完成态才敢说「已扣」：没出好的单子扣费可能还没结算。 -->
+        <text wx:if="{{done && work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
 
         <!-- 封面：单独给出来，并说清它到底管什么。
              不这么做的话，用户设了封面、发到平台却看不到，只会以为封面没生效。 -->

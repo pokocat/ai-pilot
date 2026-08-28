@@ -33,6 +33,13 @@ Page(withShare({
   data: host.hostBaseData({
     workId: '',
     loading: true,
+    /** 读失败与「读到了但还播不了」是两件事，不能都落进同一个成功版式。 */
+    loadFailed: false,
+    loadError: '',
+    /** 作品确实处于完成态（done / published）。generating 不算。 */
+    done: false,
+    /** 这次失败重试是否有意义。401/403/404 重试多少次都一样。 */
+    canRetry: true,
     work: null,
     durationText: '',
     platforms: PLATFORMS,
@@ -64,17 +71,47 @@ Page(withShare({
     const workId = String((options && options.workId) || '');
     if (!workId) { host.toast('缺少作品参数'); host.back(); return; }
     this.setData({ workId });
-    api.work(workId)
+    this.load();
+  },
+
+  /**
+   * 取作品详情。抽成方法是为了能重试 —— 这一页原来读失败就只剩一个 toast，
+   * toast 三秒后消失，用户对着一个空页面没有任何再试一次的办法。
+   */
+  load() {
+    this.setData({ loading: true, loadFailed: false, loadError: '', done: false, canRetry: true });
+    api.work(this.data.workId)
       .then((work) => this.setData({
         loading: false,
+        loadFailed: false,
         work,
+        // 「读到了」不等于「出好了」：契约允许 status=generating（深链、从列表点进来
+        // 都可能撞上）。这一位决定页面说「已经成片」还是「还在生成」。
+        done: work.status === 'done' || work.status === 'published',
         durationText: model.formatDuration(work.durationSec),
       }))
       .catch((error) => {
-        this.setData({ loading: false });
-        host.toast(error && error.message ? error.message : '打开失败');
+        // 读失败时 work 仍是 null。以前这里只关掉 loading，页面就照着成功版式
+        // 渲染「生成完成 · 你的故事，已经成片」——把一次没读到说成了出片成功。
+        const status = Number(error && error.statusCode) || 0;
+        const code = String((error && error.code) || '');
+        const unauthorized = status === 401 || code === 'UNAUTHORIZED';
+        this.setData({
+          loading: false,
+          loadFailed: true,
+          loadError: (error && error.message) ? error.message : '',
+          // 401 要弹登录门，不是摆一个「重试」——没登录时重试一万次也是 401。
+          showLogin: unauthorized ? true : this.data.showLogin,
+          // 404 / 403 同理：作品不存在或不属于这个账号，重试不会变。
+          // 只有网络与 5xx 这类真的可能好转的才给重试。
+          canRetry: !unauthorized && status !== 404 && status !== 403,
+          done: false,
+          work: null,
+        });
       });
   },
+
+  retryLoad() { this.load(); },
 
   /**
    * 保存到相册。
@@ -219,5 +256,5 @@ Page(withShare({
 
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); },
+  loggedIn() { this.setData({ showLogin: false }); this.load(); },
 }));

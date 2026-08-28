@@ -764,12 +764,31 @@ cd admin && npm install && npm run dev   # 运营后台
 cd app   && npm test   # node --import tsx --test src/**/*.test.ts
 cd admin && npm test   # 同上
 ```
+**「快出片」主链的三层测试分工（2026-08-27 起）**，改分包代码前先认清自己该改哪一层：
+
+| 层 | 文件 | 覆盖什么 | 依赖 |
+|---|---|---|---|
+| 纯函数 | `app/scripts/video-{catalog,model}.test.mjs` | 模板真值、报价、镜头切分、文案编辑规则 | 无 |
+| **页面行为** | `app/scripts/video-chain.test.mjs` + `weapp-runtime.mjs` | 逐页走通 首页→模板专区→模板详情→改文案→配画面→确认→出片→作品：取数、状态流转、按钮 handler、跳转参数与页面栈 | 无 |
+| 布局与渲染 | `app/scripts/video-e2e.mjs`（`npm run e2e:weapp`） | 主次入口的上下顺序、横向溢出、截图 | 微信开发者工具**已登录** + 服务端口已开 |
+
+- `weapp-runtime.mjs` 是个最小微信运行时（`wx` / `Page` / `getApp` / `getCurrentPages`），让原生页面 JS 在 Node 里真跑。**它不冒充渲染**：WXML 编译、样式、布局测量只有开发者工具/真机能验，那是第三层的事。
+- 它跑的是 **`weapp-native/` 源码**，不是 `dist-native`：构建器对 JS 是逐字节搬运，跑源码等于跑产物，且改完立刻生效；缺的那一个 `config/env`（只在构建时生成）由运行时注入 mock 档。**不要改成在测试里跑构建** —— `node --test scripts/*.test.mjs` 是并行的，写共享 `dist-native` 会和读产物的用例抢文件。
+- wx 桩必须忠实回调 `success`：`services/nav.js` 的导航锁靠 `success`/`fail` 复位 `inFlight`，不回调就等于第一次跳转之后整个 App 再也跳不动，而症状是「点了没反应」。同理操作菜单要**按选项文案**选而不是按下标——`shots` 的 `pickAsset` 会按素材库有没有东西重排选项。
+- 换机后第三层大概率跑不起来（开发者工具新 profile 无登录态，CLI 卡在 `initialize`）；前两层不受影响，先用它们把行为守住。
+
 **CI：`.github/workflows/frontend-unit.yml`**（2026-07-27 起）用 `admin` / `app` 两个 matrix job 跑 `npm ci` + `npm test`。
 此前 CI 只跑 server，这两条命令全靠人工执行，`admin` 的 `tsx` 漏装后测试基座整整停摆一段时间都没人发现。
 两个坑写在这里，别再踩：
 - **Node 必须 >= 22**：`src/**/*.test.ts` 不是被 shell 展开的（npm 用 `/bin/sh`，不支持 globstar，原样透传给 node），
   而是 `node --test` 自己 glob——该能力 Node 22 才有。前后端 CI 都固定 node 24；后端 gateway/LLM gate 的异步计时用例在 Node 20 会被测试运行器提前结束事件循环并批量标为 cancelled，禁止降回 Node 20。
 - **`node --test` 匹配到 0 个文件时退出码仍是 0**（只打印 `tests 0`），测试基座整体失踪也会是一片绿。
+- **安全补丁不许按写死路径找依赖**（2026-08-27 实况）：`patch-swiper-security.mjs` 原来写死
+  `node_modules/@tarojs/components{,-react}/node_modules/swiper/...` 两条嵌套路径。npm 把 `swiper` 提升到顶层后
+  这两条路径不存在，脚本一个文件都没打到（它只在「一条都没找到」时才抛，而那正是它被跳过的方式），
+  配套测试则红成 ENOENT，**看着像陈旧路径，实际是护栏已经没了** —— 顶层 `swiper@6.8.0` 里带修复模式的文件数为 0，
+  而 Taro 解析到的就是它。现在统一走 `scripts/swiper-targets.mjs` 按 Taro 自己的解析规则定位，提升与否都不影响；
+  测试断言的是「解析到的那份里已无脆弱写法」，不是「某条路径存在」。
   所以 CI 那步额外断言 `pass` 计数 > 0；移动/重命名测试文件后留意这个守卫。
 
 两端 `tsconfig.json` 都 `exclude: ["src/**/*.test.ts"]`——测试文件不参与 `tsc -b`/`build:weapp` 的生产编译门
