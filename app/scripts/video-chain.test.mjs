@@ -553,3 +553,43 @@ test('离开出片页要停掉轮询，别让用户切走后还在后台拉进�
   assert.equal(callsAfterLeave, 0,
     `离开出片页后还在拉进度 ${callsAfterLeave} 次；页面切走后 setData 会触发微信的后台告警`);
 });
+
+test('分包的登录门不许说「军令」——那是另一个产品的词', async (t) => {
+  // 分包共 20+ 处登录门，以前全传 reason='execute'，而主包 execute 那句是
+  // 「登录后才能生成和跟进军令」。「军令」是军师案卷模型的核心名词；
+  // 实体店主在「录一段声音」的意图下被问到军令，只会以为点错了小程序。
+  // 这类跨产品词泄漏比错别字更难发现：每一句单独看都通顺。
+  const s2 = session(t);
+  const reasons = fs.readFileSync(
+    path.join(SRC, 'components/login-sheet/index.js'), 'utf8');
+  assert.match(reasons, /\n\s*video:\s*'/, 'login-sheet 应有分包专用的 video 档');
+
+  const videoCopy = (reasons.match(/\n\s*video:\s*'([^']*)'/) || [])[1] || '';
+  assert.ok(videoCopy, '取不到 video 档文案');
+  assert.ok(!/军令|案卷|方案库|折抵/.test(videoCopy),
+    `分包登录文案里混进了军师的词：「${videoCopy}」`);
+
+  // 分包各页不许再传 execute
+  const leaks = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (fs.statSync(full).isDirectory()) { walk(full); continue; }
+      if (!/\.(js|wxml)$/.test(full)) continue;
+      const text = fs.readFileSync(full, 'utf8');
+      // 跳过注释行：host.js 里有一句解释为什么不用 execute
+      for (const line of text.split('\n')) {
+        if (/^\s*(\/\/|\*)/.test(line)) continue;
+        if (/['"]execute['"]/.test(line)) leaks.push(`${path.relative(SRC, full)}: ${line.trim()}`);
+      }
+    }
+  };
+  walk(path.join(SRC, VIDEO));
+  assert.deepEqual(leaks, [], `这些地方还在用主包的 execute 登录文案：\n${leaks.join('\n')}`);
+
+  // 默认值也不能是 execute —— 漏传 reason 时会静默退回军令那句
+  const host = fs.readFileSync(path.join(SRC, VIDEO, 'host.js'), 'utf8');
+  assert.match(host, /loginReason: reason \|\| 'video'/,
+    'requireLogin 漏传 reason 时的默认值必须是 video');
+  void s2;
+});

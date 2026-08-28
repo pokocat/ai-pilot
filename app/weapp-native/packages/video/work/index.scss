@@ -74,3 +74,10 @@
 /* 还在生成：与完成态同版式不同色，别让两种状态看起来一样。 */
 .wd-ready-wip .wdr-kicker { color: var(--vd-ink-3); }
 .wdr-icon-wip { background: var(--vd-ink-3); }
+
+/* 次级出路：同样满足 44px，但不抢主动作的色 */
+.wd-failed-alt { background: transparent; color: var(--vd-ink-2); border: 1px solid var(--vd-line); }
+/* 兜底块里的刷新：深色底上的浅描边按钮 */
+.wd-pending-act { margin-top: 12px; min-height: 40px; padding: 0 20px; display: inline-flex;
+  align-items: center; justify-content: center; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.34); color: #FFFFFF; font-size: 13px; font-weight: 600; }

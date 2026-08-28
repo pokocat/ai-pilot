@@ -18,7 +18,10 @@
       <view wx:elif="{{loadFailed}}" class="vd-empty wd-failed">
         <text class="s">没能打开这条片子</text>
         <text class="wd-failed-s">{{loadError || '网络没通，或者这条片子不在当前账号里。'}}</text>
+        <!-- 不可重试（403/404）也必须有出路。只把「重试」藏掉的话，这一屏除了系统返回
+             什么都不剩 —— 等于用「不给必然失败的按钮」换来了一条死路，没变好。 -->
         <view wx:if="{{canRetry}}" class="wd-failed-act" bindtap="retryLoad">重试</view>
+        <view wx:else class="wd-failed-act wd-failed-alt" bindtap="goWorks">看我的作品</view>
       </view>
 
       <block wx:else>
@@ -54,8 +57,12 @@
                  不在这里对积分下结论：详情接口只透传作品、不做结算
                  （server/src/routes/video.ts），结算发生在任务轮询那条路径上。 -->
             <view wx:else class="inner vd-grain wd-pending">
-              <text class="wd-pending-t">{{done ? '这会儿放不出来' : '还没出好'}}</text>
-              <text class="wd-pending-s">{{done ? '片子已经出好了，只是这会儿取不到播放地址。过一会儿再回来看看。' : '这条片子还在生成，过一会儿再回来看看。'}}</text>
+              <text class="wd-pending-t">{{done ? '暂时放不出来' : '还没出好'}}</text>
+              <text class="wd-pending-s">{{done ? '片子已经出好了，只是这会儿取不到播放地址。' : '这条片子还在生成，稍后再回来看看。'}}</text>
+              <!-- 取不到播放地址是典型的瞬时故障，retryLoad 早就存在（work/index.js），
+                   却只让用户「过一会儿再来」——等于有解法不给。生成中不给刷新：
+                   那不是故障，刷了也还是在生成。 -->
+              <view wx:if="{{done}}" class="wd-pending-act" catchtap="retryLoad">刷新试试</view>
             </view>
             <view wx:if="{{work.aiWatermark}}" class="vd-ai-badge wd-badge">AI 生成</view>
           </view>
@@ -113,5 +120,5 @@
     </view>
   </scroll-view>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

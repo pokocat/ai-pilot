@@ -117,5 +117,5 @@
     >{{loading || !quoteReady ? '等待服务端报价…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分'))}}</view>
   </view>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

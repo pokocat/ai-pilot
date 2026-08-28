@@ -148,7 +148,7 @@ Page(withShare({
   },
 
   submit() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.data.loading || this.data.submitting || this.data.watermarkSaving) return;
     if (!this.data.quoteReady || !this.data.estimate) { host.toast(this.data.quoteError || '还在核算价格，稍等一下'); return; }
     if (this.data.problems.length) { host.toast(this.data.problems[0].message); return; }

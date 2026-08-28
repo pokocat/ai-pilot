@@ -120,6 +120,9 @@ Page(withShare({
 
   retryLoad() { this.load(); },
 
+  /** 这条片子打不开时的出路。403/404 重试没意义，但用户总得能去别处。 */
+  goWorks() { wx.redirectTo({ url: `${host.ROOT}/works/index` }); },
+
   /**
    * 保存到相册。
    * ⚠️ 这是本分包相对军师主包的**新增能力面** —— 军师现有代码从没调过
@@ -129,7 +132,7 @@ Page(withShare({
   saveToAlbum() {
     // 没出好的片子没有可下载的成品，硬走下去只会拿到 CLIP_WORK_NOT_READY。
     if (!this.data.done) { host.toast('这条片子还没出好'); return; }
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     const work = this.data.work;
     // 下载走军师同源接口，由 BFF 每次读取作品并刷新上游短签名；不能用详情里的旧 videoUrl
     // 做前置门槛，否则地址缺失/过期时会连下载请求都不发，用户只能看到“地址待接入”。
@@ -157,7 +160,7 @@ Page(withShare({
    * 于是「我设了封面，发出去却没有」（2026-08-18 反馈）。
    */
   saveCover() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     const work = this.data.work;
     if (!work || !work.thumbnailUrl) { host.toast('这条片子没有封面图'); return; }
     if (this.data.savingCover) return;
@@ -235,7 +238,7 @@ Page(withShare({
     const platform = PLATFORMS.find((item) => item.key === key);
     // 上游未接入时直接说清楚，不走确认框也不打接口（见 PUBLISH_READY 注释）。
     if (!PUBLISH_READY) { host.toast('平台代发还在接入，先保存到相册自己发'); return; }
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (!platform || this.data.publishing) return;
     host.confirm({
       title: `发布到${platform.label}`,

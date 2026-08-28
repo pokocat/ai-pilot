@@ -37,7 +37,7 @@ Page(withShare({
     avatarState: 'missing',
     guest: false,
     showLogin: false,
-    loginReason: 'execute',
+    loginReason: 'video',
   }),
 
   onLoad() { this.load(); },
@@ -126,22 +126,22 @@ Page(withShare({
   onBannerError() { this.setData({ bannerFailed: true }); },
 
   openClone() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('clone/index');
   },
 
   openWorks() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('works/index');
   },
 
   openAssets() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('assets/index');
   },
 
   openAvatar() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('avatar/index');
   },
 

@@ -143,7 +143,7 @@ Page(withShare({
   /* ── 试听 ── */
 
   previewVoice() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.data.previewing) return;
     const no = this.data.editingNo;
     this.setData({ previewing: true });
@@ -182,7 +182,7 @@ Page(withShare({
   rewriteAll() { this.rewrite('all'); },
 
   rewrite(scope) {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.data.rewriting) return;
     this.setData({ rewriting: true });
     const no = scope === 'segment' ? this.data.editingNo : null;
@@ -232,7 +232,7 @@ Page(withShare({
   },
 
   sendChat() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     const message = String(this.data.chatInput || '').trim();
     if (!message) { host.toast('先说说你想怎么写'); return; }
     if (this.data.chatting) return;

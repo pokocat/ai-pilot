@@ -76,7 +76,7 @@ Page(withShare({
   },
 
   start() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (!this.data.avatarChecked) {
       this.loadAvatar().then(() => this.start());
       return;

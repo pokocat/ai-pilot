@@ -326,7 +326,7 @@ Page(withShare({
    */
   pickAsset(event) {
     const shotId = String(event.currentTarget.dataset.id || '');
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     const count = Number(this.data.assetCount) || 0;
     const fromLibrary = () => host.go(`assets/index?pick=1&projectId=${encodeURIComponent(this.data.projectId)}&shotId=${encodeURIComponent(shotId)}`);
     const actions = count > 0
@@ -439,7 +439,7 @@ Page(withShare({
 
   prev() { host.back(); },
   next() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.flush(); host.go(`confirm/index?projectId=${encodeURIComponent(this.data.projectId)}`);
   },

@@ -493,7 +493,7 @@ Page(withShare({
      而不是让他先去挑模板、建项目、进文案页才能听到一句。 */
   openVoicePreview() {
     if (!this.data.voiceId) { host.toast('这条声音还没就绪'); return; }
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.setOverlay(true, 'video-voice-preview');
     this.setData({ voicePreviewOpen: true });
   },

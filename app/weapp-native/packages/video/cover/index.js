@@ -141,7 +141,7 @@ Page(withShare({
   goAssets() { host.go(`/assets/index?projectId=${encodeURIComponent(this.data.projectId)}`); },
 
   save() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.data.loading || this.data.saving) return;
     const cover = this.currentCover();
     if (cover.enabled && !model.coverHasText(cover)) {

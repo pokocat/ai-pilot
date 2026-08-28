@@ -110,7 +110,7 @@ Page(withShare({
   openPreview(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const voice = this.data.voices.find((item) => item.id === id);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (!voice || !voice.ready) { host.toast('这条声音还没训练好'); return; }
     host.setOverlay(true, 'video-voice-preview');
     this.setData({
@@ -131,13 +131,13 @@ Page(withShare({
   retrain(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const voice = this.data.voices.find((item) => item.id === id);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (voice && voice.training) { host.toast(`这条声音正在训练 ${voice.progress}%`); return; }
     host.go(`clone/index?mode=voice&recapture=1&voiceId=${encodeURIComponent(id)}`);
   },
 
   startVoice() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('clone/index?mode=voice');
   },
 

@@ -135,7 +135,7 @@ Page(withShare({
     const kind = String(event.currentTarget.dataset.kind || '');
     const avatarId = String(event.currentTarget.dataset.id || '');
     const avatar = this.data.avatars.find((item) => item.id === avatarId);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (kind === 'voice' && avatar && avatar.voiceStatus === 'training') {
       host.toast(`专属声音正在训练 ${avatar.voiceProgress || 0}%`);
       return;
@@ -149,7 +149,7 @@ Page(withShare({
   },
 
   startClone() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('clone/index');
   },
 
@@ -226,7 +226,7 @@ Page(withShare({
   openVoicePreview(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const avatar = (this.data.avatars || []).find((item) => item.id === id);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (!avatar || !avatar.linkedVoiceId) { host.toast('这个分身还没关联声音'); return; }
     host.setOverlay(true, 'video-voice-preview');
     this.setData({

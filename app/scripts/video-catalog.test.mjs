@@ -362,7 +362,9 @@ test('封面页已注册、从确认页可达，且不填就不加封面', async
   assert.match(coverSource, /loadError/);
   assert.match(coverView, /bindtap="load"/);
   // 登录门只挡保存动作，游客可以先填着看
-  assert.match(coverSource, /host\.requireLogin\(this, 'execute'\)/);
+  // reason 用 'video' 不是 'execute'：主包 execute 那句是「登录后才能生成和跟进军令」，
+  // 「军令」是军师案卷模型的词，分包面向实体店主。见 login-sheet 的 REASONS.video。
+  assert.match(coverSource, /host\.requireLogin\(this, 'video'\)/);
   assert.ok(coverSource.indexOf('host.requireLogin') > coverSource.indexOf('save()'), '登录门不得前置到 onLoad');
 
   const coverStyle = fs.readFileSync(path.join(videoRoot, 'cover/index.scss'), 'utf8');

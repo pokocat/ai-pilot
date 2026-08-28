@@ -92,7 +92,7 @@ Page(withShare({
   expandStorage() {
     const storage = this.data.storage;
     if (!storage || !storage.canExpand || this.data.expanding) return;
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.confirm({
       title: '扩容空间',
       content: `增加 ${formatBytes(storage.packBytes)}，扣 ${storage.packCredits} 钻石。素材和成片共用这份空间。`,
@@ -231,7 +231,7 @@ Page(withShare({
   },
 
   upload() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.chooseMedia({
       count: 1,
       mediaType: ['video', 'image'],

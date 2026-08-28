@@ -134,5 +134,5 @@
     <view class="vd-btn {{(loading || saving || loadError) ? 'disabled' : ''}}" style="flex:1" bindtap="save">{{saving ? '正在保存…' : '保存封面'}}</view>
   </view>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>
