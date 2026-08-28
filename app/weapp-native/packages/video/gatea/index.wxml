@@ -35,10 +35,11 @@
 
     <block wx:if="{{report}}">
       <view class="rhead">
-        <text class="rtitle">{{report.passed ? '本次通过' : (report.incomplete ? '数据不全' : '本次不通过')}}</text>
-        <text class="rsub">间隙 {{report.counts.gaps}} · 漂移 {{report.counts.drift}} 个采样</text>
+        <text class="rtitle">{{pooled.passed ? '通过' : (pooled.incomplete ? '数据不全' : '不通过')}}</text>
+        <text class="rsub">已跑 {{runs}} 次 · 合并 {{pooled.counts.gaps}} 个间隙样本</text>
       </view>
-      <view wx:for="{{report.checks}}" wx:key="name" class="row">
+      <view class="rnote">协议 §1.4：一格跑 10 次，所有样本并池算一次 P95。下面是合并值。</view>
+      <view wx:for="{{pooled.checks}}" wx:key="name" class="row">
         <text class="rn">{{item.name}}</text>
         <text class="rv {{item.ok === false ? 'bad' : (item.ok ? 'good' : '')}}">
           {{item.value === null ? '未采到' : item.value}}{{item.value === null ? '' : item.unit}}
@@ -46,7 +47,7 @@
         <text class="rl">线 {{item.line}}{{item.unit}}</text>
       </view>
       <view class="rnote">下面两条是协议 §2.5 的修订建议，未拍板，不参与判定</view>
-      <view wx:for="{{report.proposed}}" wx:key="name" class="row dim">
+      <view wx:for="{{pooled.proposed}}" wx:key="name" class="row dim">
         <text class="rn">{{item.name}}</text>
         <text class="rv">{{item.value === null ? '未采到' : item.value}}{{item.value === null ? '' : item.unit}}</text>
         <text class="rl">建议 {{item.line}}{{item.unit}}</text>
@@ -61,6 +62,7 @@
       <view wx:if="{{phase === 'priming'}}" class="btn main off">准备首帧…</view>
       <view wx:if="{{phase === 'playing'}}" class="btn main" bindtap="stop">停止并出报告</view>
       <view wx:if="{{reportJson}}" class="btn" bindtap="copyReport">复制 JSON</view>
+      <view wx:if="{{runs > 0 && phase !== 'playing'}}" class="btn" bindtap="clearPool">清空重来</view>
       <view class="btn" bindtap="back">返回</view>
     </view>
   </view>

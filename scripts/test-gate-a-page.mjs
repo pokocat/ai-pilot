@@ -116,12 +116,14 @@ const swaps = [];
 const origSwap = page.swapTo.bind(page);
 page.swapTo = function (i) { swaps.push({ index: i, at: audio.currentTime, primed: this.primedIndex === i }); origSwap(i); };
 
+let segs = [];
+function playThrough() {
 page.start();
 advance(10);                                  // 让 A 的 bindplay 回来，音轨起来
 ok(page.data.phase === 'playing', '首帧就绪后才起音轨（phase=playing）');
 
 // 音频按真实速度走，视频跟着走。每 100ms 推一次。
-const segs = page.live.segments;
+  segs = page.live.segments;
 for (let step = 0; step < 1700; step++) {
   audio.currentTime = Math.min(163, audio.currentTime + 0.1);
   // 音轨放完就该收尾。不这么写的话音频停在 163、视频还在往前跑，
@@ -146,6 +148,8 @@ for (let step = 0; step < 1700; step++) {
     videos[k].currentTime = page.lastVideoTime[page.data.activeKey] = Math.max(0, audio.currentTime - segs[page.data.segIndex].startSec);
   }
 }
+}
+playThrough();
 ok(pulledBack, '画面跑偏 500ms 时会被拉回音频位置（主时钟是音频）');
 
 console.log('\n连播结束：');
@@ -168,5 +172,16 @@ const worst=[...d].sort((a,b)=>Math.abs(b.d)-Math.abs(a.d)).slice(0,6);
 console.log('\n漂移最大的几个采样：', worst.map(x=>x.t+'s:'+x.d+'ms').join('  '));
 const bnd=new Set(segs.map(x=>x.startSec));
 console.log('其中落在段边界后 0.2s 内的：', worst.filter(x=>[...bnd].some(b=>x.t>=b&&x.t<b+0.25)).length,'/',worst.length);
+
+// 协议 §1.4 要求一格跑 10 次并池算一次 P95。跑第二遍确认样本是累加不是覆盖。
+const gaps1 = page.pool.gaps.length, runs1 = page.pool.runs;
+audio.currentTime = 0; pulledBack = false; swaps.length = 0;
+for (const k of Object.keys(videos)) { videos[k].currentTime = 0; videos[k].playing = false; }
+playThrough();
+ok(page.pool.runs === runs1 + 1, `跑第二遍后 runs=${page.pool.runs}（应 ${runs1 + 1}）`);
+ok(page.pool.gaps.length === gaps1 * 2, `样本并池：间隙 ${gaps1} → ${page.pool.gaps.length}（应翻倍，不是覆盖）`);
+page.clearPool();
+ok(page.pool === null || page.data.runs === 0, '清空重来能倒掉池子');
+
 console.log(fails.length ? `\n${fails.length} 项没过` : '\n全部通过');
 process.exit(fails.length ? 1 : 0);

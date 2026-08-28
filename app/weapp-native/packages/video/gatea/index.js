@@ -56,6 +56,8 @@ Page({
     srcA: '', srcB: '',
     activeKey: 'a',
     report: null,
+    pooled: null,
+    runs: 0,
     reportJson: '',
     notice: '',
   },
@@ -79,8 +81,15 @@ Page({
   onUnload() { this.teardown(); },
   onHide() { this.teardown(); },
 
+  /**
+   * 清掉本次跑测的样本，但**保留跨跑次的池子**。
+   * 协议 §1.4 要求「先合并再算」：一个格子里 10 次连播的所有样本并成一个池子
+   * 算一次 P95，不是每跑一次算个 P95 再取平均 —— 后者会把长尾抹掉。
+   * 所以池子只在按「清空重来」时才倒掉。
+   */
   resetMarks() {
     this.marks = { gaps: [], drift: [], firstFrame: [], rate: [], crashes: 0 };
+    if (!this.pool) this.pool = { gaps: [], drift: [], firstFrame: [], rate: [], crashes: 0, runs: 0 };
     this.rateProbe = null;
     this.lastVideoTime = { a: 0, b: 0 };
     this.primedIndex = -1;
@@ -294,16 +303,32 @@ Page({
 
   finish() {
     this.teardown();
+    if (this.data.phase === 'done') return;   // 音轨 onEnded 与手动停止可能同时到
+
+    this.pool.runs += 1;
+    this.pool.gaps = this.pool.gaps.concat(this.marks.gaps);
+    this.pool.firstFrame = this.pool.firstFrame.concat(this.marks.firstFrame);
+    this.pool.rate = this.pool.rate.concat(this.marks.rate);
+    this.pool.crashes += this.marks.crashes;
+    // 漂移曲线按跑次分开留：45 秒 / 163 秒那两个读数是取曲线上的点，
+    // 把几条曲线拼起来会取到错的点。
+    this.pool.drift = this.marks.drift;
+
     const report = metrics.summarize(this.marks);
+    const pooled = metrics.summarize(this.pool);
     this.setData({
       phase: 'done',
       report,
+      pooled,
+      runs: this.pool.runs,
       reportJson: JSON.stringify({
         manifest: this.data.manifestId,
         note: this.data.runnable ? '埋点线；判定以 60fps 录屏为准（协议 §1.6）'
                                  : '占位素材，非合法闸门数据',
-        counts: report.counts,
-        checks: report.checks,
+        runs: this.pool.runs,
+        counts: pooled.counts,
+        checks: pooled.checks,
+        thisRun: report.checks,
         proposedRevision: report.proposed,
         driftSeries: report.series,
       }, null, 2),
@@ -319,6 +344,14 @@ Page({
   copyReport() {
     if (!this.data.reportJson) return;
     wx.setClipboardData({ data: this.data.reportJson, success: () => host.toast('已复制', 'success') });
+  },
+
+  /** 换格子（换机型 / 换网络档 / 换冷热）时倒掉池子重开。 */
+  clearPool() {
+    this.pool = null;
+    this.resetMarks();
+    this.setData({ report: null, pooled: null, runs: 0, reportJson: '', phase: 'idle' });
+    host.toast('样本池已清空', 'success');
   },
 
   stop() { this.finish(); },

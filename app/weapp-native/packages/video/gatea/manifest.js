@@ -76,6 +76,8 @@ const REAL = {
 
 
 
+
+
 /** 冷缓存要求三层缓存都没见过这批 URL（§1.3），跑测前给每个地址挂上本次 runId。 */
 function withRunId(manifest, runId) {
   if (!runId) return manifest;
