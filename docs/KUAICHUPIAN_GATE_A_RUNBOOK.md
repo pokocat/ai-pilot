@@ -145,3 +145,41 @@ node scripts/analyze-gate-a-recording.mjs 录屏.mp4
 滑窗那条正是 §2.5 预言的情况：已定判据全过，而「口播对不对得上」的那条不过。
 画面比音频快约 6%，段内累积、到切点被拽回，在 ±300ms 之间摆。
 要过这条得有比 seek 更细的校正手段，是产品决定，未擅改。
+
+---
+
+## 七、换台电脑接着跑
+
+```bash
+git fetch origin && git switch spike/gate-a-preview
+npm --prefix app ci        # 或 npm --prefix app install
+```
+
+**仓库里没有的东西，到了新机器要自己再做一遍：**
+
+| 缺什么 | 怎么办 |
+|---|---|
+| 夹具素材（22 段 mp4 + 音轨） | 按 §一.1 重跑 `gen-gate-a-media.mjs`，产物已 gitignore，不入库 |
+| `manifest.js` 的 `REAL` | 仓库里是空的（不把某台机器的局域网地址提进去）。按 §一.1 填 |
+| 开发者工具登录 | 新机器要重新扫码登录，`cli open` 会报「需要重新登录」 |
+| ffmpeg | 生成夹具和分析录屏都要。注意：**有的 ffmpeg 没编 `drawtext`**，
+生成脚本已改用 `drawbox` 画二进制时间码，不依赖字体，不用管这个 |
+
+**跑之前先自查一遍，不用开发者工具、不用手机：**
+
+```bash
+node scripts/test-gate-a-page.mjs
+```
+
+打桩跑完整条 163 秒状态机，检查切换次数、顺序、预热、边界贴合、主时钟回拉、
+跨跑次并池。全绿再往真机上花时间。
+
+**要在模拟器里先跑一遍**（不是判据，用来清机制问题）：
+
+```bash
+/Applications/wechatwebdevtools.app/Contents/MacOS/cli auto \
+  --project "$PWD/app/dist-native" --auto-port 9420 &
+node scripts/run-gate-a-simulator.mjs
+```
+
+已跑的结果和已知问题在 §六。
