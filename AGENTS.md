@@ -99,7 +99,7 @@ repo/
   ① **读失败不许套用成功版式**。以前 catch 只关 `loading`、`work` 仍是 `null`，页面照样渲染「生成完成 · 你的故事，已经成片」——一次网络失败、401 或作品不属于本账号，都被显示成出片成功，且只有一个三秒消失的 toast、没有任何重试入口。
   ② **401 是三种不是一种**。`services/request.js` 的 `unauthorized()` 挂 `hadToken` / `authHandled` / `staleAuth` 正是为此：只有 `hadToken === false` 的游客 401 归页面弹登录门；`authHandled` 说明全局 `onAuthLost` 已清态并准备 reLaunch，页面再弹一次就是第二次打扰；`staleAuth` 是旧请求晚到、用户可能**已经重新登录**，弹登录门等于把登录好的会话盖住（见 §0 第 7 条铁律）。403/404 不摆必然失败的「重试」，只有网络与 5xx 才给——与 `services/api-error.js` 的 `retryable` 分类一致。
   ③ **没出好就不许给完成后的动作**。`videoUrl` 在契约里可空、`status` 可能是 `generating`（深链、从作品列表点进来都会撞上）。「生成完成」「字幕已生成」「已扣 N 积分」「保存到相册」「代发」全部按 `done` 收口；`saveToAlbum()` / `publish()` 里的完成态防御只是**兜底**，不能拿它替代「不把按钮摆出来」——一个点下去必然拿到 `CLIP_WORK_NOT_READY` 的主按钮，不该出现在生成中的页面上。本页也**不许对扣费下结论**：作品详情接口只透传作品、不做结算，结算发生在任务轮询那条路径上。
-  这三条与首页「分身读失败不能说成你还没有」是同一条原则：**不能把取不到、没好显示成正常**。回归由 `app/scripts/video-chain.test.mjs` 守（JS 状态与视图收口两侧都断言）。
+  这三条与首页「分身读失败不能说成你还没有」是同一条原则：**不能把取不到、没好显示成正常**。回归由 `app/scripts/video-chain.test.mjs` 守（JS 状态与视图收口两侧都断言），**版面另由 `video-e2e.mjs` 在真机量**（成片页三态共 10 条：兜底块不得撑出播放器、重试点击区 ≥ 44px、生成中不得出现保存/代发）——兜底块是绝对定位 + 左右锚死 + 自带 padding，少一个 `box-sizing` 就比播放器宽 44px，这种只有量得出来、看代码看不出来。另外**兜底文案必须跟着 `done` 走**：对一条 `done` 的片子说「还没有准备好」，就和头部的「生成完成」自相矛盾——已出好是「取不到播放地址」，没出好才是「还在生成」。
 - **「快出片」合并镜头字幕（AIStar v0.126，2026-08-11）**：`shots` 只决定视觉素材是否共用，不得吞掉句级字幕。AIStar `ClipShotPlan.materialize()` 必须保留 `captions[{sourceNo,text,durationSec}]`；总装按该 shot 的真实音频总时长等比换算各句时间窗，并用独立 overlay 逐句烧录。禁止再次把聚合 `text` 直接画成一张最多两行的字幕图；测试模式也必须走同一时间轴且不得调用石榴。
 - **「快出片」当前预发基线（2026-08-11）**：AIStar clip 为 `f5e21ee5-20260812T031204Z`（v0.129、force-mock=false、active/running、`NRestarts=0`），作品生成时间与可重试的取消/删除已上线，AI 水印缺省关闭且测试演示标识独立保留；军师预发后端为 `0c902ad`（active/running、`NRestarts=0`，公网 health 与 pgvector 2/2 正常），API 固定 `https://wxapi.aibuzz.cn/api_preprod`，同 SHA 原生 server 包已 auto-preview 到 AppID `wx810ebe6dfef8e75f`。后续回归不得拿 mock 包冒充本人素材验收。
 - **「快出片」AI 改稿真实性（2026-08-11）**：`server/src/services/video/scriptChat.ts` 必须使用带 Zod 校验、修复轮和足量输出预算的结构化生成；6–10 段 JSON 不得复用 700 token 辅助默认值。用户明确说“换成/改成某行业、门店或产品”时必须生成完整新稿并移除旧主体。结构化输出失败可以保持原稿并提示重试，但严禁把原稿重新分段后写 `applied=true`、显示“已更新文案”。
@@ -780,7 +780,7 @@ cd admin && npm test   # 同上
 - `weapp-runtime.mjs` 是个最小微信运行时（`wx` / `Page` / `getApp` / `getCurrentPages`），让原生页面 JS 在 Node 里真跑。**它不冒充渲染**：WXML 编译、样式、布局测量只有开发者工具/真机能验，那是第三层的事。
 - 它跑的是 **`weapp-native/` 源码**，不是 `dist-native`：构建器对 JS 是逐字节搬运，跑源码等于跑产物，且改完立刻生效；缺的那一个 `config/env`（只在构建时生成）由运行时注入 mock 档。**不要改成在测试里跑构建** —— `node --test scripts/*.test.mjs` 是并行的，写共享 `dist-native` 会和读产物的用例抢文件。
 - wx 桩必须忠实回调 `success`：`services/nav.js` 的导航锁靠 `success`/`fail` 复位 `inFlight`，不回调就等于第一次跳转之后整个 App 再也跳不动，而症状是「点了没反应」。同理操作菜单要**按选项文案**选而不是按下标——`shots` 的 `pickAsset` 会按素材库有没有东西重排选项。
-- 换机后第三层大概率跑不起来（开发者工具新 profile 无登录态，CLI 卡在 `initialize`）；前两层不受影响，先用它们把行为守住。
+- **换机后第三层要过两道门，缺一不可**（2026-08-27 实况）：① 开发者工具扫码登录；② **设置 → 安全设置 → 服务端口 开启**。只登录不开端口，CLI 仍卡在 `initialize` 退出码 246，而且**工具已在运行时错误信息是空的**——必须先完全退出工具再跑 CLI，才会打印真正的原因（「工具的服务端口已关闭」）。`cli quit` 自己也依赖服务端口，退不干净时用 `pkill -f wechatwebdevtools`；登录态在 profile 里，杀进程不会丢。开启的验证标志：`~/Library/Application Support/微信开发者工具/<profile>/Default/` 下出现 `.ide` 文件且该端口在监听。前两层不受这两道门影响，先用它们把行为守住。
 
 **CI：`.github/workflows/frontend-unit.yml`**（2026-07-27 起）用 `admin` / `app` 两个 matrix job 跑 `npm ci` + `npm test`。
 此前 CI 只跑 server，这两条命令全靠人工执行，`admin` 的 `tsx` 漏装后测试基座整整停摆一段时间都没人发现。

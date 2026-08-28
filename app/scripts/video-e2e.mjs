@@ -167,6 +167,73 @@ try {
   await wait(1800);
   check('声音采集页可打开', (await mini.currentPage()).path.includes('clone/index'));
   await mini.screenshot({ path: path.join(SHOTS, '06-clone-voice.png') });
+
+  /* ── 成片页三态 ────────────────────────────────────────────────────
+     这一页的状态判定由 video-chain.test.mjs 守（那层跑得快、不用工具），
+     但**版面只有这里能量**：兜底块是绝对定位 + 左右锚死 + 自带 padding，
+     少一个 box-sizing 就会比播放器宽 44px，文字偏心还被裁掉。
+     mock 的成片没有 videoUrl（mock.js 有明确政策：不编造媒体地址），
+     所以本机打开 cw_mock_2 必然落在兜底态 —— 正好是要量的那一屏。 */
+  const rectIn = async (page, sel) => {
+    const el = await page.$(sel);
+    if (!el) return null;
+    const [offset, size] = await Promise.all([el.offset(), el.size()]);
+    return { ...offset, ...size };
+  };
+
+  await mini.reLaunch('/packages/video/work/index?workId=cw_mock_2');
+  await wait(2200);
+  const work = await mini.currentPage();
+  const workData = await work.data();
+  check('成片页可打开', work.path.includes('work/index'), `route=${work.path}`);
+  check('已完成的作品是完成态', workData.done === true, `done=${workData.done}`);
+
+  const pending = await rectIn(work, '.wd-pending');
+  const player = await rectIn(work, '.wd-player');
+  if (pending && player) {
+    // 兜底块必须严丝合缝盖住播放器位置，不能撑出去
+    check('兜底块没有撑出播放器',
+      pending.width <= player.width + 0.5 && pending.left >= player.left - 0.5,
+      `兜底 ${pending.width}@${pending.left} vs 播放器 ${player.width}@${player.left}`);
+    check('兜底块没有横向溢出视口',
+      pending.left >= -0.5 && pending.left + pending.width <= viewport + 0.5,
+      `left=${pending.left} right=${pending.left + pending.width} 视口=${viewport}`);
+  } else {
+    check('兜底块已渲染', false, `pending=${!!pending} player=${!!player}`);
+  }
+  await mini.screenshot({ path: path.join(SHOTS, '07-work-pending.png') });
+
+  // 生成中：不许出现「已经成片」，也不许摆保存/代发
+  await mini.reLaunch('/packages/video/work/index?workId=cw_mock_1');
+  await wait(2200);
+  const wip = await mini.currentPage();
+  const wipData = await wip.data();
+  check('生成中的作品不算完成态', wipData.done === false, `done=${wipData.done}`);
+  const wipTitle = await wip.$('.wdr-title');
+  const wipTitleText = wipTitle ? (await wipTitle.text()).trim() : '';
+  check('生成中不说「已经成片」', !wipTitleText.includes('已经成片'), `「${wipTitleText}」`);
+  check('生成中不摆「保存到相册」', (await wip.$('.wd-act')) === null);
+  check('生成中不摆代发区块', (await wip.$('.wd-platforms')) === null);
+  await mini.screenshot({ path: path.join(SHOTS, '08-work-generating.png') });
+
+  // 读失败：重试是主动作，点击区不得低于 44px（§7.2）
+  await wip.setData({ loading: false, loadFailed: true, loadError: '网络没通', canRetry: true, work: null });
+  await wait(700);
+  const retry = await rectIn(wip, '.wd-failed-act');
+  check('读失败给出重试', retry !== null);
+  if (retry) {
+    check('重试点击区不低于 44px', retry.height >= 44, `高 ${retry.height}px`);
+    check('重试按钮无横向溢出',
+      retry.left >= -0.5 && retry.left + retry.width <= viewport + 0.5,
+      `left=${retry.left} right=${retry.left + retry.width} 视口=${viewport}`);
+  }
+  await mini.screenshot({ path: path.join(SHOTS, '09-work-failed.png') });
+
+  // 不可重试（404/401）时不该摆一个必然失败的按钮
+  await wip.setData({ canRetry: false });
+  await wait(500);
+  check('不可重试时不摆重试按钮', (await wip.$('.wd-failed-act')) === null);
+  await mini.screenshot({ path: path.join(SHOTS, '10-work-failed-noretry.png') });
 } finally {
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} 通过`);

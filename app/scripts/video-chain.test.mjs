@@ -410,8 +410,12 @@ test('成片取不到播放地址时要说人话，不能只给一块黑底纹',
   const m = wxml.match(/<view wx:else[^>]*class="[^"]*wd-pending[^"]*"[^>]*>([\s\S]*?)<\/view>/);
   assert.ok(m, '没有播放地址时应有一个带说明的兜底块，而不是空底纹');
   const fallback = m[1];
-  assert.ok(/还播不了|没有准备好/.test(fallback),
+  assert.ok(/放不出来|还没出好/.test(fallback),
     '没有播放地址时，播放器位置必须给出用户看得懂的说明');
+  // 同一块在两种情形下都会出现，说法必须跟着 done 走 ——
+  // 对一条 done 的片子说「还没有准备好」，就和头部的「生成完成」自相矛盾。
+  assert.ok(fallback.includes('{{done ?'),
+    '兜底文案要按 done 分上下文：已出好是取不到地址，没出好才是还在生成');
   // 本页不许对积分下结论：详情接口只透传作品、不做结算，结算在任务轮询那条路径上。
   // 读到的可能还是 generating，也可能 hold 还没推进到 settled——
   // 断言「已结算」等于把一句可能为假的话固化成要求。

@@ -47,12 +47,15 @@
                  ClipWorkDetail），下载接口对同一状态给的是 CLIP_WORK_NOT_READY「成片还没有
                  准备好」。观看这条路以前只铺一块底纹，等于让用户对着「已经成片」和一个黑框
                  自己猜——和首页「读失败不能说成你还没有」是同一类问题，这里也要说出来。 -->
+            <!-- 文案要跟着状态走。这块在两种情形下都会出现，说法不能一样：
+                   done 但没地址 —— 片子已经出好了，是这会儿取不到播放地址；
+                                    再说「还没有准备好」就和上面的「生成完成」自相矛盾。
+                   还在生成      —— 那才是真的还没准备好。
+                 不在这里对积分下结论：详情接口只透传作品、不做结算
+                 （server/src/routes/video.ts），结算发生在任务轮询那条路径上。 -->
             <view wx:else class="inner vd-grain wd-pending">
-              <text class="wd-pending-t">还播不了</text>
-              <!-- 不在这里对积分下结论：详情接口只透传作品、不做结算（server/src/routes/video.ts），
-                   结算发生在任务轮询那条路径上，本页无从判断这一单结没结。
-                   写「积分已结过」在读到的是 generating、或结算还没推进时就是假话。 -->
-              <text class="wd-pending-s">成片还没有准备好，过一会儿再回来看看。</text>
+              <text class="wd-pending-t">{{done ? '这会儿放不出来' : '还没出好'}}</text>
+              <text class="wd-pending-s">{{done ? '片子已经出好了，只是这会儿取不到播放地址。过一会儿再回来看看。' : '这条片子还在生成，过一会儿再回来看看。'}}</text>
             </view>
             <view wx:if="{{work.aiWatermark}}" class="vd-ai-badge wd-badge">AI 生成</view>
           </view>
