@@ -441,6 +441,13 @@ test('作品读失败要说没读到，不能套用出片成功的版式', async
     await s.rt.withGlobals(async () => { work.retryLoad(); await tick(320); });
     assert.equal(work.data.loadFailed, false, '重试成功后应退出失败态');
     assert.ok(work.data.work, '重试成功后应载入作品');
+
+    // JS 置了 loadFailed 还不够，模板得真的用它 —— 否则页面仍会落进成功版式
+    const wxml = fs.readFileSync(path.join(SRC, VIDEO, 'work/index.wxml'), 'utf8');
+    const failedAt = wxml.indexOf('wx:elif="{{loadFailed}}"');
+    assert.ok(failedAt >= 0, '模板必须有读失败分支');
+    assert.ok(failedAt < wxml.indexOf('wdr-title'),
+      '读失败分支要排在成功版式之前，否则 work 为 null 时仍会落进「已经成片」');
   } finally { api.work = real; }
 });
 
@@ -450,38 +457,65 @@ test('读不到的原因不同，给的出路也要不同', async (t) => {
   const s = session(t);
   const api = s.rt.require(path.join(SRC, VIDEO, 'api.js'));
   const real = api.work;
-  const failWith = (statusCode, message) => {
-    api.work = () => Promise.reject(Object.assign(new Error(message), { statusCode }));
+  const failWith = (extra, message) => {
+    api.work = () => Promise.reject(Object.assign(new Error(message), extra));
   };
 
   try {
-    failWith(401, '请先登录');
-    const unauth = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
-    assert.equal(unauth.data.showLogin, true, '401 应当把登录门弹出来');
-    assert.equal(unauth.data.canRetry, false, '没登录时「重试」是摆设');
+    // services/request.js 的 unauthorized() 会挂 hadToken/authHandled/staleAuth，
+    // 401 因此是三种而不是一种，本页只该管其中一种。
+    failWith({ statusCode: 401, code: 'UNAUTHORIZED', hadToken: false, authHandled: false, staleAuth: false }, '未登录');
+    const guest = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
+    assert.equal(guest.data.showLogin, true, '游客 401 应当由本页弹登录门');
+    assert.equal(guest.data.canRetry, false, '没登录时「重试」是摆设');
 
-    failWith(404, '作品不存在');
+    // 带 token 的 401：全局 onAuthLost 已经清态 + 提示 + 准备 reLaunch，
+    // 本页再弹一个登录浮层就是第二次打扰（AGENTS §0.7）。
+    failWith({ statusCode: 401, code: 'UNAUTHORIZED', hadToken: true, authHandled: true, staleAuth: false }, '登录态已失效');
+    const handled = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
+    assert.equal(handled.data.showLogin, false, '全局已经接管的 401，本页不该再弹一次登录门');
+
+    // 旧请求晚到，用户可能**已经重新登录**了 —— 这时弹登录门等于把登录好的会话盖住。
+    failWith({ statusCode: 401, code: 'UNAUTHORIZED', hadToken: true, authHandled: false, staleAuth: true }, '未登录');
+    const stale = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
+    assert.equal(stale.data.showLogin, false, '过期请求的 401 绝不能盖住已经重新登录的会话');
+
+    failWith({ statusCode: 404, code: 'CLIP_WORK_NOT_FOUND' }, '作品不存在');
     const gone = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_missing' }, 320);
     assert.equal(gone.data.canRetry, false, '作品不存在时重试不会让它存在');
     assert.equal(gone.data.showLogin, false, '404 不该误弹登录门');
 
-    failWith(500, '服务开小差了');
+    failWith({ statusCode: 500 }, '服务开小差了');
     const oops = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
     assert.equal(oops.data.canRetry, true, '5xx 是真的可能好转，要给重试');
   } finally { api.work = real; }
 });
 
-test('生成中的作品不许显示成「已经成片」', async (t) => {
+test('生成中的作品不许显示成「已经成片」，也不该给保存和代发', async (t) => {
   // 契约允许 status=generating，mock 里 cw_mock_1 就是。深链或从列表点进来都会撞上。
   const s = session(t);
   const wip = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_1' }, 320);
-  assert.ok(wip.data.work, '这条作品应当能读到');
   assert.equal(wip.data.work.status, 'generating', 'cw_mock_1 应当是生成中，否则这条用例失去意义');
   assert.equal(wip.data.done, false, '生成中不算完成，页面不能说「已经成片」');
 
+  // 没出好就点保存，只会拿到「成片还没有准备好」，得先挡住
+  await s.rt.withGlobals(async () => { wip.saveToAlbum(); await tick(80); });
+  const toast = s.rt.lastToast();
+  assert.ok(toast && /还没出好/.test(String(toast.title)),
+    `生成中点保存应当被挡住并说明，实际：${toast ? toast.title : '(没有任何提示)'}`);
+
   const done = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
   assert.equal(done.data.done, true, '已完成的作品才是完成态');
+
+  // 视图侧同样要收口：光有 done 这一位、模板不用它，页面照样恭喜你已经成片
+  const wxml = fs.readFileSync(path.join(SRC, VIDEO, 'work/index.wxml'), 'utf8');
+  const ready = wxml.match(/<view class="wd-ready"[^>]*>/);
+  assert.ok(ready && /wx:if="\{\{done\}\}"/.test(ready[0]),
+    '「生成完成」那块必须按 done 收口');
+  assert.match(wxml, /wx:if="\{\{done && work\.credits\}\}"/,
+    '「已扣 N 积分」只有完成态才敢说');
 });
+
 
 test('离开出片页要停掉轮询，别让用户切走后还在后台拉进度', async (t) => {
   const s = session(t);

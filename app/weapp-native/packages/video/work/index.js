@@ -96,14 +96,21 @@ Page(withShare({
         const status = Number(error && error.statusCode) || 0;
         const code = String((error && error.code) || '');
         const unauthorized = status === 401 || code === 'UNAUTHORIZED';
+        /* 401 不是一种，是三种（services/request.js 的 unauthorized() 就是为此挂的标）：
+             hadToken=false   游客没登录 —— 本页弹登录门是对的
+             authHandled=true 带 token 的 401，全局 onAuthLost 已经清态 + 提示 + 准备 reLaunch，
+                              本页再弹一个登录浮层就是第二次打扰
+             staleAuth=true   旧请求晚到，用户可能**已经重新登录**了 —— 这时弹登录门
+                              等于把一个登录好的会话盖住
+           见 AGENTS §0.7 的全局铁律。只有第一种归本页管。 */
+        const globallyHandled = Boolean(error && (error.authHandled || error.staleAuth));
+        const guestNeedsLogin = unauthorized && !globallyHandled && !(error && error.hadToken);
         this.setData({
           loading: false,
           loadFailed: true,
           loadError: (error && error.message) ? error.message : '',
-          // 401 要弹登录门，不是摆一个「重试」——没登录时重试一万次也是 401。
-          showLogin: unauthorized ? true : this.data.showLogin,
-          // 404 / 403 同理：作品不存在或不属于这个账号，重试不会变。
-          // 只有网络与 5xx 这类真的可能好转的才给重试。
+          showLogin: guestNeedsLogin ? true : this.data.showLogin,
+          // 401/403/404 重试多少次都一样；只有网络与 5xx 这类真可能好转的才给重试。
           canRetry: !unauthorized && status !== 404 && status !== 403,
           done: false,
           work: null,
@@ -120,6 +127,8 @@ Page(withShare({
    * 且用户拒绝过一次后只能引导去设置页开（wx.openSetting）。
    */
   saveToAlbum() {
+    // 没出好的片子没有可下载的成品，硬走下去只会拿到 CLIP_WORK_NOT_READY。
+    if (!this.data.done) { host.toast('这条片子还没出好'); return; }
     if (!host.requireLogin(this, 'execute')) return;
     const work = this.data.work;
     // 下载走军师同源接口，由 BFF 每次读取作品并刷新上游短签名；不能用详情里的旧 videoUrl
@@ -221,6 +230,7 @@ Page(withShare({
   },
 
   publish(event) {
+    if (!this.data.done) { host.toast('这条片子还没出好'); return; }
     const key = String(event.currentTarget.dataset.key || '');
     const platform = PLATFORMS.find((item) => item.key === key);
     // 上游未接入时直接说清楚，不走确认框也不打接口（见 PUBLISH_READY 注释）。

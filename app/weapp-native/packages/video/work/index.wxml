@@ -75,8 +75,9 @@
           </view>
         </view>
 
-        <!-- 代发 -->
-        <view class="wd-section">
+        <!-- 代发。整块只在完成态出现：没出好的片子既存不下来也发不出去，
+             摆在那里点下去只会拿到「成片还没有准备好」。 -->
+        <view class="wd-section" wx:if="{{done}}">
           <text class="wd-sec-kicker">下一步</text>
           <!-- 标题跟着能力走：代发没接通时不许承诺「直接发布」（上游恒 503，见 index.js 的 PUBLISH_READY）。 -->
           <text class="wd-sec-title">{{publishReady ? '保存，或者直接发布' : '先保存下来，自己发'}}</text>
