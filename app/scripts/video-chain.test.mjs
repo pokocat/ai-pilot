@@ -504,16 +504,28 @@ test('生成中的作品不许显示成「已经成片」，也不该给保存�
   assert.ok(toast && /还没出好/.test(String(toast.title)),
     `生成中点保存应当被挡住并说明，实际：${toast ? toast.title : '(没有任何提示)'}`);
 
+  await s.rt.withGlobals(async () => { wip.publish({ currentTarget: { dataset: { key: 'douyin' } } }); await tick(80); });
+  const pubToast = s.rt.lastToast();
+  assert.ok(pubToast && /还没出好/.test(String(pubToast.title)),
+    `生成中点代发也应当被挡住，实际：${pubToast ? pubToast.title : '(没有任何提示)'}`);
+
   const done = await s.mount(`${VIDEO}/work/index`, { workId: 'cw_mock_2' }, 320);
   assert.equal(done.data.done, true, '已完成的作品才是完成态');
 
-  // 视图侧同样要收口：光有 done 这一位、模板不用它，页面照样恭喜你已经成片
+  // 视图侧同样要收口：光有 done 这一位、模板不用它，页面照样恭喜你已经成片，
+  // 也照样把点下去必然失败的按钮摆出来。方法里的防线只是兜底。
   const wxml = fs.readFileSync(path.join(SRC, VIDEO, 'work/index.wxml'), 'utf8');
   const ready = wxml.match(/<view class="wd-ready"[^>]*>/);
   assert.ok(ready && /wx:if="\{\{done\}\}"/.test(ready[0]),
     '「生成完成」那块必须按 done 收口');
   assert.match(wxml, /wx:if="\{\{done && work\.credits\}\}"/,
     '「已扣 N 积分」只有完成态才敢说');
+  const save = wxml.match(/<view[^>]*bindtap="saveToAlbum"[^>]*>/);
+  assert.ok(save && /wx:if="\{\{done\}\}"/.test(save[0]),
+    '「保存到相册」必须按 done 收口，别摆一个点下去必然失败的主按钮');
+  const section = wxml.match(/<view class="wd-section"[^>]*>\s*<text class="wd-sec-kicker">下一步/);
+  assert.ok(section && /wx:if="\{\{done\}\}"/.test(section[0]),
+    '「下一步」整块（保存 + 代发）必须按 done 收口');
 });
 
 
