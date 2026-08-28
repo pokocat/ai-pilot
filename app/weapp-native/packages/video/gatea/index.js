@@ -27,10 +27,16 @@ const metrics = require('./metrics.js');
 
 /** 提前多久把下一段喂进备用缓冲。太短来不及解码，太长白占一路解码器（低端机很敏感）。 */
 const PRIME_LEAD_MS = 2000;
-/** 画面与音频偏差超过这个值就回拉。低于一帧半没必要动，seek 本身会造成可见的顿。 */
-const CORRECT_MS = 120;
+/**
+ * 段内回拉的阈值。这是**兜底**不是常规手段 —— 常规校正在切换那一下顺手做掉（swapTo）。
+ * 播放中 seek 会重启解码，阈值定低了就变成慢速 seek 风暴：模拟器上定 120ms/冷却 800ms 时，
+ * 视频压根没播动，5 秒音频过去画面还停在开头。
+ */
+const CORRECT_MS = 400;
 /** 主时钟采样间隔。漂移曲线和字幕都靠它，100ms 够用且不烧电。 */
 const TICK_MS = 100;
+/** 两次回拉的最短间隔。要宽过一次 seek 的解码重启成本，否则回拉之间互相追尾。 */
+const CORRECT_COOLDOWN_MS = 3000;
 
 Page({
   data: {
@@ -74,10 +80,12 @@ Page({
   onHide() { this.teardown(); },
 
   resetMarks() {
-    this.marks = { gaps: [], drift: [], firstFrame: [], crashes: 0 };
+    this.marks = { gaps: [], drift: [], firstFrame: [], rate: [], crashes: 0 };
+    this.rateProbe = null;
     this.lastVideoTime = { a: 0, b: 0 };
     this.primedIndex = -1;
     this.awaitingTime = null;
+    this.lastCorrectAt = 0;
     this.pendingSwap = null;   // { index, tCmd, key }
     this.tapAt = 0;
     this.firstFrameLogged = false;
@@ -167,10 +175,34 @@ Page({
     const d = (shown - t) * 1000;
     this.marks.drift.push({ t: Math.round(t * 10) / 10, d: Math.round(d) });
 
+    // 播放速率：段内画面时间的推进量 ÷ 音频时间的推进量。
+    // 1.0 = 跟得上；明显小于 1 = 解码跟不上，那是环境问题不是逻辑问题。
+    // 没有这个数，漂移大到底怪谁是说不清的。
+    const prev = this.rateProbe;
+    if (prev && prev.key === key && t > prev.t) {
+      const dv = (this.lastVideoTime[key] || 0) - prev.v;
+      const da = t - prev.t;
+      if (da > 0.5) { this.marks.rate.push(Math.round((dv / da) * 100) / 100); this.rateProbe = { key, t, v: this.lastVideoTime[key] || 0 }; }
+    } else if (!prev || prev.key !== key) {
+      this.rateProbe = { key, t, v: this.lastVideoTime[key] || 0 };
+    }
+
     // 偏多了就把画面拉回音频的位置。回拉的是画面，不是声音 —— 声音是主时钟，不能动。
-    if (Math.abs(d) > CORRECT_MS) {
+    //
+    // 两道闸必须都开才真的回拉，缺一个就会把播放锁死：
+    // timeupdate 大约 250ms 才回一次，而这个循环是 100ms 一拍。回拉之后不等新读数，
+    // 接下来两三拍拿到的还是回拉前的旧值，于是接着回拉 —— seek 又重启解码，
+    // 视频永远停在开头播不动。模拟器上实测就是这样：音频到 5.9 秒时画面卡在 0.119 秒。
+    const nowMs = Date.now();
+    const settled = this.awaitingTime !== key;                       // 新读数已经回来了
+    const cooled = nowMs - (this.lastCorrectAt || 0) > CORRECT_COOLDOWN_MS;
+    if (Math.abs(d) > CORRECT_MS && settled && cooled) {
       const ctx = wx.createVideoContext(key === 'a' ? 'gv-a' : 'gv-b', this);
-      if (ctx) ctx.seek(Math.max(0, t - seg.startSec));
+      if (ctx) {
+        ctx.seek(Math.max(0, t - seg.startSec));
+        this.lastCorrectAt = nowMs;
+        this.awaitingTime = key;   // 等这一路的新读数回来再考虑下一次
+      }
     }
 
     // 预热按理想时间线判断，不受上面那个「以实际显示为准」的影响 ——
@@ -222,8 +254,11 @@ Page({
     this.awaitingTime = spare;
     this.pendingSwap = { index, key: spare, tCmd: Date.now() };
     const ctx = wx.createVideoContext(spare === 'a' ? 'gv-a' : 'gv-b', this);
+    const into = Math.max(0, this.audioTime() - segs[index].startSec);
     this.setData({ activeKey: spare, segIndex: index }, () => {
-      if (ctx) ctx.play();
+      // 切换是唯一“免费”的校正时机：反正要换显示层，这一下 seek 不额外制造顿。
+      // 段内不再频繁回拉 —— 播放中 seek 是破坏性的，每次都重启解码。
+      if (ctx) { if (into > 0.05) ctx.seek(into); ctx.play(); }
       const old = wx.createVideoContext(spare === 'a' ? 'gv-b' : 'gv-a', this);
       if (old) old.pause();
       this.armBoundary(index);

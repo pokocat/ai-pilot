@@ -96,8 +96,10 @@ function summarize(raw) {
   ];
 
   const measured = checks.filter((c) => c.value !== null);
+  const rate = raw.rate || [];
   return {
     checks, proposed,
+    rate: rate.length ? { median: percentile(rate, 50), min: Math.min.apply(null, rate), n: rate.length } : null,
     passed: measured.length === checks.length && measured.every((c) => c.ok),
     incomplete: measured.length !== checks.length,
     counts: { gaps: gaps.length, drift: drift.length, firstFrame: first.length },
