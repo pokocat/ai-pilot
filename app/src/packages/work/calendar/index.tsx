@@ -6,6 +6,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type ChartSummary } from '../../../services/api';
+import { FORTUNE_DISCLAIMER, FORTUNE_CREDO, FORTUNE_DISCLAIMER_FULL } from '../../../data/constants';
 import { DEFAULT_BIRTH_TIME, birthTimeParts } from '../../../data/shichen';
 import { IS_WEAPP } from '../../../services/config';
 import { navTo } from '../../../services/nav';
@@ -270,7 +271,7 @@ export default function TianshiCalendar() {
         {/* 离屏画布：仅用于生成图片 */}
         <Canvas type="2d" id="tcalCanvas" className="tc-canvas" style={{ width: `${CW}px`, height: `${CH}px` }} />
 
-        <Text className="tc-foot">命理内容为文化视角的经营节奏参考，不构成决策依据；「人谋可以改命」。</Text>
+        <Text className="tc-foot">{FORTUNE_DISCLAIMER_FULL}</Text>
       </View>
       <Login open={showLogin} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadChart(); }} />
     </View>
@@ -369,7 +370,9 @@ function paintCalendarCard(ctx: CanvasRenderingContext2D, chart: ChartSummary) {
   ctx.font = 'bold 28px serif';
   ctx.fillText('找军师参谋部', W / 2, boxY + 74);
 
+  // 两行：600px 宽画不下整句（19px × 32 字 ≈ 608px 会碰边），拆行不缩字号。
   ctx.fillStyle = '#B4B8BE';
   ctx.font = '19px sans-serif';
-  ctx.fillText('命理为文化视角的经营节奏参考，不构成决策依据', W / 2, CH - 38);
+  ctx.fillText(FORTUNE_DISCLAIMER, W / 2, CH - 64);
+  ctx.fillText(FORTUNE_CREDO, W / 2, CH - 34);
 }
