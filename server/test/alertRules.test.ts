@@ -204,11 +204,29 @@ describe('告警规则 × 应用指标对账', () => {
     assert.match(source, /keep_firing_for:\s*15m/);
   });
 
-  test('零注册告警读取数据库 72h 事实，不再依赖首样本会漏计的进程 counter', () => {
+  test('零注册告警读数据库 72h 事实，且只在正式开放后评估', () => {
     const rule = allRules().find((r) => r.name === 'JunshiNoRegistrations72h');
     assert.ok(rule);
     assert.match(rule.expr, /junshi_user_registrations_72h\s*==\s*0/);
+    assert.match(rule.expr, /and\s+on\(\)\s+junshi_monitor_public_launch_enabled\s*==\s*1/);
     assert.doesNotMatch(rule.expr, /junshi_user_registrations_total/);
+  });
+
+  test('调度器用通用任务成功锚点告警；支付只在有待处理订单时升级', () => {
+    const scheduler = allRules().find((r) => r.name === 'JunshiSchedulerJobStalled');
+    assert.ok(scheduler);
+    assert.match(scheduler.expr, /junshi_scheduler_job_health_anchor_timestamp_seconds/);
+    assert.match(scheduler.expr, /junshi_scheduler_job_interval_seconds/);
+    assert.match(scheduler.expr, /junshi_scheduler_job_enabled/);
+    assert.match(scheduler.expr, /on\(instance, job\)/, '关闭 scheduler 的 API 实例不能用新鲜启动锚点掩盖真正停滞的任务实例');
+
+    const payment = allRules().find((r) => r.name === 'JunshiPayReconcileDelayed');
+    assert.ok(payment);
+    assert.match(payment.expr, /junshi_pay_stuck_paid_unapplied/);
+    assert.match(payment.expr, /junshi_pay_stuck_created_stale/);
+    assert.match(payment.expr, /job="pay-reconcile-sweep"/);
+    assert.match(payment.expr, /on\(instance, job\)/);
+    assert.equal(allRules().some((r) => r.name === 'JunshiPaySweepStopped'), false, '无订单时不得继续发支付 critical 噪音');
   });
 
   test('API P95/错误率只看用户交互接口，并以 15 分钟最小样本量防低流量误报', () => {

@@ -25,6 +25,38 @@ test('任务注册与隔离执行：run 抛错不外溢，未注册任务报错'
   await assert.rejects(() => runJob('不存在'), /未注册/);
 });
 
+test('定时任务串行排队，同名任务在途时不重复堆积', async () => {
+  let active = 0;
+  let peak = 0;
+  const order: string[] = [];
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  registerJob({
+    name: 'test-serial-a', intervalMs: 60_000, run: async () => {
+      active += 1; peak = Math.max(peak, active); order.push('a:start');
+      await firstGate;
+      order.push('a:end'); active -= 1;
+    },
+  });
+  registerJob({
+    name: 'test-serial-b', intervalMs: 60_000, run: async () => {
+      active += 1; peak = Math.max(peak, active); order.push('b'); active -= 1;
+    },
+  });
+
+  const a1 = runJob('test-serial-a');
+  const a2 = runJob('test-serial-a');
+  const b = runJob('test-serial-b');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(order, ['a:start'], '第一个任务未释放前，后续任务不应抢连接执行');
+  releaseFirst();
+  await Promise.all([a1, a2, b]);
+
+  assert.equal(peak, 1, '进程内最多只运行一个定时任务');
+  assert.deepEqual(order, ['a:start', 'a:end', 'b'], '同名在途调用应复用原 promise，不执行第二轮');
+});
+
 test('召回扫描：超时未推进的案卷登记候选，一天只记一次，活跃案卷不误报', async () => {
   const idleToken = await login(uniquePhone(), '沉默用户');
   const activeToken = await login(uniquePhone(), '活跃用户');

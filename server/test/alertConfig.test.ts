@@ -8,10 +8,11 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 import { prisma } from '../src/db.js';
-import { __clearFeatureCache, setFeatureFlagPayload } from '../src/services/featureFlag.js';
+import { __clearFeatureCache, setFeatureFlag, setFeatureFlagPayload } from '../src/services/featureFlag.js';
 import {
   ALERT_CONFIG_DEFS, alertConfigValues, feishuSign, formatAlertCard,
   setFeishuTarget, feishuStatus, sendFeishuText, sendFeishuCard, __setFeishuTransportForTest,
+  PUBLIC_LAUNCH_MONITOR_FLAG, publicLaunchMonitorEnabled,
 } from '../src/services/alertConfig.js';
 import { alertRoutes } from '../src/routes/alerts.js';
 import { __resetMetrics } from '../src/services/metrics.js';
@@ -62,6 +63,12 @@ describe('阈值', () => {
     }
     const byKey = new Map(ALERT_CONFIG_DEFS.map((d) => [d.key, d.def]));
     assert.ok(byKey.get('api_p95_warn_ms')! < byKey.get('api_p95_crit_ms')!, 'API 预警线必须低于严重线');
+  });
+
+  test('正式开放增长监控默认关闭，只有运营显式开启才生效', async () => {
+    assert.equal(await publicLaunchMonitorEnabled(), false);
+    await setFeatureFlag(PUBLIC_LAUNCH_MONITOR_FLAG, true);
+    assert.equal(await publicLaunchMonitorEnabled(), true);
   });
 });
 
