@@ -50,6 +50,8 @@ Page(withShare({
     if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
     this.setData({ projectId });
     this.saveTimer = null;
+    // 从预览页「改文案」跳来会带 no：打开后直接展开那一段，别让用户再找一遍
+    this.openNo = Number((options && options.no) || 0) || 0;
     this.load();
   },
 
@@ -69,6 +71,7 @@ Page(withShare({
         this.setData({ loading: false, project: normalized, chatMessages: normalized.scriptChat });
         host.writeDraft(this.data.projectId, { project: normalized, step: 1 });
         this.recompute(normalized.segments);
+        if (this.openNo) { const no = this.openNo; this.openNo = 0; this.startEdit({ currentTarget: { dataset: { no } } }); }
       })
       .catch((error) => {
         const draft = host.readDraft(this.data.projectId);
@@ -89,14 +92,25 @@ Page(withShare({
 
   recompute(segments) {
     const summary = model.summarize(segments);
+    const estimate = model.estimateCredits(segments, this.data.project && this.data.project.shots);
     this.setData({
       rows: segments
         .filter((segment) => segment.role !== ROLE.TAIL)
         .map((segment) => Object.assign({}, segment, {
           seconds: model.segmentSeconds(segment),
           editing: segment.no === this.data.editingNo,
+          // 模板自带的两样东西都要露给用户：text = 这一段讲什么，hint = 这里该放什么。
+          // 以前只显示 text，用户看不出哪几段要自己出镜、哪几段该拍什么画面。
+          isAvatar: segment.role === ROLE.AVATAR,
+          hint: segment.role === ROLE.BROLL ? (segment.hint || '') : '',
         })),
       totalText: model.formatDuration(summary.totalSec),
+      // 「已选模板」三件事实，与首页主卡、预览页底栏同一条计算路径
+      facts: {
+        durText: model.formatDuration(summary.totalSec),
+        avatarSec: summary.avatarSec,
+        creditText: model.formatCredits ? model.formatCredits(estimate.total) : String(estimate.total),
+      },
     });
   },
 

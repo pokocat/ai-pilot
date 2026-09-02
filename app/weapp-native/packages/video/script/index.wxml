@@ -61,6 +61,16 @@
       </block>
 
       <block wx:else>
+      <!-- 已选模板：三件事实。模板定死段数、顺序、时长和角色，用户只改每段说什么 -->
+      <view wx:if="{{facts}}" class="tpl-facts">
+        <view class="tf-thumb vd-grain"></view>
+        <view class="tf-body">
+          <text class="tf-k">已选模板</text>
+          <text class="tf-t">{{project.templateName || '模板'}}</text>
+          <view class="tf-row"><text>成片 {{facts.durText}}</text><view class="dot"></view><text>数字人出镜 {{facts.avatarSec}} 秒</text><view class="dot"></view><text>约 {{facts.creditText}}</text></view>
+        </view>
+      </view>
+
       <view class="sb-head">
         <view><text class="sb-kicker">当前成稿</text><text class="sb-title">口播文案</text></view>
         <view class="sb-actions">
@@ -74,8 +84,10 @@
       <view wx:else class="lines">
         <block wx:for="{{rows}}" wx:key="no">
           <!-- 只读态：整段连读 -->
-          <view wx:if="{{!item.editing}}" class="line" data-no="{{item.no}}" bindtap="startEdit">
+          <view wx:if="{{!item.editing}}" class="line {{item.isAvatar ? 'avatar' : ''}}" data-no="{{item.no}}" bindtap="startEdit">
+            <text wx:if="{{item.isAvatar}}" class="line-role">数字人出镜 · {{item.seconds}} 秒</text>
             <text class="line-text">{{item.text}}</text>
+            <text wx:if="{{item.hint}}" class="line-hint">{{item.hint}}</text>
           </view>
 
           <!-- 编辑态：展开动作区 -->
