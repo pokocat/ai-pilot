@@ -11,6 +11,7 @@ import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import { scanPrescriptionFollowups } from './prescription.js';
 import { sweepPendingOrders, sweepPendingRefunds } from './wechatPay.js';
 import { scanInviteActivationOutbox } from './activation.js';
+import { confirmMatured, scanCommissionOutbox } from './commission.js';
 import { expireStalePendingSubscriptions, reconcilePapayOrders, reconcilePendingSubscriptions, scanAutoRenewals, scanPendingSubscriptionCancellations } from './wechatPapay.js';
 import {
   hasSentWechatNotificationToday,
@@ -421,6 +422,9 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   const cancellations = await scanPendingSubscriptionCancellations();
   const staleSubscriptions = await expireStalePendingSubscriptions();
   const inviteOutbox = await scanInviteActivationOutbox();
+  // 佣金 outbox 与 invite 归因 outbox 同一形态、同一失败面（支付/退款事务内落行、事务外处理），
+  // 所以并进同一轮 sweep：多一个 job 就多一次选主 + 一个连接，而这两件事本来就该一起补。
+  const commissionOutbox = await scanCommissionOutbox();
   if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
   if (refunds.scanned) console.log(`[scheduler] refund sweep: completed=${refunds.completed} (scanned ${refunds.scanned})`);
   if (subscriptions.scanned) console.log(`[scheduler] auto-renew: submitted=${subscriptions.submitted} failed=${subscriptions.failed} (scanned ${subscriptions.scanned})`);
@@ -429,4 +433,13 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   if (cancellations.scanned) console.log(`[scheduler] papay cancellations: cancelled=${cancellations.cancelled} (scanned ${cancellations.scanned})`);
   if (staleSubscriptions) console.log(`[scheduler] papay pending subscriptions expired: ${staleSubscriptions}`);
   if (inviteOutbox.scanned) console.log(`[scheduler] invite activation outbox: completed=${inviteOutbox.completed} (scanned ${inviteOutbox.scanned})`);
+  if (commissionOutbox.scanned) console.log(`[scheduler] commission outbox: completed=${commissionOutbox.completed} (scanned ${commissionOutbox.scanned})`);
+} });
+// 佣金冻结期到点（代理分销）：pending + holdUntil 已过 + 订单未退款 → confirmed（可结算）。
+// 30 分钟一轮足够：冻结期以天计，运营看到的「待结」晚半小时成熟不影响任何决策；
+// 反过来跑太密会让这条纯扫描任务白占选主连接。总开关关闭时本 job 仍会跑，但库里不会有
+// pending 行可成熟（计提侧已短路），是空扫。
+registerJob({ name: 'commission-mature', intervalMs: 30 * 60_000, run: async () => {
+  const confirmed = await confirmMatured();
+  if (confirmed) console.log(`[scheduler] commission matured: confirmed=${confirmed}`);
 } });

@@ -160,7 +160,7 @@ function ImpersonateBlock({ userId, userName, toast }: { userId: string; userNam
   );
 }
 
-export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: string; isOwner: boolean; onClose: () => void; toast: (m: string) => void }) {
+export function UserDetailPanel({ userId, isOwner, onClose, onOpenChain, toast }: { userId: string; isOwner: boolean; onClose: () => void; onOpenChain: (userId: string) => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [ctx, setCtx] = useState<AdminUserContext | null>(null);
   const [err, setErr] = useState('');
@@ -252,6 +252,8 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
         <button type="button" className="bk" onClick={onClose} aria-label="返回用户列表"><Icon name="arrow" size={18} /></button>
         <div className="di"><Icon name="user" size={18} /></div>
         <div className="dt"><div className="t">{u.name}</div><div className="s">{u.phone} · 余额 {creditText(u.creditBalance)}</div></div>
+        {/* 跨屏直达：客服在这儿最常问的下一个问题就是「这人是谁带来的 / 他下面有多少人」 */}
+        <button type="button" className="mini-btn" onClick={() => onOpenChain(userId)}>查邀请链</button>
       </div>
       <div className="ad-db">
         <UsageQuotaBlock userId={userId} isOwner={isOwner} toast={toast} />

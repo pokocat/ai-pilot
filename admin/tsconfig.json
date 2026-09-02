@@ -11,6 +11,10 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    // shadcn 约定的 `@/` 别名（components.json 的 aliases）——只有增长组新模块用它，
+    // 旧页面继续用相对路径。vite.config.ts 里有一份同义的 resolve.alias，两处必须同时改。
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false

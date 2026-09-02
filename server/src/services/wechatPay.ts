@@ -20,6 +20,7 @@ import {
   enqueueInviteActivation, parseAttribution, processInviteActivationOutbox, recordActivation,
   type InviteActivationTarget,
 } from './activation.js';
+import { dispatchCommission, enqueueCommission } from './commission.js';
 import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
@@ -701,6 +702,12 @@ export async function markPaidAndApply(parsed: {
   // 换来一次重复回调，账算不过来。现在支付事务只写一行 InviteActivationOutbox，提交后派发处理；
   // 进程随即退出也由 scheduler 续扫，不再把微信重投当唯一重试机制。
   if (result.inviteOutTradeNo) dispatchInviteActivation(result.inviteOutTradeNo);
+  // 代理分销计提同样在**事务提交之后**派发、同样不被 await（理由与上面那段逐字相同：
+  // 它要查 Referral / 代理档案 / 分销规则，塞进支付事务就是给真金入账加一片失败面）。
+  // 复用 inviteOutTradeNo 这个句柄而不另加一个字段：佣金 outbox 就是在 invite outbox 的
+  // 那两处入队的，两者恒等；`claim.count !== 1` 那条分支两者都刻意不派发（由抢到发放的
+  // 那一侧负责）。派发失败/进程退出都由 scheduler 的 scanCommissionOutbox 续扫。
+  if (result.inviteOutTradeNo) dispatchCommission(result.inviteOutTradeNo, 'paid');
   // 显式收窄返回值：`invite` 带着 userId / tenantId，只在本函数内部用。有路由是把这个结果对象
   // 直接往响应体里放的形状（`{ ok, applied, reason }`），别让内部字段哪天顺着某个 `return r` 漏出去。
   return { applied: result.applied, reason: result.reason };
@@ -722,6 +729,10 @@ async function markPaidAndApplyTx(parsed: {
       // 退款单（status='refunded' 但 appliedAt 仍在）也照补：ActivationEvent 不随退款回收，
       // 「首次补记成功后再退款」的终态本来就留着这一行，不为它再造第二套口径。
       await enqueueInviteActivation(tx, order.outTradeNo, inviteTargetOf(order));
+      // 代理分销计提（2026-09-02）：与 invite 归因**同样的两处**入队，理由完全一致
+      // ——都要「历史订单也能补上 outbox 行」，且都绝不能挤进支付事务里做查询。
+      // 幂等由 CommissionEntry 的唯一键兜住，重复通知不会重复计提。
+      await enqueueCommission(tx, order.outTradeNo, 'paid');
       return { applied: false, reason: 'already_applied', inviteOutTradeNo: order.outTradeNo };
     }
     // 不同订单也必须按用户串行化，否则两笔同时到账会各自读取同一份旧套餐状态，造成时长覆盖。
@@ -814,6 +825,8 @@ async function markPaidAndApplyTx(parsed: {
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     // outbox 与权益/终态同事务提交：响应 200 后即使进程立刻退出，scheduler 也能补完 invite 统计。
     await enqueueInviteActivation(tx, order.outTradeNo, invite);
+    // 佣金 outbox 与权益/终态同事务提交（同上一处的理由）。
+    await enqueueCommission(tx, order.outTradeNo, 'paid');
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
     // 委托代扣订单到账后，以**实际发放后的**权益到期日作为下一周期锚点：到期前 24h 提交申请，
     // 对齐微信自动续费「通知后 24 小时扣费」。签约回调与支付回调无先后保证，因此这里允许
@@ -1156,6 +1169,9 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${cur.userId}`}))`;
       if (cur.appliedAt) await revokeOrderGrant(cur, tx);
       if (cur.subscriptionContractId) await tx.subscriptionContract.updateMany({ where: { id: cur.subscriptionContractId, status: { in: ['pending', 'active'] } }, data: { status: 'cancel_pending', nextBillingAt: null } });
+      // 佣金冲销/追回意图与「置 refunded」同事务落 outbox：只有真的退成功才写
+      // （申请受理 ≠ 退款完成，PROCESSING 阶段不能先把代理的佣金冲掉）。
+      await enqueueCommission(tx, outTradeNo, 'refunded');
     }
     await tx.paymentOrder.update({
       where: { outTradeNo },
@@ -1176,6 +1192,8 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
   if (finalSuccess) {
     if (mock) notePayMock('refunded');
     else notePayRefund(order.amount);
+    // 事务提交后派发一次佣金冲销（不 await、失败留给 scheduler）。
+    dispatchCommission(outTradeNo, 'refunded');
   }
   return { ok: true, refundId: remoteRefundId ?? outRefundNo, wechatStatus };
 }
@@ -1196,6 +1214,8 @@ export async function markRefundNotified(decoded: {
   const outTradeNo = decoded.out_trade_no;
   const remoteStatus = (decoded.refund_status ?? '').toUpperCase();
   const success = remoteStatus === 'SUCCESS';
+  // 本次回调真的把订单推到退款终态了吗（只有这种情况才派发佣金冲销）。
+  let revokedNow = false;
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outTradeNo}))`;
     const cur = await tx.paymentOrder.findUnique({ where: { outTradeNo } });
@@ -1244,7 +1264,12 @@ export async function markRefundNotified(decoded: {
       data: { tenantId: cur.tenantId, userId: cur.userId, action: 'user.pay.refund.notify_revoked',
         payloadJson: { outTradeNo, refundId: decoded.refund_id ?? null, amount: cur.amount, item: snapshotItemName(cur), source: 'merchant_backend' } },
     }).catch(() => {});
+    // 商户后台直接退款这条路径同样要冲销佣金：这里是「钱退了、权益还在」那个资损口的收口，
+    // 「钱退了、佣金还照结」是同一类漏洞，必须挂在同一个事务里。
+    await enqueueCommission(tx, outTradeNo, 'refunded');
+    revokedNow = true;
   });
+  if (revokedNow) dispatchCommission(outTradeNo, 'refunded');
 }
 
 /** 主动查退款：通知丢失时仍可把 PROCESSING 推进到成功/关闭/异常终态。 */

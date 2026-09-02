@@ -3177,3 +3177,314 @@ export interface AdminReferralRisk {
   groupTotal: number;
   groups: AdminReferralRiskGroup[];
 }
+
+/* ────────────── 运营后台「增长」组：邀请关系 / 邀请链 / 代理分销（2026-09-02） ──────────────
+   方案见 docs/[FABLE5]ADMIN_GROWTH_DISTRIBUTION_PLAN_2026-09-02.md。三条口径贯穿全段：
+   ① 手机号一律已按 services/audit.ts 的 maskAuditPhone 掩码，绝不下发完整号码；不下发 userAgent；
+   ② 金额一律「分」（Int），比例一律万分比 rateBp（0..10000）；时间一律 ISO 字符串；
+   ③ 分页响应统一 { items, total, page, pageSize }；读失败抛 5xx，不用空数组伪装。 */
+
+/** 统一分页壳。 */
+export interface AdminPage<T> { items: T[]; total: number; page: number; pageSize: number }
+
+/** 界面上的「一个人」：姓名可空、手机已掩码、带完整 userId（前端自行取尾 6 位做短 id）。 */
+export interface AdminPersonRef {
+  userId: string;
+  name: string | null;
+  /** 已掩码（138****1234）或 null */
+  phone: string | null;
+  tenantId: string;
+}
+
+/** 与 AdminReferralTreeNode.status 同口径（planGate：有 planId 且未到期 = activated）。 */
+export type AdminPlanActivation = 'activated' | 'registered';
+
+/* ── 邀请关系（Referral 账本的运营视图） ── */
+
+export interface AdminInviteEdge {
+  invitee: AdminPersonRef;
+  inviter: AdminPersonRef;
+  inviteCode: string;
+  /** share_friend | share_timeline | poster_qr | manual */
+  source: ReferralSource;
+  boundAt: string;
+  inviteeStatus: AdminPlanActivation;
+  /** 被邀人首笔已支付订单（paid/applied/refunded 均算「曾付费」；无则 null） */
+  firstPaid: { outTradeNo: string; amount: number; paidAt: string; refunded: boolean } | null;
+  /** 邀请人是否为生效中的代理（status=active），供列表打徽标 */
+  inviterIsDistributor: boolean;
+}
+
+export interface AdminInviteListQuery {
+  q?: string;
+  source?: ReferralSource;
+  /** 被邀人开通状态筛选 */
+  status?: AdminPlanActivation;
+  tenantId?: string;
+  /** 只看最近 N 天建立的关系；缺省全量（关系永久，不该默认被窗口吃掉） */
+  days?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export type AdminInviteList = AdminPage<AdminInviteEdge>;
+
+export interface AdminInviteAttribution {
+  id: string;
+  inviteCode: string;
+  source: string;
+  outcome: ReferralBindingOutcome;
+  newUser: AdminPersonRef | null;
+  referrer: AdminPersonRef | null;
+  clientIp: string | null;
+  tenantId: string;
+  createdAt: string;
+}
+
+export interface AdminInviteAttributionQuery {
+  q?: string;
+  outcome?: ReferralBindingOutcome;
+  source?: string;
+  tenantId?: string;
+  days?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export type AdminInviteAttributionList = AdminPage<AdminInviteAttribution>;
+
+/** 运营补绑（POST /admin/invites/manual-bind，requireSuper）。 */
+export interface AdminManualBindRequest {
+  /** 被绑定的用户（必须尚无推荐人） */
+  userId: string;
+  inviteCode: string;
+  /** 补绑原因，进审计（1..200 字） */
+  reason: string;
+}
+
+export interface AdminManualBindResult {
+  /** 与注册时同一组 outcome；bound 才建了边。补绑不受归因窗口限制，故不会出现 expired/no_timestamp */
+  outcome: ReferralBindingOutcome;
+  /** bound 时回新建的边 */
+  edge: AdminInviteEdge | null;
+}
+
+/* ── 邀请链（以人为中心） ── */
+
+export interface AdminChainAncestor extends AdminPersonRef {
+  /** 1 = 直接邀请人，2 = 邀请人的邀请人 …（不限三级，沿 referrerId 递归到根，hop 上限 64） */
+  depth: number;
+  status: AdminPlanActivation;
+  isDistributor: boolean;
+  /** 这一跳建边的时刻与来源 */
+  boundAt: string;
+  source: ReferralSource;
+}
+
+export interface AdminChainLevelStat {
+  level: 1 | 2 | 3;
+  /** 该级人数 */
+  users: number;
+  activated: number;
+  /** 该级用户累计已支付 GMV（分；已退款订单不计） */
+  paidGmv: number;
+  /** 本人为代理时，该级带来的佣金合计（分，含负的 clawback；非代理为 null） */
+  commission: number | null;
+}
+
+export interface AdminChainView {
+  user: AdminPersonRef & { status: AdminPlanActivation; inviteCode: string | null; createdAt: string };
+  /** 从直接邀请人到根，按 depth 升序；空数组 = 本人是根 */
+  upline: AdminChainAncestor[];
+  /** true = 上溯撞到 hop 上限而停（不该发生；发生了要显示出来） */
+  uplineTruncated: boolean;
+  /** 三级下钻子树（只有本人一个根）；节点口径与 /admin/referral/tree 完全一致 */
+  downline: AdminReferralTree;
+  team: AdminChainLevelStat[];
+  /** 本人代理档案摘要；非代理 null */
+  distributor: AdminDistributorBrief | null;
+}
+
+/* ── 代理分销 ── */
+
+export type DistributorStatus = 'pending' | 'active' | 'suspended' | 'terminated';
+/** 计提规则的商品类型维度；'all' 是兜底，精确类型优先 */
+export type DistributionItemType = 'plan' | 'sku' | 'all';
+export type CommissionKind = 'accrual' | 'clawback';
+export type CommissionStatus = 'pending' | 'confirmed' | 'settled' | 'reversed';
+export type SettlementStatus = 'draft' | 'approved' | 'paid' | 'void';
+
+export interface AdminDistributionConfig {
+  /** 功能开关 `distribution`：关 = 不计提（历史订单开闸后不追溯） */
+  enabled: boolean;
+  /** 冻结期天数（功能开关 `distribution-hold`.days） */
+  holdDays: number;
+  /** false = 运营还没配冻结期，用的是代码兜底值 */
+  holdConfigured: boolean;
+  flagKeys: { enabled: string; hold: string };
+}
+
+export interface AdminDistributionRule {
+  id: string;
+  level: 1 | 2 | 3;
+  itemType: DistributionItemType;
+  rateBp: number;
+  enabled: boolean;
+}
+
+export interface AdminDistributorTier {
+  id: string;
+  name: string;
+  sort: number;
+  enabled: boolean;
+  note: string | null;
+  /** 挂靠代理数（DELETE 只在为 0 时允许） */
+  distributorCount: number;
+  rules: AdminDistributionRule[];
+  updatedAt: string;
+}
+
+export interface AdminTierUpsertRequest { name: string; sort?: number; enabled?: boolean; note?: string | null }
+
+export interface AdminTierRulesRequest {
+  /** 整体替换：不在列表里的 (level,itemType) 组合视为删除 */
+  rules: { level: 1 | 2 | 3; itemType: DistributionItemType; rateBp: number; enabled: boolean }[];
+}
+
+export interface AdminDistributorBrief {
+  id: string;
+  userId: string;
+  status: DistributorStatus;
+  tier: { id: string; name: string } | null;
+  displayName: string | null;
+}
+
+export interface AdminDistributorItem extends AdminDistributorBrief {
+  user: AdminPersonRef;
+  /** 联系手机（已掩码） */
+  contactPhone: string | null;
+  remark: string | null;
+  team: { lv1: number; lv2: number; lv3: number };
+  /** 分：累计计提（accrual 正额之和）/ 待结（pending+confirmed 净额）/ 已结（settled 净额） */
+  commission: { accrued: number; pending: number; settled: number };
+  approvedBy: string | null;
+  approvedAt: string | null;
+  suspendedAt: string | null;
+  terminatedAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminDistributorListQuery {
+  q?: string;
+  status?: DistributorStatus;
+  tierId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export type AdminDistributorList = AdminPage<AdminDistributorItem>;
+
+export interface AdminDistributorCreateRequest {
+  userId: string;
+  tierId?: string | null;
+  displayName?: string | null;
+  /** 明文入库、响应掩码 */
+  contactPhone?: string | null;
+  remark?: string | null;
+}
+
+export interface AdminDistributorPatchRequest {
+  tierId?: string | null;
+  /** 状态机：active↔suspended；→terminated 为终态，之后只读 */
+  status?: Exclude<DistributorStatus, 'pending'>;
+  displayName?: string | null;
+  contactPhone?: string | null;
+  remark?: string | null;
+}
+
+export interface AdminCommissionEntry {
+  id: string;
+  outTradeNo: string;
+  buyer: AdminPersonRef;
+  beneficiary: AdminPersonRef;
+  distributorId: string;
+  level: 1 | 2 | 3;
+  itemType: 'plan' | 'sku';
+  itemKey: string;
+  /** 订单实付（分） */
+  baseAmount: number;
+  rateBp: number;
+  /** 分；clawback 为负 */
+  amount: number;
+  kind: CommissionKind;
+  status: CommissionStatus;
+  holdUntil: string;
+  settlementId: string | null;
+  reversedAt: string | null;
+  /** 计提时的规则快照（等级名/比例/冻结期），规则改了历史行不漂 */
+  ruleSnapshot: { tierId: string; tierName: string; ruleId: string; rateBp: number; holdDays: number } | null;
+  createdAt: string;
+}
+
+export interface AdminCommissionQuery {
+  distributorId?: string;
+  status?: CommissionStatus;
+  kind?: CommissionKind;
+  days?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminCommissionList extends AdminPage<AdminCommissionEntry> {
+  /** 同筛选条件下按状态的净额与条数（分） */
+  summary: { status: CommissionStatus; amount: number; count: number }[];
+  /** 近 N 天按日计提/追回（分），供一张柱图；日期 YYYY-MM-DD（北京时间自然日） */
+  daily: { date: string; accrued: number; clawback: number }[];
+}
+
+export interface AdminSettlement {
+  id: string;
+  distributor: AdminDistributorBrief;
+  periodStart: string;
+  periodEnd: string;
+  entryCount: number;
+  /** 分；可为负 */
+  totalAmount: number;
+  status: SettlementStatus;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  paidBy: string | null;
+  paidAt: string | null;
+  paidRef: string | null;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface AdminSettlementQuery {
+  distributorId?: string;
+  status?: SettlementStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export type AdminSettlementList = AdminPage<AdminSettlement>;
+
+export interface AdminSettlementGenerateRequest {
+  /** 缺省 = 全部 active/suspended 代理各出一张（零行的不出） */
+  distributorId?: string;
+  /** ISO；纳入 createdAt ∈ [periodStart, periodEnd) 且 status=confirmed 且未挂单的行（含 clawback） */
+  periodStart: string;
+  periodEnd: string;
+}
+
+export interface AdminSettlementGenerateResult { created: AdminSettlement[]; skippedDistributors: number }
+
+export interface AdminSettlementPaidRequest { paidRef: string; note?: string | null }
+export interface AdminSettlementVoidRequest { reason: string }
+
+export interface AdminDistributorDetail {
+  distributor: AdminDistributorItem;
+  team: AdminChainLevelStat[];
+  recentCommissions: AdminCommissionEntry[];
+  settlements: AdminSettlement[];
+}

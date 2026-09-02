@@ -6,6 +6,14 @@
 //   3) <button>/<input>/<select> 不得带一次性 inline style（width/padding/color/border 等）——用组件类；
 //   4) admin.css 里（:root 之外）不得把某个 token 的颜色值硬编码（如 #2D7A52 应写 var(--success)）。
 // 用法：node scripts/audit-admin-ui.mjs   （CI / 提交前跑；有违规则 exit 1）
+//
+// ── 唯一豁免：shadcn 模块（「增长」组，2026-09-02）───────────────────────────
+// `admin/src/growth/**`、`admin/src/components/ui/**`、`admin/src/lib/**` **跳过规则 1**。
+// 理由：这三个目录的 class 由 Tailwind v4 按需生成（`admin/src/styles/shadcn.css`），
+// admin.css 里当然查不到 `flex` / `gap-2` / `text-muted-foreground`，规则 1 在这里
+// 只会产出成百上千条假阳性，不适用。**其余规则一条不减**：inline 硬编码颜色、
+// 表单控件一次性 inline style、div.sw、空 catch 照样阻断——那几条与用哪套 CSS 无关。
+// 旧目录规则完全不变（旧页面不许 import `@/components/ui`，见 admin/DESIGN.md）。
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -24,6 +32,13 @@ function collectTsx(dir) {
 }
 const TSX = collectTsx(path.join(ROOT, 'admin/src')).sort();
 
+// 规则 1 的豁免目录（见文件头注释）。用 posix 相对路径前缀判断，Windows 下也稳。
+const TAILWIND_DIRS = ['admin/src/growth/', 'admin/src/components/ui/', 'admin/src/lib/'];
+const isTailwindModule = (file) => {
+  const rel = path.relative(ROOT, file).split(path.sep).join('/');
+  return TAILWIND_DIRS.some((d) => rel.startsWith(d));
+};
+
 const css = fs.readFileSync(CSS, 'utf8');
 const cssClasses = new Set([...css.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1]));
 // :root token 值 → 变量名（用于「裸色应写 var()」检查）
@@ -38,10 +53,11 @@ const add = (file, line, msg) => violations.push(`${path.relative(ROOT, file)}:$
 
 // —— .tsx 扫描 ——
 for (const f of TSX) {
+  const tailwindModule = isTailwindModule(f);
   fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
     const ln = i + 1;
-    // 1) className：抓取并校验每个 class token 是否有 CSS 规则
-    for (const m of line.matchAll(/className=(?:"([^"]*)"|\{([^}]*(?:\{[^{}]*\}[^}]*)*)\})/g)) {
+    // 1) className：抓取并校验每个 class token 是否有 CSS 规则（shadcn 目录豁免，见文件头）
+    if (!tailwindModule) for (const m of line.matchAll(/className=(?:"([^"]*)"|\{([^}]*(?:\{[^{}]*\}[^}]*)*)\})/g)) {
       let tokens = [];
       if (m[1] != null) tokens = m[1].split(/\s+/).map((t) => [t, true]);
       else {

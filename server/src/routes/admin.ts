@@ -50,6 +50,10 @@ import { setFeatureFlag, mergeFeatureFlagPayload, isComplianceFlag } from '../se
 import {
   REFERRAL_RISK_FLAG, REFERRAL_RISK_PAYLOAD_KEY, REFERRAL_RISK_DEF, REFERRAL_RISK_MIN, REFERRAL_RISK_MAX,
 } from './adminReferral.js';
+import {
+  DISTRIBUTION_FLAG, DISTRIBUTION_HOLD_FLAG, DISTRIBUTION_HOLD_KEY,
+  DISTRIBUTION_HOLD_DEF, DISTRIBUTION_HOLD_MIN, DISTRIBUTION_HOLD_MAX,
+} from '../services/commission.js';
 import { WENCE_FLAG, normalizeChips, effectiveArms } from '../services/wence.js';
 import {
   ALERT_CONFIG_DEFS, PUBLIC_LAUNCH_MONITOR_FLAG,
@@ -132,6 +136,20 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
     desc: '同一 IP 在所选窗口内注册多少个带码新号就列入风控视图（只预警不阻断：关系照常绑定、注册照常放行）',
     compliance: false, kind: 'number', payloadKey: REFERRAL_RISK_PAYLOAD_KEY,
     def: REFERRAL_RISK_DEF, min: REFERRAL_RISK_MIN, max: REFERRAL_RISK_MAX, unit: '个新号/IP',
+  },
+  // 代理分销总开关（2026-09-02）。**默认关**：开始给渠道计提是商务决策，不该因为代码上线就自动发生。
+  // 常量与判定同源（services/commission.ts），后台能拨的开关就是计提时读的那一个。
+  {
+    id: DISTRIBUTION_FLAG, label: '代理分销计提',
+    desc: '关闭即完全不计提（佣金只发后台登记的签约代理，普通邀请人无佣金）。开启后**不追溯历史订单**，只对此后成交的单计提；`suspended` 状态的代理**不计提**（不是延后计提，解除暂停也不会补算）',
+    compliance: false, kind: 'toggle', defaultEnabled: false,
+  },
+  // 冻结期：计提后先 pending，过期且订单未退款才转 confirmed（可结算）。0 = 不冻结，须运营显式配。
+  {
+    id: DISTRIBUTION_HOLD_FLAG, label: '佣金冻结期',
+    desc: '佣金计提后冻结多少天才可结算（退款观察窗）。冻结期内退款直接冲销，不留应付；已结算后退款另落一条负额追回行，下一张结算单净额抵扣',
+    compliance: false, kind: 'number', payloadKey: DISTRIBUTION_HOLD_KEY,
+    def: DISTRIBUTION_HOLD_DEF, min: DISTRIBUTION_HOLD_MIN, max: DISTRIBUTION_HOLD_MAX, unit: '天',
   },
   {
     id: PUBLIC_LAUNCH_MONITOR_FLAG,
