@@ -128,7 +128,8 @@
     <view class="vd-btn" style="flex:1" bindtap="next">下一步 · 配画面</view>
   </view>
 
-  <view wx:if="{{!aiOpen && editMode !== 'bulk'}}" class="ai-fab" bindtap="openAi">
+  <!-- 某一段展开编辑时收起悬浮球：编辑卡里已有「AI 改这段」，悬浮球只会压在「改好了」上 -->
+  <view wx:if="{{!aiOpen && editMode !== 'bulk' && !editingNo}}" class="ai-fab" bindtap="openAi">
     <native-icon name="pen" tone="white" size="22"></native-icon>
     <text>AI 改稿</text>
     <view wx:if="{{chatMessages.length}}" class="ai-fab-dot"></view>
