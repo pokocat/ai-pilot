@@ -244,8 +244,8 @@ Inputs are utilitarian and stable.
 
 ### Navigation
 
-Navigation is grouped by **operator task**, not by backend module. The 26 destinations live in seven
-scenario groups (`今日 / 用户 / 经营 / 智能体 / 观测 / 商品 / 配置`) declared once in `admin/src/nav.ts` —
+Navigation is grouped by **operator task**, not by backend module. The 29 destinations live in eight
+scenario groups (`今日 / 用户 / 经营 / 增长 / 智能体 / 观测 / 商品 / 配置`) declared once in `admin/src/nav.ts` —
 that file is the single source of truth for labels, hints, icons, group membership, and palette aliases.
 
 **The Read-vs-Write Rule.** Grouping follows one testable principle: **read-only surfaces go to
@@ -258,8 +258,9 @@ what makes a console hard to navigate. Group icon = that group's flagship sectio
 - **Desktop (≥960px):** A persistent left rail (`204px`) holds the brand, the six groups, the command
   palette entry, and the account menu. Content sits in a `--wrap` (1180px) max-width container.
 - **Mobile (<960px):** A compact top bar carries brand + palette + account; a bottom nav carries the
-  **groups only**, flex-distributed. Group count is bounded (7 today), so the bottom nav never scrolls
-  horizontally. Keep group labels to 2–3 characters so they survive `375px / n` per item.
+  **groups only**, flex-distributed. Group count is bounded (8 today), so the bottom nav never scrolls
+  horizontally. Keep group labels to 2–3 characters so they survive `375px / n` per item — at 8 groups
+  that is ~46px each, which is the practical floor for a 2-character label plus icon.
 - **Section nav:** Within a group, sections render as a segmented `subnav` row under the chrome.
   A group with a single section renders no subnav (no fake tabs).
 - **Page head (`ph`):** Every screen's title and one-line hint come from `nav.ts`, plus a refresh
@@ -414,5 +415,55 @@ Screens consume these through `useResource` + `ViewState`; raw `.catch(() => {})
 - 小号文字不得使用低对比灰；白字主按钮/选中 chip 统一用 `--accent-deep`。`lint:ui` 会阻断 `:root` 外的 hex、字面量 z-index、`div.sw` 与空 catch。
 - 登录、搜索、列表和详情都要区分 loading / empty / error / success；接口失败必须保留服务端可读错误和重试路径。
 
-### 7. 提交前必过
+### 7. shadcn 模块（「增长」组，2026-09-02）
+
+运营后台有**两套** CSS 词汇，边界是目录，不是心情：
+
+| 目录 | 样式来源 | 备注 |
+|---|---|---|
+| `admin/src/growth/**`、`admin/src/components/ui/**`、`admin/src/lib/**` | Tailwind v4 + shadcn（`admin/src/styles/shadcn.css`） | `lint:ui` 对这三个目录**跳过规则 1**（class 由 Tailwind 生成，admin.css 里当然查不到），其余规则照旧 |
+| 其它全部（`admin/src/views/**`、`App.tsx`、`components.tsx`…） | `admin/src/styles/admin.css` 的组件类 | 规则 1..5 一条不减 |
+
+**主题映射（改配色只改 admin.css 的 `:root`，shadcn.css 只做映射）**：
+
+| shadcn 语义位 | admin.css token | 说明 |
+|---|---|---|
+| `--sc-background` / `--sc-foreground` | `--paper` / `--ink` | 模块底色与正文 |
+| `--sc-card` / `--sc-popover` | `--surface` | 卡片与浮层 |
+| `--sc-primary` / `--sc-primary-foreground` | `--accent-deep` / `#fff` | 主动作用深金，白字才够对比度 |
+| `--sc-secondary` / `--sc-muted` | `--surface-2` | 次级面与静音面 |
+| `--sc-muted-foreground` | `--ink-3` | 元数据、时间戳 |
+| `--sc-accent` / `--sc-accent-foreground` | `--accent-soft` / `--accent-ink` | shadcn 的 accent 是「悬停底」，不是品牌金本体 |
+| `--sc-destructive` | `--danger` | 只表状态 |
+| `--sc-border` / `--sc-input` / `--sc-ring` | `--line` / `--line` / `--accent` | 焦点环走亮金 |
+| `--sc-chart-1..5` | `--accent` / `--ink-2` / `--success` / `--warning` / `--danger` | 金 → 墨 → 绿 → 赭 → 红 |
+| `--sc-success(-soft)` / `--sc-warning(-soft)` | 同名 token | shadcn 没有这两个语义位，补上以免视图里写死颜色 |
+| `--font-sans` / `--font-mono` / `--font-serif` | `--sans` / `--mono` / `--serif` | 衬线仍只给标题与关键数字 |
+
+`--sc-` 前缀不是洁癖：admin.css 的 `:root` 已占用 `--accent`（品牌金 `#A07D2C`），而 shadcn 的
+`--accent` 是悬停底色，同名会互相污染。前缀化后只在 `@theme inline` 里映射一次。
+
+**禁止事项**：
+
+- **旧页面不得 `import '@/components/ui/*'`**，也不得引 `@/lib/utils` 的 `cn()`——那会把 Tailwind
+  工具类带进 admin.css 的地盘，两套盒模型混在一屏。
+- **新模块不得引用 admin.css 的组件类**（`ai-btn` / `mini-btn` / `crd` / `chip` / `empty` …）。
+  唯一例外是 `PageHead` 输出的旧类名（`ph` / `mini-btn` / `badge`）——admin.css 没有作用域，
+  它在 `.sc` 内照常生效，所以页头保持全站一致而不是每组一套。
+- **不引 Tailwind 的 preflight**（会重置旧页面的 `button` / `h1..h6` / `table` / `input`），
+  缺的三样自己补：`.sc` 的底色文字、`.sc *` 的 `border-color`、Radix 浮层用 `container` prop
+  挂进 `.sc` 内的挂载点（`admin/src/lib/scPortal.tsx`）。
+- **不做暗色模式**。shadcn 生成的组件带着十几处 `dark:*`，而 Tailwind v4 的 `dark` 变体默认就是
+  `prefers-color-scheme: dark`——`shadcn.css` 里用 `@custom-variant dark` 把它重定义成一个永不
+  命中的选择器，别改回去，也别手删组件里的 `dark:`（下次 `shadcn add` 会覆盖回来）。
+- **`@source` 白名单不许放宽到 `admin/src`**：旧页面里的 `block` / `full` / `on` / `fixed` 等
+  class 恰好与工具类同名，一旦被扫进去就会生成真工具类并按 layer 顺序盖掉旧样式。
+- 逻辑组件**共用**、皮肤件**各自一套**：`useResource` / `PageHead` / `router` / `api` 两边共用；
+  三态、空态、分页、徽标在 `admin/src/growth/ui.tsx` 里有一套 shadcn 皮肤，**语义与 `ViewState`
+  完全一致**（loading / error / empty 不许互相冒充、error 带服务端原文 + 重试、403 不给重试）。
+
+**One Command Color 不变**：金 = 唯一品牌动作色；绿 / 红 / 赭只表状态。图表色序也从这套 token 取，
+不引入 shadcn 默认的 `stone` 灰或任何新色。
+
+### 8. 提交前必过
 - `cd admin && npm run lint:ui`（设计系统合规）+ `npx tsc --noEmit`（类型）必须全绿；`npm run build` 会自动先跑 lint:ui。新增/改动 UI 前先读本文件与 `Do's and Don'ts`。

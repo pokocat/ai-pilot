@@ -25,6 +25,9 @@ import {
 import { ErrorState, PageHead, SearchBox, ViewState } from '../components';
 import { useResource, type Resource } from '../useResource';
 import { fmtTime } from '../format';
+// 归因结果 / 来源 / 短 id / 人物标签的人话表已抽到 growth/labels.ts —— 「增长」组四页共用一份。
+// 复制一份的后果是两屏对同一个 outcome 说不同的话，运营会当成两件事。本文件只改了 import。
+import { outcomeText, personText, sourceText } from '../growth/labels';
 
 type Tab = 'schema' | 'tree' | 'risk' | 'funnel';
 
@@ -34,54 +37,6 @@ const TABS: [Tab, string][] = [
   ['risk', '风控关联'],
   ['funnel', '转化漏斗'],
 ];
-
-/** 归因结果的人话（服务端回的是机器可读的 outcome 值）。 */
-const OUTCOME_LABEL: Record<string, string> = {
-  bound: '成功建边',
-  self: '自己的码',
-  cycle: '会成环',
-  unknown_code: '码不存在',
-  expired: '超出归因窗口',
-  already_bound: '已绑过别人',
-  config_unavailable: '配置读取失败（未建边）',
-  no_timestamp: '缺捕获时间（未建边）',
-};
-
-const SOURCE_LABEL: Record<string, string> = {
-  share_friend: '转发好友',
-  share_timeline: '朋友圈',
-  poster_qr: '海报扫码',
-  manual: '运营补绑',
-};
-
-function outcomeText(k: string): string { return OUTCOME_LABEL[k] ?? k; }
-function sourceText(k: string): string { return SOURCE_LABEL[k] ?? k; }
-
-/**
- * 短 id：取 id 的**尾部** 6 位，不是别处那种头部 8 位。
- *
- * 本仓的 id 是 cuid（`c` + 8 位 base36 毫秒时间戳 + 计数 + 指纹 + 8 位随机）。`slice(0, 8)`
- * 等于「c + 时间戳的前 7 位」——同一个 ~36ms 窗口里建出来的号，头部完全相同。而这块屏要消歧的
- * 恰恰是「同一批被刷出来的新号」，用头部就等于在最需要区分的场景里失效。尾部落在随机块上，
- * 6 位 base36 ≈ 22 亿种，一组最多 40 人时足够。别处的 `slice(0, 8)` 是给人工对一眼用的，
- * 这里不跟随那个惯例。
- */
-function shortId(userId: string): string {
-  return userId.length > 6 ? userId.slice(-6) : userId;
-}
-
-/**
- * 一个人在界面上的标签。**永远带短 id**（2026-08-18 复审的应改项）。
- *
- * 上一轮把手机号收成掩码（阻断修复，不能退回完整号码），代价是识人信息随之变少：两个还没补姓名、
- * 号段又同前三后四的新号，在同一个风险组里显示得**完全一样**——而「连号批量注册」正是刷号的典型
- * 形状，也就是说最需要区分的时候一定区分不出来。响应里本来就有 `userId`，把它的短形接在标签后面
- * 即可消歧；完整 id 放在 title / tooltip 里（悬停或长按可见），需要拿去查库时不用另找入口。
- */
-function personText(name: string | null, phone: string | null, userId: string): string {
-  const label = name?.trim() || phone || '';
-  return label ? `${label} · ${shortId(userId)}` : `#${shortId(userId)}`;
-}
 
 /* ══════════════ 外壳：tab + 租户筛选 + 天数窗口 ══════════════ */
 

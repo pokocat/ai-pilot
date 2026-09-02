@@ -1223,7 +1223,7 @@ model LlmTrace {
   /// 上游返回的响应 id（OpenAI 兼容 `chatcmpl-*`、Anthropic `msg_*`）。**存在的唯一理由是账单对账**：
   /// 供应商工作台可按此 id 查单次调用，没有它我们最细只能对到「某模型某天的 token 数 ↔ 某计费项的整月金额」。
   /// 一次 gateway 调用可能多次外呼（工具循环、截断续写、端点转移），故为逗号分隔的多值，按发生顺序。
-  upstreamIds   String? @db.Text
+  upstreamIds   String?  @db.Text
   status        String // ok | error
   errorMessage  String?  @db.Text
   latencyMs     Int      @default(0)
@@ -1264,13 +1264,13 @@ model ToolCallLog {
 
 /// 服务端渲染的可分享报告 HTML 页（凭不可猜 id 公开访问，发朋友圈用；只含报告正文，不含敏感数据）。
 model ReportHtml {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   tenantId  String?
   userId    String?
   title     String
-  html      String   @db.Text
+  html      String    @db.Text
   revokedAt DateTime? // 注销隔离期内保留正文，但公开入口立即 404
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])
@@ -2114,6 +2114,160 @@ model ReferralAttribution {
   /// 放量后没有这条索引就得全表扫。复合 `(createdAt, clientIp)` 让窗口过滤与分组键都走索引。
   @@index([createdAt, clientIp])
   @@map("referral_attribution")
+}
+
+/// 代理（签约渠道合作方）。**运营在后台登记的 B2B 渠道**，不是小程序里的用户身份——
+/// 端上本期零暴露（没有「我的佣金 / 提现」），佣金一律线下打款、后台只回填凭证号。
+/// 一人最多一条（`userId` 唯一）：同一个自然人不该有两份计提口径。
+///
+/// status: pending 待审（登记流程留的位，本期运营登记即 active）| active 生效
+///       | suspended **暂停计提**（不是延后计提：暂停期间的订单永久不产生佣金行，
+///         详见 services/commission.ts 的 accrueForOrder 注释）| terminated 终止（终态，之后只读）
+model Distributor {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  tenantId     String
+  tierId       String?
+  status       String    @default("active")
+  displayName  String? // 对外名称（公司/个人）。PII → 注销 purge 时置 null
+  contactPhone String? // 联系手机（可与账号手机不同）。PII → 注销 purge 时置 null；响应一律 maskAuditPhone
+  remark       String?   @db.Text
+  approvedBy   String? // 操作者摘要（AdminActor：用户名/主密钥），与审计 payload.by 同源
+  approvedAt   DateTime?
+  suspendedAt  DateTime?
+  terminatedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tier DistributorTier? @relation(fields: [tierId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tierId])
+  @@map("distributor")
+}
+
+/// 代理等级（**运营目录**）。与 `Plan` / `WenceTemplate` 同一「对外数据归运营」原则：
+/// **禁止 seed、空目录合法**，因此也**不进** `prisma/resetBusinessData.ts`（进了会在预发 seed 时
+/// 清掉运营录入的等级，连带 cascade 掉规则）。等级本身不带比例，比例在 DistributionRule 上。
+model DistributorTier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sort      Int      @default(0)
+  enabled   Boolean  @default(true)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  distributors Distributor[]
+  rules        DistributionRule[]
+
+  @@map("distributor_tier")
+}
+
+/// 分销比例：等级 × 层级(1..3) × 商品类型(plan|sku|all)。`rateBp` 万分比 0..10000。
+///
+/// 三条口径：① **精确 itemType 优先于 all**（同层级同时配了 'plan' 与 'all' 时取 'plan'）；
+/// ② `enabled=false` 或 `rateBp=0` 都等于不计提——**空规则集 = 不计提**，代码里没有任何默认比例；
+/// ③ 层级上限 3 与 `Referral` 的物化路径同深（lv1/lv2/lv3），不是另定的规则。
+model DistributionRule {
+  id        String   @id @default(cuid())
+  tierId    String
+  level     Int
+  itemType  String
+  rateBp    Int
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  tier DistributorTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  @@unique([tierId, level, itemType])
+  @@map("distribution_rule")
+}
+
+/// 佣金流水（**不可变账本**：只追加，落行后只允许改 status / settlementId / reversedAt）。
+///
+/// kind: accrual 计提（amount>0）| clawback 追回（amount<0——**已结算后才退款**时另落一行，
+///   绝不去改那条已经打过款的 accrual：账面必须留下「当初结了多少、后来追回多少」两笔）。
+/// status: pending 冻结期内（`holdUntil` 未到）| confirmed 可结算 | settled 已随结算单打款
+///       | reversed 已冲销（**结算前**退款，原行作废、不进任何结算单）。
+///
+/// 幂等键 `@@unique([outTradeNo, beneficiaryUserId, level, kind])`：一笔订单对同一受益人、
+/// 同一层级、同一 kind 只有一行。outbox 重复处理、微信重复回调、scheduler 续扫都靠它兜住。
+/// （层级进 key 是因为理论上同一人不该同时是买家的 lv1 与 lv2——单推荐人 + 无环公理保证——
+/// 但幂等键不该依赖另一处的公理成立。）
+///
+/// `ruleSnapshotJson` 存计提时的等级名/规则 id/比例/冻结期：运营改规则，历史行不漂。
+model CommissionEntry {
+  id                String    @id @default(cuid())
+  tenantId          String // 买家所属租户（多租户行级隔离铁律；受益人可能在别的租户）
+  outTradeNo        String
+  orderId           String
+  buyerUserId       String
+  beneficiaryUserId String
+  distributorId     String
+  level             Int
+  itemType          String // plan | sku（'all' 只是规则维度，落行时写实际商品类型）
+  itemKey           String
+  baseAmount        Int // 订单实付（分）
+  rateBp            Int
+  amount            Int // 分；clawback 为负
+  kind              String    @default("accrual")
+  status            String    @default("pending")
+  holdUntil         DateTime
+  settlementId      String?
+  reversedAt        DateTime?
+  ruleSnapshotJson  Json? // { tierId, tierName, ruleId, rateBp, holdDays }
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([outTradeNo, beneficiaryUserId, level, kind])
+  @@index([distributorId, status, createdAt])
+  @@index([status, holdUntil])
+  @@index([settlementId])
+  @@index([buyerUserId])
+  @@map("commission_entry")
+}
+
+/// 结算单：draft 草稿 → approved 已核 → paid 已打款（必须回填 `paidRef` 线下凭证号）；
+/// void 作废（仅 draft/approved 可作废，作废即把关联流水的 `settlementId` 解绑放回待结池）。
+/// `totalAmount` 可为负（同期追回多于计提），这种单同样要走完流程——负数净额下期抵扣的凭据。
+model CommissionSettlement {
+  id            String    @id @default(cuid())
+  distributorId String
+  periodStart   DateTime
+  periodEnd     DateTime
+  entryCount    Int
+  totalAmount   Int // 分；可为负
+  status        String    @default("draft")
+  approvedBy    String?
+  approvedAt    DateTime?
+  paidBy        String?
+  paidAt        DateTime?
+  paidRef       String? // 线下打款凭证号（银行流水号等）。银行账户资料不入库，财务线下保管
+  note          String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([distributorId, status])
+  @@map("commission_settlement")
+}
+
+/// 佣金事件 outbox（与 `InviteActivationOutbox` 同一套路，理由见 services/activation.ts 顶部长注释）：
+/// 支付 / 退款**事务内** upsert 一行，事务提交后立即异步处理一次，失败留给 scheduler 续扫。
+/// 主键是 (outTradeNo, kind)：同一笔订单的 paid 与 refunded 是两件事，各自一行各自幂等。
+model CommissionOutbox {
+  outTradeNo    String
+  kind          String // paid | refunded
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?   @db.Text
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@id([outTradeNo, kind])
+  @@index([completedAt, nextAttemptAt])
+  @@map("commission_outbox")
 }
 
 /// D-3-7：生态工具注册表（数字人代播/短剧等外部小程序跳转位）。id = toolKey，可开方白名单 = enabled agents ∪ enabled EcoTool。

@@ -80,6 +80,34 @@ export async function downloadPaymentsCsv(q: { status?: string; days?: number; q
 }
 
 /**
+ * 邀请关系账本导出 CSV（仅 owner/master）——与 downloadPaymentsCsv 同一套路：`req()` 只处理
+ * JSON，CSV 必须走 blob。筛选参数与 `api.invites()` 保持一致，运营导出的就是屏幕上那一份。
+ */
+export async function downloadInvitesCsv(q: AdminInviteListQuery = {}): Promise<void> {
+  const p = new URLSearchParams();
+  if (q.q) p.set('q', q.q);
+  if (q.source) p.set('source', q.source);
+  if (q.status) p.set('status', q.status);
+  if (q.tenantId) p.set('tenantId', q.tenantId);
+  if (q.days) p.set('days', String(q.days));
+  const qs = p.toString();
+  const res = await fetch(`${BASE}/admin/invites/export${qs ? '?' + qs : ''}`, { headers: { 'x-admin-token': getAdminToken() } });
+  if (res.status === 401) throw unauthorizedError(res.status);
+  if (res.status === 403) throw forbiddenError((await res.json().catch(() => ({}))) as { error?: string; code?: string });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(e.error || `导出失败 HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = q.days ? `invites-${q.days}d.csv` : 'invites-all.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * 后台预览图地址 → 可直接喂给 <img> 的 src。
  * previewUrl 由服务端拼：配了 OSS 是签名直链（绝对地址，原样返回）；未配 OSS 时是
  * `/api/admin/...` 的取图路由，那条要管理鉴权，而 <img> 带不了 x-admin-token ——
@@ -219,6 +247,40 @@ export type {
 export type AdminReferralRiskMemberView = AdminReferralRiskMember;
 export type AdminReferralRiskGroupView = AdminReferralRiskGroup;
 export type AdminReferralRiskView = AdminReferralRisk;
+/* —— 运营后台「增长」组（2026-09-02）：邀请关系 / 邀请链 / 代理分销 ——
+   契约段在 shared/contracts.d.ts 末尾。三条口径别在前端重造：
+   ① 手机号服务端已按 maskAuditPhone 掩码，前端**直接显示**，不要再截、也不该期待完整号；
+   ② 金额一律「分」→ 显示走 format.tsx 的 fmtYuan；比例一律万分比 rateBp → 显示 rateBp/100 + '%'；
+   ③ 分页响应统一 { items, total, page, pageSize }。 */
+export type {
+  AdminPage, AdminPersonRef, AdminPlanActivation,
+  AdminInviteEdge, AdminInviteListQuery, AdminInviteList,
+  AdminInviteAttribution, AdminInviteAttributionQuery, AdminInviteAttributionList,
+  AdminManualBindRequest, AdminManualBindResult,
+  AdminChainAncestor, AdminChainLevelStat, AdminChainView,
+  DistributorStatus, DistributionItemType, CommissionKind, CommissionStatus, SettlementStatus,
+  AdminDistributionConfig, AdminDistributionRule, AdminDistributorTier,
+  AdminTierUpsertRequest, AdminTierRulesRequest,
+  AdminDistributorBrief, AdminDistributorItem, AdminDistributorListQuery, AdminDistributorList,
+  AdminDistributorCreateRequest, AdminDistributorPatchRequest, AdminDistributorDetail,
+  AdminCommissionEntry, AdminCommissionQuery, AdminCommissionList,
+  AdminSettlement, AdminSettlementQuery, AdminSettlementList,
+  AdminSettlementGenerateRequest, AdminSettlementGenerateResult,
+  AdminSettlementPaidRequest, AdminSettlementVoidRequest,
+  ReferralSource, ReferralBindingOutcome,
+} from '../../shared/contracts';
+import type {
+  AdminInviteList, AdminInviteListQuery, AdminInviteAttributionList, AdminInviteAttributionQuery,
+  AdminManualBindRequest, AdminManualBindResult, AdminChainView,
+  AdminDistributionConfig, AdminDistributorTier, AdminTierUpsertRequest, AdminTierRulesRequest,
+  AdminDistributorList, AdminDistributorListQuery, AdminDistributorCreateRequest,
+  AdminDistributorPatchRequest, AdminDistributorDetail, AdminDistributorItem,
+  AdminCommissionList, AdminCommissionQuery,
+  AdminSettlementList, AdminSettlementQuery, AdminSettlement,
+  AdminSettlementGenerateRequest, AdminSettlementGenerateResult,
+  AdminSettlementPaidRequest, AdminSettlementVoidRequest,
+} from '../../shared/contracts';
+
 // —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
 export type { AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
@@ -245,6 +307,23 @@ function referralQs(q: { days?: number; tenantId?: string; roots?: number }): st
   if (q.days) p.set('days', String(q.days));
   if (q.roots) p.set('roots', String(q.roots));
   if (q.tenantId) p.set('tenantId', q.tenantId);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+/**
+ * 「增长」组共用的查询串拼装：`undefined` / 空串 / 0 一律不进 URL。
+ * 为什么要跳空值：`?tenantId=` 到了服务端就是「筛选了一个 id 为空串的租户」，结果恒为空——
+ * 而界面上看起来像「这个租户没有数据」（业务空态与筛错参数不许混）。
+ * 入参声明成 `object` 而不是索引签名：契约里的 Query 接口是具名接口，没有索引签名，
+ * 声明成 `Record<string, …>` 会让每个调用点都得 as 一次。
+ */
+function growthQs(q: object): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q as Record<string, unknown>)) {
+    if (v === undefined || v === null || v === '' || v === 0) continue;
+    p.set(k, String(v));
+  }
   const s = p.toString();
   return s ? `?${s}` : '';
 }
@@ -398,6 +477,61 @@ export const api = {
   // 租户筛选项单独取：四个 tab 都要用，且不随天数窗口/当前租户变化 —— 绑在 overview 上会让
   // 每次切 tab、换窗口都重跑一遍全量计数，也让「筛选项读失败」被伪装成「没有租户」。
   referralTenants: () => req<AdminReferralTenantOption[]>('/admin/referral/tenants'),
+  /* ══════════════ 「增长」组（2026-09-02）══════════════
+     端点见 docs/[FABLE5]ADMIN_GROWTH_DISTRIBUTION_PLAN_2026-09-02.md §3.2 / §3.3。
+     空值不进 URL（`?tenantId=` 这种空筛选会被服务端当成「筛选了一个空租户」）——
+     统一用下面的 growthQs 拼，别在各视图里手拼 URLSearchParams。 */
+  // —— 邀请关系 ——
+  invites: (q: AdminInviteListQuery = {}) => req<AdminInviteList>(`/admin/invites${growthQs(q)}`),
+  inviteAttributions: (q: AdminInviteAttributionQuery = {}) =>
+    req<AdminInviteAttributionList>(`/admin/invites/attributions${growthQs(q)}`),
+  // 运营补绑（super）：只给**尚无推荐人**的用户建边。服务端沿用注册时那套判定，
+  // outcome 可能是 self / cycle / unknown_code / already_bound —— 那些都是 200 的业务结果，
+  // 不是错误，视图要把它们当「没建成，原因是…」展示，别当成失败 toast。
+  manualBindInvite: (body: AdminManualBindRequest) =>
+    req<AdminManualBindResult>('/admin/invites/manual-bind', 'POST', body),
+  inviteChain: (userId: string, q: { days?: number } = {}) =>
+    req<AdminChainView>(`/admin/invites/chain/${encodeURIComponent(userId)}${growthQs(q)}`),
+
+  // —— 代理分销：配置与等级 ——
+  // 总开关（distribution）与冻结期（distribution-hold）都是功能开关，本组只读取展示，
+  // 要改请去 #/flags —— 同一个数值两个入口必然漂移（见 FlagsView 是唯一写口）。
+  distributionConfig: () => req<AdminDistributionConfig>('/admin/distribution/config'),
+  distributionTiers: () => req<AdminDistributorTier[]>('/admin/distribution/tiers'),
+  /* 等级的三个写端点都按契约回**完整的 `AdminDistributorTier`**（含 rules / distributorCount，
+     服务端写完重读同一条成形函数）。2026-09-02 走查时服务端一度回 `{ok:true}` 之类的窄形状，
+     已按契约收口到服务端——契约是 SSOT，这里不按「实测响应」另声明一套。 */
+  createDistributionTier: (body: AdminTierUpsertRequest) =>
+    req<AdminDistributorTier>('/admin/distribution/tiers', 'POST', body),
+  updateDistributionTier: (id: string, body: Partial<AdminTierUpsertRequest>) =>
+    req<AdminDistributorTier>(`/admin/distribution/tiers/${id}`, 'PATCH', body),
+  // 仅在无代理挂靠时允许（服务端 409 TIER_IN_USE 兜底，文案原样透出给运营）。
+  deleteDistributionTier: (id: string) => req<{ ok: boolean }>(`/admin/distribution/tiers/${id}`, 'DELETE'),
+  // 整体替换该等级的比例矩阵：不在列表里的 (level,itemType) 组合视为删除。
+  saveDistributionRules: (tierId: string, body: AdminTierRulesRequest) =>
+    req<AdminDistributorTier>(`/admin/distribution/tiers/${tierId}/rules`, 'PUT', body),
+
+  // —— 代理名册 ——
+  distributors: (q: AdminDistributorListQuery = {}) => req<AdminDistributorList>(`/admin/distribution/distributors${growthQs(q)}`),
+  distributor: (id: string) => req<AdminDistributorDetail>(`/admin/distribution/distributors/${id}`),
+  createDistributor: (body: AdminDistributorCreateRequest) =>
+    req<AdminDistributorItem>('/admin/distribution/distributors', 'POST', body),
+  // 状态机：active↔suspended；terminated 是终态，之后只读（服务端挡）。
+  updateDistributor: (id: string, body: AdminDistributorPatchRequest) =>
+    req<AdminDistributorItem>(`/admin/distribution/distributors/${id}`, 'PATCH', body),
+
+  // —— 佣金与结算 ——
+  commissions: (q: AdminCommissionQuery = {}) => req<AdminCommissionList>(`/admin/distribution/commissions${growthQs(q)}`),
+  settlements: (q: AdminSettlementQuery = {}) => req<AdminSettlementList>(`/admin/distribution/settlements${growthQs(q)}`),
+  generateSettlements: (body: AdminSettlementGenerateRequest) =>
+    req<AdminSettlementGenerateResult>('/admin/distribution/settlements/generate', 'POST', body),
+  approveSettlement: (id: string) => req<AdminSettlement>(`/admin/distribution/settlements/${id}/approve`, 'POST', {}),
+  // paidRef = 线下打款凭证号，必填（服务端 400 兜底）。同事务把关联流水 confirmed→settled。
+  paySettlement: (id: string, body: AdminSettlementPaidRequest) =>
+    req<AdminSettlement>(`/admin/distribution/settlements/${id}/paid`, 'POST', body),
+  voidSettlement: (id: string, body: AdminSettlementVoidRequest) =>
+    req<AdminSettlement>(`/admin/distribution/settlements/${id}/void`, 'POST', body),
+
   // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
   ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
   createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),
