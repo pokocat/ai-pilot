@@ -1,0 +1,80 @@
+<view class="vd vd-preview {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">{{title}}</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="pv-loading">正在读取项目…</view>
+
+  <block wx:else>
+    <!-- 播放器：双 video 叠放 + 图片层 + 空白层，靠 on 切显示层 -->
+    <view class="pv-stage">
+      <view class="pv-player" bindtap="togglePlay">
+        <video id="pv-a" data-key="a" class="pv-layer {{layer === 'a' ? 'on' : ''}}" src="{{srcA}}" muted="{{true}}" object-fit="cover"
+          controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}" show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
+          bindtimeupdate="onVideoTime" binderror="onVideoError"></video>
+        <video id="pv-b" data-key="b" class="pv-layer {{layer === 'b' ? 'on' : ''}}" src="{{srcB}}" muted="{{true}}" object-fit="cover"
+          controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}" show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
+          bindtimeupdate="onVideoTime" binderror="onVideoError"></video>
+        <image wx:if="{{layer === 'img'}}" class="pv-layer on" src="{{imgSrc}}" mode="aspectFill"></image>
+        <view wx:if="{{layer === 'blank'}}" class="pv-layer on pv-blank {{cur.grain}}"><text wx:if="{{!cur.pending}}">{{cur.blankText}}</text></view>
+
+        <!-- 数字人段：口型动作出片时才生成，先用预览图顶着并说清楚 -->
+        <block wx:if="{{cur.pending}}">
+          <view class="pv-hatch"></view>
+          <view class="pv-phcard"><text class="pv-phk">{{cur.pendKind}}</text><text class="pv-pht">{{cur.roleName}} · 第 {{cur.no}} 段</text></view>
+        </block>
+
+        <view class="pv-clock">{{clockText}}</view>
+        <view wx:if="{{cur.caption}}" class="pv-cap"><text>{{cur.caption}}</text></view>
+        <view wx:if="{{!playing}}" class="pv-pbtn"><view class="pv-tri"></view></view>
+        <view wx:else class="pv-pbtn small"><view class="pv-bar"></view><view class="pv-bar"></view></view>
+      </view>
+      <view wx:if="{{!hasAudio}}" class="pv-noaudio">还没有配音，先按每段预计时长走</view>
+    </view>
+
+    <!-- 单轨时间线 -->
+    <view class="pv-tl">
+      <view class="pv-ruler"><text>0:00</text><view class="sp"></view><text>{{halfText}}</text><view class="sp"></view><text>{{totalText}}</text></view>
+      <scroll-view class="pv-trackwrap" scroll-x enhanced show-scrollbar="{{false}}" scroll-left="{{scrollLeft}}" scroll-with-animation="{{false}}">
+        <view class="pv-track">
+          <view wx:for="{{clips}}" wx:key="id" class="pv-clip {{item.on ? 'on' : ''}}" style="width:{{item.w}}px" data-i="{{item.i}}" bindtap="pickClip">
+            <view class="pv-thumb {{item.grain}}"></view>
+            <view wx:if="{{item.pending}}" class="pv-pend"></view>
+            <view class="pv-role {{item.role}}"></view>
+            <text class="pv-no">{{item.no}}</text>
+            <text class="pv-len">{{item.lenText}}</text>
+          </view>
+          <view class="pv-head" style="left:{{headPx}}px"></view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <!-- 当前段 -->
+    <view wx:if="{{cur}}" class="pv-segbar">
+      <view class="pv-segtop">
+        <view class="pv-tag {{cur.role}}"><view class="dot"></view><text>{{cur.roleName}}</text></view>
+        <text class="pv-segno">第 {{cur.no}} 段 · {{cur.rangeText}}</text>
+      </view>
+      <text class="pv-segtx">{{cur.text}}</text>
+      <view wx:if="{{cur.hint}}" class="pv-seghint">{{cur.hint}}</view>
+      <view wx:if="{{cur.editable}}" class="pv-ops">
+        <view wx:for="{{cur.ops}}" wx:key="key" class="pv-op {{item.primary ? 'primary' : ''}}" data-key="{{item.key}}" bindtap="onOp">{{item.label}}</view>
+      </view>
+      <view wx:if="{{cur.locked}}" class="pv-locked">模板固定片段，不可修改</view>
+    </view>
+
+    <view class="vd-footer-space"></view>
+  </block>
+
+  <view wx:if="{{!loading}}" class="vd-footer">
+    <view class="pv-fm"><text class="a">{{footA}}</text><text class="b">{{footB}}</text></view>
+    <view class="vd-btn pv-cta" bindtap="generate">立即生成</view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

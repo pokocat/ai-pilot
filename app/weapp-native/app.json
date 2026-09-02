@@ -70,7 +70,8 @@
         "assets/index",
         "avatar/index",
         "voices/index",
-        "gatea/index"
+        "gatea/index",
+        "preview/index"
       ]
     }
   ],

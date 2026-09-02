@@ -438,6 +438,11 @@ Page(withShare({
   },
 
   prev() { host.back(); },
+  /** 单轨时间线预览（方案 §3.3）。先把改动落盘，预览页读的是服务端项目。 */
+  openPreview() {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
+    this.flush(); host.go(`preview/index?projectId=${encodeURIComponent(this.data.projectId)}`);
+  },
   next() {
     if (!host.requireLogin(this, 'execute')) return;
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
