@@ -75,7 +75,7 @@
     </view>
   </scroll-view>
 
-  <view class="vd-footer"><view class="vd-btn ghost" bindtap="prev">上一步</view><view class="vd-btn" style="flex:1" bindtap="next">下一步 · 出片</view></view>
+  <view class="vd-footer"><view class="vd-btn ghost" bindtap="prev">上一步</view><view class="vd-btn ghost" bindtap="openPreview">预览成片</view><view class="vd-btn" style="flex:1" bindtap="next">下一步 · 出片</view></view>
 
   <view wx:if="{{rangeOpen}}" class="range-mask" catchtap="closeRange">
     <view class="range-sheet" catchtap="swallow">
