@@ -1,7 +1,7 @@
 // 运营后台外壳：鉴权 → 分组导航 → 分区渲染 → 详情面板 / 命令面板 / toast。
 //
 // 改版要点（旧版问题见 nav.ts 与 router.ts 顶部注释）：
-//   ① 22 个目的地不再平铺在横滚底栏里，而是按「看 vs 改」收敛成 7 个运营场景组 + 组内 segmented 分区；
+//   ① 目的地不再平铺在横滚底栏里，而是按「看 vs 改」收敛成 8 个运营场景组 + 组内 segmented 分区；
 //   ② 当前位置写进 hash，刷新 / 返回 / 分享链接都不丢现场；
 //   ③ ⌘K 命令面板可直达任意一屏，也能按姓名/手机号直接跳到某个用户；
 //   ④ 桌面端左栏常驻、内容进 max-width 容器，不再把 1440px 屏当成手机用。
@@ -23,6 +23,11 @@ import { UsersView, UserDetailPanel } from './views/users';
 import { PaymentsView, FunnelView, UsageView, TokenUsageView } from './views/revenue';
 // 邀请增长三视图单独成文件（手写 SVG 体量大，且 revenue.tsx 正被并行改动）——见该文件头注释。
 import { ReferralView } from './views/referral';
+/* 「增长」组的三个新页在 `src/growth/`（shadcn 模块）而不是 `src/views/`：那个目录是
+   Tailwind 作用域与 lint:ui 规则 1 的豁免边界，见 admin/DESIGN.md「shadcn 模块（增长组）」。 */
+import { InvitesView } from './growth/InvitesView';
+import { ChainView } from './growth/ChainView';
+import { DistributionView } from './growth/DistributionView';
 import { ObservabilityView, ModerationView, AuditView } from './views/observe';
 import { SessionsView, SessionDetailPanel } from './views/sessions';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
@@ -79,6 +84,9 @@ export default function App() {
     navigate(remembered && secs.some((s) => s.key === remembered) ? remembered : secs[0].key);
   };
   const openUser = useCallback((id: string) => navigate('users', id), []);
+  // 「增长」组的跨屏直达：邀请关系 / 代理名册 / 用户详情都往邀请链跳；空 id = 回到找人空态。
+  const openChain = useCallback((id: string) => navigate('chain', id || undefined), []);
+  const openDistributor = useCallback((id: string) => navigate('distribution', id || undefined), []);
   // 订单只带 userName（契约无 userId），所以按姓名带进用户搜索而不是伪造 id。
   const findUser = useCallback((name: string) => navigate('users', undefined, { params: { q: name } }), []);
   const go = useCallback((k: string) => navigate(k), []);
@@ -171,6 +179,10 @@ export default function App() {
               {key === 'payments' && <PaymentsView toast={showToast} isSuper={isOwner} onFindUser={findUser} />}
               {key === 'funnel' && <FunnelView />}
               {key === 'referral' && <ReferralView />}
+              {key === 'invites' && <InvitesView isSuper={isOwner} onOpenChain={openChain} toast={showToast} />}
+              {/* chain / distribution 的 route.id 语义不同：前者是 userId，后者是 distributorId */}
+              {key === 'chain' && <ChainView userId={route.id} onOpenChain={openChain} onOpenUser={openUser} onOpenDistributor={openDistributor} />}
+              {key === 'distribution' && <DistributionView isSuper={isOwner} distributorId={route.id} onOpenDistributor={openDistributor} onOpenChain={openChain} toast={showToast} />}
               {key === 'tokens' && <TokenUsageView onOpenUser={openUser} />}
               {key === 'sessions' && <SessionsView onOpen={(id) => navigate('sessions', id)} />}
               {key === 'trace' && <ObservabilityView />}
@@ -208,6 +220,7 @@ export default function App() {
               userId={detailUser}
               isOwner={isOwner}
               onClose={() => navigate('users')}
+              onOpenChain={openChain}
               toast={showToast}
             />
           )}
@@ -221,7 +234,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* 移动端底栏：只放组（7 个，flex 均分）→ 永远放得下，不再横滚 */}
+      {/* 移动端底栏：只放组（8 个，flex 均分）→ 永远放得下，不再横滚。
+          375px / 8 ≈ 46px 一格，组名保持 2-3 字（见 nav.ts 与 DESIGN.md） */}
       <nav className="botnav" aria-label="功能分组">
         {groups.map((g) => (
           <button

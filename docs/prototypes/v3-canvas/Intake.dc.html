@@ -1,0 +1,353 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF; --danger:#B94B3C; --dangerSoft:#FBEDEA;
+      --fixed:#9A8F84; --fixedSoft:#EDE7E0;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .ttl { flex:1; font-family:var(--serif); font-weight:600; font-size:17px; }
+    .navact { font-size:12px; color:var(--muted); }
+
+    /* 内容整块可滚（§3.7.4 ③）：22 段脚本展开后必然超屏 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
+    .body { padding:6px 20px 0; display:flex; flex-direction:column; gap:8px; }
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:13px; }
+
+    .src { display:flex; align-items:center; gap:12px; }
+    .thumb { width:56px; height:74px; border-radius:12px; flex:none; position:relative; overflow:hidden;
+      background-image:radial-gradient(circle at 68% 26%, rgba(255,226,178,.5) 0 16%, transparent 44%),
+        linear-gradient(152deg,#BE8659,#453D38); }
+    .srcb { flex:1; min-width:0; }
+    .srck { display:block; font-size:11px; color:var(--muted); margin-bottom:3px; }
+    .srct { display:block; font-size:15px; font-weight:600; line-height:1.4; font-family:var(--serif);
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* 主卡三件事实，与首页主推卡同源：成片时长 / 数字人出镜秒数 / 预计钻石 */
+    .facts { display:flex; align-items:center; gap:7px; margin-top:6px; font-size:11px;
+      color:var(--ink2); font-variant-numeric:tabular-nums; }
+    .facts i { width:1px; height:9px; background:var(--line); display:block; }
+
+    .h { font-family:var(--serif); font-size:18px; font-weight:600; }
+    .hs { font-size:12px; color:var(--ink3); line-height:1.65; margin-top:6px; }
+    .quote { font-size:13px; line-height:1.7; color:var(--ink); padding:9px 11px; margin-top:8px;
+      border-radius:12px; background:var(--sunken); border-left:3px solid var(--avLine); }
+
+    .kv { display:flex; gap:10px; padding:11px 0; border-bottom:1px solid var(--lineSoft); align-items:baseline; }
+    .kv:last-child { border-bottom:none; padding-bottom:2px; }
+    .k { width:44px; flex:none; font-size:12px; color:var(--muted); }
+    .v { flex:1; font-size:13.5px; line-height:1.6; font-weight:500; }
+    .v.wait { color:var(--avDeep); font-weight:600; }
+    .edit { flex:none; font-size:12px; color:var(--avDeep); }
+    .edit.lock { color:var(--faint); }
+
+    .ask { border-radius:16px; padding:13px 14px; border:1px solid var(--avLine); background:var(--avSoft); }
+    .ask.done { background:var(--okSoft); border-color:rgba(47,125,91,.22); }
+    .askrow { display:flex; align-items:flex-start; gap:10px; }
+    .askic { width:20px; height:20px; flex:none; margin-top:1px; }
+    .askb { flex:1; min-width:0; }
+    .askt { display:block; font-size:13px; font-weight:600; line-height:1.5; }
+    .asks { display:block; font-size:11.5px; color:var(--ink3); line-height:1.6; margin-top:4px; }
+    .askact { display:flex; gap:8px; margin-top:10px; }
+    .ab { height:34px; padding:0 14px; border-radius:11px; display:flex; align-items:center;
+      justify-content:center; font-size:12.5px; font-weight:600; }
+    .ab.solid { background:var(--av); color:#FFF; }
+    .ab.ghost { background:rgba(255,255,255,.72); border:1px solid var(--line); color:var(--ink2); font-weight:500; }
+
+    /* 逐段确认：模板的 text 是「这一段讲什么」，hint 是「这里该放什么」（方案 §3.3） */
+    .sch { display:flex; align-items:center; gap:8px; }
+    .scht { flex:1; font-size:13.5px; font-weight:600; }
+    .scha { font-size:12px; color:var(--avDeep); font-weight:600; }
+    .scs { font-size:11.5px; color:var(--ink3); line-height:1.65; margin-top:7px; }
+    .seglist { max-height:238px; overflow-y:auto; margin-top:8px; padding-right:8px; }
+    .sg { padding:9px 0; border-bottom:1px solid var(--lineSoft); }
+    .sg:last-child { border-bottom:none; padding-bottom:0; }
+    .sgh { display:flex; align-items:center; gap:7px; }
+    .tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700;
+      padding:2px 7px; border-radius:5px; color:#FFF; flex:none; }
+    .tag.avatar { background:var(--av); }
+    .tag.broll { background:var(--br); }
+    .tag.tail { background:var(--fixed); }
+    .sgn { flex:1; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .sgedit { flex:none; font-size:11.5px; color:var(--avDeep); }
+    .sgt { font-size:12.5px; line-height:1.7; color:var(--ink2); margin-top:5px; }
+    .sghint { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--br);
+      background:var(--brSoft); border:1px solid var(--brLine); border-radius:9px;
+      padding:5px 8px; margin-top:6px; }
+    .sghint svg { flex:none; }
+
+    .note { font-size:11.5px; color:var(--muted); line-height:1.7; padding:0 2px 4px; }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:12px; font-weight:600; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 18px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+    .cta.off { opacity:.45; box-shadow:none; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">确认脚本</div>
+  </div>
+
+  <div class="page">
+  <div class="body">
+    <div class="card">
+      <div class="src">
+        <div class="thumb"></div>
+        <div class="srcb">
+          <span class="srck">已选模板</span>
+          <span class="srct">为实体发声</span>
+          <div class="facts">
+            <span>成片 2:43</span><i></i>
+            <span>数字人出镜 32 秒</span><i></i>
+            <span>约 35 钻石</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="h">脚本已经写好了</div>
+      <div class="hs">你说的这句话：</div>
+      <div class="quote">我在学院路巷口开了十二年修鞋铺，想让街坊知道这家店还在。</div>
+      <div class="hs">模板定死了 22 段的顺序、时长和角色，AI 只在里面写每一段说什么。往下逐段看一遍，不对就单段改。</div>
+    </div>
+
+    <div class="card">
+      <div class="h">这条片子讲的是谁</div>
+      <div class="hs">下面几项从你那句话里提取，不对就点右边改。</div>
+      <div style="margin-top:8px">
+        <div class="kv"><span class="k">主体</span><span class="v">巷口修鞋铺 · 学院路</span><span class="edit">改</span></div>
+        <div class="kv"><span class="k">目标</span><span class="v">让街坊知道这家店还在开</span><span class="edit">改</span></div>
+        <div class="kv"><span class="k">受众</span><span class="v">附近居民、老顾客</span><span class="edit">改</span></div>
+        <div class="kv"><span class="k">时长</span><span class="v">2:43 · 模板固定</span><span class="edit lock">不可改</span></div>
+        <div class="kv"><span class="k">称呼</span><span class="v {{ nameCls }}">{{ nameText }}</span><span class="edit">改</span></div>
+      </div>
+    </div>
+
+    <sc-if value="{{ askOpen }}" hint-placeholder-val="{{ true }}">
+      <div class="ask">
+        <div class="askrow">
+          <span class="askic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></svg>
+          </span>
+          <span class="askb">
+            <span class="askt">片子里怎么称呼你？</span>
+            <span class="asks">第 1、7、13、21 段是你的数字人出镜，这个称呼会念出来也会上字幕。AI 不替你猜。</span>
+          </span>
+        </div>
+        <div class="askact">
+          <div class="ab solid" onClick="{{ pickOwner }}">称「张姐」</div>
+          <div class="ab ghost" onClick="{{ pickShop }}">只说店名</div>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ askDone }}" hint-placeholder-val="{{ false }}">
+      <div class="ask done">
+        <div class="askrow">
+          <span class="askic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F7D5B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          </span>
+          <span class="askb">
+            <span class="askt">已按{{ nameText }}</span>
+            <span class="asks">数字人出镜的 4 段已经改过来了，字幕跟着走。</span>
+          </span>
+        </div>
+      </div>
+    </sc-if>
+
+    <div class="card">
+      <div class="sch">
+        <span class="scht">逐段脚本 · 22 段</span>
+        <span class="scha" onClick="{{ toggleList }}">{{ listLabel }}</span>
+      </div>
+      <sc-if value="{{ listClosed }}" hint-placeholder-val="{{ false }}">
+        <div class="scs">数字人出镜 4 段共 32 秒，配画面 17 段共 121 秒，结尾固定段 10 秒。配画面那 17 段模板已经写好「这里该放什么」，下一步照着传素材就行。</div>
+      </sc-if>
+      <sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}">
+        <div class="seglist">
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+            <div class="sg">
+              <div class="sgh">
+                <span class="tag {{ r.role }}">{{ r.roleName }}</span>
+                <span class="sgn">第 {{ r.no }} 段 · {{ r.sec }} 秒</span>
+                <span class="sgedit">{{ r.action }}</span>
+              </div>
+              <div class="sgt">{{ r.text }}</div>
+              <sc-if value="{{ r.hasHint }}" hint-placeholder-val="{{ true }}">
+                <div class="sghint">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#326B86" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 4 3 3-2 4 3"/></svg>
+                  {{ r.hint }}
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <div class="note">段数、顺序和每段多长由模板定，改不了。要换结构就换一套模板。</div>
+  </div>
+  </div>
+
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ footA }}</span>
+      <span class="b">{{ footB }}</span>
+    </div>
+    <div class="cta {{ ctaCls }}">开始制作</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { name: '', listOpen: true };
+  }
+
+  /**
+   * ct_shiti《为实体发声》全片 22 段，取自 catalog.js 运行时真值。
+   *
+   * `text` = 这一段讲什么，`hint` = 这里该放什么 —— 两个字段都是模板自带的，
+   * 方案 §3.3 要求把它们露到用户面前，之前的原型只用了 text。
+   *
+   * ⚠️ 模板的 `variables`（shopName / street / years / ownerName）在正文里**没有占位符**，
+   * 端上也没有任何替换逻辑（template/index.js 只读 scriptSkeleton.segments）。
+   * 所以这一屏不能做成「改一个变量全片同步」——那是还不存在的能力。
+   */
+  segs() {
+    return [
+      { no:  1, role: 'avatar', sec:  6,
+        text: '百分之九十的实体店在边缘挣扎，但有的店却逆势生长。' },
+      { no:  2, role: 'broll', sec: 11,
+        text: '我们走遍全国，发现那些活得好的老板：要么凌晨四点还在揉面，只为一口让人惦记的老味道；',
+        hint: '这里放：清晨备货或街景空镜' },
+      { no:  3, role: 'broll', sec:  7,
+        text: '要么对着手机一遍遍练习，把冰冷的屏幕捂热成新的门店。',
+        hint: '这里放：店主对着手机练习' },
+      { no:  4, role: 'broll', sec:  4,
+        text: '都说实体生意难做，这话不假。' },
+      { no:  5, role: 'broll', sec:  5,
+        text: '电商自媒体的洪流，卷走了太多熟悉的身影。',
+        hint: '这里放：冷清的街道或空店面' },
+      { no:  6, role: 'broll', sec:  8,
+        text: '但绝处，总能逢生，这些滚烫的人生，这些城市的烟火气，不该沉默！' },
+      { no:  7, role: 'avatar', sec:  9,
+        text: '我们团队发起百位实体创业者计划，想用镜头，把那些滚烫的人生，讲给世界听。' },
+      { no:  8, role: 'broll', sec:  8,
+        text: '记录下平凡岗位上的不凡，每一家凌晨亮灯的小店背后，是咬牙的坚持；',
+        hint: '这里放：凌晨亮灯的小店' },
+      { no:  9, role: 'broll', sec:  5,
+        text: '每一个轰鸣的车间里，藏着对品质的死磕；',
+        hint: '这里放：车间机器运转特写' },
+      { no: 10, role: 'broll', sec:  7,
+        text: '每一个本土品牌的名字，都写满了从线下到线上的突围故事。',
+        hint: '这里放：本土品牌招牌' },
+      { no: 11, role: 'broll', sec:  5,
+        text: '这些故事很小，汇聚起来，就是刺破寒冬的光。',
+        hint: '这里放：微光/灯火的空镜' },
+      { no: 12, role: 'broll', sec:  8,
+        text: '这些故事就发生在你每天路过的街角，它们正在消失，像从未存在过。',
+        hint: '这里放：你每天路过的街角' },
+      { no: 13, role: 'avatar', sec:  7,
+        text: '但今天，你能让故事活下去，把那些滚烫的人生，讲给世界听。' },
+      { no: 14, role: 'broll', sec: 11,
+        text: '当你按下录制键，奇迹正在发生：你拯救了王阿姨的豆腐摊，视频播放量换来了新顾客的长队，',
+        hint: '这里放：顾客排队或摊位忙碌' },
+      { no: 15, role: 'broll', sec:  6,
+        text: '你点燃了张叔眼里的光，机械厂故事引来海外订单。',
+        hint: '这里放：车间或工人特写' },
+      { no: 16, role: 'broll', sec: 13,
+        text: '加入为实体发声计划，不是要你当网红，而是邀请你成为城市故事的守护者，实体经济的点灯人，平凡生活的英雄。' },
+      { no: 17, role: 'broll', sec:  8,
+        text: '用你的声音，替沉默的实体发声，让每部手机，都成为照亮街角的火把，',
+        hint: '这里放：手机拍摄的画面' },
+      { no: 18, role: 'broll', sec:  6,
+        text: '当十万支火把点燃，整座城市将不再有黑暗的角落。',
+        hint: '这里放：城市夜景灯火' },
+      { no: 19, role: 'broll', sec:  4,
+        text: '别等到熟悉的店铺消失才后悔。',
+        hint: '这里放：卷闸门紧闭的店面' },
+      { no: 20, role: 'broll', sec:  5,
+        text: '此刻，你指尖的温度，能融化冰封的招牌。',
+        hint: '这里放：招牌特写' },
+      { no: 21, role: 'avatar', sec: 10,
+        text: '这不是商业计划，而是一场人文运动，让技术有了心跳，让奋斗有了观众，让城市有了记忆！' },
+      { no: 22, role: 'tail', sec: 10,
+        text: '结尾：为实体发声计划' },
+    ];
+  }
+
+  renderVals() {
+    const roleName = { avatar: '数字人出镜', broll: '配画面', tail: '固定片段' };
+    const action = { avatar: '改文案', broll: '改文案', tail: '不可改' };
+    const done = !!this.state.name;
+    return {
+      nameText: this.state.name || '待确认',
+      nameCls: done ? '' : 'wait',
+      askOpen: !done,
+      askDone: done,
+      listOpen: this.state.listOpen,
+      listClosed: !this.state.listOpen,
+      listLabel: this.state.listOpen ? '收起' : '展开 22 段',
+      rows: this.segs().map((s) => ({
+        no: s.no,
+        sec: s.sec,
+        role: s.role,
+        roleName: roleName[s.role],
+        action: action[s.role],
+        text: s.text,
+        hasHint: !!s.hint,
+        hint: s.hint || '',
+      })),
+      footA: done ? '脚本已备好 · 22 段' : '还有 1 项要你确认',
+      footB: done ? '下一步给配画面的 17 段传素材' : '称呼会念出来也会上字幕，得你来定',
+      ctaCls: done ? '' : 'off',
+      toggleList: () => this.setState({ listOpen: !this.state.listOpen }),
+      pickOwner: () => this.setState({ name: '「张姐」' }),
+      pickShop: () => this.setState({ name: '店名「巷口修鞋铺」' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

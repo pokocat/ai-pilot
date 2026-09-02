@@ -33,6 +33,13 @@ Page(withShare({
   data: host.hostBaseData({
     workId: '',
     loading: true,
+    /** 读失败与「读到了但还播不了」是两件事，不能都落进同一个成功版式。 */
+    loadFailed: false,
+    loadError: '',
+    /** 作品确实处于完成态（done / published）。generating 不算。 */
+    done: false,
+    /** 这次失败重试是否有意义。401/403/404 重试多少次都一样。 */
+    canRetry: true,
     work: null,
     durationText: '',
     platforms: PLATFORMS,
@@ -62,19 +69,59 @@ Page(withShare({
 
   onLoad(options) {
     const workId = String((options && options.workId) || '');
-    if (!workId) { host.toast('缺少作品参数'); host.back(); return; }
+    if (!workId) { host.toast('打不开这条片子'); host.back(); return; }
     this.setData({ workId });
-    api.work(workId)
+    this.load();
+  },
+
+  /**
+   * 取作品详情。抽成方法是为了能重试 —— 这一页原来读失败就只剩一个 toast，
+   * toast 三秒后消失，用户对着一个空页面没有任何再试一次的办法。
+   */
+  load() {
+    this.setData({ loading: true, loadFailed: false, loadError: '', done: false, canRetry: true });
+    api.work(this.data.workId)
       .then((work) => this.setData({
         loading: false,
+        loadFailed: false,
         work,
+        // 「读到了」不等于「出好了」：契约允许 status=generating（深链、从列表点进来
+        // 都可能撞上）。这一位决定页面说「已经成片」还是「还在生成」。
+        done: work.status === 'done' || work.status === 'published',
         durationText: model.formatDuration(work.durationSec),
       }))
       .catch((error) => {
-        this.setData({ loading: false });
-        host.toast(error && error.message ? error.message : '打开失败');
+        // 读失败时 work 仍是 null。以前这里只关掉 loading，页面就照着成功版式
+        // 渲染「生成完成 · 你的故事，已经成片」——把一次没读到说成了出片成功。
+        const status = Number(error && error.statusCode) || 0;
+        const code = String((error && error.code) || '');
+        const unauthorized = status === 401 || code === 'UNAUTHORIZED';
+        /* 401 不是一种，是三种（services/request.js 的 unauthorized() 就是为此挂的标）：
+             hadToken=false   游客没登录 —— 本页弹登录门是对的
+             authHandled=true 带 token 的 401，全局 onAuthLost 已经清态 + 提示 + 准备 reLaunch，
+                              本页再弹一个登录浮层就是第二次打扰
+             staleAuth=true   旧请求晚到，用户可能**已经重新登录**了 —— 这时弹登录门
+                              等于把一个登录好的会话盖住
+           见 AGENTS §0.7 的全局铁律。只有第一种归本页管。 */
+        const globallyHandled = Boolean(error && (error.authHandled || error.staleAuth));
+        const guestNeedsLogin = unauthorized && !globallyHandled && !(error && error.hadToken);
+        this.setData({
+          loading: false,
+          loadFailed: true,
+          loadError: (error && error.message) ? error.message : '',
+          showLogin: guestNeedsLogin ? true : this.data.showLogin,
+          // 401/403/404 重试多少次都一样；只有网络与 5xx 这类真可能好转的才给重试。
+          canRetry: !unauthorized && status !== 404 && status !== 403,
+          done: false,
+          work: null,
+        });
       });
   },
+
+  retryLoad() { this.load(); },
+
+  /** 这条片子打不开时的出路。403/404 重试没意义，但用户总得能去别处。 */
+  goWorks() { wx.redirectTo({ url: `${host.ROOT}/works/index` }); },
 
   /**
    * 保存到相册。
@@ -83,7 +130,9 @@ Page(withShare({
    * 且用户拒绝过一次后只能引导去设置页开（wx.openSetting）。
    */
   saveToAlbum() {
-    if (!host.requireLogin(this, 'execute')) return;
+    // 没出好的片子没有可下载的成品，硬走下去只会拿到 CLIP_WORK_NOT_READY。
+    if (!this.data.done) { host.toast('这条片子还没出好'); return; }
+    if (!host.requireLogin(this, 'video')) return;
     const work = this.data.work;
     // 下载走军师同源接口，由 BFF 每次读取作品并刷新上游短签名；不能用详情里的旧 videoUrl
     // 做前置门槛，否则地址缺失/过期时会连下载请求都不发，用户只能看到“地址待接入”。
@@ -111,7 +160,7 @@ Page(withShare({
    * 于是「我设了封面，发出去却没有」（2026-08-18 反馈）。
    */
   saveCover() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     const work = this.data.work;
     if (!work || !work.thumbnailUrl) { host.toast('这条片子没有封面图'); return; }
     if (this.data.savingCover) return;
@@ -121,19 +170,19 @@ Page(withShare({
       success: (res) => {
         if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
           host.hideLoading(); this.setData({ savingCover: false });
-          host.toast('封面下载没有完成，请稍后重试');
+          host.toast('封面下载失败，请稍后重试');
           return;
         }
         wx.saveImageToPhotosAlbum({
           filePath: res.tempFilePath,
-          success: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面已存到相册', 'success'); },
+          success: () => { host.hideLoading(); this.setData({ savingCover: false }); host.toast('封面已保存到相册', 'success'); },
           fail: (error) => {
             host.hideLoading(); this.setData({ savingCover: false });
             const message = String(error && error.errMsg || '');
             // 与 saveToAlbum 同一套：拒过权限只能引导去设置页，不能只 toast 一句失败
             if (/auth|deny|denied|permission|writePhotosAlbum/i.test(message)) { this.openAlbumSetting(); return; }
             if (/cancel/i.test(message)) return;
-            host.toast('封面写入相册失败，请检查手机存储空间');
+            host.toast('封面保存到相册失败，请检查手机存储空间');
           },
         });
       },
@@ -153,13 +202,13 @@ Page(withShare({
       success: (res) => {
         if (Number(res.statusCode) !== 200 || !res.tempFilePath) {
           host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
-          host.toast(Number(res.statusCode) === 401 ? '登录态已失效，请重新登录后保存' : '成片下载没有完成，请稍后重试');
+          host.toast(Number(res.statusCode) === 401 ? '登录态已失效，请重新登录' : '成片下载失败，请稍后重试');
           return;
         }
-        host.loading('写入相册');
+        host.loading('保存到相册');
         wx.saveVideoToPhotosAlbum({
           filePath: res.tempFilePath,
-          success: () => { host.hideLoading(); this.setData({ saving: false, saveProgress: 100 }); host.toast('已存到相册', 'success'); },
+          success: () => { host.hideLoading(); this.setData({ saving: false, saveProgress: 100 }); host.toast('已保存到相册', 'success'); },
           fail: (error) => {
             host.hideLoading();
             this.setData({ saving: false, saveProgress: 0 });
@@ -168,14 +217,14 @@ Page(withShare({
               this.openAlbumSetting();
               return;
             }
-            host.toast(/invalid video|format/i.test(message) ? '成片文件暂时无法识别，请联系运营' : '写入相册失败，请检查手机存储空间');
+            host.toast(/invalid video|format/i.test(message) ? '成片文件暂时无法识别，请联系运营' : '保存到相册失败，请检查手机存储空间');
           },
         });
       },
       fail: (error) => {
         host.hideLoading(); this.setData({ saving: false, saveProgress: 0 });
         const message = String(error && error.errMsg || '');
-        host.toast(/domain|合法域名/i.test(message) ? '下载域名配置未生效，请联系运营' : '成片下载失败，请检查网络后重试');
+        host.toast(/domain|合法域名/i.test(message) ? '视频下载还没配置好，请联系运营' : '成片下载失败，请检查网络后重试');
       },
     });
     if (task && typeof task.onProgressUpdate === 'function') task.onProgressUpdate((event) => {
@@ -184,17 +233,18 @@ Page(withShare({
   },
 
   publish(event) {
+    if (!this.data.done) { host.toast('这条片子还没出好'); return; }
     const key = String(event.currentTarget.dataset.key || '');
     const platform = PLATFORMS.find((item) => item.key === key);
     // 上游未接入时直接说清楚，不走确认框也不打接口（见 PUBLISH_READY 注释）。
-    if (!PUBLISH_READY) { host.toast('平台代发还在接入，先保存到相册自己发'); return; }
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!PUBLISH_READY) { host.toast('还不能帮你发到平台，先保存到相册自己发'); return; }
+    if (!host.requireLogin(this, 'video')) return;
     if (!platform || this.data.publishing) return;
     host.confirm({
       title: `发布到${platform.label}`,
       content: this.data.work && this.data.work.aiWatermark
         ? '成片会保留你已开启的「AI 生成」水印，并提交到对应平台。确定继续吗？'
-        : '将把这条成片提交到对应平台。确定继续吗？',
+        : '这条成片会提交到对应平台。确定继续吗？',
       confirmText: '确认发布',
     }).then((ok) => {
       if (!ok) return;
@@ -219,5 +269,5 @@ Page(withShare({
 
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); },
+  loggedIn() { this.setData({ showLogin: false }); this.load(); },
 }));

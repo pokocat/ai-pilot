@@ -37,7 +37,7 @@ function decorate(voice) {
     sourceText: dedicated ? '专属录制' : '视频原声',
     sourceDesc: dedicated
       ? '你单独录制的音色，出片时优先使用这一版'
-      : '从形象视频里提取的基础音色，补录后会更稳',
+      : '从形象视频里提取的基础音色，补录后会更稳定',
     completedText: status === 'ready' ? formatCompletedAt(voice && voice.trainedText) : '',
     actionText: status === 'training' ? '训练中' : status === 'failed' ? '重新录制' : '重录提升',
   });
@@ -110,7 +110,7 @@ Page(withShare({
   openPreview(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const voice = this.data.voices.find((item) => item.id === id);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (!voice || !voice.ready) { host.toast('这条声音还没训练好'); return; }
     host.setOverlay(true, 'video-voice-preview');
     this.setData({
@@ -131,13 +131,13 @@ Page(withShare({
   retrain(event) {
     const id = String(event.currentTarget.dataset.id || '');
     const voice = this.data.voices.find((item) => item.id === id);
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (voice && voice.training) { host.toast(`这条声音正在训练 ${voice.progress}%`); return; }
     host.go(`clone/index?mode=voice&recapture=1&voiceId=${encodeURIComponent(id)}`);
   },
 
   startVoice() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('clone/index?mode=voice');
   },
 

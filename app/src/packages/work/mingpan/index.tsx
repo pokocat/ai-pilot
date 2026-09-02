@@ -6,6 +6,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import BaseSheet from '../../../components/Sheet';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
+import { FORTUNE_DISCLAIMER_FULL } from '../../../data/constants';
 import { api, type MingpanReport, type MpPalace, type WuxingKey, type HuaKey } from '../../../services/api';
 import { navTo } from '../../../services/nav';
 import { DEFAULT_BIRTH_TIME, birthTimeParts, birthTimeValue } from '../../../data/shichen';
@@ -237,7 +238,7 @@ export default function MingpanReportPage() {
         ) : null}
 
         {/* 报告视图由服务端 disclaimer 兜底；其余状态给一条通用文化视角小字 */}
-        {!report ? <Text className="mp-copyright">命理内容为文化视角的研究与参考，不构成决策依据；「人谋可以改命」。</Text> : null}
+        {!report ? <Text className="mp-copyright">{FORTUNE_DISCLAIMER_FULL}</Text> : null}
       </View>
 
       {/* 宫位全量弹层：主星 / 辅星 / 杂曜 / 大限 */}

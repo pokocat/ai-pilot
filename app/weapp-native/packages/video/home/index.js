@@ -22,8 +22,8 @@ const { withShare } = require('../../../services/share');
  * 只写「自动合成」等于把产品的核心机制藏起来了。
  */
 const STEPS = [
-  { key: 'script', name: '改文案', desc: '套模板改几句' },
-  { key: 'shots', name: '配画面', desc: '拍或选素材' },
+  { key: 'script', name: '改文案', desc: '套用模板改几句' },
+  { key: 'shots', name: '配画面', desc: '拍摄或选择素材' },
   { key: 'render', name: '出片', desc: '数字人开口' },
 ];
 
@@ -37,7 +37,7 @@ Page(withShare({
     avatarState: 'missing',
     guest: false,
     showLogin: false,
-    loginReason: 'execute',
+    loginReason: 'video',
   }),
 
   onLoad() { this.load(); },
@@ -126,22 +126,22 @@ Page(withShare({
   onBannerError() { this.setData({ bannerFailed: true }); },
 
   openClone() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('clone/index');
   },
 
   openWorks() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('works/index');
   },
 
   openAssets() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('assets/index');
   },
 
   openAvatar() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.go('avatar/index');
   },
 

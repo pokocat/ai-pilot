@@ -42,7 +42,7 @@ Page(withShare({
 
   onLoad(options) {
     const projectId = String((options && options.projectId) || '');
-    if (!projectId) { host.toast('缺少项目参数'); host.back(); return; }
+    if (!projectId) { host.toast('打不开这个项目'); host.back(); return; }
     this.setData({ projectId });
     this.load();
   },
@@ -68,7 +68,7 @@ Page(withShare({
       // 读失败 ≠ 用户没填过。必须报错并给重试，不能静默当成空封面盖掉已有配置
       this.setData({
         loading: false,
-        loadError: (error && error.message) ? error.message : '封面配置没读出来，请重试',
+        loadError: (error && error.message) ? error.message : '这次没读出来，请重试',
       });
     });
   },
@@ -141,11 +141,11 @@ Page(withShare({
   goAssets() { host.go(`/assets/index?projectId=${encodeURIComponent(this.data.projectId)}`); },
 
   save() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     if (this.data.loading || this.data.saving) return;
     const cover = this.currentCover();
     if (cover.enabled && !model.coverHasText(cover)) {
-      host.toast('至少填一个槽位，或关掉封面');
+      host.toast('至少填一项，或关掉封面');
       return;
     }
     this.setData({ saving: true });

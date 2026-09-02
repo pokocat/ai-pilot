@@ -51,7 +51,7 @@ export default function Reminders() {
         <View className="rm-hero">
           <Text className="rm-k">执 行 提 醒</Text>
           <Text className="rm-title serif">按执行节奏提醒</Text>
-          <Text className="rm-desc">提醒不是个人中心里的杂项，而是当前执行闭环的一部分。军令、复盘与周计划按节奏推送。</Text>
+          <Text className="rm-desc">军令、复盘和周计划按执行节奏推送。</Text>
         </View>
 
         {loading && !view ? (

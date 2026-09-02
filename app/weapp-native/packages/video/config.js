@@ -8,10 +8,11 @@
 
 let buildEnv = { APP_MODE: 'mock' };
 try {
-  // 源码目录没有 env.js；原生构建器会在 dist-native/config/env.js 写入真实构建模式。
-  // Node 纯函数测试直接 require 源码时走 catch，稳定回到 mock。
+  // 源码里 `config/env.js` 是有的（默认 mock），构建器会在产物里用真实构建模式覆盖它。
+  // catch 只是兜底：抽成插件/独立小程序后目录结构可能变，读不到就稳定回落 mock，
+  // 绝不能因为读不到配置而让分包整个起不来。
   buildEnv = require('../../config/env');
-} catch (_) { /* source-mode test */ }
+} catch (_) { /* 读不到就用上面的 mock 默认值 */ }
 
 const BACKEND_MODE = buildEnv.APP_MODE === 'server' ? 'bff' : 'mock';
 

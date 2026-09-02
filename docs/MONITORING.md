@@ -47,8 +47,9 @@
 | 产出质量 | `gen_degraded_total{path}`（mock 兜底/工程语境替换）· `llm_output_truncated_total{provider,resolved}`（**resolved=continued 已自动续写救回 / given_up 交回用户**——告警与看板一律按 resolved 拆，混在一起会把「救回来了」画成事故） | `llm/gateway.ts` 各 fallback 分支 / `completionGuard.ts` |
 | 对话交互质量 | `chat_first_token_seconds`（用户发送/Job 接单→首字）· `chat_provider_first_token_seconds`（provider 建流→首字）· `chat_stream_stall_total{provider,phase,had_text}`（是否已有可见正文）· `chat_nonstream_total{reason}` · `chat_partial_kept_total{provider,cause}` · `chat_asks_recovered_total{outcome}` | provider 流式循环 / gateway / GenerationJob worker |
 | 持久生成 | `chat_generation_total{result}` · `chat_generation_duration_seconds{phase=queue\|provider\|finalize\|job}` · `chat_generation_recovered_total` · `chat_usage_estimated_total{provider}` | `services/generationJobs.ts` 终态与租约接管；区分排队慢/provider 慢/收尾慢及估算结算 |
-| 业务事件 | `user_registrations_total{channel}` · `user_registrations_72h` · `user_last_registration_timestamp_seconds` · `moderation_checks_total{ref,verdict}` · `credits_flow_total{direction,reason}` · `plan_gate_blocked_total{state}` | 注册 counter 供渠道趋势；72h 数量与最后注册时间为抓取时查库的告警事实（60s 缓存）；其余见 `routes/auth.ts` / `moderation.ts` / `credits.ts` / `app.ts` 禁写闸 |
-| 支付 | `pay_orders_created_total` · `pay_orders_applied_total{type}` · `pay_amount_cny_total` · `pay_refunds_total` · `pay_sweep_*` · `pay_stuck_paid_unapplied`（抓取时查库,60s 缓存） | `services/wechatPay.ts` |
+| 业务事件 | `user_registrations_total{channel}` · `user_registrations_72h` · `user_last_registration_timestamp_seconds` · `monitor_public_launch_enabled` · `moderation_checks_total{ref,verdict}` · `credits_flow_total{direction,reason}` · `plan_gate_blocked_total{state}` | 注册 counter 供渠道趋势；72h 数量与最后注册时间为抓取时查库的事实（60s 缓存），只有运营后台开启「正式开放增长监控」后才用零注册告警；其余见 `routes/auth.ts` / `moderation.ts` / `credits.ts` / `app.ts` 禁写闸 |
+| 定时任务 | `scheduler_job_runs_total{job,result}` · `scheduler_job_{interval_seconds,enabled,health_anchor_timestamp_seconds,last_success_timestamp_seconds,last_failure_timestamp_seconds,last_duration_seconds,in_flight}{job}` | `services/scheduler.ts`；健康锚点初始化为任务注册时间、成功后更新，避免新进程首轮尚未到期即误报 |
+| 支付 | `pay_orders_created_total` · `pay_orders_applied_total{type}` · `pay_amount_cny_total` · `pay_refunds_total` · `pay_sweep_*` · `pay_stuck_{paid_unapplied,created_stale}`（抓取时查库,60s 缓存） | `services/wechatPay.ts`；支付对账延迟只有确有待处理订单时才作为支付告警，空订单期由通用任务健康告警覆盖 |
 | 告警配套 | `alert_config{key}`（阈值运行值,后台「功能开关」页可调）· `alerts_forwarded_total{outcome}`（飞书转发成败） | `services/alertConfig.ts` / `routes/alerts.ts` |
 | DB 池 | `prisma_pool_connections_{busy,idle,open}` | Prisma metrics 预览特性 |
 
@@ -126,13 +127,13 @@ UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 
 | 规则文件 | 覆盖 | 关键线 |
 |---|---|---|
-| `system.rules.yml`（12 条） | 主机 CPU/内存/磁盘/文件句柄、PG 连接/死锁/长事务、监控 target 离线 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75%；死锁 >0 即 critical |
+| `system.rules.yml`（13 条） | 主机 CPU/内存/磁盘/文件句柄、PG 连接/死锁/长事务、通用定时任务停滞、监控 target 离线 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75%；死锁 >0 即 critical；任务超过 `max(3 个周期, 15 分钟)` 未成功才 warning |
 | `api.rules.yml`（10 条） | 服务/探活挂、TLS 证书 14 天到期、用户接口 P95/5xx、429 激增、过载闸、主线程、内存 | 用户接口 15m P95 >800ms 持续 10m 预警 / >2s 持续 5m 严重；5xx≥1% 持续 5m；两类均要求 15m 样本≥20，后台可调 |
 | `llm.rules.yml` · `junshi-llm` 组 | 上游 429/调用错误率/调用 P95、**按错误类型分布**（鉴权/上下文超限/内容策略/网络过载等，见 `llm/errorClassify.ts`）、队列拒绝与等待、长冷却、按端点探活、Token 日预算 70%/90%/**100%**、漏账、降级 | 定时探活只覆盖在线 route：文本走 chat 协议，embedding/rerank 走各自协议；失败精确到 endpoint×purpose×kind，持续 25m 才触发并保留恢复态 15m；其余阈值同规则文件 |
 | `llm.rules.yml` · `junshi-chat` 组 | **对话交互质量 + 持久任务**：未写完、续写、输出中断、首字、残文保全、对话生成失败率/异常接管 | 失败率 >10% 且 15m 样本≥5；异常接管 >0 即 warning；估算结算仅进看板，不作为告警 |
-| `business.rules.yml`（8 条） | 已付未发放（资损）、sweep 失败/停跑、退款激增、审核拦截、72h 零注册、创作失败率与模板回退 | 已付未发放 >10 分钟 = critical；sweep 15m 未跑 = critical；72h 零注册直接读数据库事实而非进程 counter；创作失败率 >20% 且样本≥5 |
+| `business.rules.yml`（8 条） | 已付未发放（资损）、对账失败/待处理订单延迟、退款激增、审核拦截、正式开放后的 72h 零注册、创作失败率与模板回退 | 已付未发放 >10 分钟 = critical；只有确有待收敛订单且对账健康锚点超过 15m 才 warning；零注册直接读数据库事实且受「正式开放增长监控」闸门控制；创作失败率 >20% 且样本≥5 |
 
-四个文件当前合计 **57 条可处置规则**。告警只收需要人工判断或处置的异常；`chat_usage_estimated_total` 等正常兜底统计继续保留在 Grafana，但不再因为“发生过估算结算”单独通知。成对阈值使用统一 `signal` 标签：critical 触发时会压住同信号 warning；
+四个文件当前合计 **58 条可处置规则**。告警只收需要人工判断或处置的异常；`chat_usage_estimated_total` 等正常兜底统计继续保留在 Grafana，但不再因为“发生过估算结算”单独通知。支付告警必须由待收敛订单事实支撑；产品尚未正式开放时，「正式开放增长监控」保持默认关闭，零注册只进看板不通知，上线或开始投放后由 owner 在运营后台显式开启。成对阈值使用统一 `signal` 标签：critical 触发时会压住同信号 warning；
 没有 `signal` 的不同告警不会互相误抑制。
 
 API 指标口径（2026-08-06 生产重定基线）：

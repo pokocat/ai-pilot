@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#FCFAF6; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans); background:var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+
+    /* 品牌行只放左边：右上角 x296–383 / y48–88 是微信胶囊禁区（§3.7.4 ①），
+       参考稿放在那里的搜索图标在小程序里放不了。 */
+    .brand { height:46px; display:flex; align-items:center; padding:0 22px; }
+    .bt { font-family:var(--serif); font-size:22px; font-weight:700; letter-spacing:.02em; }
+    .bs { margin-left:10px; font-size:11.5px; color:var(--muted); }
+
+    /* 分类条按现有模板的类型推导，不写死一套分类。
+       模板变多时这里自动长出来；一套都没有的分类不会出现。 */
+    .catrow { height:42px; display:flex; align-items:center; gap:16px; padding:0 22px; }
+    .cats { flex:1; min-width:0; display:flex; align-items:center; gap:18px; overflow-x:auto; }
+    .cat { flex:none; position:relative; font-size:14px; color:var(--muted); padding-bottom:9px; white-space:nowrap; }
+    .cat.on { color:var(--ink); font-weight:700; }
+    .cat.on::after { content:''; position:absolute; left:0; right:0; bottom:2px; height:2.5px;
+      border-radius:2px; background:var(--av); }
+    .bell { flex:none; width:32px; height:32px; border-radius:11px; position:relative;
+      display:flex; align-items:center; justify-content:center; background:var(--sunken); }
+    .badge { position:absolute; right:-2px; top:-2px; min-width:15px; height:15px; padding:0 4px;
+      border-radius:999px; background:var(--av); border:1.5px solid var(--bg); color:#FFF;
+      font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+
+    /* 信息流按小红书的密度做（2026-08-26 定）：贴边窄缝 + 3:4 裁切封面 + 标题下置。
+       成片仍是 9:16（config.js 的 OUTPUT 不变），信息流封面只是裁掉上下取中段构图，
+       点进模板/预览才看全幅 —— 小红书对竖版视频也是这么裁的。
+       §3.7.4 ③：真实滚动容器，卡片压到底栏下缘属于「有更多」的信号，不是压栏缺陷。 */
+    .feed { position:absolute; left:0; right:0; top:132px; bottom:84px; overflow-y:auto;
+      padding:2px 9px 14px; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:13px 7px; align-content:start; align-items:start; }
+
+    /* 列宽 = (390 − 9×2 − 7) / 2 = 182.5；3:4 由 aspect-ratio 自算（≈243）。
+       这几个数与 .feed 的 padding / gap 同源，改一个另一个跟着改。 */
+    .cov { aspect-ratio:3 / 4; border-radius:9px; overflow:hidden; position:relative;
+      background:#1E1B19; box-shadow:0 2px 8px rgba(74,48,32,.10); }
+    .shot { position:absolute; inset:0; }
+    .grain { position:absolute; inset:0;
+      background-image:repeating-linear-gradient(0deg, rgba(0,0,0,.05) 0 1px, transparent 1px 3px); }
+    .c1 { background-image:radial-gradient(circle at 68% 30%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
+    .c2 { background-image:radial-gradient(circle at 30% 66%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
+    .c3 { background-image:radial-gradient(circle at 56% 34%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
+    /* 分类标签在封面上：182px 的列宽放不下「标题 + 右侧标签」那种横排 */
+    .ktag { position:absolute; left:6px; top:6px; z-index:2; font-size:9px; font-weight:700;
+      color:#FFF; padding:2px 6px; border-radius:4px; background:rgba(20,14,11,.55); }
+    /* 时长并进播放角标一颗胶囊，去掉居中大播放钮和整条压暗 —— 封面留给画面 */
+    .dur { position:absolute; right:6px; bottom:6px; z-index:2; display:flex; align-items:center;
+      gap:4px; padding:2.5px 7px; border-radius:999px; background:rgba(20,14,11,.55);
+      font-size:10px; color:#FFF; font-weight:600; font-variant-numeric:tabular-nums; }
+    /* 没产出的模板不摆假封面：压灰 + 说清楚 */
+    .cov.soon .shot { filter:saturate(.32) brightness(.52); }
+    .soonlab { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2;
+      font-size:10.5px; font-weight:700; color:#FFF; letter-spacing:.08em;
+      background:rgba(20,14,11,.66); padding:4px 10px; border-radius:999px; white-space:nowrap; }
+
+    /* 标题 = 一句话（模板名｜卖点），夹两行 —— 小红书的卡片就是「封面 + 两行标题 + 一行轻元信息」 */
+    .cb { margin-top:7px; padding:0 1px; }
+    .cbt { font-size:13px; font-weight:700; line-height:1.42;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    /* 元信息一行：数字人出镜秒数 + 预计钻石（成片时长在封面角标上）。
+       catalog.js templateMeta() 就是为了这三个数才改成从 segments 推导的 —— 别写死常量。 */
+    .meta { display:flex; align-items:center; margin-top:6px; font-size:10.5px;
+      color:var(--ink3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .meta b { margin-left:auto; font-weight:700; color:var(--avDeep); }
+    .blocked { font-size:10.5px; color:var(--avDeep); line-height:1.55; margin-top:5px;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+    .empty { grid-column:1 / -1; padding:38px 8px; text-align:center;
+      font-size:12.5px; color:var(--muted); line-height:1.8; }
+
+    /* 底栏 §3.7.4 ②：10 + 40 + 34 = 84，与 .feed 的 bottom 同源 */
+    .tabbar { position:absolute; z-index:5; left:0; right:0; bottom:0; height:84px;
+      background:rgba(252,250,246,.97); border-top:1px solid var(--lineSoft);
+      box-shadow:0 -8px 26px rgba(74,48,32,.07); display:flex; align-items:flex-start; padding:10px 0 0; }
+    .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .tab span { font-size:10.5px; color:var(--faint); letter-spacing:.04em; }
+    .tab.on span { color:var(--av); font-weight:700; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="brand">
+    <span class="bt">快出片</span>
+    <span class="bs">{{ shelfCount }}</span>
+  </div>
+
+  <div class="catrow">
+    <div class="cats">
+      <sc-for list="{{ cats }}" as="c" hint-placeholder-count="3">
+        <span class="cat {{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}</span>
+      </sc-for>
+    </div>
+    <div class="bell" onClick="{{ openTodo }}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#494B4F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <span class="badge">3</span>
+    </div>
+  </div>
+
+  <div class="feed">
+    <sc-for list="{{ list }}" as="t" hint-placeholder-count="3">
+      <div class="card" onClick="{{ t.open }}">
+        <div class="cov {{ t.soonCls }}">
+          <div class="shot {{ t.cover }}"><div class="grain"></div></div>
+          <span class="ktag">{{ t.kind }}</span>
+          <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
+            <span class="dur">
+              <svg width="7" height="8" viewBox="0 0 7 8" fill="#FFF"><path d="M0 0l7 4-7 4z"/></svg>
+              {{ t.dur }}
+            </span>
+          </sc-if>
+          <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
+            <span class="soonlab">即将上线</span>
+          </sc-if>
+        </div>
+        <div class="cb">
+          <div class="cbt">{{ t.title }}</div>
+          <sc-if value="{{ t.ready }}" hint-placeholder-val="{{ true }}">
+            <div class="meta">
+              <span>数字人出镜 {{ t.avatarSec }} 秒</span>
+              <b>{{ t.credits }} 钻石</b>
+            </div>
+          </sc-if>
+          <sc-if value="{{ t.soon }}" hint-placeholder-val="{{ false }}">
+            <div class="blocked">{{ t.blocked }}</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-for>
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+      <div class="empty">这个分类下还没有模板。<br>模板由内容生产线逐套产出，不是配置项。</div>
+    </sc-if>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab on">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F06435" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span>创作</span>
+    </div>
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h4l2 2.5h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>资料库</span>
+    </div>
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+      <span>作品</span>
+    </div>
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      <span>我的</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { cat: '', todo: false };
+  }
+
+  /**
+   * 首发三套模板（方案 §0.3 / §3.1）。**只有第一套真实存在。**
+   *
+   * `为实体发声` 的时长 / 出镜秒数 / 钻石 / 段数取自 catalog.js 的
+   * listBuiltInTemplates() 运行时真值：163 秒、数字人 32 秒（第 1、7、13、21 段）、
+   * 35 钻石、22 段。文件里写死的 162 / 38 / 68 是设计稿残留，templateMeta() 会用
+   * segments 重算覆盖掉，**以运行时为准**。
+   *
+   * 另外两套按 §13.9 标注为什么还不存在，不摆假封面、不给假数字 ——
+   * 首页第一天的真实样子就是「三套里只有一套能点」，评审要看的正是这个。
+   * 信息流按模板变多之后的密度设计（小红书两列卡），今天的三张卡摆不满一屏，
+   * 这不是布局缺陷，是货架的真实库存。
+   */
+  templates() {
+    return [
+      { id: 'ct_shiti', name: '为实体发声', kind: '品牌故事', cover: 'c1', dur: '2:43', ready: true,
+        avatarSec: 32, credits: 35, segmentCount: 22,
+        hook: '纪实倡导片，凌晨亮灯的实体店主群像' },
+      { id: 'ct_qiye', name: '企业宣传片', kind: '品牌故事', cover: 'c3', dur: '', ready: false,
+        hook: '同一套骨架，讲企业的来历、产线和人',
+        blocked: '还在做。要先写好剧本骨架、备齐固定素材，再用真实门店的片子验收。' },
+      { id: 'ct_daihuo', name: '短视频带货', kind: '带货', cover: 'c2', dur: '', ready: false,
+        hook: '明星切片混剪，另一套子系统',
+        blocked: '还在做。明星切片的授权谈妥之前不会上线。' },
+    ];
+  }
+
+  renderVals() {
+    const all = this.templates();
+    // 分类条从现有模板的类型推导出来，**不写死一套分类**（2026-08-25 定）。
+    // 模板变多时自动长出新的一项；一套都没有的分类不会出现，也就不会出现
+    // 「五个分类筛一个模板」那种空架子。真接口上来后换成模板的分类字段即可。
+    const kinds = all.map((t) => t.kind).filter((k, i, xs) => xs.indexOf(k) === i);
+    const cur = this.state.cat;
+    const list = cur ? all.filter((t) => t.kind === cur) : all;
+    const usable = all.filter((t) => t.ready).length;
+
+    return {
+      shelfCount: '共 ' + all.length + ' 套 · ' + usable + ' 套可用',
+      isEmpty: list.length === 0,
+      cats: [{ key: '', label: '全部' }].concat(kinds.map((k) => ({ key: k, label: k }))).map((c) => ({
+        label: c.label,
+        cls: cur === c.key ? 'on' : '',
+        pick: () => this.setState({ cat: c.key }),
+      })),
+      list: list.map((t) => ({
+        // 标题下置成一句话：模板名｜一句卖点（小红书卡片没有独立的名称行 + 说明行）
+        title: t.name + '｜' + t.hook,
+        kind: t.kind, cover: t.cover, dur: t.dur,
+        avatarSec: t.avatarSec, credits: t.credits, segmentCount: t.segmentCount,
+        blocked: t.blocked || '',
+        ready: t.ready, soon: !t.ready, soonCls: t.ready ? '' : 'soon',
+        open: () => {},
+      })),
+      openTodo: () => this.setState({ todo: true }),
+    };
+  }
+}
+</script>
+</body>
+</html>

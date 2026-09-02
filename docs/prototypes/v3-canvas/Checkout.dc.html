@@ -1,0 +1,242 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .ttl { flex:1; font-family:var(--serif); font-weight:600; font-size:17px; }
+
+    /* 内容整块可滚（§3.7.4 ③）：消耗明细四行 + 风险披露必然超屏。
+       top/bottom 与导航行、底部操作栏（9 + 46 + 34 = 89）同源，不得各写各的。 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
+    .body { padding:6px 20px 0; display:flex; flex-direction:column; gap:6px; }
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:13px; }
+
+    .lede { font-family:var(--serif); font-size:18px; font-weight:600; line-height:1.4; }
+    .ledes { font-size:12px; color:var(--ink3); line-height:1.65; margin-top:7px; }
+
+    .meter { display:flex; height:14px; border-radius:5px; overflow:hidden; gap:1.5px; margin-top:11px; }
+    .m1 { background:var(--br); }
+    .m2 { background:var(--av); }
+    .m3 { background:var(--avSoft); background-image:repeating-linear-gradient(135deg, rgba(240,100,53,.55) 0 5px, rgba(240,100,53,.14) 5px 10px); }
+    .mleg { display:flex; gap:10px; margin-top:8px; }
+    .ml { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--ink3); }
+    .ml i { width:9px; height:9px; border-radius:2px; display:block; }
+
+    .rowh { font-size:12px; color:var(--muted); margin-bottom:2px; }
+    .li { display:flex; align-items:flex-start; gap:10px; padding:7px 0; border-bottom:1px solid var(--lineSoft); }
+    .li:last-child { border-bottom:none; padding-bottom:0; }
+    .lic { width:22px; height:22px; border-radius:7px; flex:none; display:flex; align-items:center; justify-content:center; }
+    .lic.ok { background:var(--okSoft); }
+    .lic.re { background:var(--avSoft); }
+    .lic.ph { background:#FFE6DA; }
+    .lib { flex:1; min-width:0; }
+    .lit { display:block; font-size:13.5px; font-weight:600; }
+    .lis { display:block; font-size:11.5px; color:var(--ink3); margin-top:4px; line-height:1.6; }
+    .liv { flex:none; font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+    .liv.free { color:var(--ok); }
+    .liv.paid { color:var(--avDeep); }
+
+    .buy { margin-top:10px; display:flex; align-items:center; gap:10px; padding:10px 13px;
+      border-radius:14px; border:1px solid var(--line); background:var(--bg); }
+    .buy.on { border-color:var(--av); background:#FFF; box-shadow:0 6px 16px rgba(240,100,53,.12); }
+    .box { width:18px; height:18px; border-radius:6px; border:2px solid var(--line); flex:none;
+      display:flex; align-items:center; justify-content:center; }
+    .buy.on .box { border-color:var(--av); background:var(--av); }
+    .box svg { display:none; }
+    .buy.on .box svg, .ack.on .box svg { display:block; }
+    .buyb { flex:1; min-width:0; }
+    .buyt { display:block; font-size:13px; font-weight:600; }
+    .buys { display:block; font-size:11.5px; color:var(--ink3); margin-top:3px; line-height:1.55; }
+
+    .warn { border:1px solid var(--avLine); background:var(--avSoft); border-radius:16px; padding:11px; }
+    .warnt { font-size:13px; font-weight:700; color:var(--avDeep); }
+    .warnl { margin:8px 0 0; padding:0; list-style:none; }
+    .warnl li { font-size:11.5px; line-height:1.55; color:var(--ink2); padding-left:14px; position:relative; }
+    .warnl li:before { content:""; position:absolute; left:2px; top:9px; width:4px; height:4px;
+      border-radius:50%; background:var(--av); }
+    .ack { display:flex; align-items:center; gap:10px; margin-top:10px; padding-top:10px;
+      border-top:1px dashed var(--avLine); }
+    .ackt { flex:1; font-size:12.5px; font-weight:600; line-height:1.5; }
+
+    .bind { font-size:10.5px; color:var(--muted); line-height:1.5; padding:0 2px; }
+    .bind b { font-weight:600; color:var(--ink3); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 20px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+    .cta.off { opacity:.45; box-shadow:none; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">确认生成</div>
+  </div>
+
+  <div class="page">
+  <div class="body">
+    <div class="card">
+      <div class="lede">2 分 43 秒中，137 秒已是成片效果</div>
+      <div class="ledes">仅剩 3 段数字人出镜共 26 秒待生成，费用只用在这几段。其余部分与你刚才看到的预览完全一致。</div>
+      <div class="meter">
+        <div class="m1" style="width:80.4%"></div>
+        <div class="m2" style="width:3.7%"></div>
+        <div class="m3" style="width:15.9%"></div>
+      </div>
+      <div class="mleg">
+        <span class="ml"><i style="background:#326B86"></i>实拍素材与固定片段 131 秒</span>
+        <span class="ml"><i style="background:#F06435"></i>已生成 6 秒</span>
+        <span class="ml"><i style="background:#FFD9C9"></i>待生成 26 秒</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="rowh">本次消耗</div>
+      <div class="li">
+        <span class="lic ok">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2F7D5B" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </span>
+        <span class="lib">
+          <span class="lit">画面、字幕、音乐、剪辑</span>
+          <span class="lis">实拍 17 段共 121 秒，加固定尾片 10 秒</span>
+        </span>
+        <span class="liv free">免费</span>
+      </div>
+      <div class="li">
+        <span class="lic re">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        </span>
+        <span class="lib">
+          <span class="lit">王老板数字人出镜 6 秒 · 第 1 段</span>
+          <span class="lis">上次已生成，本次不再扣费</span>
+        </span>
+        <span class="liv free">0 钻石</span>
+      </div>
+      <div class="li">
+        <span class="lic ph">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></svg>
+        </span>
+        <span class="lib">
+          <span class="lit">王老板数字人出镜 26 秒 · 第 7、13、21 段</span>
+          <span class="lis">本次生成这三段，失败不扣费</span>
+        </span>
+        <span class="liv paid">26 钻石</span>
+      </div>
+      <div class="li">
+        <span class="lic ph">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></svg>
+        </span>
+        <span class="lib">
+          <span class="lit">口播配音 2:33</span>
+          <span class="lis">进预览前已经全部生成，本次一并结算</span>
+        </span>
+        <span class="liv paid">3 钻石</span>
+      </div>
+
+      <div class="buy {{ buyCls }}" onClick="{{ toggleBuy }}">
+        <span class="box">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </span>
+        <span class="buyb">
+          <span class="buyt">先只生成第 7 段这 9 秒，确认后再导出整片</span>
+          <span class="buys">9 钻石。已生成的片段会原样用于成片，不重复扣费。</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="warn">
+      <div class="warnt">这 26 秒生成后可能与当前不同</div>
+      <ul class="warnl">
+        <li>口型、眨眼和肢体动作由数字人生成，与当前样片会有出入</li>
+        <li>出镜的还是你训练的那个形象和声音，不会换人</li>
+        <li>配音、字幕、时长、前后衔接不会变</li>
+      </ul>
+      <div class="ack {{ ackCls }}" onClick="{{ toggleAck }}">
+        <span class="box" style="{{ ackStyle }}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </span>
+        <span class="ackt">已了解这 26 秒尚未生成</span>
+      </div>
+    </div>
+
+    <div class="bind">以你刚才预览的版本为准。若之后修改了内容，需重新预览确认后才能生成。</div>
+  </div>
+  </div>
+
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ total }}</span>
+      <span class="b">{{ note }}</span>
+    </div>
+    <div class="cta {{ ctaCls }}">{{ ctaText }}</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { buy: false, ack: false };
+  }
+
+  renderVals() {
+    const ack = this.state.ack;
+    const buy = this.state.buy;
+    return {
+      buyCls: buy ? 'on' : '',
+      ackStyle: ack ? 'border-color:#F06435;background:#F06435' : '',
+      ackCls: ack ? 'on' : '',
+      // 整条 35 钻石 = 数字人 32 + 配音 3。第 1 段 6 钻上一屏已先行生成，
+      // 本次导出整片结算 26（数字人）+ 3（配音）= 29；只先生成第 7 段则单算 9。
+      total: buy ? '9 钻石' : '29 钻石',
+      note: buy ? '先生成这 9 秒，导出整片时不再扣费' : '余额 240，本次消耗 29',
+      ctaText: buy ? '仅生成这段' : '立即生成',
+      ctaCls: ack ? '' : 'off',
+      toggleBuy: () => this.setState({ buy: !this.state.buy }),
+      toggleAck: () => this.setState({ ack: !this.state.ack }),
+    };
+  }
+}
+</script>
+</body>
+</html>

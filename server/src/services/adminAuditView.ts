@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '../db.js';
+import { prisma, utcTimestamp } from '../db.js';
 import { isoSecond } from './audit.js';
 import type { AdminAuditItem, AdminAuditListView, AdminDateRange } from '../../../shared/contracts';
 
@@ -80,7 +80,9 @@ export async function adminAuditView(opts: {
   const page = pageNumber(opts.page, 1);
   const pageSize = pageNumber(opts.pageSize, 50, 200);
   const clauses: Prisma.Sql[] = [
-    Prisma.sql`a."createdAt" >= ${opts.from} AND a."createdAt" < ${opts.toExclusive}`,
+    // Prisma DateTime 列是 UTC naive；raw SQL 裸绑 Date 会按数据库会话时区偏移，
+    // 导致后台选「今天」却漏掉刚写入的日志（生产 +8h，本地测试 -7h）。
+    Prisma.sql`a."createdAt" >= ${utcTimestamp(opts.from)} AND a."createdAt" < ${utcTimestamp(opts.toExclusive)}`,
   ];
   // 历史 payload 不完全受契约约束；先验明纯数字再 cast，避免一条脏 statusCode
   // 让整页审计查询报 PostgreSQL invalid input syntax。

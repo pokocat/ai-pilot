@@ -1,0 +1,415 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --fixed:#9A8F84; --fixedInk:#6B6259; --fixedSoft:#EDE7E0;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .ttl { flex:1; min-width:0; font-family:var(--serif); font-weight:600; font-size:17px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .navact { font-size:12px; color:var(--muted); }
+
+    /* 真机是 scroll-view：导航以下整块可滚 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
+    .stage { padding:2px 20px 0; display:flex; flex-direction:column; align-items:center; }
+    .player { width:150px; height:266px; border-radius:16px; overflow:hidden; position:relative;
+      background:#2A2724; box-shadow:0 12px 30px rgba(69,54,44,.18); }
+    .vid { position:absolute; inset:0; }
+    .g-morning { background-image:radial-gradient(circle at 72% 18%, rgba(255,244,205,.85) 0 12%, transparent 34%), linear-gradient(145deg,#E8B679 0%,#C77A53 52%,#6D554B 100%); }
+    .g-street  { background-image:radial-gradient(circle at 78% 28%, rgba(244,214,178,.55) 0 12%, transparent 35%), linear-gradient(150deg,#C9A682 0%,#8A7565 54%,#4A4C4C 100%); }
+    .g-craft   { background-image:radial-gradient(circle at 22% 76%, rgba(229,179,121,.4) 0 16%, transparent 38%), linear-gradient(145deg,#9C7555 0%,#695044 56%,#2F3332 100%); }
+    .g-avatar  { background-image:radial-gradient(circle at 50% 34%, rgba(255,226,205,.9) 0 18%, transparent 46%), linear-gradient(160deg,#B9846A 0%,#7A5748 58%,#33302E 100%); }
+    .g-graphic { background:linear-gradient(160deg,#F4EFE7 0%,#E4DACB 100%); }
+    .g-tail    { background:linear-gradient(160deg,#5A544E 0%,#2B2A28 100%); }
+    .hatch { position:absolute; inset:0;
+      background-image:repeating-linear-gradient(135deg, rgba(20,16,14,.42) 0 9px, rgba(20,16,14,.16) 9px 18px); }
+    .phcard { position:absolute; left:12px; right:12px; top:50%; transform:translateY(-50%);
+      background:rgba(255,255,255,.94); border-radius:12px; padding:11px; text-align:center; }
+    .phcard .k { display:block; font-size:9.5px; font-weight:700; letter-spacing:.08em; color:var(--avDeep); margin-bottom:5px; }
+    .phcard .t { display:block; font-family:var(--serif); font-size:13px; font-weight:600; line-height:1.5; }
+    .tchip { position:absolute; left:9px; top:9px; padding:3px 8px; border-radius:999px;
+      background:rgba(36,30,26,.55); color:#FFF; font-size:10.5px; font-variant-numeric:tabular-nums; }
+    .badge { position:absolute; right:9px; top:9px; padding:3px 8px; border-radius:999px;
+      font-size:9.5px; font-weight:600; background:rgba(240,100,53,.92); color:#FFF; }
+    .cap { position:absolute; left:10px; right:10px; bottom:40px; text-align:center; }
+    .cap span { display:inline-block; background:rgba(20,17,15,.62); color:#FFF; font-size:11.5px;
+      line-height:1.5; padding:4px 8px; border-radius:7px; }
+    .pbtn { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
+      border-radius:50%; background:rgba(255,255,255,.92); display:flex; align-items:center; justify-content:center;
+      box-shadow:0 6px 20px rgba(0,0,0,.24); }
+    .pbtn.small { width:34px; height:34px; margin:-17px 0 0 -17px; background:rgba(255,255,255,.34); }
+
+    .band { width:350px; position:relative; margin:9px 0 0; }
+    .track { height:14px; border-radius:5px; overflow:hidden; display:flex; gap:1px; position:relative; }
+    .seg { height:14px; }
+    .seg.exact { background:var(--br); }
+    .seg.fixed { background:var(--fixed); }
+    .seg.avatar { background:var(--avSoft);
+      background-image:repeating-linear-gradient(135deg, rgba(240,100,53,.55) 0 5px, rgba(240,100,53,.14) 5px 10px); }
+    .seg.ready { background:var(--av); }
+    .seg.on { outline:2px solid var(--ink); outline-offset:1px; border-radius:3px; }
+    .head { position:absolute; top:-3px; width:2px; height:20px; background:var(--ink); border-radius:2px; }
+    .bandft { display:flex; align-items:baseline; gap:6px; margin-top:6px; }
+    .bandft .a { font-size:11.5px; font-weight:600; }
+    .bandft .b { flex:1; text-align:right; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:11px; }
+    .body { padding:9px 20px 0; display:flex; flex-direction:column; gap:8px; }
+
+    .dh { font-family:var(--serif); font-size:15px; font-weight:600; }
+    .dl { display:flex; align-items:flex-start; gap:9px; padding:5px 0; border-bottom:1px solid var(--lineSoft); }
+    .dl:last-child { border-bottom:none; padding-bottom:0; }
+    .di { width:16px; height:16px; border-radius:5px; flex:none; margin-top:1px;
+      display:flex; align-items:center; justify-content:center; }
+    .di.ok { background:var(--okSoft); }
+    .di.ph { background:#FFE0D0; }
+    .db { flex:1; min-width:0; }
+    .dt { display:block; font-size:12.5px; font-weight:600; line-height:1.5; }
+    .ds { display:block; font-size:11.5px; color:var(--ink3); margin-top:3px; line-height:1.6; }
+
+    .buyhead { display:flex; align-items:center; gap:8px; }
+    .buyheadt { flex:1; font-size:13px; font-weight:600; }
+    .buyheada { font-size:12px; color:var(--avDeep); font-weight:600; }
+    .pick { display:flex; align-items:center; gap:9px; padding:9px 0; border-bottom:1px solid var(--lineSoft); }
+    .pick:last-child { border-bottom:none; }
+    .box { width:17px; height:17px; border-radius:5px; border:2px solid var(--line); flex:none;
+      display:flex; align-items:center; justify-content:center; }
+    .box svg { display:none; }
+    .pick.on .box { border-color:var(--av); background:var(--av); }
+    .pick.on .box svg { display:block; }
+    .pickb { flex:1; min-width:0; }
+    .pickt { display:block; font-size:12.5px; font-weight:500; }
+    .picks { display:block; font-size:11px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+    .pickv { flex:none; font-size:12px; font-weight:600; color:var(--avDeep); font-variant-numeric:tabular-nums; }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:12px; font-weight:600; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 18px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">为实体发声 · 王记五金</div>
+  </div>
+
+  <div class="page">
+  <div class="stage">
+    <div class="player" onClick="{{ togglePlay }}">
+      <div class="vid {{ cur.grain }}"></div>
+      <sc-if value="{{ cur.ph }}" hint-placeholder-val="{{ true }}">
+        <div class="hatch"></div>
+        <div class="phcard">
+          <span class="k">{{ cur.phKind }}</span>
+          <span class="t">{{ cur.phTitle }}</span>
+        </div>
+        <div class="badge">待生成</div>
+      </sc-if>
+      <div class="tchip">{{ clock }}</div>
+      <sc-if value="{{ cur.hasCaption }}" hint-placeholder-val="{{ true }}">
+        <div class="cap"><span>{{ cur.caption }}</span></div>
+      </sc-if>
+      <sc-if value="{{ showPlay }}" hint-placeholder-val="{{ true }}">
+        <div class="pbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg></div>
+      </sc-if>
+      <sc-if value="{{ playing }}" hint-placeholder-val="{{ false }}">
+        <div class="pbtn small"><svg width="12" height="12" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></div>
+      </sc-if>
+    </div>
+
+    <div class="band">
+      <div class="track">
+        <sc-for list="{{ segs }}" as="s" hint-placeholder-count="22">
+          <div class="seg {{ s.cls }}" style="width:{{ s.pct }}%" onClick="{{ s.pick }}"></div>
+        </sc-for>
+      </div>
+      <div class="head" style="left:calc({{ headPct }}% - 1px)"></div>
+      <div class="bandft">
+        <span class="a">{{ cur.name }}</span>
+        <span class="b">{{ cur.range }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="card">
+      <div class="dh">本条视频的构成</div>
+      <div style="margin-top:6px">
+        <div class="dl">
+          <span class="di ok"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#2F7D5B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+          <span class="db">
+            <span class="dt">配音、字幕、时长、顺序</span>
+            <span class="ds">与成片一致，当前听到的即为最终配音。</span>
+          </span>
+        </div>
+        <div class="dl">
+          <span class="di ok"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#2F7D5B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+          <span class="db">
+            <span class="dt">已就绪 131 秒</span>
+            <span class="ds">你的实拍素材 17 段，加模板固定尾片 10 秒。</span>
+          </span>
+        </div>
+        <div class="dl">
+          <span class="di ph"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="3" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg></span>
+          <span class="db">
+            <span class="dt">数字人 32 秒 · 待生成</span>
+            <span class="ds">第 1、7、13、21 段。形象和声音是你的，待生成的只有口型和肢体动作。</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="buyhead">
+        <span class="buyheadt">按段先行生成</span>
+        <span class="buyheada" onClick="{{ toggleList }}">{{ listLabel }}</span>
+      </div>
+      <sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:6px; max-height:196px; overflow-y:auto">
+          <sc-for list="{{ picks }}" as="p" hint-placeholder-count="4">
+            <div class="pick {{ p.cls }}" onClick="{{ p.toggle }}">
+              <span class="box"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span class="pickb">
+                <span class="pickt">{{ p.name }}</span>
+                <span class="picks">{{ p.range }}</span>
+              </span>
+              <span class="pickv">{{ p.cost }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ listClosed }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:11.5px;color:#686A6F;line-height:1.65;margin-top:6px">
+          可先生成最在意的片段。已生成的片段会原样用于成片，不重复扣费。
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  </div>
+
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ footA }}</span>
+      <span class="b">{{ footB }}</span>
+    </div>
+    <div class="cta">{{ ctaText }}</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { t: 52, playing: false, listOpen: false, buy: {}, picked: '' };
+  }
+
+  componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+
+  tick() {
+    const next = this.state.t + 0.9;
+    if (next >= 163) { clearInterval(this.timer); this.timer = null; this.setState({ t: 163, playing: false }); }
+    else this.setState({ t: next });
+  }
+
+  // ct_shiti《为实体发声》全片 —— 22 段 / 163 秒 / 数字人 32 秒（第 1、7、13、21 段），
+  // 全部取自 catalog.js 的 listBuiltInTemplates() 运行时真值，不是文件里的硬编码常量。
+  // 没有「AI 空镜」这一类：T2V/I2V 已移出 P0（方案 §0.0、§4.4），石榴网关也没有这个能力。
+  segments() {
+    return [
+      { id: 's1', from:  0, to:  6, kind: 'avatar', no:  1, name: '第 1 段 · 数字人出镜', grain: 'g-avatar',
+        caption: '百分之九十的实体店在边缘挣扎',
+        text: '百分之九十的实体店在边缘挣扎，但有的店却逆势生长。',
+        phKind: '口型动作待生成', phTitle: '王老板 · 门店机位', cost: 6 },
+      { id: 's2', from:  6, to: 17, kind: 'exact', no:  2, name: '第 2 段 · 实拍画面', grain: 'g-morning',
+        caption: '我们走遍全国',
+        text: '我们走遍全国，发现那些活得好的老板：要么凌晨四点还在揉面，只为一口让人惦记的老味道；',
+        hint: '这里放：清晨备货或街景空镜' },
+      { id: 's3', from: 17, to: 24, kind: 'exact', no:  3, name: '第 3 段 · 实拍画面', grain: 'g-craft',
+        caption: '要么对着手机一遍遍练习',
+        text: '要么对着手机一遍遍练习，把冰冷的屏幕捂热成新的门店。',
+        hint: '这里放：店主对着手机练习' },
+      { id: 's4', from: 24, to: 28, kind: 'exact', no:  4, name: '第 4 段 · 实拍画面', grain: 'g-street',
+        caption: '都说实体生意难做',
+        text: '都说实体生意难做，这话不假。' },
+      { id: 's5', from: 28, to: 33, kind: 'exact', no:  5, name: '第 5 段 · 实拍画面', grain: 'g-street',
+        caption: '电商自媒体的洪流',
+        text: '电商自媒体的洪流，卷走了太多熟悉的身影。',
+        hint: '这里放：冷清的街道或空店面' },
+      { id: 's6', from: 33, to: 41, kind: 'exact', no:  6, name: '第 6 段 · 实拍画面', grain: 'g-street',
+        caption: '但绝处',
+        text: '但绝处，总能逢生，这些滚烫的人生，这些城市的烟火气，不该沉默！' },
+      { id: 's7', from: 41, to: 50, kind: 'avatar', no:  7, name: '第 7 段 · 数字人出镜', grain: 'g-avatar',
+        caption: '我们团队发起百位实体创业者计划',
+        text: '我们团队发起百位实体创业者计划，想用镜头，把那些滚烫的人生，讲给世界听。',
+        phKind: '口型动作待生成', phTitle: '王老板 · 门店机位', cost: 9 },
+      { id: 's8', from: 50, to: 58, kind: 'exact', no:  8, name: '第 8 段 · 实拍画面', grain: 'g-morning',
+        caption: '记录下平凡岗位上的不凡',
+        text: '记录下平凡岗位上的不凡，每一家凌晨亮灯的小店背后，是咬牙的坚持；',
+        hint: '这里放：凌晨亮灯的小店' },
+      { id: 's9', from: 58, to: 63, kind: 'exact', no:  9, name: '第 9 段 · 实拍画面', grain: 'g-craft',
+        caption: '每一个轰鸣的车间里',
+        text: '每一个轰鸣的车间里，藏着对品质的死磕；',
+        hint: '这里放：车间机器运转特写' },
+      { id: 's10', from: 63, to: 70, kind: 'exact', no: 10, name: '第 10 段 · 实拍画面', grain: 'g-street',
+        caption: '每一个本土品牌的名字',
+        text: '每一个本土品牌的名字，都写满了从线下到线上的突围故事。',
+        hint: '这里放：本土品牌招牌' },
+      { id: 's11', from: 70, to: 75, kind: 'exact', no: 11, name: '第 11 段 · 实拍画面', grain: 'g-morning',
+        caption: '这些故事很小',
+        text: '这些故事很小，汇聚起来，就是刺破寒冬的光。',
+        hint: '这里放：微光/灯火的空镜' },
+      { id: 's12', from: 75, to: 83, kind: 'exact', no: 12, name: '第 12 段 · 实拍画面', grain: 'g-street',
+        caption: '这些故事就发生在你每天路过的街角',
+        text: '这些故事就发生在你每天路过的街角，它们正在消失，像从未存在过。',
+        hint: '这里放：你每天路过的街角' },
+      { id: 's13', from: 83, to: 90, kind: 'avatar', no: 13, name: '第 13 段 · 数字人出镜', grain: 'g-avatar',
+        caption: '但今天',
+        text: '但今天，你能让故事活下去，把那些滚烫的人生，讲给世界听。',
+        phKind: '口型动作待生成', phTitle: '王老板 · 门店机位', cost: 7 },
+      { id: 's14', from: 90, to: 101, kind: 'exact', no: 14, name: '第 14 段 · 实拍画面', grain: 'g-street',
+        caption: '当你按下录制键',
+        text: '当你按下录制键，奇迹正在发生：你拯救了王阿姨的豆腐摊，视频播放量换来了新顾客的长队，',
+        hint: '这里放：顾客排队或摊位忙碌' },
+      { id: 's15', from: 101, to: 107, kind: 'exact', no: 15, name: '第 15 段 · 实拍画面', grain: 'g-craft',
+        caption: '你点燃了张叔眼里的光',
+        text: '你点燃了张叔眼里的光，机械厂故事引来海外订单。',
+        hint: '这里放：车间或工人特写' },
+      { id: 's16', from: 107, to: 120, kind: 'exact', no: 16, name: '第 16 段 · 实拍画面', grain: 'g-street',
+        caption: '加入为实体发声计划',
+        text: '加入为实体发声计划，不是要你当网红，而是邀请你成为城市故事的守护者，实体经济的点灯人，平凡生活的英雄。' },
+      { id: 's17', from: 120, to: 128, kind: 'exact', no: 17, name: '第 17 段 · 实拍画面', grain: 'g-craft',
+        caption: '用你的声音',
+        text: '用你的声音，替沉默的实体发声，让每部手机，都成为照亮街角的火把，',
+        hint: '这里放：手机拍摄的画面' },
+      { id: 's18', from: 128, to: 134, kind: 'exact', no: 18, name: '第 18 段 · 实拍画面', grain: 'g-morning',
+        caption: '当十万支火把点燃',
+        text: '当十万支火把点燃，整座城市将不再有黑暗的角落。',
+        hint: '这里放：城市夜景灯火' },
+      { id: 's19', from: 134, to: 138, kind: 'exact', no: 19, name: '第 19 段 · 实拍画面', grain: 'g-street',
+        caption: '别等到熟悉的店铺消失才后悔',
+        text: '别等到熟悉的店铺消失才后悔。',
+        hint: '这里放：卷闸门紧闭的店面' },
+      { id: 's20', from: 138, to: 143, kind: 'exact', no: 20, name: '第 20 段 · 实拍画面', grain: 'g-street',
+        caption: '此刻',
+        text: '此刻，你指尖的温度，能融化冰封的招牌。',
+        hint: '这里放：招牌特写' },
+      { id: 's21', from: 143, to: 153, kind: 'avatar', no: 21, name: '第 21 段 · 数字人出镜', grain: 'g-avatar',
+        caption: '这不是商业计划',
+        text: '这不是商业计划，而是一场人文运动，让技术有了心跳，让奋斗有了观众，让城市有了记忆！',
+        phKind: '口型动作待生成', phTitle: '王老板 · 门店机位', cost: 10 },
+      { id: 's22', from: 153, to: 163, kind: 'fixed', no: 22, name: '第 22 段 · 结尾固定段', grain: 'g-tail',
+        caption: '为实体发声计划',
+        text: '结尾：为实体发声计划' },
+    ];
+  }
+
+  fmt(v) {
+    const s = Math.max(0, Math.min(163, Math.floor(v)));
+    return String(Math.floor(s / 60)) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  renderVals() {
+    const t = this.state.t;
+    const segs = this.segments();
+    const cur = segs.find((s) => t >= s.from && t < s.to) || segs[segs.length - 1];
+    const gen = segs.filter((s) => s.cost);
+    const bought = gen.filter((s) => this.state.buy[s.id]);
+    const spent = bought.reduce((n, s) => n + s.cost, 0);
+    // 整条报价 = 数字人 32 秒 × 1 钻石 + 口播配音 ceil(597 字 / 1000 × 5) = 3 钻石。
+    // 口径见 model.js estimateCredits()；b-roll 和尾片不计费。
+    const TOTAL = gen.reduce((n, s) => n + s.cost, 0) + 3;
+    const isPh = (s) => s.kind === 'avatar' && !this.state.buy[s.id];
+
+    return {
+      clock: this.fmt(t) + ' / 2:43',
+      headPct: (t / 163) * 100,
+      playing: this.state.playing,
+      showPlay: !this.state.playing,
+      listOpen: this.state.listOpen,
+      listClosed: !this.state.listOpen,
+      listLabel: this.state.listOpen ? '收起' : '展开 4 段',
+      cur: {
+        grain: cur.grain,
+        ph: isPh(cur),
+        phKind: cur.phKind || '',
+        phTitle: cur.phTitle || '',
+        caption: cur.caption || '',
+        hasCaption: !!cur.caption,
+        name: cur.name,
+        range: this.fmt(cur.from) + '–' + this.fmt(cur.to),
+      },
+      segs: segs.map((s) => ({
+        pct: ((s.to - s.from) / 163) * 100,
+        cls: (this.state.buy[s.id] ? 'ready' : s.kind) + (s.id === (this.state.picked || cur.id) ? ' on' : ''),
+        pick: () => {
+          if (this.timer) { clearInterval(this.timer); this.timer = null; }
+          this.setState({ t: s.from, picked: s.id, playing: false });
+        },
+      })),
+      picks: gen.map((s) => ({
+        name: s.name,
+        range: this.fmt(s.from) + '–' + this.fmt(s.to) + ' · ' + (s.to - s.from) + ' 秒',
+        cost: this.state.buy[s.id] ? '已生成' : (s.cost + ' 钻石'),
+        cls: this.state.buy[s.id] ? 'on' : '',
+        toggle: () => this.setState({ buy: { ...this.state.buy, [s.id]: !this.state.buy[s.id] } }),
+      })),
+      togglePlay: () => {
+        if (this.state.playing) {
+          if (this.timer) { clearInterval(this.timer); this.timer = null; }
+          this.setState({ playing: false });
+        } else {
+          const from = this.state.t >= 163 ? 0 : this.state.t;
+          this.timer = setInterval(() => this.tick(), 200);
+          this.setState({ playing: true, t: from, picked: '' });
+        }
+      },
+      toggleList: () => this.setState({ listOpen: !this.state.listOpen }),
+      footA: spent ? ('先行生成 ' + bought.length + ' 段 · ' + spent + ' 钻石') : ('本条共计 ' + TOTAL + ' 钻石'),
+      footB: spent ? ('这几段导出整片时不再扣费，余 ' + (TOTAL - spent) + ' 钻石') : '数字人 32 秒待生成，其余免费',
+      ctaText: spent ? ('生成这 ' + bought.length + ' 段') : '立即生成',
+    };
+  }
+}
+</script>
+</body>
+</html>

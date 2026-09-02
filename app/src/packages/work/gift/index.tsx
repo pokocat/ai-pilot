@@ -6,6 +6,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type FateCardContent } from '../../../services/api';
 import { DEFAULT_BIRTH_TIME, birthTimeParts } from '../../../data/shichen';
+import { FORTUNE_DISCLAIMER, FORTUNE_CREDO, FORTUNE_DISCLAIMER_FULL } from '../../../data/constants';
 import { IS_WEAPP } from '../../../services/config';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
@@ -185,7 +186,7 @@ export default function Gift() {
         {/* 离屏画布：仅用于生成图片，不直接展示 */}
         <Canvas type="2d" id="fateCanvas" className="gf-canvas" style={{ width: `${CW}px`, height: `${CH}px` }} />
 
-        <Text className="gf-note">朋友的生辰只用于本次排盘，服务器不留档、不生成公开链接。命理内容为文化视角的经营参考，不构成决策依据。</Text>
+        <Text className="gf-note">朋友的生辰只用于本次排盘，服务器不留档、不生成公开链接。{FORTUNE_DISCLAIMER_FULL}</Text>
       </View>
       )}
     </View>
@@ -252,7 +253,9 @@ function paintFateCard(ctx: CanvasRenderingContext2D, content: FateCardContent) 
   ctx.font = 'bold 30px serif';
   ctx.fillText('找军师参谋部', W / 2, boxY + 84);
 
+  // 两行：同 calendar，600px 画不下整句。
   ctx.fillStyle = '#B4B8BE';
   ctx.font = '20px sans-serif';
-  ctx.fillText('命理为文化视角的经营参考，不构成决策依据', W / 2, CH - 44);
+  ctx.fillText(FORTUNE_DISCLAIMER, W / 2, CH - 72);
+  ctx.fillText(FORTUNE_CREDO, W / 2, CH - 40);
 }

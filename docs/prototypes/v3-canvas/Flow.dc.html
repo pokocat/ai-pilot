@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .board {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#ECE9E3; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:1000px; height:800px; box-sizing:border-box; padding:32px 36px;
+      color:var(--ink); font-family:var(--sans); background:var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .board * { box-sizing:border-box; }
+    .kicker { font-size:11.5px; font-weight:700; letter-spacing:.14em; color:var(--avDeep); }
+    .h1 { font-family:var(--serif); font-size:26px; font-weight:600; line-height:1.35; margin-top:7px; }
+    .sub { font-size:12.5px; color:var(--ink3); line-height:1.7; margin-top:7px; max-width:720px; }
+
+    .entries { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; margin-top:18px; }
+    .en { background:var(--surface); border:1px solid var(--lineSoft); border-radius:15px; padding:12px 14px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); border-left:3px solid var(--av); }
+    .en.b { border-left-color:var(--br); }
+    .en.c { border-left-color:#9A8F84; }
+    .ent { font-size:13px; font-weight:600; }
+    .ens { font-size:11.5px; color:var(--ink3); line-height:1.6; margin-top:4px; }
+    .enw { font-size:11px; color:var(--muted); margin-top:6px; }
+
+    .cols { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px 22px; margin-top:16px; }
+    .step { display:flex; gap:11px; align-items:flex-start; }
+    .no { width:22px; height:22px; border-radius:7px; flex:none; background:var(--ink); color:#FFF;
+      font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+    .no.hot { background:var(--av); }
+    .sb { flex:1; min-width:0; }
+    .su { display:block; font-size:13px; font-weight:600; line-height:1.5; }
+    .ss { display:block; font-size:11.5px; color:var(--ink3); line-height:1.6; margin-top:3px; }
+    .sm { display:inline-block; font-size:10.5px; color:var(--muted); margin-top:5px;
+      background:var(--sunken); border:1px solid var(--lineSoft); padding:2px 8px; border-radius:999px; }
+
+    .loop { margin-top:16px; background:var(--surface); border:1px solid var(--lineSoft); border-radius:16px;
+      padding:14px 18px; box-shadow:0 4px 14px rgba(95,72,55,.06); display:flex; gap:20px; align-items:center; }
+    .lb { flex:1; }
+    .lt { font-size:13px; font-weight:600; }
+    .ls { font-size:11.5px; color:var(--ink3); line-height:1.7; margin-top:5px; }
+    .tabs { display:flex; gap:9px; flex:none; }
+    .tbx { width:118px; border-radius:12px; padding:9px 11px; background:var(--sunken); border:1px solid var(--lineSoft); }
+    .tbx.on { background:var(--avSoft); border-color:var(--avLine); }
+    .tbn { display:block; font-size:12px; font-weight:600; }
+    .tbs { display:block; font-size:10.5px; color:var(--ink3); line-height:1.5; margin-top:3px; }
+  </style>
+</helmet>
+
+<div class="board">
+  <div class="kicker">用户主动线</div>
+  <div class="h1">从创建到发布，再到复用</div>
+  <div class="sub">这条线只画用户自己走的路：每一步他做什么、系统同时完成了什么、对应哪块画板。三个 Tab 不是三条线，是这条线上的三个停靠点。</div>
+
+  <div class="entries">
+    <div class="en">
+      <div class="ent">① 自主创建</div>
+      <div class="ens">打开小程序 → 首页挑一套模板 → 说一句话、粘贴链接或选择商品，交代这一条要讲什么</div>
+      <div class="enw">画板：首页、语音输入</div>
+    </div>
+    <div class="en b">
+      <div class="ent">① 来自军师的任务</div>
+      <div class="ens">从军师进入，目标、品牌资料与初稿脚本一并带入，完成后自动回传</div>
+      <div class="enw">画板：首页「来自军师」那张卡</div>
+    </div>
+    <div class="en c">
+      <div class="ent">① 扫码参与活动</div>
+      <div class="ens">顾客扫商家二维码，仅走「选模板 → 上传照片 → 生成 → 分享」，费用由商家承担</div>
+      <div class="enw">本轮未画，P1 再做</div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="step">
+      <span class="no">2</span>
+      <span class="sb">
+        <span class="su">确认脚本</span>
+        <span class="ss">用户：核对已填好的目标、受众、卖点，确认「报哪个价」这类必答项。系统：从链接与素材库自动识别，识别不确定的标出来询问。</span>
+        <span class="sm">画板 ① 确认脚本</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no">3</span>
+      <span class="sb">
+        <span class="su">自动准备</span>
+        <span class="ss">用户：可退出等待。系统：生成脚本与配音、匹配数字人、按节拍切段、从素材库配画面、给出费用预估。</span>
+        <span class="sm">进度显示在首页「草稿」一栏</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no hot">4</span>
+      <span class="sb">
+        <span class="su">预览确认</span>
+        <span class="ss">用户：完整看一遍，判断节奏、字幕、时长。系统：按秒标明哪几段已就绪、哪几段待生成。</span>
+        <span class="sm">画板 ② 预览（这一步是整条线的重心）</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no">5</span>
+      <span class="sb">
+        <span class="su">局部修改</span>
+        <span class="ss">用户：在发现问题的那一秒点「调整这一段」。系统：能自动补齐的先补齐，需付费的一律先报价。</span>
+        <span class="sm">画板 ③ 补画面</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no hot">6</span>
+      <span class="sb">
+        <span class="su">确认扣费</span>
+        <span class="ss">用户：清楚自己在为哪几秒付费，勾选确认。系统：已生成的不再计费，只对待生成部分报价。</span>
+        <span class="sm">画板 ④ 确认扣费</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no">7</span>
+      <span class="sb">
+        <span class="su">生成与交付</span>
+        <span class="ss">用户：保存到相册、分享出去，或退出等待。系统：逐段生成，失败只重做失败段，未成功部分退费。</span>
+        <span class="sm">画板 ⑤ 生成与交付</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no">8</span>
+      <span class="sb">
+        <span class="su">作品归档</span>
+        <span class="ss">用户：在作品里找到这条，查看当时用了什么。系统：完整保存脚本、商品、数字人、素材的关联关系。</span>
+        <span class="sm">画板 作品</span>
+      </span>
+    </div>
+    <div class="step">
+      <span class="no">9</span>
+      <span class="sb">
+        <span class="su">复制并修改</span>
+        <span class="ss">用户：无需从头开始，改一句话或换个商品即可。系统：复制为新草稿，可复用的片段继续沿用。</span>
+        <span class="sm">回到第 2 步，线走成环</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="loop">
+    <div class="lb">
+      <div class="lt">这条线为什么要成环</div>
+      <div class="ls">第一条视频成本最高——要确认信息、上传素材、创建数字人。从第二条起，商品、脚本、数字人、素材都是现成的，用户只改一句话。产品的价值不在第一条出得多快，而在第二条出得多省。</div>
+    </div>
+    <div class="tabs">
+      <div class="tbx on"><span class="tbn">创作</span><span class="tbs">入口、草稿、待办任务</span></div>
+      <div class="tbx"><span class="tbn">资料库</span><span class="tbs">越攒越省的那部分</span></div>
+      <div class="tbx"><span class="tbn">作品</span><span class="tbs">交付与复用</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1000,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

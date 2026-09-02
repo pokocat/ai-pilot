@@ -21,6 +21,8 @@ import {
   noteChatFirstToken, noteChatGenerationFinalized,
   noteSessionDigestState, noteSessionDigestCompaction,
   noteCreativeCritique, noteProbe,
+  registerSchedulerJobMetric, setSchedulerMetricsEnabled,
+  noteSchedulerJobStarted, noteSchedulerJobFinished,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -240,6 +242,7 @@ describe('指标内容', () => {
     assert.match(body, /junshi_user_registrations_total\{channel="wechat_register"\} 1/);
     assert.match(body, /^junshi_user_registrations_72h \d+$/m, '注册静默告警必须导出数据库事实 gauge');
     assert.match(body, /^junshi_user_last_registration_timestamp_seconds \d+(?:\.\d+)?$/m);
+    assert.match(body, /^junshi_monitor_public_launch_enabled [01]$/m, '增长量告警必须有正式开放闸门');
     assert.match(body, /junshi_credits_flow_total\{direction="spent",reason="深度报告"\} 30/);
     assert.match(body, /junshi_credits_flow_total\{direction="granted",reason="决策版"\} 500/);
     assert.match(body, /^junshi_pay_orders_created_total 1$/m);
@@ -249,6 +252,20 @@ describe('指标内容', () => {
     assert.match(body, /junshi_pay_sweep_last\{result="scanned"\} 5/);
     assert.match(body, /junshi_pay_sweep_last\{result="closed"\} 2/);
     assert.match(body, /^junshi_pay_sweep_runs_total 1$/m);
+  });
+
+  test('定时任务导出周期、最后成功/失败、时长和运行结果', async () => {
+    registerSchedulerJobMetric('test-metrics-job', 300_000);
+    setSchedulerMetricsEnabled(true);
+    noteSchedulerJobStarted('test-metrics-job');
+    noteSchedulerJobFinished('test-metrics-job', 'success', 1234);
+    const body = await get();
+    assert.match(body, /junshi_scheduler_job_runs_total\{job="test-metrics-job",result="success"\} 1/);
+    assert.match(body, /junshi_scheduler_job_interval_seconds\{job="test-metrics-job"\} 300/);
+    assert.match(body, /junshi_scheduler_job_enabled\{job="test-metrics-job"\} 1/);
+    assert.match(body, /junshi_scheduler_job_last_success_timestamp_seconds\{job="test-metrics-job"\} [1-9]\d*/);
+    assert.match(body, /junshi_scheduler_job_last_duration_seconds\{job="test-metrics-job"\} 1\.234/);
+    assert.match(body, /junshi_scheduler_job_in_flight\{job="test-metrics-job"\} 0/);
   });
 
   test('端点探活指标精确到端点/用途/检测项，手动与定时来源分开', async () => {

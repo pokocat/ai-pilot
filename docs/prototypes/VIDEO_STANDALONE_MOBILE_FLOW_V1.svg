@@ -1,0 +1,525 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2360" height="1980" viewBox="0 0 2360 1980" role="img" aria-labelledby="title desc">
+  <title id="title">快出片独立小程序移动端产品原型 V1</title>
+  <desc id="desc">六个手机界面展示从表达创作意图、AI理解确认、自动准备、低成本装配预览、片段调整到生成完成的完整流程。</desc>
+  <defs>
+    <linearGradient id="boardBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E9E4DC"/>
+      <stop offset="0.55" stop-color="#F7F4EE"/>
+      <stop offset="1" stop-color="#E8EEF0"/>
+    </linearGradient>
+    <linearGradient id="heroWarm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F27849"/>
+      <stop offset="1" stop-color="#BE431F"/>
+    </linearGradient>
+    <linearGradient id="storeScene" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E7B57E"/>
+      <stop offset="0.45" stop-color="#95664C"/>
+      <stop offset="1" stop-color="#303638"/>
+    </linearGradient>
+    <linearGradient id="productScene" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D8E6E9"/>
+      <stop offset="0.52" stop-color="#7393A0"/>
+      <stop offset="1" stop-color="#2F5364"/>
+    </linearGradient>
+    <linearGradient id="successScene" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D29B6C"/>
+      <stop offset="0.54" stop-color="#855541"/>
+      <stop offset="1" stop-color="#263A38"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#F06435" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F06435" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#624D3D" flood-opacity="0.16"/>
+    </filter>
+    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#624D3D" flood-opacity="0.09"/>
+    </filter>
+    <filter id="orangeShadow" x="-40%" y="-40%" width="180%" height="190%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#C74920" flood-opacity="0.28"/>
+    </filter>
+    <clipPath id="screenClip">
+      <rect x="8" y="8" width="344" height="744" rx="38"/>
+    </clipPath>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#A79C91"/>
+    </marker>
+    <style>
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif; }
+      .serif { font-family: "Noto Serif SC", "Songti SC", serif; }
+      .ink { fill: #191A1C; }
+      .ink2 { fill: #494B4F; }
+      .muted { fill: #81838A; }
+      .tiny { font-size: 11px; }
+      .small { font-size: 12px; }
+      .body { font-size: 14px; }
+      .label { font-size: 13px; font-weight: 600; }
+      .title { font-size: 21px; font-weight: 700; }
+      .screen-title { font-size: 18px; font-weight: 700; }
+      .board-title { font-size: 42px; font-weight: 700; letter-spacing: -1px; }
+      .board-subtitle { font-size: 17px; }
+      .card { fill: #FFFFFF; stroke: rgba(25,26,28,0.07); stroke-width: 1; }
+      .line { stroke: rgba(25,26,28,0.10); stroke-width: 1; }
+      .orange { fill: #F06435; }
+      .orangeText { fill: #C74920; }
+      .orangeSoft { fill: #FFF0E9; }
+      .blue { fill: #326B86; }
+      .blueSoft { fill: #EDF5F8; }
+      .green { fill: #2F7D5B; }
+      .greenSoft { fill: #EAF5EF; }
+      .btnText { fill: #FFFFFF; font-size: 15px; font-weight: 700; }
+      .navText { font-size: 10px; font-weight: 600; }
+      .num { font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+    </style>
+  </defs>
+
+  <rect width="2360" height="1980" fill="url(#boardBg)"/>
+  <circle cx="2150" cy="90" r="290" fill="url(#glow)"/>
+  <circle cx="260" cy="1830" r="260" fill="#326B86" opacity="0.05"/>
+
+  <g class="sans">
+    <text x="100" y="92" class="board-title ink">快出片 · 移动端核心创作流</text>
+    <text x="100" y="126" class="board-subtitle ink2">模板驱动 · 资产复用 · 预览成本不等于生成成本</text>
+
+    <g transform="translate(1730 55)">
+      <rect width="520" height="82" rx="20" fill="#FFFFFF" opacity="0.82" stroke="#FFFFFF"/>
+      <circle cx="28" cy="27" r="7" fill="#2F7D5B"/>
+      <text x="43" y="32" class="small ink2">绿色：可准确预览</text>
+      <circle cx="192" cy="27" r="7" fill="#F06435"/>
+      <text x="207" y="32" class="small ink2">橙色：生成式片段</text>
+      <circle cx="364" cy="27" r="7" fill="#326B86"/>
+      <text x="379" y="32" class="small ink2">蓝色：已有素材</text>
+      <text x="28" y="61" class="small muted">前台始终只有一个播放器，后台自动升级预览质量</text>
+    </g>
+
+    <text x="100" y="190" class="small muted">01—03 · 输入与自动准备</text>
+    <text x="100" y="1030" class="small muted">04—06 · 预览、局部调整与交付</text>
+
+    <path d="M 492 612 C 630 612, 720 612, 854 612" fill="none" stroke="#A79C91" stroke-width="2" stroke-dasharray="6 8" marker-end="url(#arrow)"/>
+    <path d="M 1372 612 C 1510 612, 1600 612, 1734 612" fill="none" stroke="#A79C91" stroke-width="2" stroke-dasharray="6 8" marker-end="url(#arrow)"/>
+    <path d="M 492 1432 C 630 1432, 720 1432, 854 1432" fill="none" stroke="#A79C91" stroke-width="2" stroke-dasharray="6 8" marker-end="url(#arrow)"/>
+    <path d="M 1372 1432 C 1510 1432, 1600 1432, 1734 1432" fill="none" stroke="#A79C91" stroke-width="2" stroke-dasharray="6 8" marker-end="url(#arrow)"/>
+
+    <!-- 01 创作首页 -->
+    <g transform="translate(120 220)">
+      <text x="0" y="-18" class="num orangeText">01  从最省事的输入开始</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <circle cx="302" cy="73" r="66" fill="#F06435" opacity="0.08"/>
+        <text x="30" y="72" class="serif screen-title ink">快出片</text>
+        <circle cx="310" cy="66" r="17" fill="#FFFFFF" stroke="rgba(25,26,28,0.08)"/>
+        <circle cx="310" cy="62" r="5" fill="none" stroke="#494B4F" stroke-width="1.6"/>
+        <path d="M302 74 C304 69,316 69,318 74" fill="none" stroke="#494B4F" stroke-width="1.6" stroke-linecap="round"/>
+
+        <text x="30" y="116" class="serif title ink">今天想做一条</text>
+        <text x="30" y="143" class="serif title ink">什么视频？</text>
+        <text x="30" y="168" class="small muted">不用填表，说一句就能开始</text>
+
+        <rect x="26" y="188" width="308" height="86" rx="20" fill="#FFFFFF" stroke="#F06435" stroke-opacity="0.18" filter="url(#cardShadow)"/>
+        <circle cx="66" cy="231" r="24" fill="url(#heroWarm)"/>
+        <rect x="62" y="218" width="8" height="17" rx="4" fill="#FFFFFF"/>
+        <path d="M57 229 C57 241,75 241,75 229 M66 241 L66 247 M60 247 L72 247" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+        <text x="102" y="224" class="label ink">说说想做什么</text>
+        <text x="102" y="246" class="small muted">“给我的五金店做条宣传片”</text>
+        <text x="310" y="236" class="body orangeText">›</text>
+
+        <text x="30" y="309" class="small muted">也可以这样开始</text>
+        <g transform="translate(26 324)">
+          <rect width="148" height="112" rx="18" class="card"/>
+          <rect x="16" y="16" width="36" height="36" rx="12" class="blueSoft"/>
+          <rect x="25" y="25" width="18" height="18" rx="4" fill="none" stroke="#326B86" stroke-width="1.8"/>
+          <circle cx="38" cy="30" r="2.5" class="blue"/>
+          <path d="M28 39 L33 34 L37 38 L41 35" fill="none" stroke="#326B86" stroke-width="1.5"/>
+          <text x="16" y="72" class="label ink">给一个商品</text>
+          <text x="16" y="92" class="tiny muted">链接 / 截图 / 商品库</text>
+        </g>
+        <g transform="translate(186 324)">
+          <rect width="148" height="112" rx="18" class="card"/>
+          <rect x="16" y="16" width="36" height="36" rx="12" class="orangeSoft"/>
+          <path d="M27 27 H41 V41 H27 Z M30 23 V30 M38 23 V30 M30 38 V45 M38 38 V45" fill="none" stroke="#C74920" stroke-width="1.8" stroke-linecap="round"/>
+          <text x="16" y="72" class="label ink">继续外部任务</text>
+          <text x="16" y="92" class="tiny muted">来自军师 / 商家 / CRM</text>
+        </g>
+
+        <text x="30" y="476" class="label ink">推荐模板</text>
+        <g transform="translate(26 490)">
+          <rect width="188" height="116" rx="18" fill="#2E3A3B"/>
+          <circle cx="154" cy="28" r="40" fill="#F06435" opacity="0.20"/>
+          <text x="16" y="30" class="tiny" fill="#F2C6B5">数字人口播</text>
+          <text x="16" y="56" class="serif label" fill="#FFFFFF">品牌故事 · 叙事</text>
+          <text x="16" y="79" class="tiny" fill="#D5D8D7">适合企业宣传、门店故事</text>
+          <rect x="16" y="91" width="50" height="3" rx="2" fill="#F06435"/>
+          <rect x="70" y="91" width="30" height="3" rx="2" fill="#69858A"/>
+        </g>
+        <g transform="translate(224 490)">
+          <rect width="134" height="116" rx="18" fill="#FFFFFF" stroke="rgba(25,26,28,0.07)"/>
+          <text x="14" y="30" class="tiny blue">数字人带货</text>
+          <text x="14" y="56" class="label ink">商品种草</text>
+          <text x="14" y="78" class="tiny muted">卖点 · 证据 · 行动</text>
+        </g>
+
+        <rect x="8" y="674" width="344" height="78" fill="#FFFFFF"/>
+        <line x1="8" y1="674" x2="352" y2="674" class="line"/>
+        <g transform="translate(64 693)">
+          <circle cx="0" cy="0" r="8" class="orange"/>
+          <path d="M-3 0 H3 M0 -3 V3" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>
+          <text x="-12" y="26" class="navText orangeText">创作</text>
+        </g>
+        <g transform="translate(180 693)">
+          <rect x="-8" y="-7" width="16" height="14" rx="3" fill="none" stroke="#81838A" stroke-width="1.5"/>
+          <text x="-18" y="26" class="navText muted">资料库</text>
+        </g>
+        <g transform="translate(294 693)">
+          <path d="M-8 -6 H8 V7 H-8 Z M-3 -10 H3" fill="none" stroke="#81838A" stroke-width="1.5" stroke-linecap="round"/>
+          <text x="-12" y="26" class="navText muted">作品</text>
+        </g>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <!-- 02 理解确认 -->
+    <g transform="translate(1000 220)">
+      <text x="0" y="-18" class="num orangeText">02  AI 先理解，用户只做确认</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <text x="30" y="72" class="body ink">‹</text>
+        <text x="60" y="72" class="serif screen-title ink">我理解的是</text>
+        <text x="30" y="110" class="small muted">你可以直接确认，也可以只改其中一项</text>
+
+        <g transform="translate(26 132)">
+          <rect width="308" height="118" rx="20" fill="#2F3A3A" filter="url(#cardShadow)"/>
+          <circle cx="260" cy="15" r="52" fill="#F06435" opacity="0.18"/>
+          <text x="20" y="32" class="tiny" fill="#F5B69F">推荐方向</text>
+          <text x="20" y="60" class="serif title" fill="#FFFFFF">一家五金店的光</text>
+          <text x="20" y="84" class="small" fill="#D8DEDD">数字人口播 · 叙事宣传 · 约 45 秒</text>
+          <rect x="20" y="96" width="84" height="8" rx="4" fill="#F06435"/>
+          <rect x="110" y="96" width="50" height="8" rx="4" fill="#668288"/>
+          <rect x="166" y="96" width="32" height="8" rx="4" fill="#A89A8B"/>
+        </g>
+
+        <g transform="translate(26 266)">
+          <rect width="308" height="280" rx="20" class="card"/>
+          <g transform="translate(18 22)">
+            <circle cx="10" cy="10" r="10" class="greenSoft"/>
+            <path d="M5 10 L9 14 L16 6" fill="none" stroke="#2F7D5B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <text x="34" y="10" class="tiny muted">宣传主体</text>
+            <text x="34" y="31" class="label ink">王师傅的五金店</text>
+            <text x="260" y="23" class="body orangeText">›</text>
+          </g>
+          <line x1="18" y1="72" x2="290" y2="72" class="line"/>
+          <g transform="translate(18 90)">
+            <circle cx="10" cy="10" r="10" class="greenSoft"/>
+            <path d="M5 10 L9 14 L16 6" fill="none" stroke="#2F7D5B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <text x="34" y="10" class="tiny muted">视频目标</text>
+            <text x="34" y="31" class="label ink">让周边顾客重新看见老店</text>
+            <text x="260" y="23" class="body orangeText">›</text>
+          </g>
+          <line x1="18" y1="140" x2="290" y2="140" class="line"/>
+          <g transform="translate(18 158)">
+            <circle cx="10" cy="10" r="10" class="blueSoft"/>
+            <rect x="5" y="5" width="10" height="10" rx="2" fill="none" stroke="#326B86" stroke-width="1.5"/>
+            <text x="34" y="10" class="tiny muted">已找到素材</text>
+            <text x="34" y="31" class="label ink">门头 3 张 · 老板视频 2 段</text>
+            <text x="260" y="23" class="body orangeText">›</text>
+          </g>
+          <line x1="18" y1="208" x2="290" y2="208" class="line"/>
+          <g transform="translate(18 226)">
+            <circle cx="10" cy="10" r="10" fill="#FFF4DE"/>
+            <text x="7" y="14" class="small" fill="#A66B12">?</text>
+            <text x="34" y="10" class="tiny" fill="#A66B12">还需确认 1 项</text>
+            <text x="34" y="31" class="label ink">结尾是否出现到店地址？</text>
+            <text x="260" y="23" class="body orangeText">›</text>
+          </g>
+        </g>
+
+        <rect x="26" y="568" width="308" height="42" rx="14" class="orangeSoft"/>
+        <text x="44" y="594" class="small orangeText">✦ AI 不确定的内容不会替你编造</text>
+
+        <rect x="8" y="650" width="344" height="102" fill="#FFFFFF"/>
+        <line x1="8" y1="650" x2="352" y2="650" class="line"/>
+        <text x="30" y="677" class="tiny muted">已自动保存</text>
+        <rect x="26" y="690" width="308" height="52" rx="16" fill="url(#heroWarm)" filter="url(#orangeShadow)"/>
+        <text x="180" y="722" text-anchor="middle" class="btnText">确认，自动准备</text>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <!-- 03 自动准备 -->
+    <g transform="translate(1880 220)">
+      <text x="0" y="-18" class="num orangeText">03  等待也要让人知道在发生什么</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <text x="30" y="72" class="body ink">‹</text>
+        <text x="60" y="72" class="serif screen-title ink">正在自动准备</text>
+
+        <circle cx="180" cy="182" r="76" fill="#FFFFFF" filter="url(#cardShadow)"/>
+        <circle cx="180" cy="182" r="55" fill="none" stroke="#EFEEE9" stroke-width="12"/>
+        <circle cx="180" cy="182" r="55" fill="none" stroke="#F06435" stroke-width="12" stroke-linecap="round" stroke-dasharray="248 346" transform="rotate(-90 180 182)"/>
+        <text x="180" y="179" text-anchor="middle" class="title ink">72%</text>
+        <text x="180" y="201" text-anchor="middle" class="tiny muted">预计不到 1 分钟</text>
+
+        <g transform="translate(26 282)">
+          <rect width="308" height="232" rx="20" class="card"/>
+          <g transform="translate(20 24)">
+            <circle cx="10" cy="10" r="10" class="green"/>
+            <path d="M5 10 L9 14 L16 6" fill="none" stroke="#FFFFFF" stroke-width="1.8"/>
+            <text x="36" y="15" class="label ink">文案与旁白时间线</text>
+            <text x="256" y="15" class="tiny green">完成</text>
+          </g>
+          <line x1="30" y1="50" x2="30" y2="82" stroke="#C9DCCF" stroke-width="2"/>
+          <g transform="translate(20 84)">
+            <circle cx="10" cy="10" r="10" class="green"/>
+            <path d="M5 10 L9 14 L16 6" fill="none" stroke="#FFFFFF" stroke-width="1.8"/>
+            <text x="36" y="15" class="label ink">匹配已有素材</text>
+            <text x="256" y="15" class="tiny green">完成</text>
+          </g>
+          <line x1="30" y1="110" x2="30" y2="142" stroke="#F1B49D" stroke-width="2"/>
+          <g transform="translate(20 144)">
+            <circle cx="10" cy="10" r="10" class="orange"/>
+            <circle cx="10" cy="10" r="4" fill="#FFFFFF"/>
+            <text x="36" y="15" class="label ink">字幕、音乐与拼接</text>
+            <text x="256" y="15" class="tiny orangeText">处理中</text>
+          </g>
+          <line x1="30" y1="170" x2="30" y2="196" stroke="#DEDCD6" stroke-width="2"/>
+          <g transform="translate(20 198)">
+            <circle cx="10" cy="10" r="10" fill="#EFEEE9"/>
+            <text x="36" y="15" class="label muted">生成装配预览</text>
+          </g>
+        </g>
+
+        <rect x="26" y="534" width="308" height="54" rx="16" class="greenSoft"/>
+        <circle cx="49" cy="561" r="10" class="green"/>
+        <path d="M45 561 L48 564 L54 557" fill="none" stroke="#FFFFFF" stroke-width="1.5"/>
+        <text x="68" y="557" class="label green">当前未调用付费视频生成</text>
+        <text x="68" y="575" class="tiny" fill="#527861">先把可确定的部分完整装好</text>
+
+        <g transform="translate(26 606)">
+          <text x="0" y="0" class="tiny muted">时间线</text>
+          <rect x="0" y="14" width="84" height="12" rx="6" class="orange"/>
+          <rect x="88" y="14" width="96" height="12" rx="6" class="blue"/>
+          <rect x="188" y="14" width="42" height="12" rx="6" fill="#F4B197"/>
+          <rect x="234" y="14" width="74" height="12" rx="6" class="blue"/>
+          <text x="0" y="47" class="tiny muted">数字人</text>
+          <text x="94" y="47" class="tiny muted">已有素材</text>
+          <text x="191" y="47" class="tiny muted">示意</text>
+        </g>
+
+        <rect x="8" y="690" width="344" height="62" fill="#FFFFFF"/>
+        <text x="180" y="720" text-anchor="middle" class="small ink2">可以先离开，准备好后会通知你</text>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <!-- 04 预览 -->
+    <g transform="translate(120 1060)">
+      <text x="0" y="-18" class="num orangeText">04  一个播放器承接质量控制</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <text x="30" y="72" class="body ink">‹</text>
+        <text x="60" y="72" class="serif screen-title ink">预览成片</text>
+        <rect x="260" y="51" width="74" height="32" rx="16" fill="#FFFFFF" stroke="rgba(25,26,28,0.08)"/>
+        <text x="297" y="72" text-anchor="middle" class="tiny ink2">自动保存</text>
+
+        <g transform="translate(69 98)">
+          <rect width="222" height="394" rx="20" fill="url(#storeScene)" filter="url(#cardShadow)"/>
+          <circle cx="168" cy="66" r="60" fill="#F8D6A5" opacity="0.24"/>
+          <path d="M18 243 L66 185 L108 228 L150 166 L208 245 V394 H18 Z" fill="#282F30" opacity="0.42"/>
+          <rect x="34" y="162" width="150" height="82" rx="5" fill="#3E4342" opacity="0.82"/>
+          <rect x="48" y="176" width="122" height="18" rx="2" fill="#C87A4E"/>
+          <text x="109" y="190" text-anchor="middle" class="tiny" fill="#FFF4DF">王师傅五金店</text>
+          <circle cx="111" cy="208" r="28" fill="#FFFFFF" opacity="0.92"/>
+          <path d="M105 195 L105 221 L124 208 Z" class="orange"/>
+
+          <rect x="12" y="12" width="104" height="24" rx="12" fill="#1C1D1F" opacity="0.72"/>
+          <text x="64" y="28" text-anchor="middle" class="tiny" fill="#FFFFFF">00:18 · 商品场景</text>
+          <rect x="132" y="12" width="78" height="24" rx="12" fill="#FFF0E9"/>
+          <text x="171" y="28" text-anchor="middle" class="tiny orangeText">效果示意</text>
+
+          <rect x="14" y="300" width="194" height="52" rx="10" fill="#111516" opacity="0.72"/>
+          <text x="111" y="321" text-anchor="middle" class="small" fill="#FFFFFF">AI 不是替他们发光</text>
+          <text x="111" y="340" text-anchor="middle" class="small" fill="#FFFFFF">而是让坚守的人被看见</text>
+          <rect x="68" y="363" width="86" height="24" rx="12" fill="#FFFFFF" opacity="0.92"/>
+          <text x="111" y="379" text-anchor="middle" class="tiny ink">调整这一段</text>
+        </g>
+
+        <rect x="26" y="508" width="308" height="46" rx="15" class="greenSoft"/>
+        <circle cx="46" cy="531" r="7" class="green"/>
+        <text x="61" y="528" class="label green">40 秒准确预览</text>
+        <text x="61" y="544" class="tiny" fill="#527861">5 秒 AI 场景为效果示意 · 共 45 秒</text>
+
+        <g transform="translate(26 568)">
+          <rect width="308" height="42" rx="13" class="card"/>
+          <text x="14" y="26" class="tiny muted">讲什么</text>
+          <text x="76" y="26" class="label ink">品牌故事文案</text>
+          <text x="288" y="26" text-anchor="end" class="body orangeText">›</text>
+        </g>
+        <g transform="translate(26 618)">
+          <rect width="148" height="42" rx="13" class="card"/>
+          <text x="14" y="26" class="tiny muted">谁来讲</text>
+          <text x="66" y="26" class="label ink">王老板</text>
+        </g>
+        <g transform="translate(186 618)">
+          <rect width="148" height="42" rx="13" class="card"/>
+          <text x="14" y="26" class="tiny muted">样式</text>
+          <text x="54" y="26" class="label ink">暖橙纪实</text>
+        </g>
+
+        <rect x="8" y="674" width="344" height="78" fill="#FFFFFF"/>
+        <line x1="8" y1="674" x2="352" y2="674" class="line"/>
+        <rect x="26" y="688" width="308" height="52" rx="16" fill="url(#heroWarm)" filter="url(#orangeShadow)"/>
+        <text x="180" y="713" text-anchor="middle" class="btnText">生成成片 · 18 钻石</text>
+        <text x="180" y="731" text-anchor="middle" class="tiny" fill="#FFE8DE">已生成片段不会重复扣费</text>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <!-- 05 局部调整 -->
+    <g transform="translate(1000 1060)">
+      <text x="0" y="-18" class="num orangeText">05  只暴露当前问题的解决办法</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <text x="30" y="72" class="body ink">‹</text>
+        <text x="60" y="72" class="serif screen-title ink">调整这一段</text>
+
+        <g transform="translate(26 98)">
+          <rect width="308" height="128" rx="20" fill="url(#productScene)"/>
+          <rect x="16" y="16" width="106" height="24" rx="12" fill="#1C1D1F" opacity="0.70"/>
+          <text x="69" y="32" text-anchor="middle" class="tiny" fill="#FFFFFF">00:18—00:23</text>
+          <rect x="205" y="16" width="86" height="24" rx="12" class="orangeSoft"/>
+          <text x="248" y="32" text-anchor="middle" class="tiny orangeText">效果示意 5 秒</text>
+          <rect x="31" y="76" width="246" height="35" rx="10" fill="#172124" opacity="0.68"/>
+          <text x="154" y="98" text-anchor="middle" class="small" fill="#FFFFFF">“工具不只是商品，也是生活的底气”</text>
+        </g>
+
+        <text x="30" y="260" class="label ink">这段画面怎么处理？</text>
+        <text x="30" y="282" class="small muted">系统已按成本与表达效果排序</text>
+
+        <g transform="translate(26 300)">
+          <rect width="308" height="82" rx="18" fill="#EDF5F8" stroke="#326B86" stroke-width="1.5"/>
+          <circle cx="28" cy="28" r="11" fill="#326B86"/>
+          <path d="M23 28 L27 32 L34 23" fill="none" stroke="#FFFFFF" stroke-width="1.8"/>
+          <text x="52" y="25" class="label ink">使用已有门店素材</text>
+          <text x="52" y="47" class="small blue">推荐 · 不增加费用</text>
+          <text x="292" y="28" text-anchor="end" class="tiny muted">自动裁取 5 秒</text>
+          <text x="18" y="68" class="tiny muted">会优先选取工具墙和顾客进店的清晰片段</text>
+        </g>
+
+        <g transform="translate(26 394)">
+          <rect width="308" height="70" rx="18" class="card"/>
+          <circle cx="28" cy="27" r="11" fill="#FFFFFF" stroke="#C9C6C0" stroke-width="1.5"/>
+          <text x="52" y="24" class="label ink">让数字人多讲 5 秒</text>
+          <text x="52" y="47" class="small muted">不增加费用 · 画面更稳定</text>
+          <text x="292" y="34" text-anchor="end" class="body muted">›</text>
+        </g>
+
+        <g transform="translate(26 476)">
+          <rect width="308" height="88" rx="18" class="card"/>
+          <circle cx="28" cy="27" r="11" fill="#FFFFFF" stroke="#C9C6C0" stroke-width="1.5"/>
+          <text x="52" y="24" class="label ink">AI 生成真实场景画面</text>
+          <text x="52" y="47" class="small orangeText">增加约 5 钻石</text>
+          <rect x="170" y="56" width="120" height="24" rx="12" class="orangeSoft"/>
+          <text x="230" y="72" text-anchor="middle" class="tiny orangeText">先查看真实效果</text>
+        </g>
+
+        <rect x="26" y="584" width="308" height="46" rx="15" fill="#FFFFFF" stroke="rgba(25,26,28,0.08)"/>
+        <text x="44" y="612" class="small ink2">更多方式：上传 / 素材库 / 高级时长</text>
+        <text x="316" y="612" text-anchor="end" class="body muted">›</text>
+
+        <rect x="8" y="650" width="344" height="102" fill="#FFFFFF"/>
+        <line x1="8" y1="650" x2="352" y2="650" class="line"/>
+        <text x="30" y="678" class="tiny muted">应用后立即刷新手机预览</text>
+        <rect x="26" y="690" width="308" height="52" rx="16" fill="url(#heroWarm)" filter="url(#orangeShadow)"/>
+        <text x="180" y="722" text-anchor="middle" class="btnText">应用这个方案</text>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <!-- 06 完成 -->
+    <g transform="translate(1880 1060)">
+      <text x="0" y="-18" class="num orangeText">06  结束不是下载，而是资产沉淀</text>
+      <rect width="360" height="760" rx="44" fill="#1C1D1F" filter="url(#shadow)"/>
+      <g clip-path="url(#screenClip)">
+        <rect x="8" y="8" width="344" height="744" rx="38" fill="#F7F6F2"/>
+        <circle cx="306" cy="76" r="72" fill="#2F7D5B" opacity="0.08"/>
+        <text x="30" y="72" class="serif screen-title ink">作品已生成</text>
+        <rect x="258" y="51" width="76" height="30" rx="15" class="greenSoft"/>
+        <circle cx="275" cy="66" r="6" class="green"/>
+        <path d="M272 66 L274 68 L278 63" fill="none" stroke="#FFFFFF" stroke-width="1.2"/>
+        <text x="308" y="70" text-anchor="middle" class="tiny green">已保存</text>
+
+        <g transform="translate(61 98)">
+          <rect width="238" height="356" rx="20" fill="url(#successScene)" filter="url(#cardShadow)"/>
+          <circle cx="180" cy="58" r="64" fill="#F2CA91" opacity="0.24"/>
+          <rect x="28" y="124" width="182" height="96" rx="8" fill="#303B39" opacity="0.72"/>
+          <rect x="44" y="140" width="150" height="20" rx="3" fill="#BD7651"/>
+          <text x="119" y="155" text-anchor="middle" class="tiny" fill="#FFF0D8">王师傅五金店</text>
+          <circle cx="119" cy="190" r="36" fill="#8F6652"/>
+          <rect x="91" y="224" width="56" height="74" rx="24" fill="#4A504E"/>
+          <rect x="19" y="275" width="200" height="50" rx="11" fill="#111516" opacity="0.72"/>
+          <text x="119" y="296" text-anchor="middle" class="small" fill="#FFFFFF">让每一间认真经营的小店</text>
+          <text x="119" y="315" text-anchor="middle" class="small" fill="#FFFFFF">都重新被看见</text>
+          <circle cx="119" cy="178" r="29" fill="#FFFFFF" opacity="0.90"/>
+          <path d="M113 165 L113 191 L132 178 Z" class="orange"/>
+        </g>
+
+        <text x="30" y="486" class="serif title ink">这条片子，可以发出去了</text>
+        <text x="30" y="510" class="small muted">45 秒 · 1080×1920 · 生成于刚刚</text>
+
+        <g transform="translate(26 530)">
+          <rect width="94" height="54" rx="16" class="card"/>
+          <path d="M47 14 V32 M39 23 L47 14 L55 23 M35 34 H59" fill="none" stroke="#326B86" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="47" y="47" text-anchor="middle" class="tiny blue">保存视频</text>
+        </g>
+        <g transform="translate(133 530)">
+          <rect width="94" height="54" rx="16" class="card"/>
+          <circle cx="38" cy="23" r="4" fill="none" stroke="#C74920" stroke-width="1.6"/>
+          <circle cx="55" cy="15" r="4" fill="none" stroke="#C74920" stroke-width="1.6"/>
+          <circle cx="55" cy="31" r="4" fill="none" stroke="#C74920" stroke-width="1.6"/>
+          <path d="M42 21 L51 17 M42 25 L51 29" stroke="#C74920" stroke-width="1.5"/>
+          <text x="47" y="47" text-anchor="middle" class="tiny orangeText">分享传播</text>
+        </g>
+        <g transform="translate(240 530)">
+          <rect width="94" height="54" rx="16" class="card"/>
+          <rect x="35" y="14" width="18" height="18" rx="3" fill="none" stroke="#494B4F" stroke-width="1.6"/>
+          <path d="M41 10 H59 V28" fill="none" stroke="#494B4F" stroke-width="1.6"/>
+          <text x="47" y="47" text-anchor="middle" class="tiny ink2">复制再做</text>
+        </g>
+
+        <rect x="26" y="602" width="308" height="60" rx="18" class="greenSoft"/>
+        <text x="44" y="625" class="label green">相关资产已自动归档</text>
+        <text x="44" y="647" class="tiny" fill="#527861">商品 · 剧本 · 数字人 · 6 个素材 · 来源：军师</text>
+
+        <rect x="8" y="674" width="344" height="78" fill="#FFFFFF"/>
+        <line x1="8" y1="674" x2="352" y2="674" class="line"/>
+        <g transform="translate(64 693)">
+          <circle cx="0" cy="0" r="8" fill="#EFEEE9"/>
+          <path d="M-3 0 H3 M0 -3 V3" stroke="#81838A" stroke-width="1.5"/>
+          <text x="-12" y="26" class="navText muted">创作</text>
+        </g>
+        <g transform="translate(180 693)">
+          <rect x="-8" y="-7" width="16" height="14" rx="3" fill="none" stroke="#81838A" stroke-width="1.5"/>
+          <text x="-18" y="26" class="navText muted">资料库</text>
+        </g>
+        <g transform="translate(294 693)">
+          <circle cx="0" cy="0" r="8" class="orange"/>
+          <path d="M-5 -4 H5 V5 H-5 Z M-2 -7 H2" fill="none" stroke="#FFFFFF" stroke-width="1.3"/>
+          <text x="-12" y="26" class="navText orangeText">作品</text>
+        </g>
+      </g>
+      <rect x="130" y="17" width="100" height="24" rx="12" fill="#1C1D1F"/>
+    </g>
+
+    <g transform="translate(100 1882)">
+      <rect width="2160" height="64" rx="20" fill="#FFFFFF" opacity="0.72"/>
+      <text x="28" y="27" class="label ink">核心体验承诺</text>
+      <text x="28" y="48" class="small muted">默认不为预览生产昂贵片段；确定性的字幕、拼接、裁剪、音乐与时长尽量准确还原，生成式差异按秒披露。</text>
+      <text x="2128" y="38" text-anchor="end" class="small orangeText">V1 · 2026-08-22</text>
+    </g>
+  </g>
+</svg>

@@ -136,6 +136,8 @@ Page(withShare({
     store.loadReviewBadge().then(() => { const next = store.snapshot(); this.setData({ reviewDue: next.reviewDue }); syncTabBar(this, 0); }).catch(() => {});
     this._enterAt = Date.now();
     this.boot(false);
+    // onHide 停掉的自动滚底在这里接回来（仅当还有消息在打字）。
+    if (this._chatBooted) this.chatCoreShow();
   },
 
   onHide() {
@@ -144,6 +146,11 @@ Page(withShare({
     store.setOverlay(false, 'wence-drawer');
     this.stopHintRotation();
     if (this.data.drawerOpen) this.setData({ drawerOpen: false });
+    // ⚠️ tabBar 页切走**只触发 onHide，不触发 onUnload**。清理不能只写在 onUnload 里，
+    // 否则问策页进过一次流式对话之后，那个每 180ms 一次的自动滚底就再也停不下来，
+    // 来回切 tab 不断累积（真机上会一路吃内存，开发者工具内存宽裕看不出来）。
+    if (this._searchTimer) { clearTimeout(this._searchTimer); this._searchTimer = null; }
+    if (this._chatBooted) this.chatCoreHide();
   },
 
   // 数据档案切换后整页重进：问策的会话/提示都在 onShow 链路里成型，reLaunch 比逐个重取干净。

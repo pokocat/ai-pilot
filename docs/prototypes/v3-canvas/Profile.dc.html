@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#FCFAF6; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans); background:var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    /* 标题只占左边：右上角 x296–383 / y48–88 是微信胶囊禁区（§3.7.4 ①） */
+    .navrow { height:46px; display:flex; align-items:center; padding:0 22px; }
+    .ttl { font-family:var(--serif); font-size:22px; font-weight:700; }
+
+    .page { position:absolute; left:0; right:0; top:90px; bottom:84px; overflow-y:auto;
+      padding:2px 22px 16px; display:flex; flex-direction:column; gap:12px; }
+
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:18px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:14px; }
+
+    .me { display:flex; align-items:center; gap:13px; }
+    .ava { width:52px; height:52px; border-radius:18px; flex:none;
+      background-image:radial-gradient(circle at 50% 34%, rgba(255,226,205,.9) 0 18%, transparent 46%),
+        linear-gradient(160deg,#B9846A 0%,#7A5748 58%,#33302E 100%); }
+    .meb { flex:1; min-width:0; }
+    .men { display:block; font-size:16px; font-weight:600; }
+    .mep { display:block; font-size:11.5px; color:var(--muted); margin-top:4px; }
+    .meg { flex:none; font-size:12px; color:var(--avDeep); }
+
+    /* 钱包是回来最勤的一屏，所以「我的」值一个 Tab 而不是藏在头像里（§2.3） */
+    .wallet { background:linear-gradient(150deg,#2E2A27 0%,#4A3A31 100%); border-radius:18px;
+      padding:15px 16px; color:#FFF; box-shadow:0 10px 24px rgba(69,54,44,.2); }
+    .wh { display:flex; align-items:baseline; gap:8px; }
+    .wk { flex:1; font-size:11.5px; color:rgba(255,255,255,.66); }
+    .wa { font-size:11.5px; color:rgba(255,255,255,.9); }
+    .wn { display:flex; align-items:baseline; gap:7px; margin-top:7px; }
+    .wnum { font-size:31px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+    .wunit { font-size:12.5px; color:rgba(255,255,255,.72); }
+    .wsub { font-size:11px; color:rgba(255,255,255,.62); margin-top:6px; line-height:1.6; }
+    .wact { display:flex; gap:8px; margin-top:12px; }
+    .wb { flex:1; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+      font-size:13px; font-weight:600; }
+    .wb.solid { background:var(--av); color:#FFF; }
+    .wb.ghost { background:rgba(255,255,255,.13); color:rgba(255,255,255,.92);
+      border:1px solid rgba(255,255,255,.18); }
+
+    .sect { font-size:11.5px; color:var(--muted); padding:2px 4px 0; }
+    .row { display:flex; align-items:center; gap:11px; padding:12px 0; border-bottom:1px solid var(--lineSoft); }
+    .row:last-child { border-bottom:none; padding-bottom:0; }
+    .row:first-child { padding-top:0; }
+    .ic { width:30px; height:30px; border-radius:10px; flex:none; background:var(--sunken);
+      display:flex; align-items:center; justify-content:center; }
+    .ic.on { background:var(--avSoft); }
+    .rb { flex:1; min-width:0; }
+    .rt { display:block; font-size:13.5px; font-weight:500; }
+    .rs { display:block; font-size:11px; color:var(--muted); margin-top:3px; line-height:1.5; }
+    .rv { flex:none; font-size:12px; color:var(--ink3); font-variant-numeric:tabular-nums; }
+    .chev { flex:none; }
+    .pill { display:inline-flex; align-items:center; font-size:10px; font-weight:600; padding:2px 7px;
+      border-radius:5px; background:var(--okSoft); color:var(--ok); margin-left:6px; }
+
+    .foot { font-size:11px; color:var(--faint); text-align:center; line-height:1.8; padding:4px 0 2px; }
+
+    /* 底栏 §3.7.4 ②：10 + 40 + 34 = 84，与 .page 的 bottom 同源 */
+    .tabbar { position:absolute; z-index:5; left:0; right:0; bottom:0; height:84px;
+      background:rgba(252,250,246,.97); border-top:1px solid var(--lineSoft);
+      box-shadow:0 -8px 26px rgba(74,48,32,.07); display:flex; align-items:flex-start; padding:10px 0 0; }
+    .tab { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .tab span { font-size:10.5px; color:var(--faint); letter-spacing:.04em; }
+    .tab.on span { color:var(--av); font-weight:700; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow"><span class="ttl">我的</span></div>
+
+  <div class="page">
+    <div class="card">
+      <div class="me">
+        <div class="ava"></div>
+        <span class="meb">
+          <span class="men">王老板</span>
+          <span class="mep">138****6027 · 王记五金</span>
+        </span>
+        <span class="meg">编辑</span>
+      </div>
+    </div>
+
+    <div class="wallet">
+      <div class="wh">
+        <span class="wk">钻石余额</span>
+        <span class="wa" onClick="{{ toggleBill }}">{{ billLabel }}</span>
+      </div>
+      <div class="wn">
+        <span class="wnum">{{ balance }}</span>
+        <span class="wunit">钻石</span>
+      </div>
+      <div class="wsub">{{ walletSub }}</div>
+      <sc-if value="{{ billOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:11px; border-top:1px solid rgba(255,255,255,.14); padding-top:9px">
+          <sc-for list="{{ bills }}" as="b" hint-placeholder-count="3">
+            <div style="display:flex; align-items:baseline; gap:9px; padding:5px 0">
+              <span style="flex:1; font-size:12px; color:rgba(255,255,255,.9)">{{ b.what }}</span>
+              <span style="flex:none; font-size:11px; color:rgba(255,255,255,.5)">{{ b.when }}</span>
+              <span style="flex:none; font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; color:{{ b.color }}">{{ b.amount }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+      <div class="wact">
+        <div class="wb solid">充值</div>
+        <div class="wb ghost">看套餐</div>
+      </div>
+    </div>
+
+    <div class="sect">连接的应用</div>
+    <div class="card">
+      <div class="row">
+        <span class="ic on">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6"/><path d="M11 6l1-1a4.2 4.2 0 0 1 6 6l-1 1"/><path d="M13 18l-1 1a4.2 4.2 0 0 1-6-6l1-1"/></svg>
+        </span>
+        <span class="rb">
+          <span class="rt">军师<span class="pill">已连接</span></span>
+          <span class="rs">来自军师的创作任务会落到「创作」里；成片自动回传。</span>
+        </span>
+        <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="row">
+        <span class="ic">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#81838A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        </span>
+        <span class="rb">
+          <span class="rt">连接其他应用</span>
+          <span class="rs">目前只有军师一个。</span>
+        </span>
+        <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+    </div>
+
+    <div class="sect">设置</div>
+    <div class="card">
+      <sc-for list="{{ items }}" as="s" hint-placeholder-count="4">
+        <div class="row">
+          <span class="rb"><span class="rt">{{ s.name }}</span></span>
+          <span class="rv">{{ s.value }}</span>
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </div>
+      </sc-for>
+    </div>
+
+    <div class="foot">快出片 0.1.0</div>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      <span>创作</span>
+    </div>
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2 2 0 0 1 5 6.5h4l2 2.5h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>资料库</span>
+    </div>
+    <div class="tab">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#AAA9A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+      <span>作品</span>
+    </div>
+    <div class="tab on">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F06435" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>
+      <span>我的</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { bill: false };
+  }
+
+  renderVals() {
+    const open = this.state.bill;
+    // 钱包真值口径见方案 §8.5：快出片钱包是用户消费的唯一真值。
+    // 流水金额与 Checkout / Rendering 两屏对得上：整条 35 = 数字人 32 + 配音 3，
+    // 其中第 1 段 6 钻上一轮先行生成，导出整片时结算 29。
+    return {
+      balance: 211,
+      walletSub: '按段计费，生成失败自动退回。已生成的片段导出整片时不重复扣费。',
+      billLabel: open ? '收起' : '看流水',
+      billOpen: open,
+      bills: [
+        { what: '为实体发声 · 导出整片', when: '今天 14:20', amount: '-29', color: 'rgba(255,255,255,.92)' },
+        { what: '先行生成第 1 段', when: '今天 13:58', amount: '-6', color: 'rgba(255,255,255,.92)' },
+        { what: '充值', when: '8 月 20 日', amount: '+240', color: '#8FD3B0' },
+      ],
+      items: [
+        { name: '通知', value: '完成后通知我' },
+        { name: '保存到相册', value: '每次询问' },
+        { name: '隐私与授权', value: '' },
+        { name: '帮助与反馈', value: '' },
+      ],
+      toggleBill: () => this.setState({ bill: !this.state.bill }),
+    };
+  }
+}
+</script>
+</body>
+</html>

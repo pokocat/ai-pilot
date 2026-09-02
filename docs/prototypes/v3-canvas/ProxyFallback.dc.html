@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .ttl { flex:1; font-family:var(--serif); font-weight:600; font-size:17px; }
+    .navact { font-size:12px; color:var(--muted); }
+
+    .stage { padding:6px 20px 0; display:flex; flex-direction:column; align-items:center; }
+    .player { width:216px; height:384px; border-radius:18px; overflow:hidden; position:relative;
+      background:#2A2724; box-shadow:0 14px 34px rgba(69,54,44,.20); }
+    .vid { position:absolute; inset:0;
+      background-image:radial-gradient(circle at 78% 28%, rgba(244,214,178,.55) 0 12%, transparent 35%),
+        linear-gradient(150deg,#C9A682 0%,#8A7565 54%,#4A4C4C 100%); }
+    .veil { position:absolute; inset:0; background:rgba(26,22,19,.72); display:flex;
+      flex-direction:column; align-items:center; justify-content:center; padding:22px; text-align:center; }
+    .spin { width:30px; height:30px; border-radius:50%; border:3px solid rgba(255,255,255,.24);
+      border-top-color:#FFF; animation:sp 1s linear infinite; }
+    @keyframes sp { to { transform:rotate(360deg); } }
+    .veilt { display:block; color:#FFF; font-family:var(--serif); font-size:15px; font-weight:600; margin-top:14px; }
+    .veils { display:block; color:rgba(255,255,255,.72); font-size:11.5px; line-height:1.7; margin-top:8px; }
+    .pbar { width:100%; height:4px; border-radius:999px; background:rgba(255,255,255,.2);
+      margin-top:16px; overflow:hidden; }
+    .pfill { height:4px; border-radius:999px; background:#FFF; }
+    .cap { position:absolute; left:14px; right:14px; bottom:52px; text-align:center; }
+    .cap span { display:inline-block; background:rgba(20,17,15,.62); color:#FFF; font-size:12.5px;
+      line-height:1.5; padding:5px 9px; border-radius:8px; }
+    .tchip { position:absolute; left:10px; top:10px; padding:4px 9px; border-radius:999px;
+      background:rgba(36,30,26,.55); color:#FFF; font-size:11px; font-variant-numeric:tabular-nums; }
+    .pbtn { position:absolute; left:50%; top:50%; width:54px; height:54px; margin:-27px 0 0 -27px;
+      border-radius:50%; background:rgba(255,255,255,.92); display:flex; align-items:center; justify-content:center;
+      box-shadow:0 6px 20px rgba(0,0,0,.24); }
+
+    .strip { width:350px; margin:10px 0 0; }
+    .striph { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .striptt { flex:1; font-size:12.5px; font-weight:600; }
+    .stripa { font-size:12px; color:var(--avDeep); font-weight:600; }
+    .frames { display:flex; gap:5px; }
+    .fr { flex:1; height:38px; border-radius:8px; position:relative; overflow:hidden; }
+    .fr span { position:absolute; left:0; right:0; bottom:0; font-size:9px; color:#FFF;
+      background:rgba(20,17,15,.5); text-align:center; padding:1px 0; font-variant-numeric:tabular-nums; }
+    .g1 { background-image:linear-gradient(145deg,#E8B679,#6D554B); }
+    .g2 { background-image:linear-gradient(150deg,#C9A682,#4A4C4C); }
+    .g3 { background-image:linear-gradient(145deg,#9C7555,#2F3332); }
+    .g4 { background-image:linear-gradient(145deg,#C7825A,#383A39); }
+    .g5 { background:linear-gradient(160deg,#F4EFE7,#E4DACB); }
+    .g6 { background-image:linear-gradient(160deg,#B9846A,#33302E); }
+    .mute { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--muted); margin-top:8px; }
+
+    .body { padding:12px 20px 0; display:flex; flex-direction:column; gap:9px; }
+    .rows { display:flex; flex-direction:column; gap:8px; }
+    .row { background:var(--surface); border:1px solid var(--lineSoft); border-radius:16px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:12px 14px; display:flex; align-items:center; gap:10px; }
+    .rowk { font-size:12px; color:var(--muted); width:52px; flex:none; }
+    .rowv { flex:1; font-size:13.5px; font-weight:600; }
+    .rowa { font-size:12px; color:var(--avDeep); }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:12px; font-weight:600; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 20px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+    .cta.off { opacity:.45; box-shadow:none; }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">王记五金 · 二十三年</div>
+  </div>
+
+  <div class="stage">
+    <div class="player">
+      <div class="vid"></div>
+      <sc-if value="{{ ready }}" hint-placeholder-val="{{ false }}">
+        <div class="tchip">00:00 / 02:43</div>
+        <div class="cap"><span>百分之九十的实体店在边缘挣扎</span></div>
+        <div class="pbtn"><svg width="20" height="20" viewBox="0 0 24 24" fill="#191A1C"><path d="M8 5l12 7-12 7z"/></svg></div>
+      </sc-if>
+      <sc-if value="{{ waiting }}" hint-placeholder-val="{{ true }}">
+        <div class="veil">
+          <div class="spin"></div>
+          <span class="veilt">正在生成预览</span>
+          <span class="veils">正在把素材、字幕、配音和音乐合成为完整视频，约需 {{ left }} 秒。</span>
+          <div class="pbar"><div class="pfill" style="width:{{ pct }}%"></div></div>
+        </div>
+      </sc-if>
+    </div>
+
+    <div class="strip">
+      <div class="striph">
+        <span class="striptt">{{ stripTitle }}</span>
+        <span class="stripa" onClick="{{ toggleStrip }}">{{ stripAction }}</span>
+      </div>
+      <sc-if value="{{ stripOpen }}" hint-placeholder-val="{{ true }}">
+        <div class="frames">
+          <div class="fr g1"><span>0–6</span></div>
+          <div class="fr g2"><span>6–17</span></div>
+          <div class="fr g3"><span>17–24</span></div>
+          <div class="fr g4"><span>24–28</span></div>
+          <div class="fr g5"><span>28–33</span></div>
+          <div class="fr g6"><span>33–41</span></div>
+        </div>
+        <div class="mute">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#81838A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M17 9l4 6"/><path d="M21 9l-4 6"/></svg>
+          静音，仅用于核对顺序
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="rows">
+      <div class="row"><span class="rowk">讲什么</span><span class="rowv">王记五金 · 第 2 版脚本</span><span class="rowa">修改</span></div>
+      <div class="row"><span class="rowk">谁来讲</span><span class="rowv">王老板数字人</span><span class="rowa">更换</span></div>
+      <div class="row"><span class="rowk">整体样式</span><span class="rowv">字幕 · 音乐 · 品牌尾片</span><span class="rowa">调整</span></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ footA }}</span>
+      <span class="b">{{ footB }}</span>
+    </div>
+    <div class="cta {{ ctaCls }}">立即生成</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pct: 34, ready: false, strip: true };
+  }
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      const next = this.state.pct + 6;
+      if (next >= 100) {
+        clearInterval(this.timer); this.timer = null;
+        this.setState({ pct: 100, ready: true, strip: false });
+      } else this.setState({ pct: next });
+    }, 900);
+  }
+
+  componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+
+  renderVals() {
+    const ready = this.state.ready;
+    return {
+      ready: ready,
+      waiting: !ready,
+      pct: this.state.pct,
+      // 这个「约需 N 秒」是占位：真实数值由闸门 B 的 163 秒代理片墙钟实测给出
+      // （协议 §3.3），现在按 0.9 倍率凑一个量级，不是承诺。
+      left: Math.max(1, Math.round((100 - this.state.pct) * 0.9)),
+      stripTitle: ready ? '成片顺序如下' : '可先核对画面顺序',
+      stripAction: this.state.strip ? '收起' : '展开',
+      stripOpen: this.state.strip,
+      toggleStrip: () => this.setState({ strip: !this.state.strip }),
+      footA: ready ? '已就绪 131 秒 · 待生成 32 秒 · 35 钻石' : '预览完成前不扣费',
+      footB: ready ? '确认后再生成' : '生成预览不扣费',
+      ctaCls: ready ? '' : 'off',
+    };
+  }
+}
+</script>
+</body>
+</html>

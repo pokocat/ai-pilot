@@ -31,7 +31,7 @@
       </view>
 
       <view class="primary-cta" bindtap="openTemplates">
-        <text>挑个模板开拍</text>
+        <text>选择模板</text>
         <native-icon name="arrow" tone="white" size="16"></native-icon>
       </view>
 
@@ -63,28 +63,40 @@
       <view class="gate gate-{{avatarState}}" bindtap="tapAvatarCard">
         <view class="gate-visual">
           <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="gate-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
-          <native-icon wx:else name="{{avatarState === 'failed' ? 'alert' : 'user'}}" tone="{{avatarState === 'ready' ? 'green' : 'red'}}" size="18"></native-icon>
+          <!-- tone 要按状态映射，不能只把 ready 摘出去让其余全落 red：
+               训练中是正常等待态，穿告警红会被读成出错，诱发重复创建 —— 和把
+               「读失败」说成「你还没有」是同一类误导，只是走的视觉这条路。 -->
+          <native-icon wx:else name="{{avatarState === 'failed' ? 'alert' : 'user'}}" tone="{{avatarState === 'ready' ? 'green' : (avatarState === 'training' ? 'brand' : (avatarState === 'failed' ? 'red' : 'neutral'))}}" size="18"></native-icon>
         </view>
         <view class="gate-body">
           <block wx:if="{{avatarState === 'ready'}}">
-            <text class="gate-title">{{avatar.name || '数字分身'}}已就绪</text>
-            <text class="gate-sub">{{avatarCount > 1 ? '共 ' + avatarCount + ' 个形象' : '出片会用你自己的形象和声音'}}</text>
+            <text class="gate-title">{{avatar.name || '数字人'}}已就绪</text>
+            <text class="gate-sub">{{avatarCount > 1 ? '共 ' + avatarCount + ' 个数字人' : '出片会用你自己的形象和声音'}}</text>
           </block>
           <block wx:elif="{{avatarState === 'training'}}">
-            <text class="gate-title">数字分身训练中</text>
-            <text class="gate-sub">完成会通知你，这期间可以先改文案</text>
+            <text class="gate-title">数字人训练中</text>
+            <text class="gate-sub">完成后会通知你，这期间可以先改文案</text>
           </block>
-          <!-- 读失败必须与"确实没有"分开说：说错了会让已有分身的用户去重复创建。 -->
+          <!-- 读失败必须与"确实没有"分开说：说错了会让已有数字人的用户去重复创建。 -->
           <block wx:elif="{{avatarState === 'failed'}}">
-            <text class="gate-title">分身状态没读到</text>
-            <text class="gate-sub">网络没通，点一下重读；这不代表你没有分身</text>
+            <text class="gate-title">数字人状态加载失败</text>
+            <text class="gate-sub">网络异常，点一下重试；这不代表你没有数字人</text>
+          </block>
+          <!-- 未登录时后端根本没查过这个账号，凭什么说「还没有」。
+               这与上面「读失败不能说成你还没有」是同一条原则的另一半：
+               **没查过也不能说成你还没有**。副文早就分了 guest，标题和动作却没分。 -->
+          <block wx:elif="{{guest}}">
+            <text class="gate-title">先登录，再创建数字人</text>
+            <text class="gate-sub">上传一段正脸视频即可创建，之后出片都用它</text>
           </block>
           <block wx:else>
-            <text class="gate-title">还没有数字分身</text>
-            <text class="gate-sub">{{guest ? '登录后上传一段正脸视频即可创建' : '上传一段 5 秒以上正脸视频即可创建'}}</text>
+            <text class="gate-title">还没有数字人</text>
+            <text class="gate-sub">上传一段 5 秒以上正脸视频即可创建</text>
           </block>
         </view>
-        <text class="gate-action">{{avatarState === 'ready' ? '管理' : (avatarState === 'training' ? '看进度' : (avatarState === 'failed' ? '重试' : '去创建'))}}</text>
+        <!-- 游客点这张卡，经 tapAvatarCard 到 openClone 再到 requireLogin，实际弹的是登录浮层。
+             按钮写「去创建」是在说一件它做不到的事。 -->
+        <text class="gate-action">{{avatarState === 'ready' ? '管理' : (avatarState === 'training' ? '查看进度' : (avatarState === 'failed' ? '重试' : (guest ? '去登录' : '去创建')))}}</text>
       </view>
 
       <!-- ⑤ 次级入口 -->

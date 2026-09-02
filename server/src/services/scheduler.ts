@@ -11,6 +11,7 @@ import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import { scanPrescriptionFollowups } from './prescription.js';
 import { sweepPendingOrders, sweepPendingRefunds } from './wechatPay.js';
 import { scanInviteActivationOutbox } from './activation.js';
+import { confirmMatured, scanCommissionOutbox } from './commission.js';
 import { expireStalePendingSubscriptions, reconcilePapayOrders, reconcilePendingSubscriptions, scanAutoRenewals, scanPendingSubscriptionCancellations } from './wechatPapay.js';
 import {
   hasSentWechatNotificationToday,
@@ -23,6 +24,13 @@ import { scanAvatarTrainingNotifications } from './video/avatarNotification.js';
 import { scanDataErasureJobs } from './accountDeletion.js';
 import { runVideoMaintenanceSweep } from './video/maintenance.js';
 import { runLlmHealthSweep } from './llmHealth.js';
+import {
+  noteSchedulerJobFinished,
+  noteSchedulerJobSkipped,
+  noteSchedulerJobStarted,
+  registerSchedulerJobMetric,
+  setSchedulerMetricsEnabled,
+} from './metrics.js';
 
 export interface ScheduledJob {
   name: string;
@@ -33,35 +41,68 @@ export interface ScheduledJob {
 const jobs: ScheduledJob[] = [];
 const timers: ReturnType<typeof setInterval>[] = [];
 let started = false;
+// 严格串行执行进程内定时任务。生产只有 5 个 Prisma 连接时，旧实现会在同一秒启动
+// 5–10 个 job：每个 job 先用一个连接持有 advisory xact lock，job.run 又向全局
+// Prisma 池申请第二个连接，最终所有任务互相饿死并在 10s 后集体超时。
+// 串行后单轮最多占“1 个选主连接 + job 自身连接”，同时给用户请求留出池容量。
+let queueTail: Promise<void> = Promise.resolve();
+const queuedOrRunning = new Map<string, Promise<void>>();
 
 export function registerJob(job: ScheduledJob): void {
   jobs.push(job);
+  registerSchedulerJobMetric(job.name, job.intervalMs);
 }
 
-/** 单个任务执行（含隔离与打点）；测试可直接调用驱动任务，不依赖真实计时器。 */
-export async function runJob(name: string): Promise<void> {
-  const job = jobs.find((j) => j.name === name);
-  if (!job) throw new Error(`未注册的定时任务：${name}`);
+/** 单个任务真实执行：跨实例选主、错误隔离、任务级指标。 */
+async function executeJob(job: ScheduledJob): Promise<void> {
   const t0 = Date.now();
+  noteSchedulerJobStarted(job.name);
   try {
     if (process.env.NODE_ENV === 'test') {
       await job.run();
+      noteSchedulerJobFinished(job.name, 'success', Date.now() - t0);
     } else {
-      await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRaw<Array<{ acquired: boolean }>>`
-          SELECT pg_try_advisory_xact_lock(hashtext(${`junshi:scheduler:${name}`})) AS acquired
+          SELECT pg_try_advisory_xact_lock(hashtext(${`junshi:scheduler:${job.name}`})) AS acquired
         `;
         if (!rows[0]?.acquired) {
-          console.log(`[scheduler] ${name} skipped · another instance owns lease`);
-          return;
+          console.log(`[scheduler] ${job.name} skipped · another instance owns lease`);
+          return 'lease_skipped' as const;
         }
         await job.run();
+        return 'success' as const;
       }, { timeout: 15 * 60_000 });
+      noteSchedulerJobFinished(job.name, result, Date.now() - t0);
     }
-    console.log(`[scheduler] ${name} ok in ${Date.now() - t0}ms`);
+    console.log(`[scheduler] ${job.name} ok in ${Date.now() - t0}ms`);
   } catch (err) {
-    console.error(`[scheduler] ${name} failed:`, (err as Error).message);
+    noteSchedulerJobFinished(job.name, 'failed', Date.now() - t0);
+    console.error(`[scheduler] ${job.name} failed:`, (err as Error).message);
   }
+}
+
+/**
+ * 进程内所有任务进同一条 FIFO 队列；同名任务已排队/运行时不再堆积第二份。
+ * 测试可直接 await 本函数驱动任务，不依赖真实计时器。
+ */
+export function runJob(name: string): Promise<void> {
+  const job = jobs.find((j) => j.name === name);
+  if (!job) return Promise.reject(new Error(`未注册的定时任务：${name}`));
+  const existing = queuedOrRunning.get(name);
+  if (existing) {
+    noteSchedulerJobSkipped(name, 'overlap_skipped');
+    return existing;
+  }
+
+  const queued = queueTail.then(() => executeJob(job));
+  // executeJob 会自己收口业务异常；这层 catch 只是确保一个意外 reject 也不会毒死后续队列。
+  queueTail = queued.catch(() => {});
+  const exposed = queued.finally(() => {
+    if (queuedOrRunning.get(name) === exposed) queuedOrRunning.delete(name);
+  });
+  queuedOrRunning.set(name, exposed);
+  return exposed;
 }
 
 export function startScheduler(): void {
@@ -72,10 +113,12 @@ export function startScheduler(): void {
   //   ② 运维——可在只运 API 的节点关闭背景扫描；多实例同时开启也会由 DB 锁去重。
   // 默认 true = 行为不变。
   if ((process.env.SCHEDULER_ENABLED ?? 'true').trim() === 'false') {
+    setSchedulerMetricsEnabled(false);
     console.log('[scheduler] SCHEDULER_ENABLED=false，本进程不启动定时任务');
     return;
   }
   started = true;
+  setSchedulerMetricsEnabled(true);
   for (const job of jobs) {
     const t = setInterval(() => { void runJob(job.name); }, job.intervalMs);
     // 不阻止进程退出
@@ -89,6 +132,7 @@ export function stopScheduler(): void {
   timers.forEach((t) => clearInterval(t));
   timers.length = 0;
   started = false;
+  setSchedulerMetricsEnabled(false);
 }
 
 // ============ 任务：案卷久未推进召回候选 ============
@@ -378,6 +422,9 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   const cancellations = await scanPendingSubscriptionCancellations();
   const staleSubscriptions = await expireStalePendingSubscriptions();
   const inviteOutbox = await scanInviteActivationOutbox();
+  // 佣金 outbox 与 invite 归因 outbox 同一形态、同一失败面（支付/退款事务内落行、事务外处理），
+  // 所以并进同一轮 sweep：多一个 job 就多一次选主 + 一个连接，而这两件事本来就该一起补。
+  const commissionOutbox = await scanCommissionOutbox();
   if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
   if (refunds.scanned) console.log(`[scheduler] refund sweep: completed=${refunds.completed} (scanned ${refunds.scanned})`);
   if (subscriptions.scanned) console.log(`[scheduler] auto-renew: submitted=${subscriptions.submitted} failed=${subscriptions.failed} (scanned ${subscriptions.scanned})`);
@@ -386,4 +433,13 @@ registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async ()
   if (cancellations.scanned) console.log(`[scheduler] papay cancellations: cancelled=${cancellations.cancelled} (scanned ${cancellations.scanned})`);
   if (staleSubscriptions) console.log(`[scheduler] papay pending subscriptions expired: ${staleSubscriptions}`);
   if (inviteOutbox.scanned) console.log(`[scheduler] invite activation outbox: completed=${inviteOutbox.completed} (scanned ${inviteOutbox.scanned})`);
+  if (commissionOutbox.scanned) console.log(`[scheduler] commission outbox: completed=${commissionOutbox.completed} (scanned ${commissionOutbox.scanned})`);
+} });
+// 佣金冻结期到点（代理分销）：pending + holdUntil 已过 + 订单未退款 → confirmed（可结算）。
+// 30 分钟一轮足够：冻结期以天计，运营看到的「待结」晚半小时成熟不影响任何决策；
+// 反过来跑太密会让这条纯扫描任务白占选主连接。总开关关闭时本 job 仍会跑，但库里不会有
+// pending 行可成熟（计提侧已短路），是空扫。
+registerJob({ name: 'commission-mature', intervalMs: 30 * 60_000, run: async () => {
+  const confirmed = await confirmMatured();
+  if (confirmed) console.log(`[scheduler] commission matured: confirmed=${confirmed}`);
 } });

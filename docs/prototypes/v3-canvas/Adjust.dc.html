@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #C74920; } a:hover { color: #F06435; }
+    .scr {
+      --ink:#191A1C; --ink2:#494B4F; --ink3:#686A6F; --muted:#81838A; --faint:#AAA9A6;
+      --bg:#F7F6F2; --surface:#FFFFFF; --sunken:#EFEEE9;
+      --line:rgba(25,26,28,.12); --lineSoft:rgba(25,26,28,.07);
+      --av:#F06435; --avDeep:#C74920; --avSoft:#FFF0E9; --avLine:rgba(240,100,53,.25);
+      --br:#326B86; --brSoft:#EDF5F8; --brLine:rgba(50,107,134,.22);
+      --ok:#2F7D5B; --okSoft:#EAF5EF;
+      --fixed:#9A8F84; --fixedInk:#6B6259; --fixedSoft:#EDE7E0;
+      --serif:"Noto Serif SC","Songti SC",serif;
+      --sans:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+      width:390px; height:844px; position:relative; overflow:hidden; box-sizing:border-box;
+      color:var(--ink); font-family:var(--sans);
+      background:radial-gradient(circle at 86% 0%, rgba(240,100,53,.07), transparent 24%), var(--bg);
+      -webkit-font-smoothing:antialiased;
+    }
+    .scr * { box-sizing:border-box; }
+    .safe { height:44px; }
+    .navrow { height:40px; display:flex; align-items:center; gap:12px; padding:0 16px 0 12px; }
+    .back { width:36px; height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center;
+      border-radius:12px; background:rgba(255,255,255,.72); border:1px solid rgba(25,26,28,.06);
+      box-shadow:0 4px 14px rgba(95,72,55,.06); }
+    .ttl { flex:1; font-family:var(--serif); font-weight:600; font-size:17px; }
+    .navact { font-size:12px; color:var(--avDeep); font-weight:500; }
+
+    /* 真机是 scroll-view；这里限高可滚，避免展开「更多方案」后被底栏裁掉 */
+    /* 内容整块可滚（§3.7.4 ③）：四个方案 + 段落卡 + 截取轨会超屏。
+       top/bottom 与导航行、底部操作栏（9 + 46 + 34 = 89）同源。 */
+    .page { position:absolute; left:0; right:0; top:84px; bottom:89px; overflow-y:auto; }
+    .body { padding:6px 20px 0; display:flex; flex-direction:column; gap:8px;
+      max-height:665px; overflow-y:auto; }
+    .card { background:var(--surface); border:1px solid var(--lineSoft); border-radius:20px;
+      box-shadow:0 4px 14px rgba(95,72,55,.06); padding:12px; }
+
+    .prob { border:1px solid var(--avLine); background:var(--avSoft); border-radius:20px; padding:13px; }
+    .probt { font-family:var(--serif); font-size:16px; font-weight:600; }
+    .probs { font-size:12.5px; color:var(--ink3); line-height:1.65; margin-top:6px; }
+
+    .opts { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .opt { display:flex; align-items:center; gap:10px; padding:9px 13px; border-radius:14px;
+      background:rgba(255,255,255,.78); border:1px solid var(--line); }
+    .opt.on { background:#FFF; border-color:var(--av); box-shadow:0 6px 16px rgba(240,100,53,.14); }
+    .radio { width:18px; height:18px; border-radius:50%; border:2px solid var(--line); flex:none;
+      display:flex; align-items:center; justify-content:center; }
+    .opt.on .radio { border-color:var(--av); }
+    .radio i { width:9px; height:9px; border-radius:50%; background:var(--av); display:none; }
+    .opt.on .radio i { display:block; }
+    .optb { flex:1; min-width:0; }
+    .optt { display:block; font-size:13.5px; font-weight:600; }
+    .opts2 { display:block; font-size:11.5px; color:var(--ink3); margin-top:3px; line-height:1.55; }
+    .price { flex:none; font-size:12px; font-weight:600; padding:4px 9px; border-radius:999px; }
+    .price.free { background:var(--okSoft); color:var(--ok); }
+    .price.paid { background:var(--avSoft); color:var(--avDeep); border:1px solid var(--avLine); }
+    .more { margin-top:10px; font-size:12.5px; color:var(--avDeep); font-weight:600;
+      display:flex; align-items:center; gap:4px; }
+
+    .slot { }
+    .slotk { display:flex; align-items:center; gap:8px; }
+    .slotno { font-size:11px; font-weight:700; color:#FFF; background:var(--ink); width:20px; height:20px;
+      border-radius:6px; display:flex; align-items:center; justify-content:center; flex:none; }
+    .slotn { font-size:13.5px; font-weight:600; flex:1; }
+    .slotd { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .tag { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px;
+      font-size:12px; font-weight:500; }
+    .tag i { width:7px; height:7px; border-radius:2px; display:block; }
+    .tag.avatar { background:var(--avSoft); border:1px solid var(--avLine); color:var(--avDeep); }
+    .tag.avatar i { background:var(--av); }
+    .tag.broll { background:var(--brSoft); border:1px solid var(--brLine); color:var(--br); }
+    .tag.broll i { background:var(--br); }
+    .line { font-size:12.5px; line-height:1.7; color:var(--ink2); margin-top:10px; }
+    .parts { display:flex; gap:8px; margin-top:10px; }
+    .part { flex:1; border-radius:12px; overflow:hidden; border:1px solid var(--lineSoft); }
+    .partimg { height:44px; }
+    .g-craft { background-image:radial-gradient(circle at 22% 76%, rgba(229,179,121,.4) 0 16%, transparent 38%), linear-gradient(145deg,#9C7555 0%,#695044 56%,#2F3332 100%); }
+    .g-street { background-image:radial-gradient(circle at 78% 28%, rgba(244,214,178,.55) 0 12%, transparent 35%), linear-gradient(150deg,#C9A682 0%,#8A7565 54%,#4A4C4C 100%); }
+    .partmeta { padding:6px 8px; background:var(--surface); }
+    .partmeta .a { display:block; font-size:11.5px; font-weight:600; }
+    .partmeta .b { display:block; font-size:10.5px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+    .acts { display:flex; gap:8px; margin-top:6px; }
+    .ab { flex:1; height:40px; border-radius:12px; border:1px solid var(--line); background:var(--bg);
+      display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--ink2); font-weight:500; }
+
+    .trim { display:flex; align-items:center; gap:10px; }
+    .trimb { flex:1; min-width:0; }
+    .trimt { display:block; font-size:12.5px; font-weight:600; }
+    .trims { display:block; font-size:11.5px; color:var(--ink3); margin-top:4px; line-height:1.55; }
+    .trimact { flex:none; font-size:12px; color:var(--avDeep); font-weight:600; }
+    .rail { height:22px; border-radius:8px; background:var(--sunken); margin-top:10px; position:relative; overflow:hidden; }
+    .railuse { position:absolute; top:0; bottom:0; left:20%; width:66.7%; background:var(--brSoft);
+      border-left:2px solid var(--br); border-right:2px solid var(--br); }
+    .raill { position:absolute; left:6px; top:6px; font-size:10px; color:var(--faint); }
+    .railr { position:absolute; right:6px; top:6px; font-size:10px; color:var(--faint); }
+
+    .footer { position:absolute; left:0; right:0; bottom:0; background:rgba(255,255,255,.97);
+      border-top:1px solid var(--lineSoft); box-shadow:0 -10px 30px rgba(69,54,44,.08);
+      padding:9px 20px 34px; display:flex; align-items:center; gap:12px; }
+    .fm { flex:1; min-width:0; }
+    .fm .a { display:block; font-size:12px; font-weight:600; }
+    .fm .b { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+    .cta { flex:none; height:46px; padding:0 18px; border-radius:15px; background:var(--av); color:#FFF;
+      font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 10px 22px rgba(240,100,53,.22), inset 0 1px 0 rgba(255,255,255,.35); }
+  </style>
+</helmet>
+
+<div class="scr">
+  <div class="safe"></div>
+  <div class="navrow">
+    <div class="back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#191A1C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div class="ttl">调整画面</div>
+  </div>
+
+  <div class="page">
+  <div class="body">
+    <div class="prob">
+      <div class="probt">1 处画面待补充</div>
+      <div class="probs">“使用场景”缺少可用画面：素材库中没有产品使用场景的镜头。</div>
+      <div class="opts">
+        <sc-for list="{{ opts }}" as="o" hint-placeholder-count="2">
+          <div class="opt {{ o.cls }}" onClick="{{ o.pick }}">
+            <span class="radio"><i></i></span>
+            <span class="optb">
+              <span class="optt">{{ o.title }}</span>
+              <span class="opts2">{{ o.sub }}</span>
+            </span>
+            <span class="price {{ o.priceCls }}">{{ o.price }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div class="more" onClick="{{ toggleMore }}">
+        {{ moreLabel }}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C74920" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+    </div>
+
+    <div class="card slot">
+      <div class="slotk">
+        <span class="slotno">3</span>
+        <span class="slotn">解决方案</span>
+        <span class="slotd">00:15–00:25</span>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:6px;">
+        <span class="tag avatar"><i></i>数字人出镜 8 秒</span>
+        <span class="tag broll"><i></i>画面 10 秒</span>
+      </div>
+      <div class="line">“这箱子我自己店里用了两年，一层压 40 斤压不塌。”</div>
+      <div class="parts">
+        <div class="part">
+          <div class="partimg g-craft"></div>
+          <div class="partmeta"><span class="a">商品特写</span><span class="b">5 秒 · 实拍</span></div>
+        </div>
+        <div class="part">
+          <div class="partimg g-street"></div>
+          <div class="partmeta"><span class="a">门店素材</span><span class="b">3 秒 · 实拍</span></div>
+        </div>
+      </div>
+      <div class="acts">
+        <div class="ab">换画面</div>
+        <div class="ab">更多调整</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="trim">
+        <span class="trimb">
+          <span class="trimt">素材 15 秒，这里用 00:03–00:13</span>
+          <span class="trims">自动选取画面最清晰、动作最完整的一段，非固定截取前 10 秒。原片在素材库中完整保留。</span>
+        </span>
+        <span class="trimact">重新截取</span>
+      </div>
+      <div class="rail">
+        <div class="railuse"></div>
+        <div class="raill">00:00</div>
+        <div class="railr">00:15</div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+  <div class="footer">
+    <div class="fm">
+      <span class="a">{{ footA }}</span>
+      <span class="b">{{ footB }}</span>
+    </div>
+    <div class="cta">确定</div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pick: 'talk', more: false };
+  }
+
+  renderVals() {
+    // P0 的片段级生成只覆盖数字人段（方案 §P0-a：PreparedClip.kind = avatar | tts）。
+    // 「AI 生成一段场景画面」不在 P0：石榴网关没有 T2V/I2V，方案 §0.0 已把它整块移出。
+    // 所以这一屏的四个方案里，唯一要钱的是「数字人多出镜」——按 1 钻石/秒，口径见 model.js。
+    const base = [
+      { id: 'talk', title: '数字人出镜延长 5 秒', sub: '由王老板补讲这一段，节奏连贯', price: '+5 钻石', paid: 5 },
+      { id: 'off', title: '用官方素材补上', sub: '同类场景的授权素材，画面通用，但不是你的门店', price: '免费', paid: 0 },
+    ];
+    const extra = [
+      { id: 'lib', title: '从素材库选择', sub: '现有 3 条门店实拍，与本段匹配度一般', price: '免费', paid: 0 },
+      { id: 'up', title: '上传新素材', sub: '现拍一条即可，10 秒足够', price: '免费', paid: 0 },
+    ];
+    const list = this.state.more ? base.concat(extra) : base;
+    const cur = base.concat(extra).find((o) => o.id === this.state.pick) || base[0];
+    const total = 18 + cur.paid;
+
+    return {
+      moreLabel: this.state.more ? '收起' : '更多方案',
+      toggleMore: () => this.setState({ more: !this.state.more }),
+      opts: list.map((o) => ({
+        title: o.title,
+        sub: o.sub,
+        price: o.price,
+        priceCls: o.paid ? 'paid' : 'free',
+        cls: this.state.pick === o.id ? 'on' : '',
+        pick: () => this.setState({ pick: o.id }),
+      })),
+      footA: '已处理 · 本条共计 ' + total + ' 钻石',
+      footB: cur.paid
+        ? ('数字人多出镜 5 秒，按 1 钻石一秒；生成前会再次确认')
+        : '换画面不额外扣费，预览即时更新',
+    };
+  }
+}
+</script>
+</body>
+</html>

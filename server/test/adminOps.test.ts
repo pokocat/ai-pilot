@@ -7,6 +7,7 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from 
 import { createOperator, createSession } from '../src/services/adminAccount.js';
 import { periodKeyOf, computeExpiry, addMonthsClamped } from '../src/services/planTime.js';
 import { dateKey, now } from '../src/services/clock.js';
+import { parseAdminRange } from '../src/services/adminRange.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
@@ -443,5 +444,72 @@ describe('S5 · POST /admin/users/:id/plan 改档不静默烧时长', () => {
     const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.carriedDays, 0);
+  });
+});
+
+// S6：后台时间筛选的上界曾钉死在 `new Date()`，而 createdAt 由数据库 now() 生成、与 Node 墙钟同毫秒，
+// 于是 `lt` 把「刚刚写入的那一行」整整排除掉——运营刷「调用诊断」看不到刚发生的调用，
+// 全量 npm test（热进程）里 adminVisibility 那条来源断言也因此稳定变红（单跑冷启动反而看不出来）。
+describe('S6 · 后台时间筛选：刚落库的记录必须立刻可查', () => {
+  beforeEach(async () => {
+    await cleanBusiness();
+    await prisma.llmTrace.deleteMany();
+    await seedBaseline();
+  });
+
+  test('滚动预设的查询上界越过现在，但对外展示的天数与末端不含余量', () => {
+    const before = Date.now();
+    const r = parseAdminRange({}, 7);
+    const after = Date.now();
+    assert.equal(r.view.days, 7, '预设 7 天必须仍报 7 天，不能被余量抬成 8');
+    assert.ok(r.toExclusive.getTime() > after, '查询上界必须严格越过「现在」，否则同毫秒的行会被 lt 排除');
+    assert.ok(
+      new Date(r.view.to).getTime() <= after,
+      `对外展示的区间末端不得是未来时间，实际 ${r.view.to}`,
+    );
+    assert.equal(r.view.timeZone, 'Asia/Shanghai');
+    assert.ok(r.from.getTime() <= before - 7 * 864e5 + 5, 'from 仍是 now-7d 的滚动起点');
+  });
+
+  test('自定义日期区间不加余量：截至昨天就不能把今天的行捞进来', () => {
+    const shanghai = (d: Date) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const yesterday = shanghai(new Date(Date.now() - 864e5));
+    const r = parseAdminRange({ from: yesterday, to: yesterday }, 7);
+    assert.equal(r.view.days, 1);
+    assert.ok(r.toExclusive.getTime() <= Date.now(), '「截至昨天」的上界不得越到今天，否则运营选的区间会被悄悄放宽');
+  });
+
+  test('连续 12 次「写一条 trace → 立刻查」，每条都必须在调用诊断里可见', async () => {
+    const { tenantId, userId } = await mkTenantUser();
+    const missed: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const t = await prisma.llmTrace.create({
+        data: {
+          tenantId, userId, sessionId: `s-${i}`, agentKey: 'general', kind: 'deliverable',
+          provider: 'mock', model: 'mock', status: 'ok', latencyMs: 1, totalTokens: 1,
+        },
+      });
+      const r = await api('GET', '/api/admin/observability');
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const items = r.body.items as Array<{ id: string }>;
+      if (!items.some((it) => it.id === t.id)) missed.push(`#${i} createdAt=${t.createdAt.toISOString()}`);
+    }
+    assert.deepEqual(missed, [], `刚落库的 trace 查不到（窗口上界又把当前毫秒排除了）：${missed.join('; ')}`);
+  });
+
+  test('连续 12 次「写一条审计 → 立刻查」，每条都必须在审计工作台里可见', async () => {
+    const { userId } = await mkTenantUser();
+    const missed: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const row = await prisma.auditLog.create({
+        data: { userId, action: 'user.range.guard', payloadJson: { i } },
+      });
+      const r = await api('GET', '/api/admin/audit-view?pageSize=200');
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const items = r.body.items as Array<{ id: string }>;
+      if (!items.some((it) => it.id === row.id)) missed.push(`#${i} createdAt=${row.createdAt.toISOString()}`);
+    }
+    assert.deepEqual(missed, [], `刚落库的审计查不到：${missed.join('; ')}`);
   });
 });

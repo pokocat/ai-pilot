@@ -38,7 +38,7 @@ export const DELIVERABLES: Record<string, DeliverableTemplate> = {
         "b": "从经常性收入入手：你的腰部客群复购集中，具备做会员/订阅制的基础。"
       },
       {
-        "h": "三步路径",
+        "h": "路径",
         "list": [
           "设计分层会员权益，把高频需求打包成订阅",
           "用内容 + 自动化触达提高复购，降低人工成本",
@@ -93,8 +93,7 @@ export const DELIVERABLES: Record<string, DeliverableTemplate> = {
         "h": "机会窗口",
         "list": [
           "卡住一个对手覆盖不到的高价值细分",
-          "用服务深度建立转换成本，弱化价格战",
-          "6 个月内建立可叙述的差异化心智"
+          "用服务深度建立转换成本，弱化价格战"
         ]
       }
     ]

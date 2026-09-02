@@ -50,8 +50,15 @@ import { setFeatureFlag, mergeFeatureFlagPayload, isComplianceFlag } from '../se
 import {
   REFERRAL_RISK_FLAG, REFERRAL_RISK_PAYLOAD_KEY, REFERRAL_RISK_DEF, REFERRAL_RISK_MIN, REFERRAL_RISK_MAX,
 } from './adminReferral.js';
+import {
+  DISTRIBUTION_FLAG, DISTRIBUTION_HOLD_FLAG, DISTRIBUTION_HOLD_KEY,
+  DISTRIBUTION_HOLD_DEF, DISTRIBUTION_HOLD_MIN, DISTRIBUTION_HOLD_MAX,
+} from '../services/commission.js';
 import { WENCE_FLAG, normalizeChips, effectiveArms } from '../services/wence.js';
-import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard } from '../services/alertConfig.js';
+import {
+  ALERT_CONFIG_DEFS, PUBLIC_LAUNCH_MONITOR_FLAG,
+  feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard,
+} from '../services/alertConfig.js';
 import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota, packRemainingOf } from '../services/tokenQuota.js';
 import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
 import { skuPackAmount } from '../services/purchase.js';
@@ -104,6 +111,7 @@ type FlagDef = {
   id: string; label: string; desc: string; compliance: boolean;
   kind: 'toggle' | 'number'; payloadKey?: string; def?: number; min?: number; max?: number; unit?: string;
   arms?: string[]; // 允许的实验臂名（配了才接受 PATCH 的 arms 字段）
+  defaultEnabled?: boolean;
 };
 const FEATURE_FLAG_CATALOG: FlagDef[] = [
   { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune'), kind: 'toggle' },
@@ -128,6 +136,28 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
     desc: '同一 IP 在所选窗口内注册多少个带码新号就列入风控视图（只预警不阻断：关系照常绑定、注册照常放行）',
     compliance: false, kind: 'number', payloadKey: REFERRAL_RISK_PAYLOAD_KEY,
     def: REFERRAL_RISK_DEF, min: REFERRAL_RISK_MIN, max: REFERRAL_RISK_MAX, unit: '个新号/IP',
+  },
+  // 代理分销总开关（2026-09-02）。**默认关**：开始给渠道计提是商务决策，不该因为代码上线就自动发生。
+  // 常量与判定同源（services/commission.ts），后台能拨的开关就是计提时读的那一个。
+  {
+    id: DISTRIBUTION_FLAG, label: '代理分销计提',
+    desc: '关闭即完全不计提（佣金只发后台登记的签约代理，普通邀请人无佣金）。开启后**不追溯历史订单**，只对此后成交的单计提；`suspended` 状态的代理**不计提**（不是延后计提，解除暂停也不会补算）',
+    compliance: false, kind: 'toggle', defaultEnabled: false,
+  },
+  // 冻结期：计提后先 pending，过期且订单未退款才转 confirmed（可结算）。0 = 不冻结，须运营显式配。
+  {
+    id: DISTRIBUTION_HOLD_FLAG, label: '佣金冻结期',
+    desc: '佣金计提后冻结多少天才可结算（退款观察窗）。冻结期内退款直接冲销，不留应付；已结算后退款另落一条负额追回行，下一张结算单净额抵扣',
+    compliance: false, kind: 'number', payloadKey: DISTRIBUTION_HOLD_KEY,
+    def: DISTRIBUTION_HOLD_DEF, min: DISTRIBUTION_HOLD_MIN, max: DISTRIBUTION_HOLD_MAX, unit: '天',
+  },
+  {
+    id: PUBLIC_LAUNCH_MONITOR_FLAG,
+    label: '正式开放增长监控',
+    desc: '只在产品已对外开放或开始投放后开启；开启后连续 72 小时无新注册才告警',
+    compliance: false,
+    kind: 'toggle',
+    defaultEnabled: false,
   },
   // 监控告警阈值（监控大盘二期）：注册表在 services/alertConfig.ts，默认值=压测方案 §7 口径。
   // 值经 /api/metrics 的 junshi_alert_config 指标喂给 Prometheus 告警规则，改动 ≤75s 生效（60s 缓存 + 一个抓取周期）。
@@ -2222,7 +2252,10 @@ export async function adminRoutes(app: FastifyInstance) {
   const shapeFlag = (f: FlagDef, row?: { enabled: boolean; payload: unknown } | null) => {
     // 未落库的开关按 catalog 默认呈现：实验类（arms）默认**关**，其余默认开——
     // 「行还没建」不该等于「实验已对全量用户开启」。
-    const base = { id: f.id, label: f.label, desc: f.desc, compliance: f.compliance, kind: f.kind, enabled: row?.enabled ?? !f.arms };
+    const base = {
+      id: f.id, label: f.label, desc: f.desc, compliance: f.compliance, kind: f.kind,
+      enabled: row?.enabled ?? f.defaultEnabled ?? !f.arms,
+    };
     if (f.kind === 'number') {
       const payload = (row?.payload ?? null) as Record<string, unknown> | null;
       const raw = payload && f.payloadKey ? payload[f.payloadKey] : undefined;
