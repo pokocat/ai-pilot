@@ -61,6 +61,17 @@
 .sb-help { font-size: 11px; color: var(--vd-muted); }
 
 /* 文案像文章而不是密集表单；段落之间用节奏留白。 */
+.tpl-facts { display: flex; gap: 12px; align-items: center; padding: 12px; margin-bottom: 14px; border-radius: 16px; background: var(--vd-surface); border: 1px solid var(--vd-line-soft); }
+.tf-thumb { width: 44px; height: 58px; border-radius: 10px; flex: none; }
+.tf-body { flex: 1; min-width: 0; }
+.tf-k { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: var(--vd-muted); }
+.tf-t { display: block; margin-top: 2px; font-family: var(--vd-serif); font-size: 16px; font-weight: 600; }
+.tf-row { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 11px; color: var(--vd-ink-3); font-variant-numeric: tabular-nums; }
+.tf-row .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--vd-faint); }
+/* 数字人段的圆点用橙色，一眼看出哪几段要自己出镜 */
+.line.avatar::before { background: var(--vd-avatar); }
+.line-role { display: block; font-size: 10.5px; font-weight: 700; color: var(--vd-avatar-deep); margin-bottom: 2px; }
+.line-hint { display: block; margin-top: 4px; font-size: 11.5px; color: var(--vd-broll); line-height: 1.5; }
 .lines { background: var(--vd-surface); border-radius: 20px; border: 1px solid var(--vd-line-soft); padding: 16px 20px; box-shadow: var(--vd-shadow-soft); }
 .line { position: relative; padding: 10px 0 10px 16px; border-bottom: 1px solid var(--vd-line-soft); }
 .line:last-child { border-bottom: 0; }
