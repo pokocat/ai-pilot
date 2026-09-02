@@ -148,9 +148,11 @@ export async function listTraces(opts: {
 }): Promise<AdminTraceListView> {
   const days = opts.range?.days ?? Math.min(3660, Math.max(1, opts.days ?? 7));
   const since = opts.from ?? new Date(Date.now() - days * 86400_000);
-  const toExclusive = opts.toExclusive ?? new Date();
+  // 只有显式给了上界才加 lt。缺省钉在 `new Date()` 会把同一毫秒内刚落库的行排除掉
+  // （createdAt 由数据库 now() 生成，与 Node 墙钟同毫秒）——与 usage.ts 的按天口径保持一致。
+  const createdAt = opts.toExclusive ? { gte: since, lt: opts.toExclusive } : { gte: since };
   const where = {
-    createdAt: { gte: since, lt: toExclusive },
+    createdAt,
     ...(opts.status === 'ok' || opts.status === 'error' ? { status: opts.status } : {}),
     ...(opts.agentKey ? { agentKey: opts.agentKey } : {}),
   };

@@ -41,24 +41,31 @@ export function useResource<T>(fetcher: () => Promise<T>, deps: readonly unknown
   const [updatedAt, setUpdatedAt] = useState(0);
   // 递增请求号：只接受最后一次请求的结果，避免快速切筛选时旧响应盖掉新响应。
   const reqId = useRef(0);
-  const alive = useRef(true);
   const [nonce, setNonce] = useState(0);
 
-  useEffect(() => () => { alive.current = false; }, []);
-
   useEffect(() => {
+    // cancelled 是「这次取数还算不算数」的开关，生死跟着本次 effect 走——组件卸载、或 deps
+    // 变化要重取时，由下面的 cleanup 置位。
+    //
+    // 这里曾经用一个组件级的 `alive` ref 代替它，只在卸载时置 false、从不置回 true。React 18
+    // 的 StrictMode 开发模式会对每个组件跑一遍 mount → cleanup → mount，第一次 mount 的
+    // cleanup 就把它永久烧成 false，第二次 mount 发出的请求回来后 then/catch/finally 三个
+    // 分支全部被丢弃：data 永远是 null、loading 永远是 true。于是 `npm run dev` 下每个页面
+    // 都停在骨架屏，而生产包（没有双跑）一切正常——一个只在开发环境出现的假故障。
+    // 局部标记天生对「同一组件被反复挂载」免疫，不会再有这种跨生命周期的污染。
+    let cancelled = false;
     const my = ++reqId.current;
     setLoading(true);
     fetcher()
       .then((v) => {
-        if (!alive.current || my !== reqId.current) return;
+        if (cancelled || my !== reqId.current) return;
         setData(v);
         setError('');
         setForbidden(false);
         setUpdatedAt(Date.now());
       })
       .catch((e: unknown) => {
-        if (!alive.current || my !== reqId.current) return;
+        if (cancelled || my !== reqId.current) return;
         // 401 已由 api.req 广播 admin:unauth 切登录页，这里不再抛错误态（否则登录页背后闪一屏红字）。
         if ((e as { code?: string })?.code === 'ADMIN_UNAUTHORIZED') return;
         // 403 不是掉线：登录态保留，就地渲染成「需要授权」（旧版连它一起踢回登录页）。
@@ -66,9 +73,10 @@ export function useResource<T>(fetcher: () => Promise<T>, deps: readonly unknown
         setError((e as Error)?.message || '加载失败');
       })
       .finally(() => {
-        if (!alive.current || my !== reqId.current) return;
+        if (cancelled || my !== reqId.current) return;
         setLoading(false);
       });
+    return () => { cancelled = true; };
     // fetcher 由调用方用 useCallback 稳定；deps 决定何时重取。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce]);
