@@ -28,9 +28,11 @@ Page(withShare({
     showLogin: false,
   }),
 
+  needLogin() { host.requireLogin(this, 'execute'); },
   onLoad(options) {
     const opts = options || {};
     this.setData({
+      asTab: String(opts.tab || '') === '1',
       picking: String(opts.pick || '') === '1',
       pickShotId: String(opts.shotId || ''),
       pickProjectId: String(opts.projectId || ''),

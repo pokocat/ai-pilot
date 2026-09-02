@@ -2,110 +2,58 @@
   <view class="vd-head">
     <view class="vd-safe"></view>
     <view class="vd-headrow">
-      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">快出片</text>
-      <text class="vd-headact"> </text>
+      <view class="hm-brand"><text class="hm-bt">快出片</text><text class="hm-bs">{{shelfText}}</text></view>
     </view>
   </view>
 
-  <scroll-view class="vd-scroll" scroll-y enable-flex>
-    <view class="vd-body">
-
-      <!-- ① 宣传横幅：落地页的门面。图讲氛围，字讲价值，按钮给出口。 -->
-      <view class="banner">
-        <!-- 图挂了也不能让门面开天窗：binderror 时落到同色系的 CSS 底纹。 -->
-        <image
-          wx:if="{{!bannerFailed}}"
-          class="banner-art"
-          src="/assets/video/promo-banner.jpg"
-          mode="aspectFill"
-          lazy-load="{{false}}"
-          binderror="onBannerError"
-        ></image>
-        <view wx:else class="banner-art banner-fallback vd-grain"></view>
-        <view class="banner-copy">
-          <text class="banner-kicker">数字人 · 模板出片</text>
-          <text class="banner-title">不用出镜，也能条条更新</text>
-          <text class="banner-sub">克隆一次你的形象和声音，挑一套现成模板改几句文案，数字人替你把片子讲完。</text>
-        </view>
+  <!-- 分类条 + 待办铃铛。铃铛不占首屏位置，未读数在角标上 -->
+  <view class="hm-catrow">
+    <scroll-view class="hm-cats" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="hm-catsin">
+        <view wx:for="{{cats}}" wx:key="key" class="hm-cat {{item.on ? 'on' : ''}}" data-key="{{item.key}}" bindtap="pickCat">{{item.label}}</view>
       </view>
-
-      <view class="primary-cta" bindtap="openTemplates">
-        <text>挑个模板开拍</text>
-        <native-icon name="arrow" tone="white" size="16"></native-icon>
-      </view>
-
-      <!-- ② 继续上次：有草稿时意图最强，紧凑一行，不抢横幅的位。 -->
-      <view wx:if="{{ongoing}}" class="resume" bindtap="resume">
-        <view class="resume-bar"><view class="fill" style="width:{{ongoing.percent}}%"></view></view>
-        <view class="resume-row">
-          <view class="resume-left">
-            <text class="resume-kicker">继续上次</text>
-            <text class="resume-title">{{ongoing.templateName}}</text>
-          </view>
-          <view class="resume-right">
-            <text class="resume-step">{{ongoing.stepText}}</text>
-            <native-icon name="arrow" tone="red" size="14"></native-icon>
-          </view>
-        </view>
-      </view>
-
-      <!-- ③ 三步流程：一行三格，只讲流程不占高度。 -->
-      <view class="steps">
-        <view wx:for="{{steps}}" wx:key="key" class="step">
-          <text class="step-no">{{index + 1}}</text>
-          <text class="step-name">{{item.name}}</text>
-          <text class="step-desc">{{item.desc}}</text>
-        </view>
-      </view>
-
-      <!-- ④ 开拍前置条件：紧凑一行，未就绪才用强调色。 -->
-      <view class="gate gate-{{avatarState}}" bindtap="tapAvatarCard">
-        <view class="gate-visual">
-          <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="gate-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
-          <native-icon wx:else name="{{avatarState === 'failed' ? 'alert' : 'user'}}" tone="{{avatarState === 'ready' ? 'green' : 'red'}}" size="18"></native-icon>
-        </view>
-        <view class="gate-body">
-          <block wx:if="{{avatarState === 'ready'}}">
-            <text class="gate-title">{{avatar.name || '数字分身'}}已就绪</text>
-            <text class="gate-sub">{{avatarCount > 1 ? '共 ' + avatarCount + ' 个形象' : '出片会用你自己的形象和声音'}}</text>
-          </block>
-          <block wx:elif="{{avatarState === 'training'}}">
-            <text class="gate-title">数字分身训练中</text>
-            <text class="gate-sub">完成会通知你，这期间可以先改文案</text>
-          </block>
-          <!-- 读失败必须与"确实没有"分开说：说错了会让已有分身的用户去重复创建。 -->
-          <block wx:elif="{{avatarState === 'failed'}}">
-            <text class="gate-title">分身状态没读到</text>
-            <text class="gate-sub">网络没通，点一下重读；这不代表你没有分身</text>
-          </block>
-          <block wx:else>
-            <text class="gate-title">还没有数字分身</text>
-            <text class="gate-sub">{{guest ? '登录后上传一段正脸视频即可创建' : '上传一段 5 秒以上正脸视频即可创建'}}</text>
-          </block>
-        </view>
-        <text class="gate-action">{{avatarState === 'ready' ? '管理' : (avatarState === 'training' ? '看进度' : (avatarState === 'failed' ? '重试' : '去创建'))}}</text>
-      </view>
-
-      <!-- ⑤ 次级入口 -->
-      <view class="entries">
-        <view class="entry" bindtap="openTemplates">
-          <native-icon name="layers" tone="accent" color-key="{{colorKey}}" size="18"></native-icon>
-          <text class="entry-title">模板专区</text>
-        </view>
-        <view class="entry" bindtap="openWorks">
-          <native-icon name="video" tone="red" size="18"></native-icon>
-          <text class="entry-title">我的作品</text>
-        </view>
-        <view class="entry" bindtap="openAssets">
-          <native-icon name="image" tone="blue" size="18"></native-icon>
-          <text class="entry-title">素材库</text>
-        </view>
-      </view>
-
-      <view class="vd-footer-space"></view>
+    </scroll-view>
+    <view class="hm-bell" bindtap="openTodo">
+      <view class="hm-bellic"></view>
+      <view wx:if="{{todoCount > 0}}" class="hm-badge">{{todoCount}}</view>
     </view>
-  </scroll-view>
+  </view>
 
+  <view wx:if="{{loading}}" class="hm-note">正在读取模板…</view>
+  <view wx:elif="{{loadFailed}}" class="hm-note">模板没读出来。<text class="hm-link" bindtap="retry">再试一次</text></view>
+
+  <view wx:else class="hm-feed">
+    <view wx:for="{{list}}" wx:key="id" class="hm-card" data-id="{{item.id}}" bindtap="openTemplate">
+      <view class="hm-cov {{item.ready ? '' : 'soon'}}">
+        <view class="hm-shot {{item.cover}}"></view>
+        <text class="hm-ktag">{{item.industry}}</text>
+        <text wx:if="{{item.ready}}" class="hm-dur">{{item.durText}}</text>
+        <text wx:else class="hm-soon">即将上线</text>
+      </view>
+      <view class="hm-cb">
+        <text class="hm-cbt">{{item.title}}</text>
+        <view wx:if="{{item.ready}}" class="hm-meta"><text>数字人出镜 {{item.avatarSec}} 秒</text><text class="b">{{item.credits}} 钻石</text></view>
+        <text wx:else class="hm-blocked">{{item.blocked}}</text>
+      </view>
+    </view>
+    <view wx:if="{{!list.length}}" class="hm-empty">这个分类下还没有模板。模板由内容生产线逐套产出，不是配置项。</view>
+    <view class="hm-space"></view>
+  </view>
+
+  <!-- 待办面板 -->
+  <view wx:if="{{todoOpen}}" class="hm-scrim" catchtap="closeTodo">
+    <view class="hm-sheet" catchtap="swallow">
+      <view class="hm-grab"></view>
+      <view class="hm-sh"><text class="hm-sht">待办</text><text class="hm-sha">{{todos.length ? todos.length + ' 件' : '暂时没有'}}</text></view>
+      <view wx:for="{{todos}}" wx:key="key" class="hm-ti" data-go="{{item.go}}" bindtap="goTodo">
+        <view class="hm-tic {{item.tone}}"></view>
+        <view class="hm-tb"><text class="hm-tit">{{item.title}}</text><text class="hm-tis">{{item.sub}}</text></view>
+        <text class="hm-tig">{{item.action}}</text>
+      </view>
+      <view wx:if="{{!todos.length}}" class="hm-tnone">没有要处理的事。挑一套模板开拍吧。</view>
+    </view>
+  </view>
+
+  <vd-tabbar current="home" bindneedlogin="needLogin"></vd-tabbar>
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

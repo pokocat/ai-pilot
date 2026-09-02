@@ -66,6 +66,23 @@ function go(relative) {
   return navTo(`${ROOT}/${path}`);
 }
 
+/**
+ * 账号与钱包走军师的 /me 与 /me/credits（方案 §8.5：钱包真值在军师）。
+ * 经宿主 api 层转一手是为了跟随它的 mock / 真实分流 —— 直接 httpRequest 在 mock 包里会去打真服务。
+ * 独立形态下这两个换成快出片自己的 BFF。
+ */
+// 延迟 require：services/api ↔ services/store 互相引用，host.js 在页面加载早期就被拉起，
+// 顶层 require 拿到的是半初始化的模块对象（实测 hostApi.me is not a function）。
+function hostApi() { const m = require('../../services/api'); return m.api || m.default || m; }
+function fetchMe() { return hostApi().me(); }
+function myCredits() { return hostApi().credits(); }
+
+/** 同级页面互换（创作 / 资料库 / 作品 / 我的 四个 tab）：redirectTo 不叠栈，返回键不会在 tab 之间来回弹。 */
+function replace(relative) {
+  const path = String(relative || '').replace(/^\/+/, '');
+  return new Promise((resolve, reject) => wx.redirectTo({ url: `${ROOT}/${path}`, success: resolve, fail: reject }));
+}
+
 /** 跳出分包，去军师宿主的页面（充值、协议等）。抽走后这些要换成自己的实现或降级隐藏。 */
 function goHost(absolute) { return navTo(absolute); }
 
@@ -221,8 +238,8 @@ function clearDraft(projectId) {
 
 module.exports = {
   hostBaseData, navMetrics,
-  isLoggedIn, currentUser, shouldUseMock, requireLogin,
-  go, goHost, back, ROOT,
+  isLoggedIn, currentUser, fetchMe, myCredits, shouldUseMock, requireLogin,
+  go, replace, goHost, back, ROOT,
   httpRequest, httpUrl, httpUpload, directFileUpload, downloadFile,
   toast, loading, hideLoading, confirm, alert, prompt, chooseMedia, setOverlay,
   readDraft, writeDraft, clearDraft,

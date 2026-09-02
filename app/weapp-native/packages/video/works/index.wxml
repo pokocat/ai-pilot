@@ -2,7 +2,7 @@
   <view class="vd-head">
     <view class="vd-safe"></view>
     <view class="vd-headrow">
-      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <view wx:if="{{!asTab}}" class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
       <text class="vd-title">我的作品</text>
       <text class="vd-headact"> </text>
     </view>
@@ -73,5 +73,6 @@
     </view>
   </scroll-view>
 
+  <vd-tabbar wx:if="{{asTab}}" current="works" bindneedlogin="needLogin"></vd-tabbar>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

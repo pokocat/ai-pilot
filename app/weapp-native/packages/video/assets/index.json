@@ -3,6 +3,7 @@
   "disableScroll": false,
   "usingComponents": {
     "native-icon": "/components/native-icon/index",
-    "login-sheet": "/components/login-sheet/index"
+    "login-sheet": "/components/login-sheet/index",
+    "vd-tabbar": "../components/vd-tabbar/index"
   }
 }

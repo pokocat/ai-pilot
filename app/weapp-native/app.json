@@ -71,7 +71,8 @@
         "avatar/index",
         "voices/index",
         "gatea/index",
-        "preview/index"
+        "preview/index",
+        "profile/index"
       ]
     }
   ],

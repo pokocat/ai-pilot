@@ -24,7 +24,8 @@ Page(withShare({
     showLogin: false,
   }),
 
-  onLoad() { this.load(); },
+  onLoad(options) { this.setData({ asTab: String((options || {}).tab || '') === '1' }); this.load(); },
+  needLogin() { host.requireLogin(this, 'execute'); },
   onShow() { if (!this.data.loading) this.load(); this.startPolling(); },
   onHide() { this.stopPolling(); },
   onUnload() { this.stopPolling(); },

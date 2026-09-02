@@ -2,7 +2,7 @@
   <view class="vd-head">
     <view class="vd-safe"></view>
     <view class="vd-headrow">
-      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <view wx:if="{{!asTab}}" class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
       <text class="vd-title">{{picking ? '选一张画面' : '我的素材'}}</text>
       <text class="vd-headact" bindtap="upload">上传</text>
     </view>
@@ -89,5 +89,6 @@
     </view>
   </view>
 
+  <vd-tabbar wx:if="{{asTab}}" current="assets" bindneedlogin="needLogin"></vd-tabbar>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

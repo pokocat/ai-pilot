@@ -1,142 +1,57 @@
 @use "../styles/tokens.scss";
 
-.vd-home { display: flex; flex-direction: column; height: 100vh; }
-.vd-scroll { flex: 1; min-height: 0; }
-.vd-body { padding: 4px 20px 0; }
+.vd-home { min-height: 100vh; background: var(--vd-bg); color: var(--vd-ink); }
+.hm-brand { flex: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.hm-bt { font-family: var(--vd-serif); font-size: 22px; font-weight: 700; letter-spacing: .02em; }
+.hm-bs { font-size: 11.5px; color: var(--vd-muted); }
 
-/* ── ① 宣传横幅 ───────────────────────────────────────────────────────
-   落地页门面。插画是氛围，文字是价值主张 —— 文字不烧进图里，方便改文案。
-   高度按 750×460 的图裁到 168px：横幅只负责定调，不该吃掉半屏。 */
+.hm-catrow { height: 42px; display: flex; align-items: center; gap: 12px; padding: 0 22px; margin-top: 6px; }
+.hm-cats { flex: 1; min-width: 0; white-space: nowrap; }
+.hm-catsin { display: inline-flex; align-items: center; gap: 18px; }
+.hm-cat { position: relative; flex: none; font-size: 14px; color: var(--vd-muted); padding: 6px 0 9px; }
+.hm-cat.on { color: var(--vd-ink); font-weight: 700; }
+.hm-cat.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: 2px; height: 2.5px; border-radius: 2px; background: var(--vd-avatar); }
+.hm-bell { flex: none; width: 36px; height: 36px; border-radius: 11px; position: relative; display: flex; align-items: center; justify-content: center; background: var(--vd-surface); border: 1px solid var(--vd-line-soft); }
+.hm-bellic { width: 14px; height: 16px; border-radius: 7px 7px 3px 3px; background: var(--vd-ink-3); }
+.hm-badge { position: absolute; right: -4px; top: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--vd-avatar); color: #FFF; font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 
-.banner {
-  position: relative;
-  border-radius: var(--vd-r-card);
-  overflow: hidden;
-  background: var(--vd-canvas);
-  box-shadow: var(--vd-shadow);
-  margin-bottom: 12px;
-}
-// 190px：宣传图是 4:3 左右的深色影像稿，裁进 350×190（约 1.84:1）会切掉上下留白，
-// 正好保住中央那张高亮的口播卡。再矮就把主体也切了，再高就吃掉首屏。
-.banner-art { display: block; width: 100%; height: 190px; background: #16130F; }
-.banner-fallback { background-color: var(--vd-canvas); }
-.banner-copy {
-  padding: 14px 16px 16px;
-  background: var(--vd-surface);
-}
-.banner-kicker {
-  display: block; font-size: 11px; font-weight: 600;
-  color: var(--vd-avatar-deep); letter-spacing: 0.06em;
-}
-.banner-title {
-  display: block; margin: 5px 0 6px;
-  font-family: var(--vd-serif); font-size: 22px; font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.banner-sub { display: block; font-size: 12px; line-height: 1.65; color: var(--vd-ink-3); }
+.hm-note { padding: 40px 22px; text-align: center; color: var(--vd-muted); font-size: 13px; }
+.hm-link { color: var(--vd-avatar-deep); margin-left: 6px; }
 
-/* 主 CTA：落地页只该有一个主行动。 */
-.primary-cta {
-  height: 50px; border-radius: var(--vd-r-field);
-  background: var(--vd-avatar);
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 16px; font-weight: 700; color: #FFF;
-  box-shadow: 0 8px 18px -10px var(--vd-avatar);
-  margin-bottom: 12px;
-}
+/* 两列 3:4 卡（小红书密度）。WXSS 没有 aspect-ratio，用 padding-bottom 撑 */
+.hm-feed { display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 16px 0; }
+.hm-card { width: calc(50% - 6px); }
+.hm-cov { position: relative; width: 100%; height: 0; padding-bottom: 133.3%; border-radius: 9px; overflow: hidden; }
+.hm-shot { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.c1 { background-image: radial-gradient(circle at 68% 30%, rgba(255,226,178,.5) 0 16%, transparent 44%), linear-gradient(152deg,#BE8659,#453D38); }
+.c2 { background-image: radial-gradient(circle at 30% 66%, rgba(255,214,160,.45) 0 18%, transparent 46%), linear-gradient(146deg,#D0925C,#54392F); }
+.c3 { background-image: radial-gradient(circle at 56% 34%, rgba(255,232,206,.42) 0 16%, transparent 42%), linear-gradient(160deg,#95755F,#2B2927); }
+.hm-cov.soon .hm-shot { filter: saturate(.32) brightness(.52); }
+.hm-ktag { position: absolute; left: 6px; top: 6px; z-index: 2; font-size: 9px; font-weight: 700; color: #FFF; padding: 2px 6px; border-radius: 4px; background: rgba(20,17,15,.55); }
+.hm-dur { position: absolute; right: 6px; bottom: 6px; z-index: 2; font-size: 9.5px; color: #FFF; padding: 2px 6px; border-radius: 999px; background: rgba(20,17,15,.55); font-variant-numeric: tabular-nums; }
+.hm-soon { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 2; font-size: 11px; font-weight: 600; color: #FFF; padding: 4px 10px; border-radius: 999px; background: rgba(20,17,15,.6); border: 1px solid rgba(255,255,255,.3); white-space: nowrap; }
+.hm-cb { margin-top: 7px; padding: 0 1px; }
+.hm-cbt { display: block; font-size: 13px; font-weight: 700; line-height: 1.42; }
+.hm-meta { display: flex; align-items: center; margin-top: 6px; font-size: 10.5px; color: var(--vd-muted); }
+.hm-meta .b { margin-left: auto; font-weight: 700; color: var(--vd-avatar-deep); }
+.hm-blocked { display: block; font-size: 10.5px; color: var(--vd-avatar-deep); line-height: 1.55; margin-top: 5px; }
+.hm-empty { width: 100%; padding: 38px 8px; text-align: center; color: var(--vd-muted); font-size: 12px; line-height: 1.7; }
+.hm-space { width: 100%; height: 110px; }
 
-/* ── ② 继续上次 ─────────────────────────────────────────────────────
-   压成一条：顶部进度线 + 一行文字。不再用整块橙卡跟横幅抢视觉。 */
-
-.resume {
-  background: var(--vd-surface);
-  border: 1px solid var(--vd-avatar-line);
-  border-radius: var(--vd-r-field);
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-.resume-bar { height: 3px; background: var(--vd-avatar-soft); }
-.resume-bar .fill { display: block; height: 100%; background: var(--vd-avatar); }
-.resume-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; gap: 10px; }
-.resume-left { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
-.resume-kicker { flex: none; font-size: 11px; font-weight: 600; color: var(--vd-avatar-deep); }
-.resume-title {
-  font-size: 14px; font-weight: 600; color: var(--vd-ink);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.resume-right { flex: none; display: flex; align-items: center; gap: 4px; }
-.resume-step { font-size: 11px; color: var(--vd-muted); }
-
-/* ── ③ 三步流程 ─────────────────────────────────────────────────────
-   等宽三格，只讲流程。序号用淡橙圆点，不用大号数字占高度。 */
-
-.steps {
-  display: flex;
-  background: var(--vd-surface);
-  border: 1px solid var(--vd-line-soft);
-  border-radius: var(--vd-r-field);
-  padding: 12px 0;
-  margin-bottom: 12px;
-}
-.step {
-  flex: 1; min-width: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  border-left: 1px solid var(--vd-line-soft);
-}
-.step:first-child { border-left: 0; }
-.step-no {
-  width: 18px; height: 18px; border-radius: 50%;
-  background: var(--vd-avatar-soft); color: var(--vd-avatar-deep);
-  font-size: 10px; font-weight: 700;
-  text-align: center; line-height: 18px;
-}
-.step-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
-.step-desc { font-size: 10px; color: var(--vd-muted); }
-
-/* ── ④ 开拍前置条件 ─────────────────────────────────────────────────── */
-
-.gate {
-  display: flex; align-items: center; gap: 10px;
-  border-radius: var(--vd-r-field);
-  padding: 11px 13px;
-  margin-bottom: 12px;
-  border: 1px solid var(--vd-line-soft);
-  background: var(--vd-surface);
-}
-.gate-missing { background: var(--vd-avatar-soft); border-color: var(--vd-avatar-line); }
-.gate-training { background: var(--vd-broll-soft); border-color: var(--vd-broll-line); }
-.gate-failed { background: var(--vd-danger-soft); border-color: rgba(185, 75, 60, 0.24); }
-
-.gate-visual {
-  flex: none; width: 34px; height: 34px; border-radius: 50%;
-  background: var(--vd-sunken);
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
-}
-.gate-ready .gate-visual { background: var(--vd-success-soft); }
-.gate-photo { width: 100%; height: 100%; }
-.gate-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.gate-title { font-size: 13px; font-weight: 600; }
-.gate-sub { font-size: 11px; line-height: 1.45; color: var(--vd-muted); }
-.gate-action {
-  flex: none; font-size: 12px; font-weight: 600;
-  color: var(--vd-avatar-deep);
-  padding: 5px 11px; border-radius: var(--vd-r-chip);
-  background: rgba(255, 255, 255, 0.75);
-}
-.gate-ready .gate-action { color: var(--vd-ink-3); background: var(--vd-sunken); }
-.gate-training .gate-action { color: var(--vd-broll); }
-.gate-failed .gate-action { color: var(--vd-danger); }
-
-/* ── ⑤ 次级入口：三格等宽，只有图标 + 名字。 ── */
-
-.entries { display: flex; gap: 8px; }
-.entry {
-  flex: 1; min-width: 0;
-  background: var(--vd-surface);
-  border: 1px solid var(--vd-line-soft);
-  border-radius: var(--vd-r-field);
-  padding: 13px 8px;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-}
-.entry-title { font-size: 12px; font-weight: 600; }
+/* 待办面板 */
+.hm-scrim { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 40; background: rgba(30,24,20,.36); }
+.hm-sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--vd-surface); border-radius: 22px 22px 0 0; box-shadow: 0 -18px 44px rgba(69,54,44,.24);
+  padding: 14px 20px 20px; padding-bottom: calc(20px + constant(safe-area-inset-bottom)); padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+.hm-grab { width: 36px; height: 4px; border-radius: 999px; background: var(--vd-line); margin: 0 auto 14px; }
+.hm-sh { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.hm-sht { flex: 1; font-family: var(--vd-serif); font-size: 17px; font-weight: 600; }
+.hm-sha { font-size: 12px; color: var(--vd-muted); }
+.hm-ti { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--vd-line-soft); }
+.hm-ti:last-child { border-bottom: none; }
+.hm-tic { width: 36px; height: 36px; border-radius: 12px; flex: none; }
+.hm-tic.a { background: var(--vd-avatar-soft); } .hm-tic.b { background: var(--vd-broll-soft); } .hm-tic.c { background: var(--vd-success-soft); }
+.hm-tb { flex: 1; min-width: 0; }
+.hm-tit { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-tis { display: block; font-size: 11.5px; color: var(--vd-ink-3); margin-top: 4px; }
+.hm-tig { flex: none; font-size: 12.5px; font-weight: 600; color: var(--vd-avatar-deep); padding: 6px 12px; border-radius: 999px; background: var(--vd-avatar-soft); border: 1px solid var(--vd-avatar-line); }
+.hm-tnone { padding: 22px 0 8px; text-align: center; color: var(--vd-muted); font-size: 12.5px; }

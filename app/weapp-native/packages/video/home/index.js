@@ -1,158 +1,118 @@
-// 屏 02 · 快出片首页（分包入口页）。
+// 「创作」tab · 模板信息流（设计稿 Home.dc.html，2026-08-26 定稿那版：两列 3:4 卡）。
 //
-// 与设计稿的差异（分包形态所致，见技术方案 §2.1）：
-//   · 设计稿屏 01「登录页」不存在 —— 复用军师的登录浮层，本页对游客开放浏览。
-//   · 设计稿的三项 tabBar 在分包里做不了，改为本页的入口卡 + 各自独立页面。
+// 起点只有一个：选模板（方案 §3.1）。首页不再是落地页 —— 横幅、三步说明、入口卡都撤了，
+// 用户进来看到的就是货架：有几套、哪几套能用、每套多长多少钱。
+// 分类条从模板自身的类型推导，不写死一套分类（§13.9 第 13 项：分类字段待定，先用 industry 顶）。
 //
-// 2026-08-12 第二轮：首页改回**落地页**，模板拆去 templates/ 专区。
-//
-// 上一版把唯一一套模板做成首页主卡，等于「模板 = 首页」：模板从 1 套变 2 套时首页就得重排，
-// 而且首页没法承担「这是什么、值不值得做」的介绍职责。现在分工是：
-//   home      → 宣传横幅 + 价值主张 + 一个主 CTA（去选模板）+ 状态与入口
-//   templates → 模板专区，选哪一套在那里决定，后续加模板只加数据
-// 顺序仍按意图强度：横幅 → 主 CTA → 继续上次 → 三步说明 → 分身门槛 → 次级入口。
+// 待办收成右上角一个铃铛：继续上次、数字人训练中、正在出片。点开才是清单，不占首屏。
 const host = require('../host');
 const api = require('../api');
 const { ensureShots } = require('../model');
+const { filterOffered } = require('../catalog');
 const { withShare } = require('../../../services/share');
 
 /**
- * 三步流程说明。落地页只讲流程，不讲参数。
- * 第三步点名「数字人开口」——落地页要让用户看懂片子是靠什么出来的（模板 + 数字人），
- * 只写「自动合成」等于把产品的核心机制藏起来了。
+ * 已拍板但还没做出来的两套（方案 §0.3 首发三套）。不摆假封面、不给假数字，
+ * 卡上写清为什么还不能点。第一天的真实样子就是「三套里只有一套能用」。
+ * 做出来之后从 catalog 白名单放出来即可，这里对应的一条删掉。
  */
-const STEPS = [
-  { key: 'script', name: '改文案', desc: '套模板改几句' },
-  { key: 'shots', name: '配画面', desc: '拍或选素材' },
-  { key: 'render', name: '出片', desc: '数字人开口' },
+const UPCOMING = [
+  { id: 'ct_qiye', name: '企业宣传片', industry: '品牌故事', cover: 'c3',
+    hook: '同一套骨架，讲企业的来历、产线和人',
+    blocked: '还在做。要先写好剧本骨架、备齐固定素材，再用真实门店的片子验收。' },
+  { id: 'ct_daihuo', name: '短视频带货', industry: '带货', cover: 'c2',
+    hook: '明星切片混剪，另一套子系统',
+    blocked: '还在做。明星切片的授权谈妥之前不会上线。' },
 ];
+const COVER_BY_TONE = { warm: 'c1', craft: 'c3', street: 'c2', morning: 'c1' };
+
+function fmt(sec) { const s = Math.max(0, Math.round(sec || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 
 Page(withShare({
   data: host.hostBaseData({
-    steps: STEPS,
-    bannerFailed: false,
-    ongoing: null,
-    avatar: null,
-    avatarCount: 0,
-    avatarState: 'missing',
-    guest: false,
-    showLogin: false,
-    loginReason: 'execute',
+    all: [], list: [], cats: [], cat: '',
+    shelfText: '', loadFailed: false, loading: true,
+    todoOpen: false, todos: [], todoCount: 0,
+    guest: false, showLogin: false, loginReason: 'execute',
   }),
 
   onLoad() { this.load(); },
+  onShow() { this.refreshTodos(); },
 
-  onShow() {
-    // 从采集/制作流程返回时刷新分身门槛与草稿，避免首页展示旧状态。
-    this.refreshAccountState();
-  },
-
-  /**
-   * 落地页不依赖模板接口 —— 横幅与三步说明都是静态内容，
-   * 所以这里没有整页 loading 态：横幅立刻可见，状态行各自异步填。
-   */
   load() {
-    const loggedIn = host.isLoggedIn();
-    this.setData({ guest: !loggedIn });
-    if (!loggedIn) { this.setData({ avatar: null, avatarCount: 0, avatarState: 'missing', ongoing: null }); return; }
-    this.refreshAccountState();
+    this.setData({ guest: !host.isLoggedIn() });
+    api.templates()
+      .then((rows) => {
+        const ready = filterOffered(rows).map((t) => ({
+          id: t.id, name: t.name, industry: t.industry || '模板', cover: COVER_BY_TONE[t.coverTone] || 'c1',
+          hook: t.description || '', ready: true,
+          durText: fmt(t.estDurationSec), avatarSec: t.avatarSecHint, credits: t.creditHint, segmentCount: t.segmentCount,
+        }));
+        const all = ready.concat(UPCOMING.map((u) => Object.assign({ ready: false }, u)));
+        this.setData({ loading: false, loadFailed: false, all, shelfText: `共 ${all.length} 套 · ${ready.length} 套可用` });
+        this.applyCat(this.data.cat);
+      })
+      .catch(() => this.setData({ loading: false, loadFailed: true }));   // 读失败 ≠ 没有模板，分开说
   },
 
-  refreshAccountState() {
-    if (!host.isLoggedIn()) return;
+  applyCat(cat) {
+    const all = this.data.all;
+    const kinds = all.map((t) => t.industry).filter((k, i, xs) => xs.indexOf(k) === i);
+    const list = cat ? all.filter((t) => t.industry === cat) : all;
+    this.setData({
+      cat,
+      cats: [{ key: '', label: '全部' }].concat(kinds.map((k) => ({ key: k, label: k }))).map((c) => Object.assign(c, { on: c.key === cat })),
+      list: list.map((t) => Object.assign({}, t, { title: t.name + '｜' + t.hook })),
+    });
+  },
+  pickCat(e) { this.applyCat(String(e.currentTarget.dataset.key || '')); },
+
+  openTemplate(e) {
+    const id = e.currentTarget.dataset.id; const t = this.data.all.find((x) => x.id === id);
+    if (!t) return;
+    if (!t.ready) { host.toast(t.blocked || '这套还没上线'); return; }
+    host.go(`template/index?templateId=${encodeURIComponent(id)}`);
+  },
+
+  /* ── 待办铃铛 ── */
+  refreshTodos() {
+    if (!host.isLoggedIn()) { this.setData({ guest: true, todos: [], todoCount: 0 }); return; }
     Promise.all([
-      // ⚠️ 不能 catch(() => [])：空数组会被渲染成「你还没有数字分身」并引导去创建，
-      // 而用户可能明明有，只是这次没读到。读失败必须与空态分开。
-      api.avatars().then((rows) => ({ rows })).catch(() => ({ failed: true })),
       api.ongoingProject().catch(() => null),
-    ]).then(([avatarResult, ongoing]) => {
-      this.setData({
-        guest: false,
-        ...this.resolveAvatarState(avatarResult),
-        ongoing: ongoing ? this.decorateOngoing(ongoing) : null,
-      });
+      api.avatars().then((rows) => ({ rows })).catch(() => ({ failed: true })),   // 读失败别当成「没有」
+      api.works().catch(() => null),
+    ]).then(([ongoing, avatarResult, works]) => {
+      const todos = [];
+      if (ongoing) {
+        const broll = ensureShots(ongoing.segments || [], ongoing.shots).filter((s) => s.role === 'broll');
+        const filled = broll.filter((s) => s.assetId).length;
+        const step = ongoing.step === 3 ? 'confirm' : (ongoing.step === 2 ? 'shots' : 'script');
+        todos.push({ key: 'ongoing', tone: 'a', title: `继续上次 · ${ongoing.templateName || ongoing.title || ''}`,
+          sub: broll.length ? `${broll.length} 个画面段，已配好 ${filled} 个` : '文案还在打磨', action: '继续', go: `${step}/index?projectId=${encodeURIComponent(ongoing.id)}` });
+      }
+      if (!avatarResult.failed) {
+        const rows = avatarResult.rows || [];
+        const training = rows.filter((a) => a.imageStatus === 'training');
+        if (training.length) todos.push({ key: 'training', tone: 'b', title: '数字人训练中', sub: `${training.length} 个形象，完成会通知你`, action: '看进度', go: 'avatar/index' });
+        if (!rows.length) todos.push({ key: 'noavatar', tone: 'a', title: '还没有数字人', sub: '上传一段 5 秒以上正脸视频即可创建', action: '去创建', go: 'clone/index' });
+      }
+      const generating = Array.isArray(works) ? works.filter((w) => w.status === 'generating' || w.status === 'queued') : [];
+      if (generating.length) todos.push({ key: 'rendering', tone: 'c', title: `${generating.length} 条正在出片`, sub: '完成后会在作品里', action: '去看', go: 'works/index?tab=1' });
+      this.setData({ guest: false, todos, todoCount: todos.length });
     });
   },
-
-  /**
-   * 取当前"代表性"分身：优先 ready，其次训练中，再次任意一个。
-   *
-   * 四态必须分开，不能合并成「有/没有」：
-   *   ready / training / missing（确实没有）/ failed（这次没读到，别说人家没有）
-   */
-  resolveAvatarState(result) {
-    if (result && result.failed) {
-      return { avatar: null, avatarCount: 0, avatarState: 'failed' };
-    }
-    const list = Array.isArray(result && result.rows) ? result.rows : [];
-    const avatar = list.find((item) => item.imageStatus === 'ready')
-      || list.find((item) => item.imageStatus === 'training')
-      || list[0]
-      || null;
-    const status = avatar ? avatar.imageStatus : 'missing';
-    return {
-      avatar,
-      avatarCount: list.length,
-      avatarState: status === 'ready' ? 'ready' : (status === 'training' ? 'training' : 'missing'),
-    };
-  },
-
-  /** 进度按视觉镜头算，不用文案句数冒充已配画面的完成度。 */
-  decorateOngoing(project) {
-    const segments = project.segments || [];
-    const broll = ensureShots(segments, project.shots).filter((shot) => shot.role === 'broll');
-    const filled = broll.filter((shot) => shot.assetId).length;
-    const stepText = project.step === 2 ? '第 2 步 配画面' : (project.step === 3 ? '第 3 步 出片' : '第 1 步 改文案');
-    return Object.assign({}, project, {
-      stepText,
-      progressText: broll.length ? `${broll.length} 个画面段，已配好 ${filled} 个` : '文案还在打磨',
-      percent: broll.length ? Math.round((filled / broll.length) * 100) : 0,
-    });
-  },
-
-  /* ── 交互 ── */
-
-  resume() {
-    const ongoing = this.data.ongoing;
-    if (!ongoing) return;
-    const step = ongoing.step === 3 ? 'confirm' : (ongoing.step === 2 ? 'shots' : 'script');
-    host.go(`${step}/index?projectId=${encodeURIComponent(ongoing.id)}`);
-  },
-
-  /** 落地页的唯一主行动：去模板专区选一套。 */
-  openTemplates() { host.go('templates/index'); },
-
-  /** 宣传图缺失/解码失败时退到 CSS 底纹，别让首页门面开天窗。 */
-  onBannerError() { this.setData({ bannerFailed: true }); },
-
-  openClone() {
+  openTodo() {
     if (!host.requireLogin(this, 'execute')) return;
-    host.go('clone/index');
+    host.setOverlay(true, 'video-todo'); this.setData({ todoOpen: true });
   },
+  closeTodo() { host.setOverlay(false, 'video-todo'); this.setData({ todoOpen: false }); },
+  goTodo(e) { const go = e.currentTarget.dataset.go; this.closeTodo(); if (go) host.go(go); },
+  onUnload() { if (this.data.todoOpen) host.setOverlay(false, 'video-todo'); },
 
-  openWorks() {
-    if (!host.requireLogin(this, 'execute')) return;
-    host.go('works/index');
-  },
-
-  openAssets() {
-    if (!host.requireLogin(this, 'execute')) return;
-    host.go('assets/index');
-  },
-
-  openAvatar() {
-    if (!host.requireLogin(this, 'execute')) return;
-    host.go('avatar/index');
-  },
-
-  /** 分身状态条：读失败重试，已创建看管理，未创建去创建。 */
-  tapAvatarCard() {
-    if (this.data.avatarState === 'failed') { this.refreshAccountState(); return; }
-    if (this.data.avatar) { this.openAvatar(); return; }
-    this.openClone();
-  },
-
+  needLogin() { host.requireLogin(this, 'execute'); },
+  retry() { this.setData({ loading: true }); this.load(); },
   back() { host.back(); },
+  swallow() {},
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); this.load(); },
+  loggedIn() { this.setData({ showLogin: false }); this.load(); this.refreshTodos(); },
 }));

@@ -1,0 +1,6 @@
+<view class="vt">
+  <view wx:for="{{tabs}}" wx:key="key" class="vt-tab {{item.key === current ? 'on' : ''}}" data-key="{{item.key}}" bindtap="tap">
+    <view class="vt-ic {{item.key}}"></view>
+    <text>{{item.label}}</text>
+  </view>
+</view>

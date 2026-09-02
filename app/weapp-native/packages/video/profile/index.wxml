@@ -1,0 +1,49 @@
+<view class="vd vd-profile {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow"><text class="vd-title">我的</text></view>
+  </view>
+
+  <view class="pf-page">
+    <block wx:if="{{guest}}">
+      <view class="pf-card pf-guest">
+        <text class="pf-gt">登录后看你的数字人、素材和作品</text>
+        <view class="vd-btn" bindtap="login">登录</view>
+      </view>
+    </block>
+    <block wx:else>
+      <view class="pf-card">
+        <view class="pf-me">
+          <view class="pf-ava vd-grain"></view>
+          <view class="pf-meb"><text class="pf-men">{{name || '未填写称呼'}}</text><text class="pf-mep">{{phone}}{{phone && company ? ' · ' : ''}}{{company}}</text></view>
+        </view>
+      </view>
+
+      <view class="pf-wallet">
+        <view class="pf-wh"><text class="pf-wk">钻石余额</text></view>
+        <view class="pf-wn">
+          <text wx:if="{{balance !== null}}" class="pf-wnum">{{balance}}</text>
+          <text wx:elif="{{balanceFailed}}" class="pf-wnum dim">没读到</text>
+          <text wx:else class="pf-wnum dim">—</text>
+          <text wx:if="{{balance !== null}}" class="pf-wunit">钻石</text>
+        </view>
+        <text class="pf-wsub">按段计费，生成失败自动退回。已生成的片段导出整片时不重复扣费。充值在军师「主公」页。</text>
+      </view>
+
+      <text class="pf-sect">我的资产</text>
+      <view class="pf-card">
+        <view wx:if="{{loading}}" class="pf-row"><text class="pf-rt dim">正在读取…</text></view>
+        <view wx:for="{{rows}}" wx:key="key" class="pf-row" data-go="{{item.go}}" bindtap="goRow">
+          <text class="pf-rt">{{item.name}}</text>
+          <text class="pf-rv {{item.failed ? 'warn' : ''}}">{{item.value}}</text>
+          <view class="pf-chev"></view>
+        </view>
+      </view>
+    </block>
+    <text class="pf-foot">快出片 · 军师内测版</text>
+    <view class="pf-space"></view>
+  </view>
+
+  <vd-tabbar current="profile" bindneedlogin="needLogin"></vd-tabbar>
+  <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>
