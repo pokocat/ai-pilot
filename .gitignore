@@ -85,3 +85,7 @@ app/dist-native-e2e-shots/
 
 # 部署全量日志（本地留痕，远端只记 .deploy-history 一行结论）
 .deploy-logs/
+
+# 设计画布的拼装产物（2.5MB 单页，源文件在 docs/design/，每次现拼）
+.design-canvas/
+docs/design/**/junshi-desktop-two-column.html

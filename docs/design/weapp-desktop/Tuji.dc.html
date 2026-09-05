@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    .tag { font-size: 10px; color: #9C4A38; font-weight: 600; }
+    .rail-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .rail-ic { width: 22px; height: 22px; border-radius: 6px; background: #E7E4DB; }
+    .rail-tx { font-size: 11px; color: #7E848B; }
+    .card { background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 16px; }
+    .aside-h { font-size: 10px; letter-spacing: .34em; color: #7E848B; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 24px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;">
+    <span class="sf" style="font-size: 22px; font-weight: 600;">图籍 · 桌面双栏</span>
+    <span style="font-size: 12px; color: #7E848B;">窗口 1280 · 导航 72 + 主栏 824 + 副栏 320</span>
+    <span style="margin-left: auto;" class="tag">配额与筛选合成一条「库存面板」；上传与列表是主线</span>
+  </div>
+
+  <div style="width: 1280px; height: 821px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; overflow: hidden; display: flex; box-shadow: 0 4px 20px rgba(22,25,29,.08);">
+
+    <div style="width: 72px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #D2CBB9; padding: 18px 0; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+      <div class="sf" style="width: 32px; height: 32px; border-radius: 10px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600;">军</div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">问策</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">战局</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">今日</span></div>
+      <div class="rail-item"><div class="rail-ic" style="background:#1E5A43;"></div><span class="rail-tx" style="color:#1E5A43; font-weight:600;">图籍</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">主公</span></div>
+    </div>
+
+    <div style="flex-grow: 1; padding: 22px 20px; box-sizing: border-box; position: relative; overflow: hidden;">
+      <div class="sf" style="position: absolute; right: 26px; top: 8px; font-size: 88px; line-height: 1; font-weight: 600; color: #1E5A43; opacity: .085;">籍</div>
+
+      <div style="position: relative;">
+        <div style="font-size: 12px; letter-spacing: .2em; color: #1E5A43;">军师断事的依据</div>
+        <div class="sf" style="font-size: 29px; font-weight: 600; letter-spacing: .03em; margin-top: 4px;">图籍</div>
+        <div style="height: 1px; background: #E7E4DB; margin-top: 14px;"></div>
+      </div>
+
+      <div style="display: flex; gap: 24px; margin-top: 18px;">
+
+        <!-- 主栏 -->
+        <div style="width: 824px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+
+          <div style="width: 520px; display: flex; gap: 3px; padding: 3px; border-radius: 999px; background: #F3F1EA;">
+            <div class="sf" style="flex-grow: 1; text-align: center; padding: 8px 0; border-radius: 999px; background: #FFFFFF; font-size: 14px; font-weight: 600; box-shadow: 0 1px 3px rgba(22,25,29,.07);">家底</div>
+            <div class="sf" style="flex-grow: 1; text-align: center; padding: 8px 0; border-radius: 999px; font-size: 14px; font-weight: 600; color: #7E848B;">数据源</div>
+          </div>
+
+          <!-- 上传区 -->
+          <div class="card" style="padding: 20px 22px; display: flex; align-items: center; gap: 16px;">
+            <div style="flex-grow: 1;">
+              <div style="font-size: 11px; letter-spacing: .16em; color: #1E5A43;">第一步 · 接住乱资料</div>
+              <div class="sf" style="font-size: 20px; font-weight: 600; margin-top: 7px;">上传资料</div>
+              <div style="font-size: 12.5px; line-height: 1.7; color: #565C63; margin-top: 6px;">先把资料放进来，我过一遍。支持 PDF、Word、Excel、PPTX、Markdown、TXT，单个不超过 20MB。</div>
+            </div>
+            <div style="flex-shrink: 0; height: 42px; padding: 0 24px; border-radius: 999px; background: #1E5A43; color: #fff; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600;">
+              <span style="font-size: 16px;">+</span> 上传
+            </div>
+          </div>
+
+          <!-- 空态 -->
+          <div style="flex-grow: 1; border: 1px dashed #D2CBB9; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 240px; background: rgba(255,255,255,.4);">
+            <div class="sf" style="font-size: 17px; font-weight: 600;">还没放资料进来</div>
+            <div style="font-size: 12.5px; color: #7E848B;">微信聊天、表格、文档、图片——散在各处的材料，先丢进来。</div>
+            <div style="margin-top: 6px;" class="tag">有资料时这里是资料列表（每行：文件名 / 类型 / 大小 / 整理状态）</div>
+          </div>
+
+          <!-- 主 CTA：留在主栏页尾。手机上它就在这个位置，收进副栏会把它从页尾提到页首 -->
+          <div style="height: 50px; border-radius: 14px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14.5px; font-weight: 600;">
+            上传资料，让军师补全判断
+          </div>
+        </div>
+
+        <!-- 副栏 -->
+        <div style="width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+
+          <div class="aside-h">家 底 存 量</div>
+          <div class="card" style="padding: 15px 16px;">
+            <div class="sf" style="font-size: 21px; font-weight: 600;">0 <span style="font-size: 14px; color: #7E848B;">/ 200</span></div>
+            <div style="font-size: 12px; color: #7E848B; margin-top: 3px;">免费资料额度</div>
+            <div style="height: 4px; border-radius: 2px; background: #E7E4DB; margin-top: 10px;"></div>
+          </div>
+          <div class="card" style="padding: 15px 16px;">
+            <div class="sf" style="font-size: 21px; font-weight: 600;">200 <span style="font-size: 14px; color: #7E848B;">/ 200MB</span></div>
+            <div style="font-size: 12px; color: #7E848B; margin-top: 3px;">可用空间 · 可扩容</div>
+            <div style="height: 4px; border-radius: 2px; background: #E7E4DB; margin-top: 10px;"></div>
+          </div>
+
+          <div class="aside-h" style="margin-top: 4px;">整 理 能 力</div>
+          <div class="card" style="padding: 15px 16px; border-color: rgba(99,160,130,.32); background: #E7EEE9;">
+            <div class="sf" style="font-size: 16px; font-weight: 600; color: #0F2B20;">深度整理</div>
+            <div style="font-size: 12px; color: #565C63; margin-top: 4px;">去重 / 分类 / 优化</div>
+          </div>
+
+          <div class="aside-h" style="margin-top: 4px;">按 阶 段 筛</div>
+          <div class="card" style="padding: 0;">
+            <div style="display: flex; align-items: center; padding: 13px 16px; border-bottom: 1px solid #E7E4DB; background: #FBFAF6;">
+              <span style="flex-grow: 1; font-size: 13.5px; color: #1E5A43; font-weight: 600;">待整理</span>
+              <span class="sf" style="font-size: 18px; font-weight: 600;">0</span>
+            </div>
+            <div style="display: flex; align-items: center; padding: 13px 16px; border-bottom: 1px solid #E7E4DB;">
+              <span style="flex-grow: 1; font-size: 13.5px; color: #565C63;">已优化</span>
+              <span class="sf" style="font-size: 18px; font-weight: 600; color: #565C63;">0</span>
+            </div>
+            <div style="display: flex; align-items: center; padding: 13px 16px;">
+              <span style="flex-grow: 1; font-size: 13.5px; color: #565C63;">知识库</span>
+              <span class="sf" style="font-size: 18px; font-weight: 600; color: #565C63;">0</span>
+            </div>
+          </div>
+
+          <div class="tag" style="margin-top: auto; border-top: 1px dashed #D2CBB9; padding-top: 10px; line-height: 1.6;">
+            副栏只收配额与阶段筛选 —— 它们在手机上本来就紧挨着排在段控之后。主 CTA 留在主栏页尾，收进副栏会把它从页尾提到页首
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 28px; margin-top: 12px; font-size: 11.5px; color: #565C63;">
+    <span><b style="color:#16191D;">主栏</b> 家底/数据源 → 上传区 → 资料列表 → 主 CTA</span>
+    <span><b style="color:#16191D;">副栏</b> 额度 · 空间 · 深度整理 · 按阶段筛</span>
+    <span style="color:#9C4A38;"><b>降级</b> &lt;960 时副栏整组落回段控之后的原位，配额三块恢复横排，手机版顺序不动</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

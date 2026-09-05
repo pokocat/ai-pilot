@@ -1,0 +1,171 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    .tag { font-size: 10px; color: #9C4A38; font-weight: 600; letter-spacing: .02em; }
+    .rail-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .rail-ic { width: 22px; height: 22px; border-radius: 6px; background: #E7E4DB; }
+    .rail-tx { font-size: 11px; color: #7E848B; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 24px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;">
+    <span class="sf" style="font-size: 22px; font-weight: 600;">问策 · 桌面三栏</span>
+    <span style="font-size: 12px; color: #7E848B;">窗口 1280 · 导航 72 + 会话栏 320 + 对话主栏 888</span>
+    <span style="margin-left: auto;" class="tag">副栏在左 —— 它是导航，不是上下文</span>
+  </div>
+
+  <!-- 窗口 -->
+  <div style="width: 1280px; height: 821px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; overflow: hidden; display: flex; box-shadow: 0 4px 20px rgba(22,25,29,.08);">
+
+    <!-- 左导航 72 -->
+    <div style="width: 72px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #D2CBB9; background: #FBFAF6; padding: 18px 0; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+      <div class="sf" style="width: 32px; height: 32px; border-radius: 10px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600;">军</div>
+      <div class="rail-item">
+        <div class="rail-ic" style="background: #1E5A43;"></div>
+        <span class="rail-tx" style="color: #1E5A43; font-weight: 600;">问策</span>
+      </div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">战局</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">今日</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">图籍</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">主公</span></div>
+    </div>
+
+    <!-- 会话栏 320 -->
+    <div style="width: 320px; flex-shrink: 0; border-right: 1px solid #D2CBB9; background: #FBFAF6; padding: 16px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; gap: 3px; padding: 3px; border-radius: 999px; background: #F3F1EA;">
+        <div class="sf" style="flex-grow: 1; text-align: center; padding: 7px 0; border-radius: 999px; background: #FFFFFF; font-size: 13px; font-weight: 600; box-shadow: 0 1px 3px rgba(22,25,29,.07);">军师团</div>
+        <div class="sf" style="flex-grow: 1; text-align: center; padding: 7px 0; border-radius: 999px; font-size: 13px; font-weight: 600; color: #7E848B;">历史会话</div>
+      </div>
+      <div style="height: 38px; border: 1px solid #D2CBB9; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; padding: 0 12px; gap: 8px;">
+        <div style="width: 13px; height: 13px; border: 1.5px solid #7E848B; border-radius: 50%;"></div>
+        <span style="font-size: 12px; color: #7E848B;">搜索军师、会话、方案或资料</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column;">
+        <div style="display: flex; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #E7E4DB; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #E7EEE9; border: 1px solid #D2CBB9;"></div>
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 5px;"><span style="font-size: 13.5px; font-weight: 600;">战略诊断官</span><span style="font-size: 11px; color: #1E5A43;">观澜</span></div>
+            <div style="font-size: 11.5px; color: #7E848B; margin-top: 2px;">我是观澜，专看战略取舍。</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #E7E4DB; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #E7EEE9; border: 1px solid #D2CBB9;"></div>
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 5px;"><span style="font-size: 13.5px; font-weight: 600;">增长操盘手</span><span style="font-size: 11px; color: #1E5A43;">青衍</span></div>
+            <div style="font-size: 11.5px; color: #7E848B; margin-top: 2px;">我是青衍，负责增长。</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #E7E4DB; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #F3F1EA; border: 1px solid #D2CBB9;"></div>
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 5px;"><span style="font-size: 13.5px; font-weight: 600; color: #565C63;">经营参谋</span><span style="font-size: 11px; color: #7E848B;">照微</span></div>
+            <div style="font-size: 11.5px; color: #7E848B; margin-top: 2px;">我是照微，负责经营复盘。</div>
+          </div>
+          <span style="font-size: 10px; color: #7E848B; border: 1px solid #D2CBB9; padding: 1px 6px; border-radius: 999px; flex-shrink: 0;">需启用</span>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #E7E4DB; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #F3F1EA; border: 1px solid #D2CBB9;"></div>
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 5px;"><span style="font-size: 13.5px; font-weight: 600; color: #565C63;">组织人效顾问</span><span style="font-size: 11px; color: #7E848B;">云枢</span></div>
+            <div style="font-size: 11.5px; color: #7E848B; margin-top: 2px;">我是云枢，负责团队和组织。</div>
+          </div>
+          <span style="font-size: 10px; color: #7E848B; border: 1px solid #D2CBB9; padding: 1px 6px; border-radius: 999px; flex-shrink: 0;">需启用</span>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 11px 2px; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; background: #F3F1EA; border: 1px solid #D2CBB9;"></div>
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 5px;"><span style="font-size: 13.5px; font-weight: 600; color: #565C63;">竞争情报官</span><span style="font-size: 11px; color: #7E848B;">察远</span></div>
+            <div style="font-size: 11.5px; color: #7E848B; margin-top: 2px;">我是察远，专看对手和赛道。</div>
+          </div>
+          <span style="font-size: 10px; color: #7E848B; border: 1px solid #D2CBB9; padding: 1px 6px; border-radius: 999px; flex-shrink: 0;">需启用</span>
+        </div>
+      </div>
+
+      <div style="margin-top: auto; font-size: 10.5px; color: #9C4A38; line-height: 1.6; border-top: 1px dashed #D2CBB9; padding-top: 8px;">
+        已实现（本轮已落）：这一栏就是原来的半屏抽屉，同一棵 WXML、同一份数据
+      </div>
+    </div>
+
+    <!-- 对话主栏 888 -->
+    <div style="flex-grow: 1; display: flex; flex-direction: column; position: relative; background: #FBFAF6;">
+      <!-- 页头 -->
+      <div style="padding: 16px 24px 14px; border-bottom: 1px solid #E7E4DB; position: relative;">
+        <div class="sf" style="position: absolute; right: 24px; top: 2px; font-size: 74px; line-height: 1; font-weight: 600; color: #1E5A43; opacity: .085;">谋</div>
+        <div style="max-width: 840px; margin: 0 auto; position: relative;">
+          <div style="font-size: 12px; letter-spacing: .2em; color: #1E5A43;">总军师玄衡 · 在线</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px;">
+            <span class="sf" style="font-size: 29px; font-weight: 600; letter-spacing: .03em;">问策</span>
+            <div style="display: flex; gap: 6px;">
+              <div style="height: 30px; padding: 0 11px; border-radius: 999px; background: #E7EEE9; border: 1px solid rgba(99,160,130,.32); display: flex; align-items: center; font-size: 12px; font-weight: 600; color: #0F2B20;">军师团</div>
+              <div style="height: 30px; padding: 0 11px; border-radius: 999px; background: #E7EEE9; border: 1px solid rgba(99,160,130,.32); display: flex; align-items: center; font-size: 12px; font-weight: 600; color: #0F2B20;">历史</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 消息流 -->
+      <div style="flex-grow: 1; padding: 22px 24px; overflow: hidden;">
+        <div style="max-width: 840px; margin: 0 auto;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 20px; height: 20px; border-radius: 50%; background: #16191D;"></div>
+            <span style="font-size: 12px; font-weight: 600;">总军师</span>
+          </div>
+          <div style="margin-top: 10px; font-size: 14.5px; line-height: 1.85; color: #16191D; padding-left: 28px;">
+            我是总军师。你不用先整理好再说——把眼下最拿不准的那件事直接讲出来，我先替你判断主要矛盾在哪，再决定要不要调专业军师。先说一句：现在最卡你的，是方向、是增长，还是钱和人？
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 14px; padding-left: 28px;">
+            <div style="padding: 7px 13px; border: 1px solid #D2CBB9; border-radius: 999px; background: #FFFFFF; font-size: 12.5px;">方向定不下来</div>
+            <div style="padding: 7px 13px; border: 1px solid #D2CBB9; border-radius: 999px; background: #FFFFFF; font-size: 12.5px;">增长卡住了</div>
+            <div style="padding: 7px 13px; border: 1px solid #D2CBB9; border-radius: 999px; background: #FFFFFF; font-size: 12.5px;">钱和人都紧</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 提示 pill -->
+      <div style="padding: 0 24px;">
+        <div style="max-width: 840px; margin: 0 auto;">
+          <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px 8px 9px; border: 1px solid #D2CBB9; border-radius: 999px; background: #FBFAF6; box-shadow: 0 2px 8px rgba(22,25,29,.06);">
+            <div class="sf" style="width: 20px; height: 20px; border-radius: 50%; background: #E7EEE9; color: #0F2B20; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">问</div>
+            <span class="sf" style="font-size: 12.5px; font-weight: 600; color: #565C63;">这单要不要接？</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入台 -->
+      <div style="padding: 12px 24px 20px;">
+        <div style="max-width: 840px; margin: 0 auto; border: 1px solid rgba(203,193,168,.55); border-radius: 20px; background: rgba(246,243,235,.96); padding: 12px 14px; box-shadow: 0 8px 22px rgba(22,25,29,.10);">
+          <div style="font-size: 13.5px; color: #7E848B; min-height: 46px;">把你正拿不准的事告诉军师</div>
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div style="width: 30px; height: 30px; border-radius: 50%; border: 1px solid #D2CBB9;"></div>
+            <div style="width: 34px; height: 34px; border-radius: 50%; background: #E7EEE9; border: 1px solid rgba(99,160,130,.32);"></div>
+          </div>
+        </div>
+        <div style="max-width: 840px; margin: 8px auto 0;" class="tag">
+          浮岛里那排五 tab 行在桌面档去掉 —— 导航已经在左栏，重复一遍反而要人二选一
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 28px; margin-top: 12px; font-size: 11.5px; color: #565C63;">
+    <span><b style="color:#16191D;">主栏</b> 对话（正文轴 840 居中，1280 下正好吃满）</span>
+    <span><b style="color:#16191D;">副栏</b> 军师团 / 历史会话（导航性质，故在左）</span>
+    <span style="color:#9C4A38;"><b>降级</b> &lt;960 时会话栏收回半屏抽屉，页头「军师团 / 历史」两个入口重新变成打开抽屉</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
