@@ -12,3 +12,30 @@
 /* 额度倍率：比别名再轻一档——它是提示不是身份，常驻在标题行但不该抢注意力。只在 >1 时渲染。 */
 .chat-ratio { margin-left: 6px; font-size: 11px; color: var(--ink-3); font-weight: 500; }
 .chat-scroll { position: fixed; top: calc(var(--native-menu-top) + var(--native-menu-height) + 12px); left: 0; right: 0; bottom: calc(var(--composer-height) + var(--keyboard-height)); }
+
+/* ==========================================================================
+   桌面大窗口（2026-09-05）
+   ——————————————————————————————————————————————————————————————————————
+   页头 / 消息流 / 输入台三条都是 fixed 通栏。在手机上「通栏」就等于「一屏宽」，
+   到了微信 PC 的 1400px 窗口里，一行正文能排四十多个汉字，读一句要来回甩头。
+   这里只收正文轴：把三条的**内容**按 840px 居中（与问策 tab 同一条阅读轴），
+   页头底纹与输入台的横条仍然通栏——桌面上那两条本来就该是贯穿窗口的工具条。
+   输入台内容那一条写在 chat-core/chat-core.scss：输入框那个类是两个宿主共用的，
+   按本仓约定不能落在分包页的 SCSS 里，native-weapp.test.mjs 钉着这条边界
+   （连注释里提一嘴类名都会被那条 doesNotMatch 拦下，所以这里只描述、不写类名）。
+   ========================================================================== */
+.viewport-medium .chat-headrow,
+.viewport-expanded .chat-headrow,
+.viewport-medium .chat-stream,
+.viewport-expanded .chat-stream {
+  width: 100%;
+  max-width: 840px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+/* 页头右侧留白（--native-menu-right）**不动**：微信 PC 的胶囊在窗口标题栏、不压页面，
+   那份留白会退到 16px 的兜底值，与左边 12px 视觉上就是对称的；而 iPad 上胶囊是真的浮在
+   页面上，一旦把它换成固定值，竖屏（正好落在 medium 档、840 轴不生效）的页头菜单键
+   就会钻到胶囊底下。让它按各自平台的实测值走。 */

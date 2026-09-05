@@ -85,3 +85,18 @@
 .viewport-expanded .task { padding: 18px 20px; }
 .viewport-expanded .cr-art { width: 80px; height: 80px; flex-basis: 80px; }
 .viewport-expanded .week-card { padding: 18px 20px; }
+
+/* —— 桌面窗口的行宽（2026-09-05）——
+   这一页是一条**有序**的待办流（军令带「优先级 1 / 2 / 3」），所以不做双列——
+   分两列就等于让人从两个方向读同一个顺序。要收的是另一头：整页跟着 .pad 铺到 1080px 后，
+   一张只装七八个字的军令卡横着拉了一整屏，读起来像被拉变形的手机页。
+   这里把正文轴收回 860px 居中；它压过 app.wxss 里 `.viewport-expanded .pad` 的 1080
+   （同选择器权重，页面样式在 app 样式之后应用）。 */
+.viewport-expanded .exec-page { max-width: 860px; }
+
+/* 段控（今天 / 近七日）只有两个字段，跟着栏宽拉到 860 会变成两条大横条。
+   与图籍的 .think-tabs 用同一档 520px，桌面上五个 tab 的段控宽度因此一致。
+   ⚠️ 居中必须走 align-self，不能用 `margin-left/right: auto`：.exec-page 是 flex 纵列，
+   交叉轴上的 auto 外边距会把它压成内容宽（实测缩成 50px 宽、「近七日」折成两行）。 */
+.viewport-medium .exec-seg,
+.viewport-expanded .exec-seg { align-self: center; width: 100%; max-width: 520px; }

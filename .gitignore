@@ -8,6 +8,8 @@ dist/
 **/dist-native/
 **/dist-h5/
 **/dist-pc/
+# 桌面窗口预览台产物（scripts/desktop-preview.mjs 从 dist-native 现抓现拼）
+**/dist-desktop-preview/
 lib/
 # 上面那条裸 `lib/` 是给构建产物的，但它按 gitignore 语义匹配**任意层级**的 lib 目录，
 # 于是把 shadcn 约定的源码目录 admin/src/lib/（cn() 与 Radix 浮层挂载点）一起吞了：

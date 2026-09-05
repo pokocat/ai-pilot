@@ -6,6 +6,22 @@
 
 ## 变更日志
 
+### 2026-09-05 · 撤回微信官方分栏，桌面大窗口改由自家断点排版 · 影响面：微信 PC / iPad 五个主 Tab、问策桌面形态、桌面排版验收链路
+
+桌面版微信打开小程序只用得上左边一条手机宽的窄栏、右边一整块空白，原因是 `app.json` 里的 `frameset:true`。官方分栏（仅 Windows 微信 3.3+）一旦开启就把窗口钉成左右两栏：左栏固定放 tab 页，右栏要等 `navigateTo` 出来的次级页面才有内容，在五个 tab 之间浏览时它自始至终是空的（官方只提供 `frameset/placeholder.png` 一张兜底图）。连带后果更隐蔽——每一栏的宽度都够不到 720 / 1100 断点，2026-08-18 那套 `viewport-medium / expanded` 响应式在桌面上从来没有被点亮过一次。
+
+现在只保留 `resizable:true`：单栏铺满窗口，窗口宽度就是排版宽度，Windows / macOS / iPad 走同一条路径。`services/page.js#viewportData` 增加 `isExpanded`，档位判据仍然只有这一处。
+
+expanded（≥1100px）档三处落地：
+
+- **问策**把「军师团 / 历史会话」从半屏抽屉抬成 320px 常驻左栏（`railOn`）。用的是**同一棵 `.wd-sheet`**、同一份 `councilRows / historyRows`，没有第二套侧栏结构，也没有额外取数；页头那两个入口在侧栏在时只切分段，不再压 overlay、不再有遮罩，提示 pill 因此照常出现。窗口收窄到 1100 以下自动落回抽屉。页头/滚动区/浮岛/pill 四个 fixed 层靠根节点 `rail-on` 让出左栏宽度，正文轴仍是 840px——桌面上变宽的是「同时看得见多少东西」，不是行长。`.as-rail` 必须显式 `transform: none`：抽屉在 expanded 档本来是 `left:50% + translateX(-50%)` 居中，只覆盖 left/width 会让整根侧栏左飘半个自身宽度（实测 160px，行文被窗口边裁掉）。
+- **今日**是一条带「优先级 1 / 2 / 3」的有序待办流，**不做双列**（分两列等于让人从两个方向读同一个顺序）。要收的是被 `.pad` 拉到 1080px 的行宽：正文轴回到 860px、段控回到 520px，一张只装七八个字的军令卡不再横着拉满一屏。段控居中用 `align-self` 而不是 `margin: auto`——`.exec-page` 是 flex 纵列，交叉轴上的 auto 外边距会把它压成内容宽（实测缩成 50px、「近七日」折成两行）。
+- 战局的三势格、图籍的目录列数、主公的 840px 账户轴维持原状，本轮实测在 1280 / 1440 下没有被拉变形。
+
+新增 `app/scripts/desktop-preview.mjs`（`npm run preview:desktop`）：从开发者工具抓五个 tab **真实渲染后**的 WXML，配 `dist-native` 的编译产物 WXSS 拼成一张可任意拉宽的 HTML，用来在 390 / 720 / 900 / 1100 / 1280 / 1440 各档核桌面排版——模拟器只给手机宽度，微信 PC 的真实窗口本地驱动不了，此前这套响应式实际上没有验收手段。桌面专属节点靠 `prepare` 钩子改页面自己的 data 打开，抓到的仍是真渲染的树；改 SCSS 时 `--reuse` 可跳过开发者工具。
+
+`native-weapp.test.mjs` 把 `frameset` 缺省、侧栏复用同一棵树、遮罩只跟 `drawerOpen` 走、`transform: none`、今日的 860 / 520 与 `align-self` 全部钉死。开发者工具自动化实测：390 → `railOn=false`、1280 → `railOn=true` 且侧栏渲染、900 → 落回、缩回 390 → 落回且点「历史」照常开抽屉。`app` 全量 257 + 109 用例绿。
+
 ### 2026-09-02 · 修复后台 StrictMode 骨架屏与刚写入记录短暂不可见 · 影响面：运营后台取数、调用诊断、审计工作台、时间筛选回归
 
 `useResource` 原先用组件级 `alive` ref 管理异步响应，只在卸载 cleanup 置为 `false`。React 18 StrictMode 在开发环境会执行 mount → cleanup → mount，第一次 cleanup 因而把该 ref 永久烧死，第二次挂载发出的请求无论成功、失败还是 finally 都被丢弃：数据始终为空、loading 永远为 true，所有后台页面只剩骨架屏。现改为每一轮 effect 的局部 `cancelled` 标记，cleanup 仅作废本轮请求；跨筛选请求仍以递增 `reqId` 保证旧响应不能覆盖新结果。新增真实 `react-dom/client + StrictMode` 回归，覆盖成功、失败、403、旧请求晚回与卸载后到货。

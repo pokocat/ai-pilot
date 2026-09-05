@@ -1,7 +1,7 @@
 <import src="/chat-core/message-list.wxml"></import>
 <import src="/chat-core/composer.wxml"></import>
 
-<view class="chat-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-menu-top:{{navTop}}px;--native-menu-height:{{navRowHeight}}px;--native-menu-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px">
+<view class="chat-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-menu-top:{{navTop}}px;--native-menu-height:{{navRowHeight}}px;--native-menu-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
   <view class="chat-header">
     <view class="chat-safe"></view>
     <view class="chat-headrow">

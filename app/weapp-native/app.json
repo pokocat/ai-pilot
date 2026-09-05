@@ -158,7 +158,6 @@
     ]
   },
   "resizable": true,
-  "frameset": true,
   "lazyCodeLoading": "requiredComponents",
   "sitemapLocation": "sitemap.json"
 }

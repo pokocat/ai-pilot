@@ -1,6 +1,6 @@
 // 问策对话分包页：只保留页面宿主专属的东西——导航参数解析、页头、返回键、页头菜单。
 // 消息加载/发送/SSE 流式/生成态/粘贴归卷/asks 问答卡等对话核心全部来自主包 chat-core/behavior.js。
-const { baseData } = require('../../../services/page');
+const { baseData, syncViewport } = require('../../../services/page');
 const { chatCore, useStreamRenderer, decodeOption } = require('../../../chat-core/behavior');
 const {
   setMdText,
@@ -25,6 +25,10 @@ Page(withShare({
       pendingPrompt: options.send ? decodeOption(options.send) : decodeOption(options.prompt),
     });
   },
+  // 桌面窗口拉伸/最大化、iPad 旋转：与五个主 Tab 同一条官方链路，按窗口宽度重挂档位。
+  // 这一页是问策侧栏里点任何一位军师之后落地的地方，没有它，对话在 1400px 的窗口里
+  // 会一路铺满——正文行长比手机上宽三倍，谁都读不下去。
+  onResize(event) { syncViewport(this, event && event.size); },
   onUnload() { this.chatCoreUnload(); },
   back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/sessions/index' }) }); },
   openChatMenu() {

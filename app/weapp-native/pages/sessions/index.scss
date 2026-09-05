@@ -267,3 +267,66 @@
   border-radius: 20px;
 }
 .viewport-expanded .council > .wx-list > .wx-item:nth-last-child(2) { border-bottom: 0; }
+
+/* ==========================================================================
+   桌面常驻左栏（.rail-on，只在 expanded + chat 形态下由 JS 挂上）
+   ——————————————————————————————————————————————————————————————————————
+   微信 PC 把窗口拉到 1100px 以上时，手机版那条「点页头 → 弹半屏抽屉 → 选一条 → 收起」
+   的路子既浪费了大半块窗口，又让人一直在开合。这里把**同一棵抽屉 WXML**摆成常驻左栏：
+   军师团 / 历史会话一眼可见，右侧仍是完整对话轴。窗口收窄回 1100 以下，railOn 变 false，
+   它自动落回半屏抽屉——两套形态共用一份结构与一份数据，不存在第二套侧栏代码。
+
+   横向切分只改这四个 fixed 层的 left（页头 / 滚动区 / 浮岛 / 提示 pill），
+   它们内部的 840px 阅读轴按「剩下那块」重新居中，所以正文行长在桌面上不变宽。
+   ========================================================================== */
+.wence-page.rail-on { --rail-w: 320px; }
+
+.rail-on .wd-sheet.as-rail {
+  top: 0; left: 0; right: auto; bottom: 0;
+  width: var(--rail-w);
+  max-width: none;
+  max-height: none;
+  /* 必须显式清掉：上面 `.viewport-medium/.viewport-expanded .wd-sheet` 那条把半屏抽屉
+     按 left:50% + translateX(-50%) 居中，只覆盖 left/width 的话位移还在，
+     整根侧栏会往左飘半个自身宽度（首版实测左移 160px，行文被窗口边裁掉）。 */
+  transform: none;
+  /* 顶部让开微信胶囊那一行：侧栏是贴着窗口顶的，不让位分段器会被胶囊压住。 */
+  padding: var(--native-nav-inset) 14px calc(14px + env(safe-area-inset-bottom));
+  border-radius: 0;
+  border-right: 1px solid var(--line-strong);
+  /* 底色仍是 --paper，两栏靠上面那条 line-strong 分界。
+     试过给侧栏压一档 --bg(#F4F2EC)：它和分段器的 --surface-2(#F3F1EA) 只差一度，
+     军师团/历史会话那个 pill 直接糊成两行白字，栏内每个组件的对比度都是照 --paper 调的。 */
+  background: var(--paper);
+  z-index: 70; /* 页头(60) 之上、教学层(90) 与登录门之下——常驻栏不该盖住模态层 */
+}
+
+/* 抽屉里那条 46vh 的固定高度是为半屏算的。侧栏要吃满整列，
+   高度显式算出来而不是靠 flex 撑（§7.2：scroll-view 必须有确定高度才滑得动）。
+   108 = 分段器 40 + 搜索行 50（含 10 上边距）+ 列表上边距 4 + 底部呼吸 14。 */
+.rail-on .as-rail .wd-body { height: calc(100vh - var(--native-nav-inset) - 108px); }
+
+.rail-on .wence-head,
+.rail-on .wence-scroll { left: var(--rail-w); }
+.rail-on .wence-isle { left: calc(var(--rail-w) + 14px); }
+
+/* 浮岛与 pill 在 expanded 档本来按整窗居中；有侧栏时改成按「侧栏右边那块」居中。
+   --window-width 是 services/page.js#syncViewport 下发的当前栏真实宽度，比 100% 可靠：
+   fixed 元素的百分比参照视口，拿不到「减掉侧栏之后」的宽度。 */
+.rail-on.viewport-expanded .wence-isle {
+  left: calc(var(--rail-w) + (var(--window-width) - var(--rail-w)) / 2);
+  right: auto;
+  width: calc(var(--window-width) - var(--rail-w) - 48px);
+  max-width: 840px;
+  transform: translateX(-50%);
+}
+/* pill 要和浮岛左沿严丝合缝地对齐。浮岛宽 = min(840, 剩余宽 - 48)，于是它的左沿在
+   「剩余宽还没到 888」时是 侧栏 + 24，之后才是居中留白。少了这个 max，窗口刚过 1100 时
+   (剩余 780 < 840) 那半个差值是**负数**，pill 会被推到侧栏里去（实测左沿 290 < 侧栏 320）。
+   这条规则只在桌面 .rail-on 下生效，跑的是 PC 微信的 Chromium，min()/max() 可用。 */
+.rail-on.viewport-expanded .wence-pill {
+  left: max(
+    calc(var(--rail-w) + 24px),
+    calc(var(--rail-w) + (var(--window-width) - var(--rail-w) - 840px) / 2)
+  );
+}

@@ -122,7 +122,11 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
 test('微信桌面端启用官方可拉伸与分栏能力，五个主 Tab 响应当前栏尺寸', () => {
   const app = JSON.parse(read(sourceRoot, 'app.json'));
   assert.equal(app.resizable, true, 'PC 最大化/自由拉伸与 iPad 旋转依赖 app.json.resizable');
-  assert.equal(app.frameset, true, 'Windows 微信自动左右分栏依赖 app.json.frameset');
+  // 2026-09-05：官方分栏（frameset）撤回。它只在 Windows 微信 3.3+ 生效，一开就把窗口
+  // 钉成左右两栏——左栏永远是手机宽的 tab 页，右栏在没有次级页面时是一整块空白；
+  // 更要命的是两栏各自都够不到 720 / 1100 断点，下面这套响应式在桌面上从来没被点亮过。
+  // 现在单栏铺满窗口，排版全部由 viewportClass 自己决定。重开 frameset 前先复现那块空白。
+  assert.equal(app.frameset, undefined, '不得重新开启 app.json.frameset：官方分栏会把窗口钉成手机宽左栏 + 空白右栏');
 
   const pageService = read(sourceRoot, 'services/page.js');
   assert.match(pageService, /function viewportData\(size\)/);
@@ -142,6 +146,56 @@ test('微信桌面端启用官方可拉伸与分栏能力，五个主 Tab 响应
   const tabbarScss = read(sourceRoot, 'custom-tab-bar/index.scss');
   assert.match(appScss, /\.viewport-medium \.pad,[\s\S]*?max-width:\s*920px/);
   assert.match(tabbarScss, /@media \(min-width:\s*720px\)[\s\S]*?width:\s*560px/);
+});
+
+test('桌面 expanded 档：问策抽屉抬成常驻左栏，今日收回可读行宽', () => {
+  const pageService = read(sourceRoot, 'services/page.js');
+  assert.match(pageService, /isExpanded: sizeClass === 'expanded'/, '侧栏判据必须来自统一的档位计算，不许各页自己比宽度');
+
+  const js = read(sourceRoot, 'pages/sessions/index.js');
+  const wxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const scss = read(sourceRoot, 'pages/sessions/index.scss');
+
+  // 侧栏与半屏抽屉共用同一棵 WXML：多出第二套结构就意味着两边会各自漂移。
+  assert.equal((wxml.match(/class="wd-sheet/g) || []).length, 1, '常驻左栏必须复用抽屉那棵树，不得另写一份');
+  assert.match(wxml, /wx:if="\{\{drawerOpen \|\| railOn\}\}"/, '侧栏在时抽屉节点要照常渲染');
+  assert.match(wxml, /class="wd-sheet \{\{railOn \? 'as-rail' : ''\}\}"/);
+  assert.match(wxml, /class="wence-page[^"]*\{\{railOn \? 'rail-on' : ''\}\}"/, '根节点要挂 rail-on，四个 fixed 层靠它让出左栏');
+  // 遮罩只跟 drawerOpen 走：跟着侧栏一起渲染的话，桌面上会有一层灰罩盖住整页。
+  assert.match(wxml, /wx:if="\{\{drawerOpen\}\}" class="wd-mask"/);
+
+  assert.match(js, /railOn = expanded && this\.data\.form === 'chat'/, 'railOn 只在 expanded + chat 形态成立');
+  assert.match(js, /if \(this\.data\.railOn\) \{ this\.setData\(\{ drawerSeg: seg \}\); return; \}/,
+    '侧栏常驻时页头入口只切分段，不该再压一次 overlay');
+  assert.match(js, /onResize\(event\)[\s\S]{0,320}this\.syncRail\(viewport\)/, '窗口变化必须重算侧栏');
+  assert.match(js, /onLoad\(\)[\s\S]{0,600}this\.syncRail\(null\)/, 'onResize 不补第一帧，冷启动要自己算一次');
+
+  // 抽屉在 expanded 档本来是 left:50% + translateX(-50%) 居中；侧栏必须显式清掉位移，
+  // 否则整根栏往左飘半个自身宽度（首版实测左移 160px，行文被窗口边裁掉）。
+  assert.match(scss, /\.rail-on \.wd-sheet\.as-rail \{[\s\S]*?transform: none;/);
+  assert.match(scss, /\.rail-on \.wence-head,\s*\n\.rail-on \.wence-scroll \{ left: var\(--rail-w\); \}/,
+    '页头与滚动区必须让出左栏宽度');
+
+  // 对话分包页不是 tab，但侧栏里点任何一位军师都落到这儿；漏掉它，桌面上正文会一路铺满窗口。
+  const chatJs = read(sourceRoot, 'packages/main/chat/index.js');
+  const chatWxml = read(sourceRoot, 'packages/main/chat/index.wxml');
+  const chatScss = read(sourceRoot, 'packages/main/chat/index.scss');
+  assert.match(chatJs, /onResize\(event\) \{ syncViewport\(this, event && event\.size\); \}/, '对话页必须消费官方 Page.onResize');
+  assert.match(chatWxml, /class="chat-page \{\{themeClass\}\} \{\{viewportClass\}\}"/);
+  assert.match(chatWxml, /--window-width:\{\{windowWidth\}\}px;--window-height:\{\{windowHeight\}\}px/);
+  assert.match(chatScss, /\.viewport-expanded \.chat-stream \{[\s\S]*?max-width: 840px;/, '对话正文轴在桌面档必须收到 840px');
+  // 输入台那一条按仓库约定落在共享层，不在分包页里。
+  const chatCoreScss = read(chatCoreRoot, 'chat-core.scss');
+  assert.match(chatCoreScss, /\.viewport-expanded \.composer-box \{[\s\S]*?max-width: 840px;/, '输入台正文轴要与消息流同轴');
+  // 页头右侧留白必须继续跟 --native-menu-right 走：iPad 竖屏（medium 档、840 不生效）
+  // 换成固定值会让页头菜单键钻到胶囊底下。
+  assert.doesNotMatch(chatScss, /\.viewport-(medium|expanded) \.chat-headrow \{ padding-right: 12px; \}/);
+
+  // 今日是一条带优先级的有序待办流，不做双列；要收的是被 .pad 拉到 1080px 的行宽。
+  const execScss = read(sourceRoot, 'pages/execution/index.scss');
+  assert.match(execScss, /\.viewport-expanded \.exec-page \{ max-width: 860px; \}/);
+  assert.match(execScss, /\.viewport-expanded \.exec-seg \{ align-self: center;/,
+    '.exec-page 是 flex 纵列，段控居中不能用 auto 外边距（会被压成内容宽）');
 });
 
 test('数字分身训练通知必须由用户点击授权并回写 avatar 场景', () => {

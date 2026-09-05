@@ -30,7 +30,12 @@ function capsuleInset() { return capsuleMetrics().navInset; }
 /**
  * 微信 PC / iPad 在 app.json 开启 resizable 后，页面显示区域会随拖拽、最大化和旋转变化。
  * 这里统一把官方 onResize 返回的 px 尺寸折成三档；页面只消费语义档位，不猜 platform，
- * 因而 Windows 分栏、macOS 大窗口、iPad 横屏和开发者工具都走同一套布局。
+ * 因而 Windows 大窗口、macOS 大窗口、iPad 横屏和开发者工具都走同一套布局。
+ *
+ * ⚠️ 2026-09-05 起 app.json 不再开 `frameset`：官方分栏只在 Windows 微信 3.3+ 生效，
+ * 而它一开就把窗口钉成左右两栏 —— 左栏永远是手机宽的 tab 页，右栏在没打开次级页面前
+ * 是一整块空白（官方只提供 frameset/placeholder.png 兜底图）。副作用是每一栏都够不到
+ * 720 / 1100 断点，下面这三档在桌面上从来没被点亮过。改回单栏后窗口宽度就是排版宽度。
  */
 function viewportData(size) {
   let win = size || null;
@@ -45,6 +50,9 @@ function viewportData(size) {
     windowHeight,
     viewportClass: `viewport-${sizeClass}${windowWidth > windowHeight ? ' viewport-landscape' : ''}`,
     isLargeScreen: sizeClass !== 'compact',
+    // 只有 expanded 才够摆得下常驻侧栏（问策的会话轨）。medium 档窗口一分为二后
+    // 两边都不成立，所以要的是这个布尔量，不是 isLargeScreen。
+    isExpanded: sizeClass === 'expanded',
   };
 }
 
