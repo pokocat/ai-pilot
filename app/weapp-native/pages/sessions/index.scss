@@ -271,18 +271,23 @@
 /* ==========================================================================
    桌面常驻左栏（.rail-on，只在 expanded + chat 形态下由 JS 挂上）
    ——————————————————————————————————————————————————————————————————————
-   微信 PC 把窗口拉到 1100px 以上时，手机版那条「点页头 → 弹半屏抽屉 → 选一条 → 收起」
+   微信 PC 把窗口拉到 960px 以上时，手机版那条「点页头 → 弹半屏抽屉 → 选一条 → 收起」
    的路子既浪费了大半块窗口，又让人一直在开合。这里把**同一棵抽屉 WXML**摆成常驻左栏：
-   军师团 / 历史会话一眼可见，右侧仍是完整对话轴。窗口收窄回 1100 以下，railOn 变 false，
+   军师团 / 历史会话一眼可见，右侧仍是完整对话轴。窗口收窄回 960 以下，railOn 变 false，
    它自动落回半屏抽屉——两套形态共用一份结构与一份数据，不存在第二套侧栏代码。
 
    横向切分只改这四个 fixed 层的 left（页头 / 滚动区 / 浮岛 / 提示 pill），
    它们内部的 840px 阅读轴按「剩下那块」重新居中，所以正文行长在桌面上不变宽。
    ========================================================================== */
-.wence-page.rail-on { --rail-w: 320px; }
+/* --nav-w 是 components/nav-rail 那条 72px 左导航的宽度：桌面档它常驻在窗口最左边，
+   下面每一个 fixed 层的横向起点都要先让开它，问策于是成了三栏（导航 72 + 会话栏 320 + 对话主栏）。
+   这三栏是**齐边的**：会话栏本身就是一条通栏，不走内容区的 20 页边距与 24 栏间距，
+   所以对话主栏 = 窗口 − 392，而不是另外四个 tab 那套 窗口 − 456。 */
+.wence-page.rail-on { --nav-w: 72px; --rail-w: 320px; }
 
 .rail-on .wd-sheet.as-rail {
-  top: 0; left: 0; right: auto; bottom: 0;
+  /* 左沿贴的是导航条右边，不是窗口左边。 */
+  top: 0; left: var(--nav-w); right: auto; bottom: 0;
   width: var(--rail-w);
   max-width: none;
   max-height: none;
@@ -307,26 +312,48 @@
 .rail-on .as-rail .wd-body { height: calc(100vh - var(--native-nav-inset) - 108px); }
 
 .rail-on .wence-head,
-.rail-on .wence-scroll { left: var(--rail-w); }
-.rail-on .wence-isle { left: calc(var(--rail-w) + 14px); }
+.rail-on .wence-scroll { left: calc(var(--nav-w) + var(--rail-w)); }
+.rail-on .wence-isle { left: calc(var(--nav-w) + var(--rail-w) + 14px); }
+
+/* 桌面档浮岛里那排自绘 tab 行去掉：导航已经常驻在窗口左边，浮岛再挂一份五 tab
+   就是同一组导航在一屏里出现两次（而且一横一竖、选中态还得同步）。
+   注意这是**只在 .rail-on 下**收起：窗口缩回 960 以下时 railOn 变 false，
+   左导航消失、这排 tab 行原样回来，对话终态仍然有导航（降级表里钉死的那条）。 */
+.rail-on .wence-isle .tabbar-inner,
+.rail-on .wence-isle .isle-div { display: none; }
+
+/* tab 行没了，浮岛矮了一截，滚动区与 pill 的下沿要跟着收，否则浮岛上方常年悬着一条纸色空栏。
+   85 = 14 岛距 + 62 tab 行（.wence-isle .tabbar-inner 的高，不是底栏那 66）+ 1 分隔 + 8 呼吸；
+   去掉 tab 行与分隔这 63px，剩下的就是 14 + 8 = 22。
+   121 是 85 再加 pill 那 36px 的带子，同样减 63 → 58。 */
+.rail-on .wence-scroll {
+  bottom: calc(var(--composer-height) + 22px + env(safe-area-inset-bottom) + var(--keyboard-height));
+}
+.rail-on .wence-scroll.pill-on {
+  bottom: calc(var(--composer-height) + 58px + env(safe-area-inset-bottom) + var(--keyboard-height));
+}
+.rail-on .wence-pill {
+  bottom: calc(var(--composer-height) + 22px + env(safe-area-inset-bottom) + var(--keyboard-height));
+}
 
 /* 浮岛与 pill 在 expanded 档本来按整窗居中；有侧栏时改成按「侧栏右边那块」居中。
    --window-width 是 services/page.js#syncViewport 下发的当前栏真实宽度，比 100% 可靠：
    fixed 元素的百分比参照视口，拿不到「减掉侧栏之后」的宽度。 */
 .rail-on.viewport-expanded .wence-isle {
-  left: calc(var(--rail-w) + (var(--window-width) - var(--rail-w)) / 2);
+  left: calc(var(--nav-w) + var(--rail-w) + (var(--window-width) - var(--nav-w) - var(--rail-w)) / 2);
   right: auto;
-  width: calc(var(--window-width) - var(--rail-w) - 48px);
+  width: calc(var(--window-width) - var(--nav-w) - var(--rail-w) - 48px);
   max-width: 840px;
   transform: translateX(-50%);
 }
 /* pill 要和浮岛左沿严丝合缝地对齐。浮岛宽 = min(840, 剩余宽 - 48)，于是它的左沿在
-   「剩余宽还没到 888」时是 侧栏 + 24，之后才是居中留白。少了这个 max，窗口刚过 1100 时
-   (剩余 780 < 840) 那半个差值是**负数**，pill 会被推到侧栏里去（实测左沿 290 < 侧栏 320）。
+   「剩余宽还没到 888」时是 导航 + 侧栏 + 24，之后才是居中留白。少了这个 max，窗口刚过 960 时
+   （剩余 = 960 − 72 − 320 = 568 < 840）那半个差值是**负数**，pill 会被推到侧栏里去
+   （1100 门槛时代实测左沿 290 < 侧栏 320；门槛降到 960 后这个负值只会更大）。
    这条规则只在桌面 .rail-on 下生效，跑的是 PC 微信的 Chromium，min()/max() 可用。 */
 .rail-on.viewport-expanded .wence-pill {
   left: max(
-    calc(var(--rail-w) + 24px),
-    calc(var(--rail-w) + (var(--window-width) - var(--rail-w) - 840px) / 2)
+    calc(var(--nav-w) + var(--rail-w) + 24px),
+    calc(var(--nav-w) + var(--rail-w) + (var(--window-width) - var(--nav-w) - var(--rail-w) - 840px) / 2)
   );
 }

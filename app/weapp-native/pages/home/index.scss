@@ -170,3 +170,11 @@
 .viewport-expanded .home .battle-hero { padding-top: 28px; padding-bottom: 24px; }
 .viewport-expanded .home .force { min-height: 126px; padding-left: 16px; padding-right: 16px; }
 .viewport-expanded .home .force-concl { font-size: 17px; line-height: 1.35; }
+
+/* —— 副栏（2026-09-05 WP-B）——
+   手机档一条规则都不加：.aside 是个没有 padding / border 的普通 block，say-strip 与 guest-notice
+   自带的上下 margin 照旧穿过它折叠，渲染结果与包裹前逐像素相同。
+   桌面档 .aside 变成 flex 纵列（app.scss 的 `.pad.has-aside > .aside`，gap 12），此时 say-strip 那条
+   `margin: 2px 0 var(--rhythm-block)` 会与 gap 相加，副栏第一块被顶低、两块之间也拉开两倍——归零，
+   节奏统一交给 gap。guest-notice 的 margin-bottom 落在副栏最末，不影响块间距，留着不动。 */
+.viewport-expanded .aside .say-strip { margin: 0; }

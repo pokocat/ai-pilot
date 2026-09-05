@@ -222,3 +222,10 @@
   margin-right: auto;
   box-sizing: border-box;
 }
+
+/* 桌面骨架（2026-09-05）：expanded 档窗口最左边常驻一条 72px 导航（components/nav-rail），
+   通栏 fixed 的输入台底纹要让开它，否则那条横板会从导航底下穿过去。
+   `.chat-page` 前缀是必须的：这个类的另一个宿主是问策终态的浮岛，它在浮岛里被改成了
+   position:static（见 pages/sessions/index.scss），左沿由浮岛自己算，
+   不加前缀这条虽然不生效也会让人以为问策也归它管。 */
+.chat-page.viewport-expanded .composer-dock { left: 72px; }

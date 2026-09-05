@@ -4,7 +4,7 @@
 //
 // 为什么需要它：开发者工具模拟器只给手机宽度，微信 PC 的真实窗口又没法在本地驱动。
 // 但 WXSS 就是 CSS、WXML 渲染后就是一棵普通标签树 —— 把两者搬进浏览器，
-// 断点(720 / 1100px)与 `viewport-medium / expanded` 的排版就能逐像素地看。
+// 断点(720 / 960px)与 `viewport-medium / expanded` 的排版就能逐像素地看。
 //
 // 跑法：
 //   1) npm run build:weapp                 # 产物 → app/dist-native
@@ -41,15 +41,17 @@ const OUT = process.env.WEAPP_DESKTOP_PREVIEW || path.join(APP_ROOT, 'dist-deskt
 // prepare：桌面专属节点在手机宽度下根本不渲染（wx:if 为假），不先把开关打开就抓不到。
 // 这里改的是**页面自己的 data**，不是伪造结构——抓到的仍是小程序真实渲染出来的那棵树。
 const TABS = [
+  // isExpanded 打开是为了让 <nav-rail show="{{isExpanded}}"> 渲染进快照——它 show=false 时连节点都没有。
+  // 预览台的 apply() 会在 <960 档把 .nav-rail-body 藏回去，与线上 wx:if 的效果等价。
   { key: 'sessions', route: '/pages/sessions/index', label: '问策',
-    prepare: (page) => page.setData({ railOn: true }) },
-  { key: 'home', route: '/pages/home/index', label: '战局' },
-  { key: 'execution', route: '/pages/execution/index', label: '今日' },
-  { key: 'thinktank', route: '/pages/thinktank/index', label: '图籍' },
-  { key: 'profile', route: '/pages/profile/index', label: '主公' },
+    prepare: (page) => page.setData({ railOn: true, isExpanded: true }) },
+  { key: 'home', route: '/pages/home/index', label: '战局', prepare: (page) => page.setData({ isExpanded: true }) },
+  { key: 'execution', route: '/pages/execution/index', label: '今日', prepare: (page) => page.setData({ isExpanded: true }) },
+  { key: 'thinktank', route: '/pages/thinktank/index', label: '图籍', prepare: (page) => page.setData({ isExpanded: true }) },
+  { key: 'profile', route: '/pages/profile/index', label: '主公', prepare: (page) => page.setData({ isExpanded: true }) },
   // 不是 tab，但它是问策侧栏里点任何一位军师之后落地的地方，桌面排版一样要核。
   { key: 'chat', route: '/packages/main/chat/index?agentKey=general', label: '对话',
-    wxss: 'packages/main/chat/index.wxss' },
+    wxss: 'packages/main/chat/index.wxss', prepare: (page) => page.setData({ isExpanded: true }) },
 ];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -111,6 +113,46 @@ function wxmlToHtml(wxml) {
   html = html.replace(/<img([^>]*)><\/img>/g, '<img$1>');
   html = html.replace(/<img([^>]*?)\ssrc="(?!http|data:)[^"]*"/g, '<img$1');
   return html;
+}
+
+/* CSS 里的**标签选择器**也要跟着 WXML→HTML 的改名走（2026-09-05 复审补）。
+   wxmlToHtml 把 view→div、text→span，可产品 CSS 一直是原样拼进来的，于是
+   `.pad.has-aside > view`、`.exec-page .aside > view` 这类规则在预览台一条都不命中：
+   主栏的 `min-width: 0`、副栏子块的 margin 归零全部失效，预览台给出的溢出与间距结论不可信。
+   只改选择器，不碰声明块 —— 属性名里的 `text-align` / `text-overflow` 后面跟的是 `-`，
+   不在下面的后行断言字符集里，本来也命中不了；再加上「只处理 `{` 之前那段」两层保险。
+   scroll-view 写在 view 前面只是为了看着清楚：`-` 不在前导字符集里，
+   `scroll-view` 里的 `view` 本来就不会被单独匹配。 */
+const SELECTOR_TAGS = ['scroll-view', 'view', 'text', 'image', 'button', 'input', 'textarea'];
+const SELECTOR_TAG_RE = new RegExp(`(^|[\\s>+~,])(${SELECTOR_TAGS.join('|')})(?=[\\s>+~,{.:#[]|$)`, 'g');
+
+function rewriteSelectors(css) {
+  // 注释先整段挪走：① 里面的 `{` / `}` 不该参与下面的块判定；
+  // ② 产品 SCSS 的注释里大量出现「view / text」这些词（讲的就是这些规则），
+  //    改掉的话生成出来的预览 CSS 读起来会自相矛盾。
+  const comments = [];
+  // 占位符用 NUL 包住序号：CSS 正文里不会出现 NUL，还原时不会误伤真实内容。
+  const masked = css.replace(/\/\*[\s\S]*?\*\//g, (m) => `\0${comments.push(m) - 1}\0`);
+  let out = '';
+  let buf = '';
+  for (const ch of masked) {
+    if (ch === '{') {
+      // buf 是「选择器」还是「at 规则前奏 / 声明」：@ 开头的前奏（@media 等）里没有标签名，
+      // 带 `;` 的一定是声明尾巴（误判时宁可不改）。其余按选择器改名。
+      // 逐字符扫是为了 @media 里嵌的选择器也能改到（按 `}` 粗切会把它整段当成声明块）。
+      out += (buf.trimStart().startsWith('@') || buf.includes(';'))
+        ? buf
+        : buf.replace(SELECTOR_TAG_RE, (_, pre, tag) => pre + TAG_MAP[tag]);
+      out += ch;
+      buf = '';
+    } else if (ch === '}') {
+      out += buf + ch;
+      buf = '';
+    } else {
+      buf += ch;
+    }
+  }
+  return (out + buf).replace(/\0(\d+)\0/g, (_, n) => comments[Number(n)]);
 }
 
 function readWxss(...segments) {
@@ -180,14 +222,20 @@ async function main() {
   writeShell(captured);
 }
 
+// 自定义组件的样式各自独立成文件，app.wxss 与页面 wxss 都带不进来；预览台里出现的组件按这张表补。
+const COMPONENT_WXSS = ['components/nav-rail/index.wxss', 'components/tab-header/index.wxss'];
+
 function writeShell(captured) {
-  const appCss = inlineImports(readWxss('app.wxss'), PROJECT);
+  const appCss = inlineImports(readWxss('app.wxss'), PROJECT)
+    + COMPONENT_WXSS.map((f) => `\n/* ===== ${f} ===== */\n${inlineImports(readWxss(f), path.dirname(path.join(PROJECT, f)))}`).join('');
   const pageCss = captured.map((tab) => {
     const file = path.join(PROJECT, tab.wxss || `pages/${tab.key}/index.wxss`);
     const css = fs.existsSync(file) ? inlineImports(fs.readFileSync(file, 'utf8'), path.dirname(file)) : '';
     return `/* ===== ${tab.label} ===== */\n${css}`;
   }).join('\n');
-  fs.writeFileSync(path.join(OUT, 'index.html'), renderShell(captured, appCss, pageCss));
+  // 产品 CSS 一律先过标签改名，再拼进外壳；外壳自己那段样式是按 HTML 写的，不参与。
+  fs.writeFileSync(path.join(OUT, 'index.html'),
+    renderShell(captured, rewriteSelectors(appCss), rewriteSelectors(pageCss)));
   console.log(`[preview] → ${path.join(OUT, 'index.html')}`);
 }
 
@@ -206,7 +254,7 @@ function renderShell(tabs, appCss, pageCss) {
   .rig-bar button.on { background: #1E5A43; border-color: #1E5A43; }
   .rig-w { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .75; }
   /* 舞台按真实窗口宽度排版，再整体缩放塞进浏览器可视区 —— 缩放只改观感尺寸，
-     不改 CSS 断点命中的那个宽度，所以 720 / 1100 的分档看到的仍是真的。 */
+     不改 CSS 断点命中的那个宽度，所以 720 / 960 的分档看到的仍是真的。 */
   .stage-wrap { overflow: hidden; margin: 0 0 16px; }
   .stage { background: #FBFAF6; box-shadow: 0 8px 40px rgba(0,0,0,.4); overflow: hidden;
     transform-origin: 0 0; }
@@ -218,6 +266,14 @@ function renderShell(tabs, appCss, pageCss) {
   i[data-cmp] { display: inline-block; width: 1em; height: 1em; vertical-align: -.12em;
     background: currentColor; opacity: .35; border-radius: 3px; }
   img { max-width: 100%; }
+  /* 页头通栏那条规则原先按组件标签写（.pad.has-aside > tab-header），预览台整条落空：
+     开发者工具的 outerWxml 把自定义组件根节点吐成 <components/tab-header/index …>，
+     浏览器解析成标签 components + 属性 tab-header。当时是在这里补一条等价映射兜的。
+     2026-09-05 复审后改成宿主 class：四个 tab 页的 <tab-header class="pad-head">，
+     app.scss 那条也改成 > .pad-head —— class 会原样出现在 outerWxml 里，
+     真机与预览台从此消费同一条选择器，这里不需要再补映射。
+     标签选择器（view / text / …）的映射统一由 rewriteSelectors() 在拼 CSS 时完成。
+     ⚠️ 这段注释在 JS 模板字符串里，不许出现反引号。 */
 </style>
 <style id="app-wxss">${appCss}</style>
 <style id="page-wxss">${pageCss}</style>
@@ -225,7 +281,9 @@ function renderShell(tabs, appCss, pageCss) {
 <div class="rig">
   <div class="rig-bar">
     <strong style="margin-right:6px">窗口宽度</strong>
-    ${[390, 720, 900, 1100, 1280, 1440].map((w) => `<button data-w="${w}">${w}</button>`).join('')}
+    <!-- 960 是双栏门槛本身，1008 是微信 PC 默认窗口的实测宽度（截图 2016px ÷ 2x）——
+         两个最容易出问题的宽度都要一键能看。 -->
+    ${[390, 720, 900, 960, 1008, 1280, 1440].map((w) => `<button data-w="${w}">${w}</button>`).join('')}
     <button data-w="full">铺满</button>
     <span class="rig-w"></span>
   </div>
@@ -242,7 +300,7 @@ function renderShell(tabs, appCss, pageCss) {
   var readout = document.querySelector('.rig-w');
   // 真机的档位由 services/page.js#viewportData 按当前栏宽算；预览台按同一条断点复刻，
   // 这样这里看到的 compact / medium / expanded 与线上是同一套判据。
-  function classify(w) { return w >= 1100 ? 'expanded' : (w >= 720 ? 'medium' : 'compact'); }
+  function classify(w) { return w >= 960 ? 'expanded' : (w >= 720 ? 'medium' : 'compact'); }
   function apply(w) {
     var avail = document.querySelector('.rig').clientWidth - 32;
     var px = w === 'full' ? avail : Number(w);
@@ -258,6 +316,8 @@ function renderShell(tabs, appCss, pageCss) {
       // 抓取时强开了问策的常驻侧栏（否则手机宽度下那棵树根本不渲染）。
       // 这里按真实规则还原：只有 expanded 才有栏；窄档把它收回半屏抽屉的"关着"状态。
       var rail = classify(px) === 'expanded';
+      // 抓取时六页都强开了 isExpanded 让 <nav-rail> 渲染出来；窄档按线上规则收回。
+      root.querySelectorAll('.nav-rail-body').forEach(function (n) { n.style.display = rail ? '' : 'none'; });
       var sheet = root.querySelector('.wd-sheet');
       if (sheet) {
         root.classList.toggle('rail-on', rail);

@@ -1,0 +1,14 @@
+<!-- selectComponent 的钩子类 `.nav-rail` 挂在**宿主标签**上（六个页面的 index.wxml 里那行
+     `<nav-rail class="nav-rail" ...>`）——selectComponent 匹配的是页面自己 WXML 里的节点，
+     不是组件内部这棵树。这里的根节点只负责渲染，样式全落在 .nav-rail-body 上，
+     宿主那个类不带任何样式，show 为假时也就不会在手机档留下一条空栏。 -->
+<view wx:if="{{show}}" class="nav-rail-body {{themeClass}}">
+  <view wx:for="{{tabs}}" wx:key="path" class="rail-tab {{selected === index ? 'on' : ''}}" data-index="{{index}}" bindtap="switchTab">
+    <view class="tab-ic">
+      <image class="tab-icon tab-icon-{{item.icon}}" src="{{selected === index ? item.iconActive : item.iconNormal}}" mode="aspectFit"></image>
+      <view wx:if="{{index === 0 && unread > 0}}" class="tab-badge"><text class="tab-badge-n">{{unread > 99 ? '99+' : unread}}</text></view>
+      <view wx:if="{{index === 2 && reviewDue}}" class="tab-dot"></view>
+    </view>
+    <text class="rail-label">{{item.text}}</text>
+  </view>
+</view>

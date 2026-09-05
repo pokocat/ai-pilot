@@ -29,9 +29,28 @@
 .ks-go { display: flex; align-items: center; gap: 3px; color: var(--accent); font-size: 12px; font-weight: 600; }
 
 /* 大窗口图籍扩大资料密度：知识目录三列，操作与状态仍沿用原有完整状态机。 */
-.viewport-medium .think-tabs,
-.viewport-expanded .think-tabs { max-width: 520px; margin-left: auto; margin-right: auto; }
+.viewport-medium .think-tabs { max-width: 520px; margin-left: auto; margin-right: auto; }
+/* 桌面档段控靠主栏左沿（2026-09-05 WP-B）：整页单栏时居中是对的，进了双栏 grid 之后
+   「居中」是在 552–896 的主栏里居中，段控会离开左沿、与下面的资料卡对不上一条基线。
+   ⚠️ 靠左也不能只写 `margin-right: auto`：grid 子元素身上只要有一侧 auto 外边距，
+   justify-self 的默认 stretch 就失效，盒子退回内容宽（实测缩成 83px，四个字的 tab 挤成两行）。
+   显式给 width: 100%（撑满主栏那一格）再由 max-width 收到 520，两侧外边距一律归零。 */
+.viewport-expanded .think-tabs { width: 100%; max-width: 520px; margin-left: 0; margin-right: 0; }
 .viewport-expanded .folder-grid { justify-content: flex-start; gap: 12px; }
-.viewport-expanded .folder-tile { width: calc((100% - 24px) / 3); margin-bottom: 0; }
+/* 知识库瓦片在桌面档回到两列（2026-09-05 WP-B）：主栏 = 窗口 − 456，960 窗口下只有 504，
+   原来那条三列会把瓦片压到 (504-24)/3 = 160px——图标 + 标题 + 「N 份」三段挤不下。
+   两列在 960 下是 246px，1440 下 416px，都还是一张读得清的卡。 */
+.viewport-expanded .folder-tile { width: calc((100% - 12px) / 2); margin-bottom: 0; }
+
+/* —— 副栏（2026-09-05 WP-B）——
+   手机档一条规则都不加：额度三卡与段控自带 margin-top 14，穿过没有 padding / border 的 .aside 照旧。
+   桌面档副栏只有 320 宽：三张额度卡横排会各剩 100 出头，段控三段更是挤成三条竖字，所以都改竖排；
+   两块自己的 margin-top 归零，块间距交给 app.scss 那条 `.pad.has-aside > .aside` 的 gap 12。 */
+.viewport-expanded .aside .quota-grid { flex-direction: column; gap: 12px; margin-top: 0; }
+.viewport-expanded .aside .quota-card { width: 100%; min-height: 0; padding: 12px 14px; }
+.viewport-expanded .aside .stage-seg { flex-direction: column; gap: 4px; margin-top: 0; }
+/* 竖排之后每段本身改横排：标题在左、份数在右，一行 44 高，三段共 156——与额度三卡等重。 */
+.viewport-expanded .aside .stage-tab { flex-direction: row; align-items: center; justify-content: space-between; min-height: 44px; padding: 8px 14px; }
+.viewport-expanded .aside .stage-tab.on::after { left: 14px; bottom: 5px; width: 18px; transform: none; }
 .viewport-expanded .upload-zone,
 .viewport-expanded .ds-hero { padding: 24px; }

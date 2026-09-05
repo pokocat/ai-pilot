@@ -2,6 +2,7 @@
   "navigationStyle": "custom",
   "disableScroll": true,
   "usingComponents": {
+    "nav-rail": "/components/nav-rail/index",
     "login-sheet": "/components/login-sheet/index",
     "markdown-text": "/components/markdown-text/index",
     "native-icon": "/components/native-icon/index",

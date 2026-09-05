@@ -35,6 +35,16 @@
   box-sizing: border-box;
 }
 
+/* expanded 档还要让开左边那条 72px 常驻导航（components/nav-rail）。
+   页头 / 消息流 / 输入台三条都是 fixed 通栏，left 默认 0 —— 不改的话导航条会直接压在
+   它们上面（返回键与导航第一格重叠）。fixed 参照的是视口，所以只能逐条改 left，
+   给页面根节点加 padding 是没有用的（app.scss 里 .native-scroll 那条不适用于本页：
+   这一页整页都是 fixed 层，没有普通流的滚动容器）。
+   输入台那条落在 chat-core.scss：它的类是两个宿主共用的（问策浮岛也套着同一块），
+   按仓库约定不进分包页 SCSS，那边用 .chat-page 前缀限定，不会影响问策。 */
+.viewport-expanded .chat-header,
+.viewport-expanded .chat-scroll { left: 72px; }
+
 /* 页头右侧留白（--native-menu-right）**不动**：微信 PC 的胶囊在窗口标题栏、不压页面，
    那份留白会退到 16px 的兜底值，与左边 12px 视觉上就是对称的；而 iPad 上胶囊是真的浮在
    页面上，一旦把它换成固定值，竖屏（正好落在 medium 档、840 轴不生效）的页头菜单键

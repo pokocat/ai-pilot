@@ -1,21 +1,29 @@
 <view class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
+  <!-- 桌面 ≥960 的 72px 左导航（底栏此时已被 setOverlay('desktop-rail') 整条收起）。 -->
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{1}}"></nav-rail>
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
-    <view class="pad home">
-      <tab-header title="战局" kicker="先看清，再行动" glyph="势"></tab-header>
-      <view class="say-strip"><text class="say-k">今日献策 · {{sayingDate}}</text><text class="say-line serif">{{saying}}</text></view>
+    <!-- has-aside 恒挂：say-strip 在任何登录态下都渲染，副栏永远不空（空了 grid 会留一条 320 的空列）。 -->
+    <view class="pad home has-aside">
+      <tab-header class="pad-head" title="战局" kicker="先看清，再行动" glyph="势"></tab-header>
+      <!-- 副栏（桌面 ≥960 时落到右列，手机档这层 view 完全透明）：今日献策 + 建档提示——
+           两块本来就是手机上紧挨着的「页头下方那一小段」，与下面的判断流没有阅读顺序耦合。
+           guest-notice 从 wx:else 里挪出来，条件补 `authed &&` 补回原先由 else 分支提供的登录态判据；
+           两种登录态下的渲染顺序都与改动前逐节点相同。 -->
+      <view class="aside">
+        <view class="say-strip"><text class="say-k">今日献策 · {{sayingDate}}</text><text class="say-line serif">{{saying}}</text></view>
+        <view wx:if="{{authed && onboardingKnown&&!onboarded}}" class="guest-notice card">
+          <view class="guest-notice-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="17"></native-icon></view>
+          <view class="guest-notice-body"><text class="guest-notice-title serif">你的战局还没有建档</text><text class="guest-notice-desc">建档是自愿的；完成三问后，军师会把第一份判断写到这里。</text></view>
+          <view class="guest-notice-action" bindtap="goOnboarding"><text>开始建档</text></view>
+        </view>
+      </view>
 
       <block wx:if="{{!authed}}">
         <view class="battle-empty"><text class="battle-empty-title serif">还没有战局判断</text><text class="battle-empty-desc">先和军师说说眼下最难拿主意的事，第一份判断会写在这里。</text><button bindtap="ask">去问策</button></view>
       </block>
       <block wx:else>
-        <view wx:if="{{onboardingKnown&&!onboarded}}" class="guest-notice card">
-          <view class="guest-notice-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="17"></native-icon></view>
-          <view class="guest-notice-body"><text class="guest-notice-title serif">你的战局还没有建档</text><text class="guest-notice-desc">建档是自愿的；完成三问后，军师会把第一份判断写到这里。</text></view>
-          <view class="guest-notice-action" bindtap="goOnboarding"><text>开始建档</text></view>
-        </view>
-
         <!-- ① 判断区收成一张牌：主要矛盾 + 案卷来源 + 两个动作。证据链/待补/KPI 收进「判断依据」抽屉。 -->
         <view class="battle-hero" bindtap="toggleHero"><text class="bh-kicker">军 师 判 断 · 主 要 矛 盾</text><text class="bh-title serif {{heroExpanded?'expanded':''}}">{{summary}}</text><text class="bh-source">{{dossierTitle ? '当前案卷 · '+dossierTitle+' · 随变而调' : '还没有案卷 · 和军师聊一次，方案定了就成卷'}}</text><view class="bh-foot"><view class="bh-ask solid" catchtap="ask"><text>问军师</text></view><view class="bh-ask" catchtap="openEvidence"><text>判断依据{{cited.length?' · 已引 '+cited.length+' 类':''}}</text></view></view></view>
 

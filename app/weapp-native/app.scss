@@ -31,9 +31,9 @@ page .onboard {
   box-sizing: border-box;
 }
 
-/* 微信官方大屏能力：app.json 的 resizable/frameset 负责可拉伸与自动左右分栏，
-   页面 onResize 再把当前栏的真实宽度折成 compact / medium / expanded。
-   这里按“当前栏宽”而非设备型号排版，所以分栏后的单栏不会误套超宽桌面样式。 */
+/* 微信官方大屏能力：app.json 的 resizable 负责窗口可拉伸（官方分栏 frameset 已于
+   2026-09-05 撤回，见 services/page.js 的说明），页面 onResize 再把真实窗口宽度折成
+   compact / medium / expanded。这里按“当前窗口宽”而非设备型号排版。 */
 .viewport-medium .pad,
 .viewport-expanded .pad {
   width: calc(100% - 40px);
@@ -45,7 +45,88 @@ page .onboard {
   box-sizing: border-box;
 }
 
-.viewport-expanded .pad { max-width: 1080px; padding-left: 32px; padding-right: 32px; }
+/* 2026-09-05 桌面骨架：容器上限 1080 → 1280（border-box，含左右各 20 内边距，**内容盒 1240**），页边距 32 → 20。
+   蓝图与 docs/design/weapp-desktop 里说的「容器 1240」指的都是内容盒：
+   1240 − 24 栏间距 − 320 副栏 = 主栏 896，栏内正文轴 840 左右各留 28 —— 正文行长在任何显示器上都一样。
+   WP-B 曾把 max-width 写成 1240 并把注释改成 856：那是把 40 内边距算进了容器，正文轴 840 只剩每侧 8px，
+   等于一个假规格；所以这里是 1280。1080 的旧上限会把 320 副栏挤到主栏只剩 700 出头。
+   同一算式在小窗口下（未撞上限时主栏 = 窗口 − 456）：960 → 504，1008（微信 PC 默认窗口）→ 552，1280 → 824。 */
+/* width 必须一并覆盖成 100%：上面那条 medium/expanded 合写的 `calc(100% - 40px)` 叠上这里的
+   20px 内边距，每侧实际留白会变成 40、总页边距 80 —— 蓝图算的是 40。只覆盖 expanded 这一档，medium 那行的 calc 不动。 */
+.viewport-expanded .pad { width: 100%; max-width: 1280px; padding-left: 20px; padding-right: 20px; }
+
+/* ==========================================================================
+   桌面 expanded 档（≥960px）的骨架：左导航 + 双栏容器 + 没有底栏之后的底部留白
+   ========================================================================== */
+
+/* 内容区让出 72px 左导航。吃 padding 的是 .native-scroll 而不是 .native-page：
+   前者是 height:100vh 的普通流子元素，padding 直接把内容推开；后者是四个 tab 页里
+   .native-env-badge / .native-bottom-fade 这些 fixed 层的宿主，给它加内边距对 fixed
+   子元素毫无作用（fixed 参照视口），只会把「以为让开了」和「实际没让开」混在一起。
+   box-sizing 已经是 border-box（见上），100vh 的高度不受影响。
+   问策终态与对话分包页整页都是 fixed 层，不走这条，各自在页面 SCSS 里改 left。 */
+.viewport-expanded .native-scroll { padding-left: 72px; }
+
+/* 副栏容器。
+   为什么是「wrapper + 纵跨」而不是让主栏那几块直接落在第 1 列：
+   两列有各自独立的纵向节奏（主栏是一条长内容流，副栏是几张小卡）。CSS Grid 里只要不显式
+   放置，子元素就会按行铺开，同一行的两列会被最高的那个撑成同高 —— 副栏第一张卡会被主栏
+   第一段正文顶到很下面，行高跨列耦合。所以副栏自己是**一个** grid 子元素（.aside），
+   用 grid-row: 2 / span 200 从页头下方一直纵跨到底，内部再用 flex 排自己的节奏。
+   span 200 是个「够大就行」的数，但它**不是免费的**（2026-09-05 复审纠正）：越界放置会实打实
+   生成隐式轨道，写不到的那 ~190 条轨道高度是 0，可 row-gap 是加在**每一对相邻轨道之间**的——
+   只要 row-gap 不为 0，200 条空轨道就等于 200 段间隙。今日页原来是 gap: 14px，
+   14 × ~200 ≈ 2800px 的空白，通栏的 .tabbar-space 被推到页面最底下。
+   所以这条 grid 只留 column-gap，row-gap 显式归零；纵向节奏改由各页主栏子块自己的
+   margin 供给（目前只有今日页原来靠容器 gap，见 pages/execution/index.scss）。
+
+   主栏那些块全部钉在 grid-column: 1，各自成行，互不牵连。
+   页头（tab-header，宿主 class .pad-head）与底部留白通栏，所以单独放回 1 / -1 —— 页头**必须**通栏还有个布局上的硬理由：
+   grid 的自动放置是 sparse 的，页头只占第 1 行第 1 列的话，紧随其后的第一块主栏内容会被回填到
+   第 1 行第 2 列（页头右边、副栏上方那格空位）去。 */
+.viewport-expanded .pad.has-aside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  column-gap: 24px;
+  row-gap: 0;
+  align-items: start;
+}
+/* ⚠️ 这里原来写的是 `> *`。WXSS **不支持通配选择器**，而且不是「忽略」而是硬编译失败：
+   wcsc 报 `error at token '*'`，整份 app.wxss 编译不出来，小程序连 appLaunch 都过不去
+   （开发者工具里表现为「编译 .wxss 文件错误」+ 白屏，自动化侧 pageStack 恒为空）。
+   所以按标签枚举。四个 tab 的 .pad 直接子元素实测只有 view 与 text（图籍「经营来源」那行 h2 是
+   裸 text），button / scroll-view / image 一并列上防以后加。
+   min-width 一并归零：grid 子元素默认 min-width: auto＝min-content，卡里有 white-space: nowrap
+   的行时会顶穿 552 的主栏。
+   .aside / .pad-head（页头组件的宿主 class）/ .tabbar-space 由下面三条更高权重的规则各自改写，不受这条影响。 */
+.viewport-expanded .pad.has-aside > view,
+.viewport-expanded .pad.has-aside > text,
+.viewport-expanded .pad.has-aside > button,
+.viewport-expanded .pad.has-aside > scroll-view,
+.viewport-expanded .pad.has-aside > image { grid-column: 1; min-width: 0; }
+/* 页头用宿主 class `.pad-head` 命中，不用组件标签 `tab-header`：编译后标签会变成
+   `wx-tab-header`，它究竟能不能命中宿主节点缺少证据（预览台那边工具吐出来的又是
+   另一种形态）。class 落在宿主节点上是两种环境都有保证的，四个 tab 页的
+   <tab-header class="pad-head"> 就是为这条规则加的。 */
+.viewport-expanded .pad.has-aside > .pad-head { grid-column: 1 / -1; }
+.viewport-expanded .pad.has-aside > .aside {
+  grid-column: 2;
+  grid-row: 2 / span 200;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.viewport-expanded .pad.has-aside > .tabbar-space { grid-column: 1 / -1; }
+
+/* 桌面档没有悬浮底栏了（custom-tab-bar 被 setOverlay('desktop-rail') 整条收起），
+   于是三处「给底栏让位」的留白全部作废：
+   ① .tabbar-space 的 96px + 安全区收成一段普通页尾呼吸；
+   ② 底部渐隐带是为「内容从悬浮底栏与屏幕底缘之间那条缝里穿过」画的，没有底栏就没有那条缝，
+      留着只会在页尾糊一层纸色；
+   ③ 环境角标原先钉在底栏胶囊上方（bottom 88），现在贴回窗口左下，并让开 72px 导航。 */
+.viewport-expanded .tabbar-space { height: 24px; }
+.viewport-expanded .native-bottom-fade { display: none; }
+.viewport-expanded .native-env-badge { left: 84px; bottom: 16px; }
 
 /* 大窗口里的底部 sheet 不再从显示器左边铺到右边，保持可读行长与操作聚焦。
    遮罩仍覆盖整栏；只有实体面板收窄并居中。 */

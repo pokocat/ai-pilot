@@ -1,7 +1,6 @@
-// 底栏渲染壳。tab 表与主题态图标解析已抽到 services/tabbar.js，
-// 与问策终态浮岛里那排自绘 tab 同源（见该文件顶部说明）。
-const { TABS, visualTabs } = require('../services/tabbar');
-const { gotoExecution } = require('../services/nav');
+// 底栏渲染壳。tab 表、主题态图标解析与切换动作已全部抽到 services/tabbar.js，
+// 与桌面左导航 components/nav-rail、问策终态浮岛里那排自绘 tab 同源（见该文件顶部说明）。
+const { visualTabs, switchToTab } = require('../services/tabbar');
 
 Component({
   data: { tabs: visualTabs('theme-green'), selected: 0, themeClass: 'theme-green', unread: 0, reviewDue: false, overlay: false },
@@ -11,10 +10,7 @@ Component({
       this.setData(Object.assign({}, next || {}, { themeClass, tabs: visualTabs(themeClass) }));
     },
     switchTab(event) {
-      const index = Number(event.currentTarget.dataset.index);
-      if (index === 2) { gotoExecution('today'); return; }
-      if (index === this.data.selected) return;
-      wx.switchTab({ url: TABS[index].path });
+      switchToTab(Number(event.currentTarget.dataset.index), this.data.selected);
     },
   },
 });
