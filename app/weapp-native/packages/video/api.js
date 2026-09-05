@@ -33,7 +33,7 @@ async function waitCloneAccepted(uploadId, onPhase) {
     if (onPhase) onPhase('processing');
     await delay(1500);
   }
-  throw Object.assign(new Error('素材已经上传，军师仍在受理，请不要重复提交，稍后到分身管理查看。'), { code: 'CLIP_CLONE_ACCEPTING', statusCode: 409 });
+  throw Object.assign(new Error('素材已经上传，军师仍在受理，请不要重复提交，稍后到数字人管理查看。'), { code: 'CLIP_CLONE_ACCEPTING', statusCode: 409 });
 }
 
 /** 真实请求统一进入军师 BFF。 */

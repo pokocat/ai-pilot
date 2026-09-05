@@ -31,7 +31,7 @@ Page(withShare({
 
   onLoad(options) {
     const jobId = String((options && options.jobId) || '');
-    if (!jobId) { host.toast('缺少任务参数'); host.back(); return; }
+    if (!jobId) { host.toast('打不开这条片子'); host.back(); return; }
     this.setData({ jobId, projectId: String((options && options.projectId) || '') });
     this.poll();
     this.startPolling();

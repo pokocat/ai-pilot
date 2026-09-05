@@ -12,6 +12,13 @@
 .wd-player-wrap { width: 82%; max-width: 320px; margin: 0 auto 16px; }
 .wd-player { width: 100%; box-shadow: 0 18px 40px rgba(49,38,31,.16); background: #171717; }
 .wd-player .inner { width: 100%; height: 100%; background: #171717; }
+/* 取不到播放地址时占住播放器的位置说清楚，而不是留一块看不懂的黑底纹。 */
+/* box-sizing 不能省：.inner 是 width:100% 且 left/right 都锚死的绝对定位框，
+   再加左右 22px padding 会撑出比播放器宽 44px 的内容盒，文字偏心还会被父容器裁掉。 */
+.wd-pending { box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 8px; padding: 0 22px; text-align: center; }
+.wd-pending-t { font-size: 15px; font-weight: 600; color: #FFFFFF; }
+.wd-pending-s { font-size: 12px; line-height: 1.7; color: rgba(255,255,255,.72); }
 .wd-badge { position: absolute; left: 10px; top: 10px; z-index: 2; }
 
 .wd-title { display: block; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
@@ -52,3 +59,25 @@
   border: 1px solid var(--vd-line); border-radius: var(--vd-r-chip);
   font-size: 12px; font-weight: 600; color: var(--vd-ink-2);
 }
+
+/* 读失败态：和「读到了但还播不了」用不同版式，别让两件事看起来一样。 */
+.wd-failed { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.wd-failed-s { font-size: 12px; line-height: 1.7; color: var(--vd-ink-3); text-align: center;
+  max-width: 260px; }
+/* 点击区按 AGENTS §7.2 的 44px 下限；padding 撑不到就用 min-height 兜住。
+   inline-flex + align-self:center：不加的话会被父级拉成 286px 的通栏条，
+   一个错误恢复动作长得比主 CTA 还重。 */
+.wd-failed-act { margin-top: 4px; padding: 0 28px; min-height: 44px; display: inline-flex;
+  align-self: center; align-items: center; justify-content: center; border-radius: 999px;
+  background: var(--vd-avatar); color: #FFFFFF; font-size: 14px; font-weight: 600; }
+
+/* 还在生成：与完成态同版式不同色，别让两种状态看起来一样。 */
+.wd-ready-wip .wdr-kicker { color: var(--vd-ink-3); }
+.wdr-icon-wip { background: var(--vd-ink-3); }
+
+/* 次级出路：同样满足 44px，但不抢主动作的色 */
+.wd-failed-alt { background: transparent; color: var(--vd-ink-2); border: 1px solid var(--vd-line); }
+/* 兜底块里的刷新：深色底上的浅描边按钮 */
+.wd-pending-act { margin-top: 12px; min-height: 40px; padding: 0 20px; display: inline-flex;
+  align-items: center; justify-content: center; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.34); color: #FFFFFF; font-size: 13px; font-weight: 600; }

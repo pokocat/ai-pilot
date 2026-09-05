@@ -8,6 +8,7 @@
 //   今日   → 上班第一眼：待处理 + 概览
 //   用户   → 客服排查主战场（找人 → 看额度/订单 → 处置）
 //   经营   → 对账与转化，只读（订单 / 漏斗 / 钻石消耗 / Token 成本）
+//   增长   → 谁带来的人、链路长什么样、代理怎么结账（邀请关系 / 邀请链 / 代理分销 / 邀请增长）
 //   智能体 → 内容调教（顾问 / 技能 / 知识 / 检索）
 //   观测   → 只读的「发生过什么」（调用诊断 / 内容审核 / 审计日志）
 //   商品   → 卖什么（套餐 / 单次付费 / 生态工具）
@@ -17,15 +18,21 @@
 // 该页主体是写操作（换模型 / 填 key / 配单价 / 池权重 / 嵌入重排）。把唯一的写屏塞进三个
 // 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
 // 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
+//
+// 2026-09-02 加第 8 组「增长」：邀请体系原来只有一页只读的「邀请增长」寄在「经营」组里，
+// 而本轮补齐的是**运营面**——查关系账本、看一个人的上下游链路、登记代理与结算佣金，三页里
+// 两页带写操作。按「主导动词决定归属」，它们既不属于只读的「经营」，也不属于平台级的「配置」
+// （代理与佣金是业务对象，不是平台参数），故另立一组，并把只读的「邀请增长」一并搬进来——
+// 运营查邀请的动线本来就该收在一处。搬完「经营」回到 4 项，「增长」4 项，两组都在 8 项以内。
 
-/** 26 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 29 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral';
+  | 'referral' | 'invites' | 'chain' | 'distribution';
 
-export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'observe' | 'catalog' | 'settings';
+export type GroupKey = 'today' | 'people' | 'revenue' | 'growth' | 'studio' | 'observe' | 'catalog' | 'settings';
 
 export interface NavSection {
   key: SectionKey;
@@ -52,6 +59,8 @@ export const NAV_GROUPS: NavGroup[] = [
   { key: 'today', label: '今日', icon: 'chart' },
   { key: 'people', label: '用户', icon: 'user' },
   { key: 'revenue', label: '经营', icon: 'crown' },
+  // 组名保持 2 字：移动底栏 8 组 flex 均分，375px / 8 ≈ 46px 一格，3 字就会挤（见 DESIGN.md）。
+  { key: 'growth', label: '增长', icon: 'target' },
   { key: 'studio', label: '智能体', icon: 'agent' },
   { key: 'observe', label: '观测', icon: 'insight' },
   { key: 'catalog', label: '商品', icon: 'layers' },
@@ -70,9 +79,15 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'funnel', label: '处方漏斗', hint: '处方六态转化与开通来源归因', icon: 'target', group: 'revenue', aliases: ['转化', '漏斗', 'funnel', '处方', '归因'] },
   { key: 'usage', label: '钻石消耗', hint: '权益点发放与消耗汇总', icon: 'crown', group: 'revenue', aliases: ['权益点', '钻石', '积分', 'credit', '消耗'] },
   { key: 'tokens', label: 'Token 成本', hint: '按模型 / 用户看 token 与真实成本', icon: 'trend', group: 'revenue', aliases: ['成本', 'token', '用量', '模型成本'] },
-  // 归「经营」而不是「观测」：三个视图全只读，符合本组「只读的归观测/经营」原则，且运营看它的动线
-  // 就在订单/漏斗旁边（谁带来的人、带来的人开通了没）。本组由此 5 项，仍在「单组不超过 8 项」内。
-  { key: 'referral', label: '邀请增长', hint: '本体 Schema / 邀请关系树 / IP 风控关联（只读）', icon: 'target', group: 'revenue', aliases: ['邀请', '裂变', '关系链', '推荐', '风控', '邀请码', '邀请树', 'referral', 'invite', '拉新', '刷号', 'ip'] },
+
+  // —— 增长（邀请体系的运营面 + 只读分析） ——
+  // 顺序即动线：先查一条关系（谁邀了谁）→ 再看一个人的整条链（上溯 + 团队 + 下钻）→
+  // 再管代理与结算 → 最后才是全局分析图。把只读的「邀请增长」放最后，因为它回答的是
+  // 「整体长什么样」，值班时用得最少。
+  { key: 'invites', label: '邀请关系', hint: '关系账本与归因日志，可补绑尚无推荐人的用户', icon: 'user', group: 'growth', aliases: ['邀请', '关系', '账本', '归因', '邀请码', '补绑', '绑定', '推荐人', '被邀人', 'invite', 'referral', '拉新'] },
+  { key: 'chain', label: '邀请链', hint: '以人为中心：上溯到根、三级团队统计与下钻', icon: 'layers', group: 'growth', aliases: ['链', '关系链', '上级', '下级', '上溯', '下钻', '团队', '直邀', '祖先', 'chain', 'upline', 'downline'] },
+  { key: 'distribution', label: '代理分销', hint: '代理名册 / 分销比例 / 佣金流水 / 结算单', icon: 'crown', group: 'growth', aliases: ['代理', '分销', '渠道', '佣金', '提成', '计提', '结算', '结算单', '打款', '凭证', '等级', '比例', '追回', '冻结期', 'distribution', 'commission', 'settlement'] },
+  { key: 'referral', label: '邀请增长', hint: '本体 Schema / 邀请关系树 / IP 风控关联（只读）', icon: 'target', group: 'growth', aliases: ['邀请', '裂变', '关系链', '推荐', '风控', '邀请码', '邀请树', 'referral', 'invite', '拉新', '刷号', 'ip'] },
 
   // —— 智能体 ——
   { key: 'agent', label: '顾问', hint: '上下架、定价、提示词调教与版本发布', icon: 'agent', group: 'studio', aliases: ['智能体', 'agent', '提示词', 'prompt', '上架', '定价', '调教'] },

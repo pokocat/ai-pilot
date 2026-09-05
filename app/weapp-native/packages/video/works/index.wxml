@@ -62,7 +62,7 @@
             </block>
 
             <block wx:else>
-              <text class="wk-note">分身出镜 {{item.avatarSec}} 秒</text>
+              <text class="wk-note">数字人出镜 {{item.avatarSec}} 秒</text>
               <text class="wk-note">已扣 {{item.credits}} 积分</text>
             </block>
           </view>
@@ -74,5 +74,5 @@
   </scroll-view>
 
   <vd-tabbar wx:if="{{asTab}}" current="works" bindneedlogin="needLogin"></vd-tabbar>
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

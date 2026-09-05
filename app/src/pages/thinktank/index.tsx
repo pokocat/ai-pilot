@@ -776,7 +776,7 @@ export default function ThinkTank() {
                     </View>
                     <View className={`confirm-library card ${confirming ? 'busy' : ''}`} onClick={confirmOptimized}>
                       <Text className="cl-t serif">{confirming ? '正在写入知识库' : '确认，写入知识库'}</Text>
-                      <Text className="cl-s">{confirming ? '正在切片并建立检索索引，请稍候，不要重复操作。' : '确认后将回写战局页、方案页和后续对话引用。'}</Text>
+                      <Text className="cl-s">{confirming ? '正在整理并建立索引，请稍候，不要重复操作。' : '确认后，战局页、方案页和之后的对话都会用上这些资料。'}</Text>
                       <View className="cl-btn" style={{ background: accent }}>
                         {confirming ? <View className="cl-spinner" /> : null}
                         <Text>{confirming ? `正在处理 ${optimizedItems.length} 份资料…` : `确认 ${optimizedItems.length} 份并写入知识库`}</Text>

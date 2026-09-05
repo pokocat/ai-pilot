@@ -28,7 +28,7 @@ Page(withShare({
     showLogin: false,
   }),
 
-  needLogin() { host.requireLogin(this, 'execute'); },
+  needLogin() { host.requireLogin(this, 'video'); },
   onLoad(options) {
     const opts = options || {};
     this.setData({
@@ -94,7 +94,7 @@ Page(withShare({
   expandStorage() {
     const storage = this.data.storage;
     if (!storage || !storage.canExpand || this.data.expanding) return;
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.confirm({
       title: '扩容空间',
       content: `增加 ${formatBytes(storage.packBytes)}，扣 ${storage.packCredits} 钻石。素材和成片共用这份空间。`,
@@ -161,7 +161,7 @@ Page(withShare({
 
   openPreview(asset) {
     const contentUrl = asset && (asset.contentUrl || asset.previewUrl);
-    if (!contentUrl) { host.toast('这个素材暂时没有可预览文件'); return; }
+    if (!contentUrl) { host.toast('这个素材暂时预览不了'); return; }
     host.setOverlay(true, 'video-asset-preview');
     this.setData({ previewOpen: true, previewAsset: Object.assign({}, asset, { contentUrl }) });
   },
@@ -192,7 +192,7 @@ Page(withShare({
   renameAsset(id) {
     const asset = this.data.assets.find((item) => item.id === id);
     if (!asset) return;
-    host.prompt({ title: '给素材改标签', content: '标签会帮助配画面时优先推荐。', placeholderText: asset.tag || asset.label })
+    host.prompt({ title: '给素材改标签', content: '配画面时会优先推荐带这个标签的素材。', placeholderText: asset.tag || asset.label })
       .then((tag) => {
         if (tag == null) return;
         if (!tag) { host.toast('标签不能为空'); return; }
@@ -233,7 +233,7 @@ Page(withShare({
   },
 
   upload() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.chooseMedia({
       count: 1,
       mediaType: ['video', 'image'],

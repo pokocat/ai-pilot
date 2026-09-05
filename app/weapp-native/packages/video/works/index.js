@@ -25,7 +25,7 @@ Page(withShare({
   }),
 
   onLoad(options) { this.setData({ asTab: String((options || {}).tab || '') === '1' }); this.load(); },
-  needLogin() { host.requireLogin(this, 'execute'); },
+  needLogin() { host.requireLogin(this, 'video'); },
   onShow() { if (!this.data.loading) this.load(); this.startPolling(); },
   onHide() { this.stopPolling(); },
   onUnload() { this.stopPolling(); },
@@ -92,8 +92,8 @@ Page(withShare({
     host.confirm({
       title: generating ? '取消并删除作品？' : '删除这个作品？',
       content: generating
-        ? '删除后会取消正在生成的任务，并从作品集移除。'
-        : '删除后作品会从作品集移除，成片将无法再打开。',
+        ? '删除后会停止生成这条片子，并从「我的作品」里移除。'
+        : '删除后这条作品会从「我的作品」里移除，成片也就打不开了。',
       confirmText: '删除',
     }).then((confirmed) => {
       if (!confirmed) return;

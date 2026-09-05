@@ -23,6 +23,15 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.userDataSource.deleteMany();
   await prisma.serviceAssignment.deleteMany();
   await prisma.inviteActivationOutbox.deleteMany();
+  // 代理分销（2026-09-02）：outbox → 流水 → 结算单 → 代理档案。四张表的 userId/tenantId 都是
+  // **无外键**的裸字符串列（受益人可能与买家不同租户），user.deleteMany() 清不掉，不显式删就
+  // 会跨用例累积。顺序上流水要先于结算单（`settlementId` 指着后者），代理档案最后。
+  // `DistributorTier` / `DistributionRule` 是**运营目录**（同 WenceTemplate / Plan 的理由）：
+  // **刻意不在此列**——进了就会在预发 seed 时清掉运营录入的等级与比例。测试自己建自己清。
+  await prisma.commissionOutbox.deleteMany();
+  await prisma.commissionEntry.deleteMany();
+  await prisma.commissionSettlement.deleteMany();
+  await prisma.distributor.deleteMany();
   await prisma.paymentOrder.deleteMany();
   await prisma.subscriptionContract.deleteMany();
   await prisma.casefileMetric.deleteMany();

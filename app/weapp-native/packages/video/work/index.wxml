@@ -12,10 +12,28 @@
     <view class="wd-body">
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
 
+      <!-- 没读到就说没读到。以前这里没有分支，读失败会掉进下面的成功版式，
+           页面照样写着「生成完成 · 你的故事，已经成片」——把一次网络失败说成了出片成功。
+           同 home 页那条「读失败不能说成你还没有」。 -->
+      <view wx:elif="{{loadFailed}}" class="vd-empty wd-failed">
+        <text class="s">没能打开这条片子</text>
+        <text class="wd-failed-s">{{loadError || '网络没通，或者这条片子不在当前账号里。'}}</text>
+        <!-- 不可重试（403/404）也必须有出路。只把「重试」藏掉的话，这一屏除了系统返回
+             什么都不剩 —— 等于用「不给必然失败的按钮」换来了一条死路，没变好。 -->
+        <view wx:if="{{canRetry}}" class="wd-failed-act" bindtap="retryLoad">重试</view>
+        <view wx:else class="wd-failed-act wd-failed-alt" bindtap="goWorks">看我的作品</view>
+      </view>
+
       <block wx:else>
-        <view class="wd-ready">
+        <!-- 「读到了」不等于「出好了」。这块以前对任何取回来的作品都写「生成完成」，
+             深链打开一条 status=generating 的作品，页面照样恭喜你已经成片。 -->
+        <view class="wd-ready" wx:if="{{done}}">
           <view class="wdr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
-          <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">你的故事，已经成片</text></view>
+          <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">这条片子已经出好了</text></view>
+        </view>
+        <view class="wd-ready wd-ready-wip" wx:else>
+          <view class="wdr-icon wdr-icon-wip"><native-icon name="clock" tone="white" size="18"></native-icon></view>
+          <view><text class="wdr-kicker">还在生成</text><text class="wdr-title">这条片子还没出好</text></view>
         </view>
         <!-- 成片固定用真实 9:16 容器；外层控制宽度，内层 padding 比例不能再被固定高度覆盖。 -->
         <view class="wd-player-wrap">
@@ -28,14 +46,33 @@
               show-fullscreen-btn="{{true}}"
               poster="{{work.thumbnailUrl}}"
             ></video>
-            <view wx:else class="inner vd-grain"></view>
+            <!-- 成片地址可能为空：契约里 videoUrl 本就是可选（shared/contracts.d.ts 的
+                 ClipWorkDetail），下载接口对同一状态给的是 CLIP_WORK_NOT_READY「成片还没有
+                 准备好」。观看这条路以前只铺一块底纹，等于让用户对着「已经成片」和一个黑框
+                 自己猜——和首页「读失败不能说成你还没有」是同一类问题，这里也要说出来。 -->
+            <!-- 文案要跟着状态走。这块在两种情形下都会出现，说法不能一样：
+                   done 但没地址 —— 片子已经出好了，是这会儿取不到播放地址；
+                                    再说「还没有准备好」就和上面的「生成完成」自相矛盾。
+                   还在生成      —— 那才是真的还没准备好。
+                 不在这里对积分下结论：详情接口只透传作品、不做结算
+                 （server/src/routes/video.ts），结算发生在任务轮询那条路径上。 -->
+            <view wx:else class="inner vd-grain wd-pending">
+              <text class="wd-pending-t">{{done ? '暂时放不出来' : '还没出好'}}</text>
+              <text class="wd-pending-s">{{done ? '片子已经出好了，只是现在取不到播放地址。' : '这条片子还在生成，稍后再回来看看。'}}</text>
+              <!-- 取不到播放地址是典型的瞬时故障，retryLoad 早就存在（work/index.js），
+                   却只让用户「过一会儿再来」——等于有解法不给。生成中不给刷新：
+                   那不是故障，刷了也还是在生成。 -->
+              <view wx:if="{{done}}" class="wd-pending-act" catchtap="retryLoad">刷新试试</view>
+            </view>
             <view wx:if="{{work.aiWatermark}}" class="vd-ai-badge wd-badge">AI 生成</view>
           </view>
         </view>
 
         <text class="wd-title">{{work.title}}</text>
-        <text class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
-        <text wx:if="{{work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
+        <text wx:if="{{done}}" class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 数字人出镜 {{work.avatarSec}} 秒</text>
+        <text wx:else class="wd-meta">{{durationText}} · 竖屏 · 数字人出镜 {{work.avatarSec}} 秒</text>
+        <!-- 只有完成态才敢说「已扣」：没出好的单子扣费可能还没结算。 -->
+        <text wx:if="{{done && work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
 
         <!-- 封面：单独给出来，并说清它到底管什么。
              不这么做的话，用户设了封面、发到平台却看不到，只会以为封面没生效。 -->
@@ -43,17 +80,18 @@
           <image class="wd-cover-img" src="{{work.thumbnailUrl}}" mode="aspectFill"></image>
           <view class="wd-cover-copy">
             <text class="wd-cover-title">这条片子的封面</text>
-            <text class="wd-cover-sub">它是视频的第一帧，也是平台缩略图，不占正片时长。有的平台不会自动取，存下来就能在发布时手动设。</text>
+            <text class="wd-cover-sub">它是视频的第一帧，也是平台缩略图，不占正片时长。有的平台不会自动取这一帧，先存下来，发布时就能手动设置。</text>
             <view class="wd-cover-act" catchtap="saveCover">{{savingCover ? '保存中…' : '保存封面图'}}</view>
           </view>
         </view>
 
-        <!-- 代发 -->
-        <view class="wd-section">
+        <!-- 代发。整块只在完成态出现：没出好的片子既存不下来也发不出去，
+             摆在那里点下去只会拿到「成片还没有准备好」。 -->
+        <view class="wd-section" wx:if="{{done}}">
           <text class="wd-sec-kicker">下一步</text>
           <!-- 标题跟着能力走：代发没接通时不许承诺「直接发布」（上游恒 503，见 index.js 的 PUBLISH_READY）。 -->
           <text class="wd-sec-title">{{publishReady ? '保存，或者直接发布' : '先保存下来，自己发'}}</text>
-          <text wx:if="{{!publishReady}}" class="wd-sec-note">一键代发到下面这些平台还在接入，暂时点不了</text>
+          <text wx:if="{{!publishReady}}" class="wd-sec-note">还不能帮你发到下面这些平台，暂时点不了</text>
           <view class="wd-platforms">
             <view
               wx:for="{{platforms}}"
@@ -65,12 +103,14 @@
           </view>
         </view>
 
-        <view class="vd-btn wd-act" bindtap="saveToAlbum">{{saving ? '保存中 ' + saveProgress + '%' : '保存到相册'}}</view>
+        <!-- 保存同样只在完成态出现。方法里那道 done 防线是兜底，
+             但一个点下去必然失败的主按钮本身就不该摆在这儿。 -->
+        <view wx:if="{{done}}" class="vd-btn wd-act" bindtap="saveToAlbum">{{saving ? '保存中 ' + saveProgress + '%' : '保存到相册'}}</view>
 
         <view class="wd-again vd-card" bindtap="again">
           <view class="wa-body">
             <text class="wa-t">再出一条</text>
-            <text class="wa-s">换个店名或一两句话，1 分钟复制一条新的</text>
+            <text class="wa-s">换个店名或一两句话，就能再出一条</text>
           </view>
           <native-icon class="wa-arrow" name="arrow" tone="neutral" size="15"></native-icon>
         </view>
@@ -80,5 +120,5 @@
     </view>
   </scroll-view>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

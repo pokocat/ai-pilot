@@ -9,6 +9,12 @@ dist/
 **/dist-h5/
 **/dist-pc/
 lib/
+# 上面那条裸 `lib/` 是给构建产物的，但它按 gitignore 语义匹配**任意层级**的 lib 目录，
+# 于是把 shadcn 约定的源码目录 admin/src/lib/（cn() 与 Radix 浮层挂载点）一起吞了：
+# 2026-09-02 那次 `git add -A` 静默漏掉这两个源文件，本地磁盘上有所以构建全绿，
+# 而 deploy-prod.sh 打的是 `git archive HEAD`，远端 admin 构建会因缺模块直接失败
+# ——且它排在「服务端已重启」之后，留下半套上线。故显式放行这一处源码目录。
+!admin/src/lib/
 .temp/
 .swc/
 app/.taro-cache/

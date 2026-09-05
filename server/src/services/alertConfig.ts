@@ -15,7 +15,7 @@
 // 发不到飞书（要外部拨测兜底，见 docs/MONITORING.md §7）。
 
 import { createHmac } from 'node:crypto';
-import { featureFlagPayload, setFeatureFlagPayload } from './featureFlag.js';
+import { featureFlagPayload, isFeatureEnabled, setFeatureFlagPayload } from './featureFlag.js';
 import { encryptSecret, decryptSecretSafe } from './secretBox.js';
 export { formatAlertCard, formatAlertText } from './alertCard.js';
 export type { AmAlert, AmWebhookPayload, AlertCardOptions } from './alertCard.js';
@@ -37,6 +37,14 @@ export interface AlertConfigDef {
 
 const D = (key: string, label: string, desc: string, def: number, min: number, max: number, unit: string): AlertConfigDef =>
   ({ id: `monitor.${key}`, key, label, desc, def, min, max, unit });
+
+// 增长量告警的业务阶段闸门。产品尚未对外开放时，“72h 零注册”是预期状态，
+// 不应通过延长窗口或降级告警来延迟噪音。运营确认正式开放/开始投放后再显式开启。
+export const PUBLIC_LAUNCH_MONITOR_FLAG = 'monitor.public-launch';
+
+export async function publicLaunchMonitorEnabled(): Promise<boolean> {
+  return isFeatureEnabled(PUBLIC_LAUNCH_MONITOR_FLAG, false);
+}
 
 // 成本/容量护栏参考压测方案 §7；面向用户的 API 时延告警使用生产 SLO，不能把压测容量线
 // 直接当线上故障线。对话体验默认值来自线上事故复盘（下方会单独标注）。

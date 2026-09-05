@@ -20,9 +20,9 @@
         </view>
       </view>
 
-      <view class="rd-live"><view class="rd-live-dot"></view><text>任务已在云端稳定运行</text></view>
+      <view class="rd-live"><view class="rd-live-dot"></view><text>生成中</text></view>
       <text class="rd-title">正在把你的故事做成片</text>
-      <text class="rd-sub">可以直接退出去忙。生成完成后，作品会留在「我的作品」。</text>
+      <text class="rd-sub">可以直接退出，完成后作品会留在「我的作品」。</text>
 
       <view class="rd-stages vd-card">
         <view wx:for="{{stageRows}}" wx:key="key" class="rd-stage {{item.state}}">
@@ -36,13 +36,13 @@
 
       <view wx:if="{{notifyTemplate && !failed && status !== 'succeeded'}}" class="rd-notify vd-card">
       <view class="rn-copy">
-        <text class="rn-title">{{notifySubscribed ? '出好了会微信通知你' : '不想一直等着？'}}</text>
-        <text class="rn-sub">{{notifySubscribed ? '可以放心退出，成片好了微信会推给你。' : '开启通知后就能退出小程序，出好了微信提醒你来看。'}}</text>
+        <text class="rn-title">{{notifySubscribed ? '完成后微信通知你' : '不想一直等着？'}}</text>
+        <text class="rn-sub">{{notifySubscribed ? '可以退出等待，成片完成后微信会推给你。' : '开启通知后可退出等待，完成后微信提醒你来看。'}}</text>
       </view>
       <view wx:if="{{!notifySubscribed}}" class="vd-btn ghost rn-btn {{notifyRequesting ? 'disabled' : ''}}" bindtap="requestNotify">{{notifyRequesting ? '开启中…' : '通知我'}}</view>
     </view>
 
-    <view class="vd-btn ghost rd-leave" bindtap="leave">先去忙，好了通知我</view>
+    <view class="vd-btn ghost rd-leave" bindtap="leave">退出等待，到「我的作品」查看</view>
       <text class="rd-note">关掉小程序也不影响出片</text>
     </block>
 

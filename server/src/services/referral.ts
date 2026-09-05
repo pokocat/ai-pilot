@@ -9,6 +9,7 @@ import { featureFlagPayload } from './featureFlag.js';
 import { isExpired } from './planTime.js';
 import { now } from './clock.js';
 import { INVITE_ALPHABET } from './community.js';
+import { recordAudit } from './audit.js';
 import type {
   ReferralBindingOutcome, ReferralSource as ContractReferralSource, ReferralSummary,
 } from '../../../shared/contracts';
@@ -169,6 +170,29 @@ async function wouldFormCycle(db: Db, userId: string, candidate: string): Promis
   return cursor !== null;
 }
 
+/**
+ * 「查环 → 建边」这段 check-then-act 的串行化闸（2026-09-02 补，原 AGENTS.md §13 的 TOCTOU 项）。
+ *
+ * 症状：A 用 B 的码、B 用 A 的码**同时**进线时，两侧的 `wouldFormCycle` 都可能还看不到对方
+ * 那条边（各自事务里对方尚未提交），于是两条边都建成 → 一个二元环。环一旦落库，`Referral`
+ * 是**不可变更**账本，物化路径与后续的上溯递归都跟着坏掉（`wouldFormCycle` 只能 fail-closed
+ * 保守拒绝，运营侧那个人从此谁也绑不上）。
+ *
+ * 口径：**按 id 字典序排序后依次取 `pg_advisory_xact_lock`**，注册路径与运营补绑路径共用这一把。
+ *   · 为什么两个 id 都要锁：环的成立条件涉及双方，只锁被邀人挡不住反向那条边；
+ *   · 为什么必须排序：两侧各自按「先自己后对方」的顺序取锁就是教科书死锁
+ *     （A 事务持 A 等 B、B 事务持 B 等 A）。排序后两个事务的取锁顺序一致，后到的那个排队。
+ *   · advisory lock 是**事务级**的，随提交/回滚自动释放；`hashtext` 返回 int4，适配单参重载
+ *     （与 wechatPay / credits / activation 同一套路，不另发明锁表）。
+ *   · 传裸 `prisma`（非事务）时每条语句自成事务，锁取完立即释放 = 无保护。生产两条路径都在
+ *     事务里调；测试里传裸 prisma 的用例不测并发，故不额外设防。
+ */
+async function lockReferralPair(db: Db, ids: string[]): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) {
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`referral:${id}`}))`;
+  }
+}
+
 export interface BindArgs {
   db: Db;
   userId: string;
@@ -194,6 +218,18 @@ export interface BindArgs {
  * 并发主键冲突会抛 `ReferralAlreadyBound`，那条留痕只能由调用方在事务外补。
  */
 export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
+  return (await bindReferral(args)).outcome;
+}
+
+/**
+ * `bindOnRegister` 的完整形态：多回一个**解析出来的码主 id**。
+ *
+ * 拆出来只为运营补绑（`bindManually`）能拿到 referrerId 去落审计与回显新建的边——
+ * 判定逻辑（形状 / already_bound / self / 窗口 / 查环 / 建边 / 留痕）**只有这一份**，
+ * 补绑路径绝不复制一遍（复制出来的第二份查环迟早与这份漂移，而它建出来的关系改不回去）。
+ * `bindOnRegister` 的签名与返回保持不变，注册链路与既有测试一行不用改。
+ */
+export async function bindReferral(args: BindArgs): Promise<{ outcome: ReferralOutcome; referrerId: string | null }> {
   const { db, userId, tenantId, inviteCode, capturedAt, clientIp, userAgent } = args;
   const source: ReferralSource = args.source ?? 'share_friend';
 
@@ -210,7 +246,7 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
         userAgent: userAgent ? userAgent.slice(0, 500) : null,
       },
     });
-    return outcome;
+    return { outcome, referrerId };
   };
 
   if (!isInviteCodeShape(inviteCode)) return trace('unknown_code', null);
@@ -225,6 +261,17 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
   });
   if (!referrer) return trace('unknown_code', null);
   if (referrer.id === userId) return trace('self', referrer.id);
+
+  // ── 从这里开始进入临界区（原 §13 的 TOCTOU）：先按 id 有序取双方的 advisory lock ──
+  // 锁点刻意放在 self 判定之后、窗口与查环之前：
+  //   · 之前的三个分支（码形状 / 已绑 / 自邀）都不写关系，不需要串行化；
+  //   · 之后的「查环 → 建边」是一段 check-then-act，必须在同一把锁内完成，
+  //     否则两个未绑用户互邀时双方都读不到对方那条未提交的边，环就建成了。
+  await lockReferralPair(db, [userId, referrer.id]);
+  // 等锁期间对方可能刚提交完（同一个新号两次带码进线，或运营与注册撞在一起）：
+  // 必须重读一次，否则往下走会撞主键，而主键冲突会把整个事务打成 aborted、连留痕一起丢。
+  const settled = await db.referral.findUnique({ where: { userId }, select: { referrerId: true } });
+  if (settled) return trace('already_bound', settled.referrerId);
 
   // 归因窗口：时间只能来自服务端签名捕获凭证，窗口天数归运营配置。这里再校验一次未来时间，
   // 即使调用方误把客户端字段接进来，也不能用未来时间绕过窗口。
@@ -285,6 +332,85 @@ export async function bindOnRegister(args: BindArgs): Promise<ReferralOutcome> {
     throw err;
   }
   return trace('bound', referrer.id);
+}
+
+/** 补绑目标不存在时抛出：路由据此回 404（不是 400——运营敲错 userId 与「码不存在」是两件事）。 */
+export class ReferralUserNotFound extends Error {
+  statusCode = 404;
+  code = 'USER_NOT_FOUND';
+  constructor() { super('用户不存在'); }
+}
+
+export interface ManualBindArgs {
+  /** 补绑对象（必须尚无推荐人；已有则回 already_bound，不改绑） */
+  userId: string;
+  inviteCode: string;
+  /** 操作者展示名，进审计 payload.by */
+  operator: string;
+  /** 运营这次请求的 IP（落 ReferralAttribution.clientIp，与注册侧同一列） */
+  clientIp?: string | null;
+  /** 补绑原因，进审计 */
+  reason: string;
+}
+
+/**
+ * 运营人工补绑（`POST /admin/invites/manual-bind`，requireSuper）。
+ *
+ * **关系不可变更公理不破**：这里只给「尚无推荐人」的用户建边，不提供改绑/解绑。
+ * 判定完全走 `bindReferral`（同一份 self / already_bound / unknown_code / cycle 判定 +
+ * 同一把有序 advisory lock），本函数只负责三件外围事：
+ *   ① 解析目标用户拿 tenantId（关系行的租户跟着被邀人走，与注册侧一致）；
+ *   ② `source='manual'` —— 它同时是**免归因窗口**的开关：运营补绑手上没有签名捕获凭证，
+ *      `bindReferral` 里 `no_timestamp` 那道闸对 manual 放行（规划 §3.2 明写「不受归因窗口限制」）。
+ *      所以这里**不传 capturedAt**，也不该传：补绑的新鲜度由运营的 reason 与审计承担，不由窗口判。
+ *   ③ 落审计 `admin.invite.manual_bind`（含 outcome —— 失败的补绑尝试也必须留下操作痕迹）。
+ *
+ * 留痕（`ReferralAttribution`）由 `bindReferral` 在同事务内写，与注册侧同一张表同一组 outcome，
+ * 所以运营在「归因日志」里看得到这条 `source='manual'` 的记录，不需要第二个日志面。
+ */
+export async function bindManually(args: ManualBindArgs): Promise<{ outcome: ReferralOutcome; referrerId: string | null }> {
+  const user = await prisma.user.findUnique({ where: { id: args.userId }, select: { id: true, tenantId: true } });
+  if (!user) throw new ReferralUserNotFound();
+
+  let result: { outcome: ReferralOutcome; referrerId: string | null };
+  try {
+    result = await prisma.$transaction((tx) => bindReferral({
+      db: tx,
+      userId: user.id,
+      tenantId: user.tenantId,
+      inviteCode: args.inviteCode,
+      source: 'manual',
+      clientIp: args.clientIp ?? null,
+      // 运营的 UA 是后台浏览器指纹，与风控看的「新号从哪台设备进线」无关，不入库。
+      userAgent: null,
+    }));
+  } catch (err) {
+    // 加锁后这条几乎不可达（锁内重读会先命中 already_bound），保留是因为 P2002 会把事务打成
+    // aborted：那时留痕只能在事务外补，丢了这段运营就看不到自己刚做过什么。
+    if (err instanceof ReferralAlreadyBound) {
+      await traceOutsideTransaction({
+        tenantId: user.tenantId, userId: user.id, inviteCode: args.inviteCode,
+        source: 'manual', outcome: 'already_bound', referrerId: err.referrerId,
+        clientIp: args.clientIp ?? null,
+      });
+      result = { outcome: 'already_bound', referrerId: err.referrerId };
+    } else throw err;
+  }
+
+  await recordAudit({
+    tenantId: user.tenantId,
+    userId: user.id,
+    action: 'admin.invite.manual_bind',
+    payload: {
+      userId: user.id,
+      inviteCode: args.inviteCode,
+      referrerId: result.referrerId,
+      outcome: result.outcome,
+      reason: args.reason,
+      by: args.operator,
+    },
+  });
+  return result;
 }
 
 /**

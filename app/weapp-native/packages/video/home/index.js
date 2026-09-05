@@ -33,7 +33,7 @@ Page(withShare({
     all: [], list: [], cats: [], cat: '',
     shelfText: '', loadFailed: false, loading: true,
     todoOpen: false, todos: [], todoCount: 0,
-    guest: false, showLogin: false, loginReason: 'execute',
+    guest: false, showLogin: false, loginReason: 'video',
   }),
 
   onLoad() { this.load(); },
@@ -102,14 +102,14 @@ Page(withShare({
     });
   },
   openTodo() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     host.setOverlay(true, 'video-todo'); this.setData({ todoOpen: true });
   },
   closeTodo() { host.setOverlay(false, 'video-todo'); this.setData({ todoOpen: false }); },
   goTodo(e) { const go = e.currentTarget.dataset.go; this.closeTodo(); if (go) host.go(go); },
   onUnload() { if (this.data.todoOpen) host.setOverlay(false, 'video-todo'); },
 
-  needLogin() { host.requireLogin(this, 'execute'); },
+  needLogin() { host.requireLogin(this, 'video'); },
   retry() { this.setData({ loading: true }); this.load(); },
   back() { host.back(); },
   swallow() {},

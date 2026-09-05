@@ -85,10 +85,10 @@
         <video wx:if="{{previewAsset.kind === 'video'}}" class="amp-video" src="{{previewAsset.contentUrl}}" poster="{{previewAsset.previewUrl}}" controls autoplay show-center-play-btn enable-progress-gesture object-fit="contain"></video>
         <image wx:else class="amp-image" src="{{previewAsset.contentUrl}}" mode="aspectFit" show-menu-by-longpress></image>
       </view>
-      <view class="amp-foot"><text>{{previewAsset.kind === 'video' && previewAsset.durationSec ? previewAsset.durationSec + ' 秒' : '双指缩放或长按可保存图片'}}</text><view class="vd-btn ghost" bindtap="closePreview">看完了</view></view>
+      <view class="amp-foot"><text>{{previewAsset.kind === 'video' && previewAsset.durationSec ? previewAsset.durationSec + ' 秒' : '双指缩放或长按可保存图片'}}</text><view class="vd-btn ghost" bindtap="closePreview">关闭</view></view>
     </view>
   </view>
 
   <vd-tabbar wx:if="{{asTab}}" current="assets" bindneedlogin="needLogin"></vd-tabbar>
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

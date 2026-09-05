@@ -1616,7 +1616,7 @@ export default function Chat() {
     }
     // 附卷已满九份：不转，完整粘贴内容留在输入框，容主公自行取舍。
     if (refs.length + pasteInflightRef.current >= UPLOAD_COUNT_MAX) {
-      Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
+      Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，先移除几份再传`, icon: 'none' });
       return;
     }
     void absorbPasteToFile(pasted);
@@ -1689,7 +1689,7 @@ export default function Chat() {
     if (!v || !agent) return;
     // 软限制守卫：手动堆出的超长（非粘贴）在此拦下——粘贴早已转附卷，不会走到这。
     if (v.length > INPUT_MAX) {
-      Taro.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' });
+      Taro.showToast({ title: '超过两千字，可精简或粘贴成附卷', icon: 'none' });
       return;
     }
     if (!store.isAuthed()) {

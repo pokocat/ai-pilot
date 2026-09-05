@@ -3,7 +3,7 @@
     <view class="vd-safe"></view>
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">{{mode === 'voice' ? (retrainVoiceId ? '重新训练声音' : '提升专属声音') : '创建我的数字分身'}}</text>
+      <text class="vd-title">{{mode === 'voice' ? (retrainVoiceId ? '重新训练声音' : '提升专属声音') : '创建我的数字人'}}</text>
       <text class="vd-headact"> </text>
     </view>
 
@@ -22,7 +22,7 @@
       <block wx:if="{{mode === 'voice' && step === 1}}">
         <view class="cl-enhance-intro">
           <text class="cl-enhance-kicker">{{retrainVoiceId ? '重新训练' : '可选增强'}}</text>
-          <text class="cl-h">{{retrainVoiceId ? '用新录音换掉现有声音' : '让分身更像你的声音'}}</text>
+          <text class="cl-h">{{retrainVoiceId ? '用新录音换掉现有声音' : '让数字人更像你的声音'}}</text>
           <!-- 重训是就地覆盖那条声音（供应商 recreate 改的是同一个对象），不是新增一条。
                不说清楚的话，用户会以为自己在攒声音库，结果原来的音色没了。 -->
           <text class="cl-s">{{retrainVoiceId ? '这段新录音会替换掉这条声音现在的音色，之后的口播都用新的；已经生成好的成片不受影响。' : '数字人已经可以由一段视频创建。单独录一段干净人声，只是让后续口播的音色更稳定、更像你。'}}</text>
@@ -32,7 +32,7 @@
         <view wx:if="{{costRows.length}}" class="cl-cost vd-card">
           <view class="cc-head">
             <native-icon name="diamond" tone="gold" size="15"></native-icon>
-            <text class="cc-title">这次要扣多少</text>
+            <text class="cc-title">本次扣费</text>
           </view>
           <view wx:for="{{costRows}}" wx:key="key" class="cc-row">
             <text class="cc-label">{{item.label}}</text>
@@ -41,7 +41,7 @@
           <text wx:if="{{retrainQuotaText}}" class="cc-note {{retrainBlocked ? 'warn' : ''}}">{{retrainQuotaText}}</text>
           <!-- 重训走不通时给一个显式改道入口。不自动切：重训与新建差三倍多的价，替用户切等于替他花钱。 -->
           <view wx:if="{{retrainBlocked}}" class="cc-switch" bindtap="switchToNewVoice">改为新建一条声音</view>
-          <text class="cc-note">{{retrainVoiceId ? '重新训练比新建一条便宜，也不会多占一份克隆权益。' : '已经有可用声音的话，直接在创建数字人时复用它，不额外扣费。'}}</text>
+          <text class="cc-note">{{retrainVoiceId ? '重新训练比新建一条便宜，也不会多用掉一次克隆额度。' : '已经有可用声音的话，直接在创建数字人时复用它，不额外扣费。'}}</text>
         </view>
 
         <view class="cl-source-tabs">
@@ -60,7 +60,7 @@
         </view>
 
         <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">
-          <text>{{recording ? '正在录，点一下结束' : (startingRecord ? '正在开启麦克风…' : (voiceFile ? '重新录一段' : '开始录制'))}}</text>
+          <text>{{recording ? '正在录制，点一下结束' : (startingRecord ? '正在开启麦克风…' : (voiceFile ? '重新录一段' : '开始录制'))}}</text>
         </view>
 
         <view wx:if="{{voiceFile}}" class="cl-file-ready">
@@ -79,7 +79,7 @@
       <block wx:elif="{{mode === 'avatar' && step === 1}}">
         <text class="cl-kicker">{{faceSource === 'image' ? '一张照片即可创建' : '一段视频即可创建'}}</text>
         <text class="cl-h">{{faceSource === 'image' ? '上传你的正脸照片' : '上传你的出镜视频'}}</text>
-        <text class="cl-s">{{faceSource === 'image' ? '一张清晰正脸照就能建分身。照片里没有声音，成片说话用的是你另外训练或已有的那条声音。' : '录满 ' + requirements.avatar.minDurationSec + ' 秒即可提交，建议 ' + requirements.avatar.recommendedMinDurationSec + '–' + requirements.avatar.recommendedMaxDurationSec + ' 秒。直接创建形象；视频里有清楚人声时，还会同步生成基础声音。'}}</text>
+        <text class="cl-s">{{faceSource === 'image' ? '一张清晰正脸照就能建数字人。照片里没有声音，成片说话用的是你另外训练或已有的那条声音。' : '录满 ' + requirements.avatar.minDurationSec + ' 秒即可提交，建议 ' + requirements.avatar.recommendedMinDurationSec + '–' + requirements.avatar.recommendedMaxDurationSec + ' 秒。直接创建形象；视频里有清楚人声时，还会同步生成基础声音。'}}</text>
 
         <!-- 素材来源二选一。两者是不同的计价档，切换会当场重算下面的账单。 -->
         <view class="cl-source-tabs">
@@ -118,13 +118,13 @@
         <view wx:if="{{costRows.length}}" class="cl-cost vd-card">
           <view class="cc-head">
             <native-icon name="diamond" tone="gold" size="15"></native-icon>
-            <text class="cc-title">这次要扣多少</text>
+            <text class="cc-title">本次扣费</text>
           </view>
           <view wx:for="{{costRows}}" wx:key="key" class="cc-row">
             <text class="cc-label">{{item.label}}</text>
             <text class="cc-value {{item.free ? 'free' : ''}}">{{item.costText}}</text>
           </view>
-          <text class="cc-note">训练一条新声音在供应商侧成本很高，内测期请优先复用已有声音。</text>
+          <text class="cc-note">训练一条新声音成本很高，内测期请优先使用已有的声音。</text>
         </view>
 
         <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="{{faceSource === 'image' ? 'pickPhoto' : 'pickFace'}}">
@@ -156,7 +156,7 @@
         </view>
         <view wx:else class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeFace">更换视频</view>
-          <view class="vd-btn cl-act {{agreed ? '' : 'disabled'}}" bindtap="submitAvatar">{{submitting ? submitPhaseText : '创建视频数字人'}}</view>
+          <view class="vd-btn cl-act {{agreed ? '' : 'disabled'}}" bindtap="submitAvatar">{{submitting ? submitPhaseText : '创建数字人'}}</view>
         </view>
         <view wx:if="{{submitting}}" class="cl-upload-progress"><view class="cup-track"><view class="cup-fill" style="width:{{uploadProgress}}%"></view></view><text>{{submitPhaseText}}{{uploadProgress > 0 && uploadProgress < 100 ? ' · ' + uploadProgress + '%' : ''}}</text><text class="cup-note">上传后会自动受理，请不要重复提交</text></view>
 
@@ -173,8 +173,8 @@
           <text class="cp-label">正在学习</text>
         </view>
 
-        <text class="cl-h center">{{mode === 'voice' ? '专属声音正在训练' : '数字分身正在训练'}}</text>
-        <text class="cl-s center">{{training.etaText}}。可以先退出，回来会继续显示真实进度。</text>
+        <text class="cl-h center">{{mode === 'voice' ? '专属声音正在训练' : '数字人正在训练'}}</text>
+        <text class="cl-s center">{{training.etaText}}。可以先退出，回来会继续显示进度。</text>
 
         <view class="cl-track vd-card">
           <view wx:if="{{mode === 'voice'}}" class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
@@ -214,7 +214,7 @@
 
         <view wx:if="{{presetAvailable}}" class="cl-preset vd-card">
           <text class="ci-title">不想等？先做第一条</text>
-          <text class="ci-row">用平台提供的形象和声音先出一条片子，你的分身训练好之后，一键换成你自己。</text>
+          <text class="ci-row">用平台提供的形象和声音先出一条片子，你的数字人训练好之后，一键换成你自己。</text>
           <view class="vd-btn cl-preset-btn" bindtap="usePreset">先用预置形象出片</view>
         </view>
 
@@ -233,5 +233,5 @@
     bindclose="closeVoicePreview"
   ></voice-preview>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

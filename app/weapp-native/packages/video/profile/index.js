@@ -17,7 +17,7 @@ Page({
     balance: null, balanceFailed: false,
     rows: [],
     version: '',
-    showLogin: false, loginReason: 'execute',
+    showLogin: false, loginReason: 'video',
   }),
 
   onLoad() { this.load(); },
@@ -58,8 +58,8 @@ Page({
   },
 
   goRow(e) { const go = e.currentTarget.dataset.go; if (go) host.go(go); },
-  needLogin() { host.requireLogin(this, 'execute'); },
-  login() { host.requireLogin(this, 'execute'); },
+  needLogin() { host.requireLogin(this, 'video'); },
+  login() { host.requireLogin(this, 'video'); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, loading: true }); this.load(); },
 });

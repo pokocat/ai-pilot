@@ -13,7 +13,7 @@
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { llmGateStatsAll, WAIT_BUCKET_BOUNDS_S } from './llmGate.js';
 import { poolStatus } from './llmPool.js';
-import { alertConfigValues } from './alertConfig.js';
+import { alertConfigValues, publicLaunchMonitorEnabled } from './alertConfig.js';
 import { prisma } from '../db.js';
 
 /* ─────────────── 带标签的计数器 / 直方图（基建） ─────────────── */
@@ -536,6 +536,74 @@ const payMockEvents = new LabeledCounter(
 );
 export function notePayMock(event: 'created' | 'applied' | 'refunded'): void { payMockEvents.inc({ event }); }
 
+/* ──────────────── 定时任务 ──────────────── */
+
+export type SchedulerJobResult = 'success' | 'failed' | 'lease_skipped' | 'overlap_skipped';
+
+interface SchedulerJobMetricState {
+  intervalSeconds: number;
+  healthAnchorSeconds: number;
+  lastSuccessSeconds: number;
+  lastFailureSeconds: number;
+  lastDurationSeconds: number;
+  inFlight: number;
+}
+
+// 任务名来自 registerJob 的固定目录，不接受业务输入，标签基数可控。
+const schedulerJobRuns = new LabeledCounter(
+  'junshi_scheduler_job_runs_total',
+  '定时任务执行结果（result=success|failed|lease_skipped|overlap_skipped）',
+  200,
+);
+const schedulerJobs = new Map<string, SchedulerJobMetricState>();
+let schedulerMetricsEnabled = 0;
+
+/** 任务注册时建立健康锚点；首轮未到时不应被误报为停跑。 */
+export function registerSchedulerJobMetric(job: string, intervalMs: number): void {
+  const current = schedulerJobs.get(job);
+  if (current) {
+    current.intervalSeconds = Math.max(1, intervalMs / 1000);
+    return;
+  }
+  schedulerJobs.set(job, {
+    intervalSeconds: Math.max(1, intervalMs / 1000),
+    healthAnchorSeconds: Date.now() / 1000,
+    lastSuccessSeconds: 0,
+    lastFailureSeconds: 0,
+    lastDurationSeconds: 0,
+    inFlight: 0,
+  });
+}
+
+/** SCHEDULER_ENABLED=false 的纯 API 实例不参与任务停跑告警。 */
+export function setSchedulerMetricsEnabled(enabled: boolean): void {
+  schedulerMetricsEnabled = enabled ? 1 : 0;
+}
+
+export function noteSchedulerJobStarted(job: string): void {
+  const state = schedulerJobs.get(job);
+  if (state) state.inFlight += 1;
+}
+
+export function noteSchedulerJobFinished(job: string, result: SchedulerJobResult, durationMs: number): void {
+  schedulerJobRuns.inc({ job, result });
+  const state = schedulerJobs.get(job);
+  if (!state) return;
+  state.inFlight = Math.max(0, state.inFlight - 1);
+  state.lastDurationSeconds = Math.max(0, durationMs / 1000);
+  const at = Date.now() / 1000;
+  if (result === 'success') {
+    state.lastSuccessSeconds = at;
+    state.healthAnchorSeconds = at;
+  } else if (result === 'failed') {
+    state.lastFailureSeconds = at;
+  }
+}
+
+export function noteSchedulerJobSkipped(job: string, result: 'lease_skipped' | 'overlap_skipped'): void {
+  schedulerJobRuns.inc({ job, result });
+}
+
 // 告警转发（Alertmanager → 飞书）自身的成败——通知链路哑了也得有人知道。
 const alertForwards = new LabeledCounter('junshi_alerts_forwarded_total', '告警转发次数（outcome=sent|failed|not_configured）');
 export function noteAlertForward(outcome: string): void { alertForwards.inc({ outcome }); }
@@ -751,6 +819,11 @@ export async function renderMetrics(): Promise<string> {
     push(metric('junshi_user_last_registration_timestamp_seconds', '数据库事实：最近一次用户注册时间（Unix 秒；无用户为 0）', 'gauge'))
       .samples.push(fmt('junshi_user_last_registration_timestamp_seconds', facts.lastAtSeconds));
   } catch { /* 数据库暂不可用时不伪造 0；PgDown/JunshiApiDown 负责告警 */ }
+  try {
+    const enabled = await publicLaunchMonitorEnabled();
+    push(metric('junshi_monitor_public_launch_enabled', '产品是否已正式开放并启用增长量告警（1=启用）', 'gauge'))
+      .samples.push(fmt('junshi_monitor_public_launch_enabled', enabled ? 1 : 0));
+  } catch { /* 读不到阶段闸门时不默认开启，避免未开放阶段噪音 */ }
   moderationChecks.renderInto(ms);
   creditsFlow.renderInto(ms);
   planGateBlocked.renderInto(ms);
@@ -758,6 +831,26 @@ export async function renderMetrics(): Promise<string> {
   creativeFailures.renderInto(ms);
   creativeEngines.renderInto(ms);
   creativeCritiques.renderInto(ms);
+
+  /* —— 定时任务：通用健康度代替“拿支付计数器猜调度器死没死”。 —— */
+  schedulerJobRuns.renderInto(ms);
+  const schedulerInterval = push(metric('junshi_scheduler_job_interval_seconds', '定时任务的目标运行周期', 'gauge'));
+  const schedulerEnabled = push(metric('junshi_scheduler_job_enabled', '当前实例是否启用定时任务（1=启用）', 'gauge'));
+  const schedulerAnchor = push(metric('junshi_scheduler_job_health_anchor_timestamp_seconds', '定时任务健康锚点：最近成功时间，首轮前为进程注册时间', 'gauge'));
+  const schedulerSuccess = push(metric('junshi_scheduler_job_last_success_timestamp_seconds', '定时任务最近一次成功时间（Unix 秒，尚未成功为 0）', 'gauge'));
+  const schedulerFailure = push(metric('junshi_scheduler_job_last_failure_timestamp_seconds', '定时任务最近一次失败时间（Unix 秒，尚未失败为 0）', 'gauge'));
+  const schedulerDuration = push(metric('junshi_scheduler_job_last_duration_seconds', '定时任务最近一轮执行时长', 'gauge'));
+  const schedulerInFlight = push(metric('junshi_scheduler_job_in_flight', '定时任务当前运行数', 'gauge'));
+  for (const [job, state] of schedulerJobs) {
+    const labels = { job };
+    schedulerInterval.samples.push(fmt('junshi_scheduler_job_interval_seconds', state.intervalSeconds, labels));
+    schedulerEnabled.samples.push(fmt('junshi_scheduler_job_enabled', schedulerMetricsEnabled, labels));
+    schedulerAnchor.samples.push(fmt('junshi_scheduler_job_health_anchor_timestamp_seconds', state.healthAnchorSeconds, labels));
+    schedulerSuccess.samples.push(fmt('junshi_scheduler_job_last_success_timestamp_seconds', state.lastSuccessSeconds, labels));
+    schedulerFailure.samples.push(fmt('junshi_scheduler_job_last_failure_timestamp_seconds', state.lastFailureSeconds, labels));
+    schedulerDuration.samples.push(fmt('junshi_scheduler_job_last_duration_seconds', state.lastDurationSeconds, labels));
+    schedulerInFlight.samples.push(fmt('junshi_scheduler_job_in_flight', state.inFlight, labels));
+  }
 
   /* —— 支付 —— */
   payOrdersCreated.renderInto(ms);
@@ -890,6 +983,15 @@ export function __resetMetrics(): void {
   sessionDigestUpdates.reset(); sessionDigestCompactions.reset(); sessionDigestItems.reset(); sessionDigestPending.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset(); creativeCritiques.reset();
+  schedulerJobRuns.reset();
+  for (const state of schedulerJobs.values()) {
+    state.healthAnchorSeconds = Date.now() / 1000;
+    state.lastSuccessSeconds = 0;
+    state.lastFailureSeconds = 0;
+    state.lastDurationSeconds = 0;
+    state.inFlight = 0;
+  }
+  schedulerMetricsEnabled = 0;
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };

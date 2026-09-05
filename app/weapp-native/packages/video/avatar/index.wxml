@@ -3,7 +3,7 @@
     <view class="vd-safe"></view>
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">我的数字分身</text>
+      <text class="vd-title">我的数字人</text>
       <text class="vd-headact"> </text>
     </view>
   </view>
@@ -13,24 +13,24 @@
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
 
       <!-- 读失败且手上没有可显示的数据：明说是我们没读到。绝不能落到下面那个空态去，
-           那句话会让有分身的人重新采集一次（要扣钻石）。
+           那句话会让有数字人的人重新采集一次（要扣钻石）。
            已经读到过数据时不走这里 —— 轮询抖一次不该把用户正在看的列表清空，改用列表上方的轻提示。 -->
       <view wx:elif="{{loadFailed && !avatars.length}}" class="vd-empty">
-        <text class="t">没能读到你的数字分身</text>
+        <text class="t">没能读到你的数字人</text>
         <text class="s">这是加载失败，不是你没有创建过。已有的形象和训练进度都还在，不用重新采集，重试一下就好。</text>
         <view class="vd-btn av-empty-btn" bindtap="retry">重新加载</view>
         <view class="av-empty-link" bindtap="openVoices"><text>看看我的声音</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
       </view>
 
       <view wx:elif="{{!loggedIn}}" class="vd-empty">
-        <text class="t">登录后查看你的数字分身</text>
+        <text class="t">登录后查看你的数字人</text>
         <text class="s">创建之后每条片子都不用再出镜拍摄，形象和声音都会留在这里。</text>
         <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
       </view>
 
       <block wx:elif="{{!avatars.length}}">
         <view class="vd-empty">
-          <text class="t">还没有数字分身</text>
+          <text class="t">还没有数字人</text>
           <text class="s">上传一段正脸视频就能创建，之后每条片子都不用再出镜拍摄。</text>
           <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
           <!-- 这一屏只管形象。声音是能脱离形象独立存在的，别让「只训了声音」的人以为自己什么都没有。 -->
@@ -55,7 +55,7 @@
             <view class="avp-copy">
               <text class="avp-state">{{item.imageStatus === 'ready' ? '形象已可用' : (item.imageStatus === 'failed' ? '这段视频需要重拍' : (item.imageStatus === 'training' ? '正在云端训练' : '还没有创建形象'))}}</text>
               <text class="avp-date">{{item.imageStatus === 'none' ? '上传一段视频即可创建' : (item.imageTrainedText || '训练完成后可直接出片')}}</text>
-              <text class="avp-voice">{{item.linkedVoiceName ? '关联声音 · ' + item.linkedVoiceName : '尚未关联声音'}}</text>
+              <text class="avp-voice">{{item.linkedVoiceName ? '关联声音 · ' + item.linkedVoiceName : '未关联声音'}}</text>
               <view class="avp-voice-state"><text class="avv-status {{item.voiceStatus}}">{{item.voiceBadgeText}}</text><text class="avp-voice-desc">{{item.voiceDesc}}</text></view>
               <text wx:if="{{item.voiceCompletedText}}" class="avp-voice-completed">{{item.voiceCompletedText}}</text>
             </view>
@@ -69,16 +69,16 @@
         <view class="vd-card av-voice av-shared-voice">
           <view class="avv-icon"><view class="avc-wave"><view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view></view></view>
           <view class="avv-copy">
-            <view class="avv-title-row"><text class="avv-title">声音可以复用</text><text class="avv-status ready">自动带入</text></view>
-            <text class="avv-desc">新建形象时可以直接关联已有声音；不同场景、装扮不用重复录音。</text>
+            <view class="avv-title-row"><text class="avv-title">声音可以重复使用</text><text class="avv-status ready">自动带入</text></view>
+            <text class="avv-desc">新建形象时可以直接关联已有的声音，换场景、换装扮都不用重新录音。</text>
           </view>
         </view>
 
-        <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除分身，删除后所有新的生成能力立即停用。</text>
+        <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除数字人，删除后立即停用，不能再用它出新的片子。</text>
 
         <view class="av-rows">
           <view class="av-row" bindtap="openVoices"><text class="ar-t">我的声音</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
-          <view class="av-row" bindtap="openConsentLog"><text class="ar-t">历史素材声明</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="av-row" bindtap="openConsentLog"><text class="ar-t">授权记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openUsageLog"><text class="ar-t">使用记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openCredits"><text class="ar-t">我的积分与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
         </view>
@@ -116,5 +116,5 @@
     bindclose="closeVoicePreview"
   ></voice-preview>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

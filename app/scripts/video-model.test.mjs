@@ -196,7 +196,7 @@ test('多句镜头按镜头计画面段数，并按合计时长限制分身出�
   const shots = model.defaultShots(segments);
   assert.equal(model.estimateCredits(segments, shots).summary.brollCount, 1);
   const toggled = model.toggleShotRole(segments, shots, shots[0].id);
-  assert.match(toggled.error, /超过单次分身出镜上限/);
+  assert.match(toggled.error, /超过单次数字人出镜上限/);
 });
 
 /* ── 整段改写 ────────────────────────────────────────────────────────

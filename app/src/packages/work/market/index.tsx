@@ -79,7 +79,7 @@ export default function Market() {
         <View className="mm-hero card">
           <Text className="kicker">Junshi OS</Text>
           <Text className="h1">能力市场</Text>
-          <Text className="mm-p">能力不是商品货架，而是军师方案的长期承接：基础能力直接用，深度能力按 💎 额度或方案权益启用。</Text>
+          <Text className="mm-p">基础能力直接用，深度能力按 💎 额度或方案权益启用。</Text>
           <View className="mm-legend">
             {['基础可用', '💎 按次产出', '方案权益', '已启用'].map((label) => (
               <Text key={label} className="mm-tag">{label}</Text>

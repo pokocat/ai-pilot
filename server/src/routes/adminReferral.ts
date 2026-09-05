@@ -74,12 +74,12 @@ const RISK_MEMBER_CAP = 40;
 export const TREE_ROW_CAP = 3000;
 const DAY_MS = 86_400_000;
 
-function clampDays(raw: unknown): number {
+export function clampDays(raw: unknown): number {
   return Math.min(365, Math.max(1, Number(raw) || 30));
 }
 
 /** 租户维度筛选：两张表都有 tenantId（本仓多租户行级隔离铁律），空串/缺省=全租户。 */
-function tenantOf(raw: unknown): string | null {
+export function tenantOf(raw: unknown): string | null {
   const v = typeof raw === 'string' ? raw.trim() : '';
   return v ? v : null;
 }
@@ -98,7 +98,7 @@ function countList(rows: { key: string | null; count: number }[]): AdminReferral
  * findUnique 的代价换掉一个「配置像是没生效」的误判，值得。
  * **读失败照抛**：让页面显示「加载失败」，不要用兜底默认值算出一份看着正常的名单。
  */
-async function riskThreshold(): Promise<{ threshold: number; configured: boolean }> {
+export async function riskThreshold(): Promise<{ threshold: number; configured: boolean }> {
   const raw = (await featureFlagPayload(REFERRAL_RISK_FLAG, { fresh: true })) as Record<string, unknown> | null;
   const n = Number(raw?.[REFERRAL_RISK_PAYLOAD_KEY]);
   const ok = Number.isFinite(n) && n >= REFERRAL_RISK_MIN && n <= REFERRAL_RISK_MAX;
@@ -260,9 +260,126 @@ async function tenantOptions(): Promise<AdminReferralTenantOption[]> {
  * 判定表达式与 planGate 逐字相同、时钟同样走 clock.now()（沙箱 x-test-now 快进后，
  * 这里的「已开通」和套餐页、和 referralSummary 的 activatedCount 必须是同一个答案）。
  */
-function planStatus(u: { planId: string | null; planExpiresAt: Date | null } | undefined, at: Date): 'activated' | 'registered' {
+export function planStatus(u: { planId: string | null; planExpiresAt: Date | null } | undefined | null, at: Date): 'activated' | 'registered' {
   if (!u?.planId) return 'registered';
   return isExpired(u.planExpiresAt, at) ? 'registered' : 'activated';
+}
+
+/**
+ * 邀请边的全局计数：邀请人总数 / 边总数 / 每人的直邀数。
+ *
+ * 一次 `groupBy(lv1)` 同时供三处用：树的根排序、节点大小编码（任意深度都准——深度 3 的节点
+ * 自己的下级不在子树查询结果里，但它的直邀数在这张表里，所以树末端不会谎报成 0）、以及
+ * `/admin/invites/chain/:userId` 的下钻子树。**抽出来是为了两处共用同一份口径**。
+ */
+export async function referralEdgeStats(tenantId: string | null): Promise<{
+  directCountOf: Map<string, number>;
+  byInviter: { lv1: string; count: number }[];
+  inviterTotal: number;
+  edgeTotal: number;
+}> {
+  const rows = await prisma.referral.groupBy({
+    by: ['lv1'], where: tenantId ? { tenantId } : {}, _count: { _all: true },
+  });
+  const byInviter = rows.map((r) => ({ lv1: r.lv1, count: r._count._all }));
+  return {
+    directCountOf: new Map(byInviter.map((r) => [r.lv1, r.count])),
+    byInviter,
+    inviterTotal: byInviter.length,
+    edgeTotal: byInviter.reduce((a, r) => a + r.count, 0),
+  };
+}
+
+/**
+ * 三级子树构建：给定若干根，回 `AdminReferralTreeNode` 数组。
+ *
+ * **`/admin/referral/tree` 与 `/admin/invites/chain/:userId` 的 downline 共用这一份**（规划 §3.2）。
+ * 分开各写一份的代价不是重复代码，而是两块屏对同一个人给出两种口径：一边算三级、一边算四级，
+ * 一边红环按风控页的窗口、一边写死 30 天，一边掩码手机号、一边忘了掩——运营点着一个节点
+ * 在另一屏找不到同一个人，就再也不会信这两块屏。
+ *
+ * 两个刻意的口径（与端点注释同源，别在调用方另行发明）：
+ *   · **取数无时间窗**：邀请关系是永久的，`days` 在这里只喂给风控红环判定，不筛关系边；
+ *   · **红环 = 风控页本次会返回的那批组**：`threshold` 由调用方用 `riskThreshold()` 取，
+ *     `riskDays` 由调用方原样传下来，同一个 `riskGroups()` 解析，两屏恒等。
+ */
+export async function buildReferralSubtrees(args: {
+  rootIds: string[];
+  tenantId: string | null;
+  /** 只管红环判定窗口，不筛关系边 */
+  riskDays: number;
+  /** 由调用方 `riskThreshold()` 取，与风控屏同一个值 */
+  threshold: number;
+  directCountOf: Map<string, number>;
+  at: Date;
+}): Promise<{ roots: AdminReferralTreeNode[]; truncated: boolean }> {
+  const { rootIds, tenantId, riskDays, threshold, directCountOf, at } = args;
+  if (rootIds.length === 0) return { roots: [], truncated: false };
+  const edgeScope: Prisma.ReferralWhereInput = tenantId ? { tenantId } : {};
+  const riskAt = riskWindow(riskDays, tenantId);
+
+  // 多取一条只为判断「是不是还有」：`>= TREE_ROW_CAP` 会把「刚好完整的 3000 条」误报成已截断，
+  // 让运营去缩小一个本来就不需要缩小的范围（并怀疑这棵树不全）。
+  const [fetched, riskAgg] = await Promise.all([
+    prisma.referral.findMany({
+      where: {
+        ...edgeScope,
+        OR: [{ lv1: { in: rootIds } }, { lv2: { in: rootIds } }, { lv3: { in: rootIds } }],
+      },
+      select: { userId: true, referrerId: true, boundAt: true, source: true },
+      orderBy: { boundAt: 'asc' },
+      take: TREE_ROW_CAP + 1,
+    }),
+    riskGroups(riskAt.sql, threshold),
+  ]);
+  const truncated = fetched.length > TREE_ROW_CAP;
+  const rows = truncated ? fetched.slice(0, TREE_ROW_CAP) : fetched;
+
+  const ids = [...new Set([...rootIds, ...rows.map((r) => r.userId)])];
+  const flaggedIps = riskAgg.groups.map((g) => g.clientIp);
+  // 「这些树节点里，哪些落在被报出的 IP 上」：结果集被 ids 限住（≤ 边数上限），有界。
+  const [users, flaggedRows] = await Promise.all([
+    prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, phone: true, planId: true, planExpiresAt: true },
+    }),
+    flaggedIps.length === 0 ? Promise.resolve([]) : prisma.referralAttribution.groupBy({
+      by: ['newUserId'],
+      where: { ...riskAt.where, clientIp: { in: flaggedIps }, newUserId: { in: ids } },
+    }),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const flagged = new Set(flaggedRows.map((r) => r.newUserId).filter((v): v is string => !!v));
+
+  const childrenOf = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const list = childrenOf.get(r.referrerId);
+    if (list) list.push(r);
+    else childrenOf.set(r.referrerId, [r]);
+  }
+
+  const node = (userId: string, depth: number, edge: { boundAt: Date; source: string } | null): AdminReferralTreeNode => {
+    const u = userById.get(userId);
+    const kids = depth >= 3 ? [] : (childrenOf.get(userId) ?? [])
+      .map((c) => node(c.userId, depth + 1, { boundAt: c.boundAt, source: c.source }))
+      .sort((a, b) => b.directCount - a.directCount || a.userId.localeCompare(b.userId));
+    return {
+      userId,
+      name: u?.name ?? null,
+      // 掩码：树节点身上同时挂着风控红环（IP 聚集的结论），完整号码在这里没有额外用途
+      // ——它只是姓名缺失时的备用标签，138****1234 足够认人。
+      phone: maskAuditPhone(u?.phone),
+      directCount: directCountOf.get(userId) ?? 0,
+      status: planStatus(u, at),
+      risk: flagged.has(userId),
+      depth,
+      boundAt: edge ? edge.boundAt.toISOString() : null,
+      source: edge ? edge.source : null,
+      children: kids,
+    };
+  };
+
+  return { roots: rootIds.map((id) => node(id, 0, null)), truncated };
 }
 
 export async function adminReferralRoutes(app: FastifyInstance) {
@@ -333,104 +450,37 @@ export async function adminReferralRoutes(app: FastifyInstance) {
     const rootLimit = Math.min(60, Math.max(1, Number(req.query.roots) || 12));
     // 与 /risk 同一把 clampDays（同一个默认值 30、同一个 1~365 夹取），两端不会各写一遍后漂移。
     const riskDays = clampDays(req.query.days);
-    const edgeScope: Prisma.ReferralWhereInput = tenantId ? { tenantId } : {};
     const at = now();
 
     // 一次 groupBy 同时拿到三样东西：邀请人总数、每人的直邀数（= 节点大小编码，任意深度都准）、
     // 以及排序用的权重。深度 3 的节点自己的下级不在本次 OR 的结果里，但它的直邀数在这张表里，
     // 所以树末端不会谎报成 0（前端据此提示「下级已超出三级视野」）。
-    const riskAt = riskWindow(riskDays, tenantId);
-    const [byInviter, { threshold }] = await Promise.all([
-      prisma.referral.groupBy({ by: ['lv1'], where: edgeScope, _count: { _all: true } }),
+    // 这两步与子树构建都已抽成可导出的函数，`/admin/invites/chain/:userId` 的 downline
+    // 共用同一份（口径同源的理由见 buildReferralSubtrees 的注释）。
+    const [{ byInviter, directCountOf, inviterTotal, edgeTotal }, { threshold }] = await Promise.all([
+      referralEdgeStats(tenantId),
       riskThreshold(),
     ]);
-    const directCountOf = new Map(byInviter.map((r) => [r.lv1, r._count._all]));
-    const inviterTotal = byInviter.length;
-    const edgeTotal = byInviter.reduce((a, r) => a + r._count._all, 0);
 
     // 根 = 直邀人数最多的前 N 个邀请人。他们自己可能也是别人的下级——这是**投影不是全景**，
     // 排序稳定（数量降序、id 升序兜平），保证同一份数据每次打开的布局一致（可预测布局）。
     const rootIds = [...byInviter]
-      .sort((a, b) => b._count._all - a._count._all || a.lv1.localeCompare(b.lv1))
+      .sort((a, b) => b.count - a.count || a.lv1.localeCompare(b.lv1))
       .slice(0, rootLimit)
       .map((r) => r.lv1);
 
-    if (rootIds.length === 0) {
-      return {
-        tenantId, rootLimit, inviterTotal, edgeTotal,
-        riskWindowDays: riskDays, truncated: false, roots: [],
-      };
-    }
-
-    // 多取一条只为判断「是不是还有」：`>= TREE_ROW_CAP` 会把「刚好完整的 3000 条」误报成已截断，
-    // 让运营去缩小一个本来就不需要缩小的范围（并怀疑这棵树不全）。
-    const [fetched, riskAgg] = await Promise.all([
-      prisma.referral.findMany({
-        where: {
-          ...edgeScope,
-          OR: [{ lv1: { in: rootIds } }, { lv2: { in: rootIds } }, { lv3: { in: rootIds } }],
-        },
-        select: { userId: true, referrerId: true, boundAt: true, source: true },
-        orderBy: { boundAt: 'asc' },
-        take: TREE_ROW_CAP + 1,
-      }),
-      // 风控标记与二部图同源：着色依据的就是 /risk **本次会返回的那批组**——同一个函数、
-      // 同一个阈值、同一份截断，且**同一个 days**（由请求带下来，不再各自写死）。
-      // 少任何一项都会出现「树上标红、二部图里查不到那个 IP」的鬼故事：
-      // 旧代码先是拿全量组着色只返回前 40 组，改完之后又剩下窗口写死 30 天这一项。
-      riskGroups(riskAt.sql, threshold),
-    ]);
-    const truncated = fetched.length > TREE_ROW_CAP;
-    const rows = truncated ? fetched.slice(0, TREE_ROW_CAP) : fetched;
-
-    const ids = [...new Set([...rootIds, ...rows.map((r) => r.userId)])];
-    const flaggedIps = riskAgg.groups.map((g) => g.clientIp);
-    // 「这些树节点里，哪些落在被报出的 IP 上」：结果集被 ids 限住（≤ 边数上限），有界。
-    const [users, flaggedRows] = await Promise.all([
-      prisma.user.findMany({
-        where: { id: { in: ids } },
-        select: { id: true, name: true, phone: true, planId: true, planExpiresAt: true },
-      }),
-      flaggedIps.length === 0 ? Promise.resolve([]) : prisma.referralAttribution.groupBy({
-        by: ['newUserId'],
-        where: { ...riskAt.where, clientIp: { in: flaggedIps }, newUserId: { in: ids } },
-      }),
-    ]);
-    const userById = new Map(users.map((u) => [u.id, u]));
-    const flagged = new Set(flaggedRows.map((r) => r.newUserId).filter((v): v is string => !!v));
-
-    const childrenOf = new Map<string, typeof rows>();
-    for (const r of rows) {
-      const list = childrenOf.get(r.referrerId);
-      if (list) list.push(r);
-      else childrenOf.set(r.referrerId, [r]);
-    }
-
-    const node = (userId: string, depth: number, edge: { boundAt: Date; source: string } | null): AdminReferralTreeNode => {
-      const u = userById.get(userId);
-      const kids = depth >= 3 ? [] : (childrenOf.get(userId) ?? [])
-        .map((c) => node(c.userId, depth + 1, { boundAt: c.boundAt, source: c.source }))
-        .sort((a, b) => b.directCount - a.directCount || a.userId.localeCompare(b.userId));
-      return {
-        userId,
-        name: u?.name ?? null,
-        // 掩码：树节点身上同时挂着风控红环（IP 聚集的结论），完整号码在这里没有额外用途
-        // ——它只是姓名缺失时的备用标签，138****1234 足够认人。
-        phone: maskAuditPhone(u?.phone),
-        directCount: directCountOf.get(userId) ?? 0,
-        status: planStatus(u, at),
-        risk: flagged.has(userId),
-        depth,
-        boundAt: edge ? edge.boundAt.toISOString() : null,
-        source: edge ? edge.source : null,
-        children: kids,
-      };
-    };
+    // 风控标记与二部图同源：着色依据的就是 /risk **本次会返回的那批组**——同一个函数、
+    // 同一个阈值、同一份截断，且**同一个 days**（由请求带下来，不再各自写死）。
+    // 少任何一项都会出现「树上标红、二部图里查不到那个 IP」的鬼故事：
+    // 旧代码先是拿全量组着色只返回前 40 组，改完之后又剩下窗口写死 30 天这一项。
+    const { roots, truncated } = await buildReferralSubtrees({
+      rootIds, tenantId, riskDays, threshold, directCountOf, at,
+    });
 
     return {
       tenantId, rootLimit, inviterTotal, edgeTotal, truncated,
       riskWindowDays: riskDays,
-      roots: rootIds.map((id) => node(id, 0, null)),
+      roots,
     };
   });
 

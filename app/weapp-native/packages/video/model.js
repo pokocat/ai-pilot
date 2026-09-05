@@ -356,7 +356,7 @@ function estimateCredits(segments, shots) {
   return {
     items: [
       { key: 'tts', label: `口播配音 ${formatDuration(sum.totalSec - sum.tailSec)}`, credits: tts },
-      { key: 'avatar', label: `分身出镜 ${sum.avatarSec} 秒`, credits: avatar },
+      { key: 'avatar', label: `数字人出镜 ${sum.avatarSec} 秒`, credits: avatar },
       { key: 'broll', label: `画面合成 ${sum.brollCount} 段`, credits: 0, freeText: '免费' },
       { key: 'tail', label: '结尾固定段', credits: 0, freeText: '免费' },
     ].concat(assemble > 0 ? [{ key: 'assemble', label: '总装', credits: assemble }] : []),
@@ -378,7 +378,7 @@ function toggleShotRole(segments, shots, id) {
     const rendered = materializeShots(segments, [current])[0];
     const sec = segmentSeconds(rendered);
     if (sec > MAX_AVATAR_SEGMENT_SEC) {
-      return { shots: list, delta: 0, error: `这段约 ${sec} 秒，超过单次分身出镜上限；请先拆开。` };
+      return { shots: list, delta: 0, error: `这段约 ${sec} 秒，超过单次数字人出镜上限；请先拆开。` };
     }
   }
   list[index] = Object.assign({}, current, {
@@ -511,7 +511,7 @@ function mergeAdjacentShots(segments, shots, id, keepAssetFrom) {
     hint: [target.hint, following.hint].filter(Boolean).join(' · ') || null,
   };
   if (role === ROLE.AVATAR && segmentSeconds(materializeShots(source, [merged])[0]) > MAX_AVATAR_SEGMENT_SEC) {
-    return { shots: current, error: '合并后超过单次分身出镜上限，请保持分段。' };
+    return { shots: current, error: '合并后超过单次数字人出镜上限，请保持分段。' };
   }
   return {
     shots: current.slice(0, index).concat([merged], current.slice(index + 2)),
@@ -539,7 +539,7 @@ function toggleRole(segments, no) {
   if (nextRole === ROLE.AVATAR) {
     const sec = segmentSeconds(current);
     if (sec > MAX_AVATAR_SEGMENT_SEC) {
-      return { segments: list, delta: 0, error: `这句太长了（约 ${sec} 秒），拆成两句再让分身出镜。` };
+      return { segments: list, delta: 0, error: `这句太长了（约 ${sec} 秒），拆成两句再让数字人出镜。` };
     }
   }
 
@@ -749,14 +749,14 @@ function preflight(project, avatar) {
   }
   const hasSpeech = rendered.some((s) => s.role !== ROLE.TAIL);
   if (hasSpeech && (!avatar || avatar.voiceStatus !== 'ready')) {
-    problems.push({ code: 'CLIP_VOICE_NOT_READY', message: '视频原声暂不可用，请在分身管理中补录一段专属声音。' });
+    problems.push({ code: 'CLIP_VOICE_NOT_READY', message: '视频原声暂不可用，请在数字人管理中补录一段专属声音。' });
   }
 
   const tooLong = rendered.filter((s) => s.role === ROLE.AVATAR && segmentSeconds(s) > MAX_AVATAR_SEGMENT_SEC);
   if (tooLong.length) {
     problems.push({
       code: 'CLIP_SEGMENT_TOO_LONG',
-      message: `${tooLong.map((s) => `第 ${s.startNo}${s.endNo > s.startNo ? `–${s.endNo}` : ''} 句`).join('、')}作为出镜段太长，拆短一点。`,
+      message: `${tooLong.map((s) => `第 ${s.startNo}${s.endNo > s.startNo ? `–${s.endNo}` : ''} 句`).join('、')}作为数字人出镜段太长，拆短一点。`,
     });
   }
 
@@ -769,7 +769,7 @@ function preflight(project, avatar) {
 /** 出片进度的四个阶段（设计稿屏 08）。服务端 stage 字段直接映射到这里。 */
 const STAGES = [
   { key: 'tts', label: '用你的声线配音' },
-  { key: 'avatar', label: '分身出镜的段落' },
+  { key: 'avatar', label: '数字人出镜的段落' },
   { key: 'broll', label: '把你的画面接上去' },
   { key: 'assemble', label: '加字幕、出成片' },
 ];

@@ -310,7 +310,7 @@ Page({
 
   /* ── 底部 ─────────────────────────────────────────────────────────── */
   generate() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     this.pause();
     host.go(`confirm/index?projectId=${encodeURIComponent(this.data.projectId)}`);
   },

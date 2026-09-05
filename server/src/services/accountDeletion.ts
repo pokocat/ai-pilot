@@ -32,7 +32,16 @@ export const ACCOUNT_DELETION_POLICY = {
     'VideoCreditHold', 'VideoCloneHold', 'VideoStoragePack', 'ReportHtml',
   ],
   shared: ['Profile', 'GraphEntity', 'GraphRelation'],
-  retain: ['ClientEvent', 'PaymentOrder', 'SubscriptionContract', 'TokenUsage', 'LlmTrace', 'AuditLog', 'ModerationLog', 'Referral', 'ReferralAttribution', 'InviteActivationOutbox'],
+  retain: [
+    'ClientEvent', 'PaymentOrder', 'SubscriptionContract', 'TokenUsage', 'LlmTrace', 'AuditLog', 'ModerationLog',
+    'Referral', 'ReferralAttribution', 'InviteActivationOutbox',
+    // 代理分销（2026-09-02）：`Distributor` 是**签约档案**、`CommissionEntry` /
+    // `CommissionSettlement` 是**财务账本**——都属「到期后只留法务/财务所需的去标识记录」。
+    // 删行不行：一条已打款的结算单背后是真实的对外付款，账不能因为对方注销账号就消失；
+    // 佣金流水删了，上级代理的结算净额也跟着变。所以 purge 时只抹 Distributor 上的
+    // displayName / contactPhone / remark 三个 PII 字段（见 redactRetained），行与金额全留。
+    'Distributor', 'CommissionEntry', 'CommissionSettlement',
+  ],
   identity: ['User', 'Tenant'],
 } as const;
 
@@ -114,6 +123,14 @@ async function redactRetained(tx: Tx, userId: string, tenantId: string, deleteTe
   // 真正属个人数据的只有归因留痕里的 clientIp / userAgent（网络与设备标识），置 null 但不删行
   // ——与上面 clientEvent / auditLog 同一套「账本去标识保留」的口径。
   await scrubUserReferralPii(tx, userId);
+  // 代理档案：**保留行与佣金归属，只抹 PII**（同上面邀请关系那套「账本去标识保留」的口径）。
+  // 为什么不改 userId：`CommissionEntry.beneficiaryUserId` / `distributorId` 都指着它，改了就
+  // 再也说不清那些已结算的钱是给谁的；而档案上真正属个人数据的只有对外名称、联系手机与备注。
+  // 状态也不动——终止代理关系是商务动作，注销账号不代表合同已解除，不该由这里替运营决定。
+  await tx.distributor.updateMany({
+    where: { userId },
+    data: { displayName: null, contactPhone: null, remark: null },
+  });
   await tx.auditLog.updateMany({
     where: { userId },
     data: { userId: null, payloadJson: { retainedFor: 'security_audit', subjectHash: hash }, ...(deleteTenant ? { tenantId: null } : {}) },

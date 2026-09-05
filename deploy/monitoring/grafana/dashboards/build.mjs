@@ -412,9 +412,10 @@ const bizDash = dashboard({
     stat({ title: '今日产出(报告)', targets: [pgTarget(q(`SELECT count(*)::float AS value FROM llm_trace WHERE kind = 'deliverable' AND status = 'ok' AND "createdAt" >= date_trunc('day', now())`), 'A', 'table')] }),
     row('支付可靠性与创作质量'),
     stat({
-      title: '支付 sweep(15m)', targets: [promTarget('increase(junshi_pay_sweep_runs_total[15m])')],
-      steps: [[null, 'red'], [1, 'green']],
-      desc: 'API 运行超过 20 分钟且这里为 0，会触发 JunshiPaySweepStopped',
+      title: '支付对账距上次成功', unit: 's',
+      targets: [promTarget('time() - max(junshi_scheduler_job_health_anchor_timestamp_seconds{job="pay-reconcile-sweep"} and on(instance, job) junshi_scheduler_job_enabled == 1)')],
+      steps: [[null, 'green'], [900, 'yellow']],
+      desc: '超过 15 分钟且库里有待处理订单时触发支付告警；无订单时的调度异常由通用定时任务告警接管',
     }),
     stat({
       title: '创作失败率(1h)', unit: 'percentunit', decimals: 2,

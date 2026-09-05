@@ -44,12 +44,14 @@ function shouldUseMock() { return useMockApi(); }
 
 /**
  * 要求登录。未登录时由宿主弹登录浮层（分包不自带登录页 —— 设计稿屏 01 在分包形态下不存在）。
- * @param {string} reason 透传给 login-sheet 的场景码，影响文案
+ * @param {string} reason 透传给 login-sheet 的场景码，影响文案。
+ *   本分包默认 'video'：主包的 'execute' 那句是「登录后才能生成和跟进军令」，
+ *   「军令」是军师案卷模型的词，实体店主在「录一段声音」的意图下看到它只会以为点错了小程序。
  * @returns {boolean} 已登录返回 true；否则 false，调用方应立即 return
  */
 function requireLogin(page, reason) {
   if (isLoggedIn()) return true;
-  if (page && page.setData) page.setData({ showLogin: true, loginReason: reason || 'execute' });
+  if (page && page.setData) page.setData({ showLogin: true, loginReason: reason || 'video' });
   return false;
 }
 

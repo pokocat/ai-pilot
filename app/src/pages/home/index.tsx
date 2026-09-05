@@ -735,8 +735,8 @@ export default function Home() {
       <PaySheet
         open={payOpen}
         mode="member"
-        title="续费会员，继续出军令与方案"
-        desc="套餐已到期，续费后可继续一键生成军令与方案。"
+        title="套餐已到期"
+        desc="续费后，军师接着给你出军令和方案。"
         confirmText="去续费"
         onConfirm={() => setPayOpen(false)}
         onClose={() => setPayOpen(false)}
@@ -745,7 +745,7 @@ export default function Home() {
         open={exceptionOpen}
         kind="power"
         title="算力不足"
-        desc="本月额度已用尽，补充算力或升级套餐后再出军令与方案。"
+        desc="本月额度已用尽。补充算力或升级套餐，军师继续给你出军令和方案。"
         onPrimary={() => { setExceptionOpen(false); navTo('/packages/work/credits/index'); }}
         onClose={() => setExceptionOpen(false)}
       />

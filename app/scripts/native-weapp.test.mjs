@@ -3022,3 +3022,38 @@ test('showModal 按钮文案不得超 4 字：超了弹窗根本不出现，表�
   }
   assert.deepEqual(offenders, [], `showModal 按钮文案越界（弹窗会不显示）：\n${offenders.join('\n')}`);
 });
+
+test('tabBar 页的清理不能只写在 onUnload —— 切 tab 只触发 onHide', () => {
+  // 2026-08-28 真机事故：问策页把 chat-core 的全部拆解绑在 onUnload 上，
+  // 而 **tabBar 页切走只触发 onHide，不触发 onUnload**（页面被缓存）。
+  // 于是进过一次流式对话之后，那个每 180ms 一次的自动滚底 setInterval 再也停不下来，
+  // 来回切 tab 不断累积；开发者工具内存宽裕看不出来，真机上一路吃到被系统杀掉。
+  const root = path.join(appRoot, 'weapp-native');
+  const tabs = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'))
+    .tabBar.list.map((item) => item.pagePath);
+
+  for (const page of tabs) {
+    const file = path.join(root, `${page}.js`);
+    const source = fs.readFileSync(file, 'utf8');
+    const block = (name) => {
+      const m = source.match(new RegExp(`\\n  ${name}\\(\\)\\s*\\{([\\s\\S]*?)\\n  \\},`));
+      return m ? m[1] : '';
+    };
+    const onHide = block('onHide');
+    const onUnload = block('onUnload');
+    if (!onUnload.trim()) continue;
+
+    // onUnload 里每一处清理动作，onHide 要么也做、要么有等价收口。
+    // 白名单：navigateBack 后才需要的一次性归还（overlay 记账两边本来就都有）。
+    const cleanups = (onUnload.match(/(clear(?:Timeout|Interval)\(this\.\w+\)|this\.\w*[Uu]nload\(\)|this\.stop\w+\(\))/g) || []);
+    for (const call of cleanups) {
+      const kind = call.replace(/^this\./, '').replace(/\(.*$/, '');
+      const covered = onHide.includes(kind)
+        || onHide.includes(kind.replace(/Unload$/, 'Hide'))
+        || onHide.includes(kind.replace(/^clearTimeout|^clearInterval/, 'clear'));
+      assert.ok(covered,
+        `${page} 的 onUnload 里有 \`${call}\`，但 onHide 没有对应收口。\n`
+        + 'tabBar 页切走只触发 onHide —— 只写 onUnload 等于永远不清。');
+    }
+  }
+});
