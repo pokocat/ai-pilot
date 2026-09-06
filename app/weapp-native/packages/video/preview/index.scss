@@ -61,7 +61,7 @@
 .pv-segtx { display: block; font-size: 13px; line-height: 1.65; color: var(--vd-ink-2); margin-top: 9px; }
 .pv-seghint { margin-top: 8px; font-size: 11.5px; color: var(--vd-broll); }
 .pv-ops { display: flex; gap: 8px; margin-top: 11px; }
-.pv-op { flex: 1; height: 40px; border-radius: 12px; border: 1px solid var(--vd-line); background: var(--vd-bg); display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--vd-ink-2); }
+.pv-op { flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--vd-line); background: var(--vd-bg); display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--vd-ink-2); }
 .pv-op.primary { background: var(--vd-avatar-soft); border-color: var(--vd-avatar-line); color: var(--vd-avatar-deep); font-weight: 600; }
 .pv-locked { margin-top: 11px; height: 40px; border-radius: 12px; background: var(--vd-fixed-soft); color: var(--vd-fixed-ink); display: flex; align-items: center; justify-content: center; font-size: 12px; }
 

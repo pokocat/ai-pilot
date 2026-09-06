@@ -55,8 +55,8 @@ const CUSTOM_SHARE_ROUTES = new Set([
 
 const routes = allRoutes();
 
-test('原生小程序 app.json 声明的路由数量未变（55 个）——分享覆盖清单据此派生', () => {
-  assert.equal(routes.length, 55, '路由数量变化时，本文件的分享覆盖清单也要跟着复核');
+test('原生小程序 app.json 声明的路由数量未变（56 个）——分享覆盖清单据此派生', () => {
+  assert.equal(routes.length, 56, '路由数量变化时，本文件的分享覆盖清单也要跟着复核');
 });
 
 test('朋友圈白名单必须游客友好：onLoad 里不得对未登录用户直接弹登录弹层', () => {
@@ -115,7 +115,7 @@ test('每个页面只 require 一次 services/share，且真的引入了 withSha
   }
 });
 
-test('timeline 白名单精确：只有 3 个游客友好且无必填参数的页挂朋友圈，其余 51 个只挂转发', () => {
+test('timeline 白名单精确：只有 3 个游客友好且无必填参数的页挂朋友圈，其余 52 个只挂转发', () => {
   assert.equal(TIMELINE_ROUTES.size, 3);
   const wrongOn = [];
   const wrongOff = [];

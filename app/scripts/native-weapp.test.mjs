@@ -113,7 +113,7 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
   // 2026-08-13 成片封面：+1 = packages/video/cover（出片确认页的可选支线，填四个文本槽位）。
   // 2026-08-15 独立声音：+1 = packages/video/voices（我的声音列表页，声音可脱离形象单独存在）。
-  assert.equal(routes.length, 55, '路由数量变化时必须同步审计原生迁移覆盖');
+  assert.equal(routes.length, 56, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -908,7 +908,7 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
   // 独立执行页加入后全部复用同一套胶囊几何。
-  assert.equal(navRoots.length, 51);
+  assert.equal(navRoots.length, 52);   // +1：video 分包新增 preview（单轨时间线预览）
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {

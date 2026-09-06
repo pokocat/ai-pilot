@@ -22,6 +22,7 @@ const host = require('../host');
 const api = require('../api');
 const model = require('../model');
 const { ROLE } = model;
+const { withShare } = require('../../../services/share');
 
 const PPS = 4.2;                 // 时间线每秒像素。22 段 163 秒 ≈ 750px，横滑两屏多（设计稿口径）
 const CLIP_GAP = 3;              // 段与段的间隙 px
@@ -34,7 +35,7 @@ const CAPTION_MAX = 18;
 
 const ROLE_NAME = { avatar: '数字人出镜', broll: '配画面', tail: '固定片段' };
 
-Page({
+Page(withShare({
   data: {
     ...host.hostBaseData(),
     projectId: '',
@@ -385,7 +386,10 @@ Page({
     const c = this.data.cur; if (!c) return;
     const pid = encodeURIComponent(this.data.projectId);
     this.pause();
-    this.pendingReload = true;   // 这几个动作都会改项目，回来要重读
+    // 只有跳去别的页面改项目的动作才需要回来重读。
+    // 「换画面」不能置位：assignAsset 已经当场重建了，紧接着的 onShow 重读会发 GET，
+    // 而它自己的 PUT 未必落库 —— 新素材被旧 shots 覆盖，画面「自己弹回去」。
+    if (key !== 'asset') this.pendingReload = true;
     if (key === 'asset') host.go(`assets/index?pick=1&projectId=${pid}&shotId=${encodeURIComponent(c.shotId)}`);
     else if (key === 'text') host.go(`script/index?projectId=${pid}&no=${c.startNo || c.no}`);
     else if (key === 'avatar') host.go(`shots/index?projectId=${pid}&pickAvatar=1`);
@@ -393,7 +397,7 @@ Page({
 
   /* ── 底部 ─────────────────────────────────────────────────────────── */
   generate() {
-    if (!host.requireLogin(this, 'execute')) return;
+    if (!host.requireLogin(this, 'video')) return;
     this.pause();
     host.go(`confirm/index?projectId=${encodeURIComponent(this.data.projectId)}`);
   },
@@ -405,4 +409,4 @@ Page({
   back() { this.pause(); host.back(); },
   closeLogin() { this.setData({ showLogin: false }); }, loggedIn() { this.setData({ showLogin: false }); },
   swallow() {},
-});
+}));

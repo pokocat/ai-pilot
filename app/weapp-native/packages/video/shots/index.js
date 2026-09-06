@@ -44,6 +44,9 @@ Page(withShare({
     const projectId = String((options && options.projectId) || '');
     if (!projectId) { host.toast('打不开这个项目'); host.back(); return; }
     this.setData({ projectId });
+    // 预览页「换数字人」深链带 pickAvatar=1 过来。它只在 load 完成后才有意义
+    // （选择器要列 avatars），所以先记下，load 成功后消费一次。
+    this.pickAvatarOnLoad = String((options && options.pickAvatar) || '') === '1';
     this.saveTimer = null; this.flashTimer = null; this.load();
   },
 
@@ -91,6 +94,7 @@ Page(withShare({
         }
         host.writeDraft(this.data.projectId, { project: normalized, step: 2 });
         this.recompute();
+        if (this.pickAvatarOnLoad) { this.pickAvatarOnLoad = false; this.openAvatarPicker(); }
       })
       .catch((error) => {
         const draft = host.readDraft(this.data.projectId);

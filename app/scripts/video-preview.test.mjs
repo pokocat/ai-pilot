@@ -6,7 +6,11 @@
  */
 import { createRequire } from 'node:module';
 import Module from 'node:module';
-const PAGE = '/Users/donis/dev/ai-pilot-gate-a/app/weapp-native/packages/video/preview/index.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+/** 由脚本自身位置推出仓库路径。写死绝对路径的话，这份测试会去测别的工作区 —— 本仓库改坏了它照样绿。 */
+const V = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../weapp-native/packages/video');
+const PAGE = path.join(V, 'preview/index.js');
 
 let now = 0, seq = 0; const timers = new Map();
 global.setTimeout = (fn, ms) => { const id = ++seq; timers.set(id, { at: now + (ms || 0), fn, every: 0 }); return id; };
@@ -35,8 +39,8 @@ const pages = []; global.Page = (o) => pages.push(o);
 
 // 22 段 ct_shiti 真实段，配 3 个视频素材 + 数字人预览图，尾段固定
 const req = createRequire(import.meta.url);
-const model = req('/Users/donis/dev/ai-pilot-gate-a/app/weapp-native/packages/video/model.js');
-const catalog = req('/Users/donis/dev/ai-pilot-gate-a/app/weapp-native/packages/video/catalog.js');
+const model = req(path.join(V, 'model.js'));
+const catalog = req(path.join(V, 'catalog.js'));
 const seed = catalog.getBuiltInProjectSeed('ct_shiti');
 const segments = catalog.getBuiltInTemplate('ct_shiti').scriptSkeleton.segments;
 const shots = model.defaultShots(segments).map((s, i) => Object.assign({}, s, s.role === 'broll' ? { assetId: 'v' + (i % 3) } : {}));
@@ -54,7 +58,9 @@ req(PAGE);
 const page = pages[0];
 page.setData = function (patch, cb) { Object.assign(this.data, patch); if (cb) cb(); };
 
-const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ? '  ✓ ' : '  ✗ ') + m); };
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+const checks = []; const ok = (c, m) => { checks.push([!!c, m]); };
 
 page.onLoad({ projectId: 'p1' });
 await new Promise((r) => realDateNow && setImmediate(r)); await new Promise((r) => setImmediate(r));
@@ -92,4 +98,4 @@ ok(calls.some((c) => c[0] === 'go' && /assets\/index\?pick=1/.test(c[1])), '「�
 page.generate();
 ok(calls.some((c) => c[0] === 'go' && /confirm\/index/.test(c[1])), '「立即生成」跳确认扣费');
 
-console.log(fails.length ? `\n${fails.length} 项没过` : '\n全部通过'); process.exit(fails.length ? 1 : 0);
+for (const [passed, msg] of checks) test(msg, () => assert.ok(passed, msg));

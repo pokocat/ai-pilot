@@ -2,7 +2,10 @@
 /** 在开发者工具模拟器里把单轨时间线预览页跑一遍：读数据、播 6 秒、点段、截图。 */
 import { createRequire } from 'node:module';
 const req = createRequire(import.meta.url);
-const AUTO = '/Users/donis/dev/ai-pilot-gate-a/app/node_modules/miniprogram-automator/out/';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AUTO = path.join(REPO, 'app/node_modules/miniprogram-automator/out/');
 const automator = req(AUTO + 'index.js');
 req(AUTO + 'MiniProgram.js').default.prototype.checkVersion = async function () {};
 const PID = process.env.PID || 'cp_mock';

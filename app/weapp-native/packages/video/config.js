@@ -1,7 +1,7 @@
 // 「快出片」分包配置 —— 后端接入模式在这里收口。
 //
 // 分包只访问军师自己的 BFF；BFF 再用独立 service token + externalOwnerId 调 aidrama。
-// 军师用户 token 绝不下发到 aidrama，也不在端上维护第二套钻石账本。
+// 军师用户 token 绝不下发到 aidrama，也不在端上维护第二套余额账本。
 //
 //   'mock'   端内假数据，不发网络请求。本机构建默认使用。
 //   'bff'    打军师后端 /api/video/*，由军师 server 内部转 aidrama。推荐的生产形态。

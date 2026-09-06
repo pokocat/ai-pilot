@@ -76,5 +76,5 @@
     <view class="vd-btn pv-cta" bindtap="generate">立即生成</view>
   </view>
 
-  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>
