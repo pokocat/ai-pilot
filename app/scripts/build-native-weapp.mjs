@@ -289,10 +289,16 @@ function validate(sourceFiles) {
   // 混着 19 处「积分」—— 同一个 app 两种说法，用户第一反应是这俩不是一回事。
   // 独立产品方案 §1333 也写死了「用户侧一律用『钻石』，文档和界面不得混用」。
   // 只查 wxml：注释里提到积分账本这类内部表述不算违规。
-  for (const file of walk(OUTPUT_ROOT).filter((f) => f.endsWith('.wxml'))) {
-    if (fs.readFileSync(file, 'utf8').includes('积分')) {
-      throw new Error(`界面不得出现「积分」，用户侧计价单位一律是「钻石」：${path.relative(OUTPUT_ROOT, file)}`);
+  // wxml 全查；js 只查字符串字面量 —— 注释里提到「积分账本」这类内部表述不算违规，
+  // 但 toast / modal / 模板串里的「积分」必须拦住（只查 wxml 的话它们漏得过去）。
+  for (const file of walk(OUTPUT_ROOT).filter((f) => f.endsWith('.wxml') || f.endsWith('.js'))) {
+    let text = fs.readFileSync(file, 'utf8');
+    if (!text.includes('积分')) continue;
+    if (file.endsWith('.js')) {
+      text = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+      if (!text.includes('积分')) continue;
     }
+    throw new Error(`界面不得出现「积分」，用户侧计价单位一律是「钻石」：${path.relative(OUTPUT_ROOT, file)}`);
   }
 
   const appJson = JSON.parse(fs.readFileSync(path.join(OUTPUT_ROOT, 'app.json'), 'utf8'));

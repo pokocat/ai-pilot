@@ -14,10 +14,10 @@
     <!-- 播放器：双 video 叠放 + 图片层 + 空白层，靠 on 切显示层 -->
     <view class="pv-stage">
       <view class="pv-player" bindtap="togglePlay">
-        <video id="pv-a" data-key="a" class="pv-layer {{layer === 'a' ? 'on' : ''}}" src="{{srcA}}" muted="{{true}}" object-fit="cover"
+        <video id="pv-a" data-key="a" class="pv-layer {{layer === 'a' ? 'on' : ''}}" src="{{srcA}}" muted="{{true}}" loop object-fit="cover"
           controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}" show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
           bindtimeupdate="onVideoTime" binderror="onVideoError"></video>
-        <video id="pv-b" data-key="b" class="pv-layer {{layer === 'b' ? 'on' : ''}}" src="{{srcB}}" muted="{{true}}" object-fit="cover"
+        <video id="pv-b" data-key="b" class="pv-layer {{layer === 'b' ? 'on' : ''}}" src="{{srcB}}" muted="{{true}}" loop object-fit="cover"
           controls="{{false}}" show-center-play-btn="{{false}}" show-play-btn="{{false}}" show-fullscreen-btn="{{false}}" enable-progress-gesture="{{false}}"
           bindtimeupdate="onVideoTime" binderror="onVideoError"></video>
         <image wx:if="{{layer === 'img'}}" class="pv-layer on" src="{{imgSrc}}" mode="aspectFill"></image>

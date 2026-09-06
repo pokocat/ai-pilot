@@ -71,7 +71,7 @@ Page(withShare({
         this.setData({ loading: false, project: normalized, chatMessages: normalized.scriptChat });
         host.writeDraft(this.data.projectId, { project: normalized, step: 1 });
         this.recompute(normalized.segments);
-        if (this.openNo) { const no = this.openNo; this.openNo = 0; this.startEdit({ currentTarget: { dataset: { no } } }); }
+        this.consumeOpenNo();
       })
       .catch((error) => {
         const draft = host.readDraft(this.data.projectId);
@@ -82,12 +82,20 @@ Page(withShare({
           });
           this.setData({ loading: false, project: normalized, chatMessages: normalized.scriptChat });
           this.recompute(draft.project.segments);
+          this.consumeOpenNo();   // 草稿这条路也得展开目标段，否则弱网下点「改文案」进来什么也没发生
           host.toast('网络不稳，已打开本地草稿');
           return;
         }
         this.setData({ loading: false });
         host.toast(error && error.message ? error.message : '打开失败');
       });
+  },
+
+  /** 深链带来的 no 只消费一次：两条成功分支（服务端 / 本地草稿）都会调，用完清零。 */
+  consumeOpenNo() {
+    const no = this.openNo; if (!no) return;
+    this.openNo = 0;
+    this.startEdit({ currentTarget: { dataset: { no } } });
   },
 
   recompute(segments) {
