@@ -48,7 +48,7 @@ Page(withShare({
     return Object.assign({}, item, {
       durationText: formatDuration(item.estDurationSec),
       avatarText: `${item.avatarSecHint || 0} 秒`,
-      creditText: `${item.creditHint || 0} 积分`,
+      creditText: `${item.creditHint || 0} 钻石`,
     });
   },
 

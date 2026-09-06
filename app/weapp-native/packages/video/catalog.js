@@ -71,7 +71,7 @@ function templateMeta(template) {
   const result = clone(template);
   result.scriptSkeleton = { segments: clone(result.segments), variables: Object.keys(result.variables || {}).map((key) => ({ key, placeholder: result.variables[key] })) };
 
-  // 时长 / 出镜秒数 / 预计积分**全部从 segments 推导**，不用手写常量。
+  // 时长 / 出镜秒数 / 预计钻石**全部从 segments 推导**，不用手写常量。
   // 起因：这三个数原先是各写各的 —— estDurationSec 早就改成算出来的（84 秒），
   // avatarSecHint=38、creditHint=68 却还是设计稿 2:42 版本的残留，
   // 于是首页主卡出现「成片 1:24，其中出镜 38 秒」这种自相矛盾的三件套。

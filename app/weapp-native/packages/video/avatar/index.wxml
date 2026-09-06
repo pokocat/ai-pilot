@@ -80,7 +80,7 @@
           <view class="av-row" bindtap="openVoices"><text class="ar-t">我的声音</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openConsentLog"><text class="ar-t">授权记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openUsageLog"><text class="ar-t">使用记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
-          <view class="av-row" bindtap="openCredits"><text class="ar-t">我的积分与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="av-row" bindtap="openCredits"><text class="ar-t">我的钻石与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
         </view>
 
       </block>

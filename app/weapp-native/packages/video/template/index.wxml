@@ -58,7 +58,7 @@
         </view>
 
         <view class="tp-price vd-card">
-          <view><text class="tpp-label">本模板预估</text><view class="tpp-main"><text class="num">{{template.creditHint}}</text><text class="unit">积分起</text></view></view>
+          <view><text class="tpp-label">本模板预估</text><view class="tpp-main"><text class="num">{{template.creditHint}}</text><text class="unit">钻石起</text></view></view>
           <view class="tpp-side"><text class="tpp-value">{{durationText}}</text><text class="tpp-sub">预计成片 · {{template.segmentCount}} 个片段</text></view>
         </view>
       </block>

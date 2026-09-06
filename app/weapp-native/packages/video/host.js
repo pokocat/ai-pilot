@@ -33,7 +33,7 @@ function navMetrics() { return capsuleMetrics(); }
  */
 function isLoggedIn() { return Boolean(getToken()); }
 
-/** 取当前用户快照（昵称/积分等）。未登录返回 null。 */
+/** 取当前用户快照（昵称/钻石等）。未登录返回 null。 */
 function currentUser() {
   const snapshot = store.snapshot();
   return snapshot && snapshot.me ? snapshot.me : null;

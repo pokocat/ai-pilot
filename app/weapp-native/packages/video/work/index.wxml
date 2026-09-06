@@ -54,7 +54,7 @@
                    done 但没地址 —— 片子已经出好了，是这会儿取不到播放地址；
                                     再说「还没有准备好」就和上面的「生成完成」自相矛盾。
                    还在生成      —— 那才是真的还没准备好。
-                 不在这里对积分下结论：详情接口只透传作品、不做结算
+                 不在这里对钻石下结论：详情接口只透传作品、不做结算
                  （server/src/routes/video.ts），结算发生在任务轮询那条路径上。 -->
             <view wx:else class="inner vd-grain wd-pending">
               <text class="wd-pending-t">{{done ? '暂时放不出来' : '还没出好'}}</text>
@@ -72,7 +72,7 @@
         <text wx:if="{{done}}" class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 数字人出镜 {{work.avatarSec}} 秒</text>
         <text wx:else class="wd-meta">{{durationText}} · 竖屏 · 数字人出镜 {{work.avatarSec}} 秒</text>
         <!-- 只有完成态才敢说「已扣」：没出好的单子扣费可能还没结算。 -->
-        <text wx:if="{{done && work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
+        <text wx:if="{{done && work.credits}}" class="wd-credits">已扣 {{work.credits}} 钻石</text>
 
         <!-- 封面：单独给出来，并说清它到底管什么。
              不这么做的话，用户设了封面、发到平台却看不到，只会以为封面没生效。 -->

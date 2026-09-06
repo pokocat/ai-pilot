@@ -521,7 +521,7 @@ function mergeAdjacentShots(segments, shots, id, keepAssetFrom) {
 
 /**
  * 切换一段的角色，返回 { segments, delta, error }。
- * delta 是积分变化量 —— 设计稿屏 06 顶部要显示「+8 刚把第 9 句改成分身出镜」。
+ * delta 是钻石变化量 —— 设计稿屏 06 顶部要显示「+8 刚把第 9 句改成分身出镜」。
  */
 function toggleRole(segments, no) {
   const list = (Array.isArray(segments) ? segments : []).slice();

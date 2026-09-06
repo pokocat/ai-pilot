@@ -109,7 +109,7 @@ Page(withShare({
 
         if (job.status === 'failed') {
           this.stopPolling();
-          this.setData({ failed: true, errorMessage: job.errorMessage || '出片失败，积分已退回。' });
+          this.setData({ failed: true, errorMessage: job.errorMessage || '出片失败，钻石已退回。' });
         }
       })
       .catch(() => {

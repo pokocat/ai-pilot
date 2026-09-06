@@ -76,7 +76,7 @@
           </view>
         </view>
 
-        <!-- 积分明细 -->
+        <!-- 钻石明细 -->
         <view wx:if="{{estimate}}" class="cf-bill vd-card">
           <text class="cb-kicker">费用明细</text>
           <text class="cb-title">只按实际生成的内容计费</text>
@@ -86,7 +86,7 @@
           </view>
           <view class="cb-total">
             <text class="cb-k">合计</text>
-            <view class="cb-total-v"><text class="num">{{estimate.total}}</text><text class="unit">积分</text></view>
+            <view class="cb-total-v"><text class="num">{{estimate.total}}</text><text class="unit">钻石</text></view>
           </view>
           <view wx:if="{{balance !== null}}" class="cb-balance">
             <text>当前余额 {{balance}}</text>
@@ -114,7 +114,7 @@
       class="vd-btn {{(loading || !quoteReady || problems.length || submitting || watermarkSaving) ? 'disabled' : ''}}"
       style="flex:1"
       bindtap="submit"
-    >{{loading || !quoteReady ? '正在核算价格…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分'))}}</view>
+    >{{loading || !quoteReady ? '正在核算价格…' : (watermarkSaving ? '正在保存设置…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 钻石'))}}</view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="video" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

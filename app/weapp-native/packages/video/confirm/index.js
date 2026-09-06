@@ -156,8 +156,8 @@ Page(withShare({
     const total = this.data.estimate ? this.data.estimate.total : 0;
     if (this.data.afterBalance != null && this.data.afterBalance < 0) {
       host.confirm({
-        title: '积分不够',
-        content: `这条片子需要 ${total} 积分，你还有 ${this.data.balance}。去充值吗？`,
+        title: '钻石不够',
+        content: `这条片子需要 ${total} 钻石，你还有 ${this.data.balance}。去充值吗？`,
         confirmText: '去充值',
       }).then((ok) => { if (ok) host.goHost('/packages/work/credits/index'); });
       return;

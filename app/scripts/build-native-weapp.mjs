@@ -285,6 +285,16 @@ function validate(sourceFiles) {
       if (!fs.existsSync(file)) throw new Error(`原生页面源码缺失：${path.relative(SOURCE_ROOT, file)}`);
     }
   }
+  // 计价单位：全站用户侧一律「钻石」。军师主包 30 处全是钻石，而 video 分包一度
+  // 混着 19 处「积分」—— 同一个 app 两种说法，用户第一反应是这俩不是一回事。
+  // 独立产品方案 §1333 也写死了「用户侧一律用『钻石』，文档和界面不得混用」。
+  // 只查 wxml：注释里提到积分账本这类内部表述不算违规。
+  for (const file of walk(OUTPUT_ROOT).filter((f) => f.endsWith('.wxml'))) {
+    if (fs.readFileSync(file, 'utf8').includes('积分')) {
+      throw new Error(`界面不得出现「积分」，用户侧计价单位一律是「钻石」：${path.relative(OUTPUT_ROOT, file)}`);
+    }
+  }
+
   const appJson = JSON.parse(fs.readFileSync(path.join(OUTPUT_ROOT, 'app.json'), 'utf8'));
   if (appJson.lazyCodeLoading !== 'requiredComponents') throw new Error('app.json 缺少 lazyCodeLoading=requiredComponents');
   const pages = [...(appJson.pages || [])];

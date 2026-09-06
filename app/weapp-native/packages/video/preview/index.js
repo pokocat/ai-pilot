@@ -5,10 +5,12 @@
  * 点哪段看哪段、按角色给出能做的事。客户原话是「合成前那个预览可以浏览整体流线，
  * 但没法预览成片效果」，这一屏就是冲着那句话做的。
  *
- * 播放引擎沿用闸门 A 验证页（gatea/index.js）跑通的那套，两条原则不变：
+ * 播放引擎沿用闸门 A 验证页跑通的那套（该验证页只在独立仓库 ai-quickreel 里，
+ * 是测试页不随军师发版），两条原则不变：
  *   1) 一条连续音轨当主时钟，画面位置每一拍从音轨时间重新推导，漂移不累积；
  *   2) 双 video 交替缓冲，切段只换显示层不等解码。
- * 段内不做 seek 回拉（会锁死播放，见 gatea 的教训），只在切段那一下对齐。
+ * 段内不做 seek 回拉（会锁死播放：回拉判断用的是 250ms 才更新一次的旧读数，
+ * 而循环 100ms 一拍，于是每拍都重新 seek，视频永远攒不出播放时间），只在切段那一下对齐。
  *
  * 现状限制（写在这儿免得以后有人以为是忘了）：
  *   - 项目数据里**还没有配音（TTS）地址**，服务端没这个接口。没有音轨时退成内部计时器
@@ -136,7 +138,7 @@ Page({
       total, totalText: model.formatDuration(total), halfText: model.formatDuration(total / 2),
       hasAudio: !!this.audioUrl,
       footA: `已就绪 ${ready} 秒 · 待生成 ${sum.avatarSec} 秒 · 共 ${model.formatDuration(total)}`,
-      footB: `数字人出镜 ${sum.avatarCount} 段共 ${sum.avatarSec} 秒待生成，其余用你的素材，免费；本条共计 ${model.formatCredits ? model.formatCredits(estimate.total) : estimate.total + ' 积分'}`,
+      footB: `数字人出镜 ${sum.avatarCount} 段共 ${sum.avatarSec} 秒待生成，其余用你的素材，免费；本条共计 ${model.formatCredits ? model.formatCredits(estimate.total) : estimate.total + ' 钻石'}`,
     });
     this.showClip(0, 0);
   },
