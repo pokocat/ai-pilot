@@ -1,6 +1,6 @@
 # 军师 · 产品说明
 
-本文承接 `AGENTS.md` 中不必每次塞给 coding agent 的产品背景。工程约束、接口、构建、TODO 与变更日志仍以 `AGENTS.md` 为准。
+本文承接 `AGENTS.md` 中不必每次塞给 coding agent 的产品背景。工程约束、接口、构建、TODO 与变更日志仍以 `AGENTS.md`（规则与索引）+ `docs/agents/` 分册（各章完整正文）为准。
 
 ## 1. 产品定位
 

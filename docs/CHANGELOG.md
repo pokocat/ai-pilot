@@ -6,6 +6,18 @@
 
 ## 变更日志
 
+### 2026-09-09 · AGENTS.md 瘦身：各章正文原样拆进 `docs/agents/` 分册，入口文件只留规则 + 骨架 + 索引 · 影响面：文档维护流程（§0 落点表）、所有引用「AGENTS.md §N」的代码注释与文档（章节号不变，落点改为分册）
+
+**为什么**：`AGENTS.md` 长到 379 KB / 1048 行，每个新会话都整份加载；§7 前端 81 KB、§8 后端 99 KB、§13 TODO 64 KB 全是按日期追加的约束账本与历史基线（提交 SHA、预发基线、Notion 待补），真正每次都要看的规则被淹在里面。根因是 §0 第 1 条「每次变更都更新本文件」——文件只增不减。
+
+**改了什么**：
+- `docs/agents/04-run-modes.md`、`05-contracts.md`、`06-account-isolation.md`、`07-frontend.md`、`08-backend.md`、`09-admin.md`、`10-database.md`（含「✦ 企业事务操作系统」）、`11-build-run-verify.md`、`13-todo.md`：原 §4–§11、§13 **逐行原样**搬入（脚本校验每一行都在），章节号与小节号不变，文件头注明维护方式。
+- `AGENTS.md` 重写为 ≤ 40 KB 的入口：§0 改成「落点表」（新约束写分册、日期条写 CHANGELOG、延后项写 13-todo、只有铁律/入口命令/结构/索引才动本文；基线 SHA 与一次性验收记录只进 CHANGELOG），新增三条一直在分册里反复出现但没上升为全局规则的原则（对外数据归运营不归代码、空态 ≠ 读失败、测试全绿 ≠ 体验验收）；§4–§11 各留铁律摘要 + 分册链接；§12 保留全文；附录 A 是「AGENTS.md §N」→ 分册的索引表。
+- `PRODUCT.md` 顶部一句话补上分册位置。
+- **膨胀防线（机器闸门）**：新增 `scripts/check-agents-doc.mjs`（整文件 ≤ 40 KB / 320 行、单节 ≤ 6 KB、单行 ≤ 1400 字、顶层骨架固定、禁止基线/SHA/NRestarts/Notion 待补/TODO 复选框/「**标题（日期）**：」账本形态、附录 A 与 `docs/agents/` 一一对应、分册保留 `## N.` 锚点）；`app/scripts/agents-doc.test.mjs` 把它挂进 `cd app && npm test`（CI frontend-unit 覆盖）；`.claude/settings.json` 加 PostToolUse 钩子，Claude Code 每次写 AGENTS.md 立即校验；根 `npm run check:agents-doc` 可手动跑。**闸门红了不许抬上限。**
+
+**不变的**：所有约束内容一字未删、未改写（要找原文按章节号进分册）；代码注释里的「AGENTS.md §7.2 / §13 / §0 / §8.4」照旧有效。
+
 ### 2026-09-05 · 爱速拍脚本 AI 全部收回军师自己的 LLM 网关（WP-A3）· 影响面：`POST /api/video/projects/:id/script/ai-rewrite`（**实现换人，响应形状不变**）、新增 env `VIDEO_SCRIPT_ENGINE`
 
 **背景（为什么必须改）**：`script/ai-rewrite` 一直是透传 aidrama，而上游 `ClipScriptService.rewrite` 的**第一行**就是「非 mock 网关 → 503 `CLIP_SCRIPT_ENGINE_NOT_CONFIGURED`」——clip 域根本没接 LLM，只有确定性占位引擎（`scope:'segment'` 是给原文拼一句固定尾巴，`scope:'all'` 是把指令切成短句轮流塞）。也就是说**生产环境用户点一次「AI 改写」拿到的是 503，不是降级文案**。爱速拍端已把「全篇改写」改走 `script/generate`，剩下的单句改写这次一并收回。

@@ -1,5 +1,18 @@
 {
   "worktree": {
     "baseRef": "head"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/scripts/check-agents-doc.mjs --hook"
+          }
+        ]
+      }
+    ]
   }
 }
