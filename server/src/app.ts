@@ -54,7 +54,8 @@ import { registerHttpAudit } from './services/audit.js';
 import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
 import { enterNow } from './services/clock.js';
 import { getRedis } from './services/redis.js';
-import { verifyUserToken } from './services/userToken.js';
+import { QUICKREEL_AUDIENCE } from './services/identity.js';
+import { attachIdentityUser, identifyRequest } from './services/identityProvisioning.js';
 import { planGateState, PlanRequiredError } from './services/planGate.js';
 import { PlanExpiredError } from './services/tokenQuota.js';
 import {
@@ -131,10 +132,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
       ...(redis ? { redis } : {}),
       keyGenerator: (req) => {
-        // verifyUserToken 是纯 HMAC 校验、不查库，放在限流键上开销可忽略；验不过就退回 IP。
-        const raw = req.headers['x-user-id'];
-        const uid = verifyUserToken(Array.isArray(raw) ? raw[0] : raw);
-        return uid ? `u:${uid}` : `ip:${req.ip}`;
+        // identifyRequest 是纯计算、不查库（HMAC 校验 / 已缓存 JWKS 的 RS256 验签），
+        // 放在限流键上开销可忽略；认不出来就退回 IP。
+        // 老 `x-user-id` → `u:<userId>`（桶键一个字节不变）；账号中心 bearer → `id:<sub>`。
+        return identifyRequest(req)?.key ?? `ip:${req.ip}`;
       },
       // 探活不能被限流吃掉（ALB / systemd / docker healthcheck 都打这几个路径）。
       // 用 startsWith 而非全等：req.url 带 query 时全等会失配。
@@ -208,6 +209,11 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     });
   }
 
+  // 统一账号中心（aibuzz-id）令牌 → 本地登录态。**必须排在禁写闸之前**：套餐闸要拿到本地 userId。
+  // 只在「没带 x-user-id 且带了 Authorization: Bearer」时才做事；ID_ISSUER 未配时整段是 no-op，
+  // 老的 x-user-id 链路完全不受影响（军师小程序照旧）。
+  app.addHook('onRequest', attachIdentityUser);
+
   // 商业化禁写闸（2026-07-28 去免费档改版）：无有效套餐的登录用户默认只读，写方法 403 PLAN_REQUIRED。
   // 放行前缀：auth（注册/登录本身写库）、付费转化全链路（plans/skus 下单+purchase、pay 支付回调/查单——
   // 只读用户必须永远付得了钱，否则没人能从只读变付费）、wechat（平台回调无用户态）、admin（ADMIN_TOKEN 独立门）。
@@ -233,10 +239,25 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       if (!WRITE_METHODS.has(req.method)) return;
       if (!req.url.startsWith('/api/')) return;
       if (ALLOW_PREFIX.some((p) => req.url.startsWith(p))) return;
-      const userId = verifyUserToken(req.headers['x-user-id'] as string | undefined);
+      // 与限流键同一把尺子：老 token 直接取 userId；账号中心 bearer 由上面的
+      // attachIdentityUser 钩子解析完并写回 x-user-id，这里读到的就是本地 userId。
+      const identity = identifyRequest(req);
+      const userId = identity?.userId;
       if (!userId) return;
       const path = req.url.split('?', 1)[0];
       if (ALLOW_WITHOUT_PLAN.has(`${req.method} ${path}`)) return;
+      // 爱速拍（快出片）免套餐闸（WP-A2 / WORKPLAN §1.1「WP-A 实现口径」）：
+      // 这个产品按**钻石**计量，不卖军师套餐，账号中心首登的新账号必然无套餐，
+      // 照旧走本闸就会把整条出片链路 403 PLAN_REQUIRED 拦死。
+      //
+      // 放行面刻意收到最小：**同时**满足三条才免——
+      //   ① 请求路径在 `/api/video/**`（军师自己的写路径一条都不放）；
+      //   ② 身份来自**已验签**的账号中心令牌（`identifyRequest` 的 `aud` 只可能出自验过签的 JWT）；
+      //   ③ 该令牌 `aud` 含 `quickreel-api`。
+      // 军师自己的令牌（老 `x-user-id`、或 `aud` 只有 `junshi-api` 的账号中心令牌）`aud` 里没有它，
+      // 行为一个字节不变。免的只是**套餐**这道闸：钻石余额（INSUFFICIENT_CREDITS）、内容审核、
+      // 限流、各路由自身的 401/403 全都照常。
+      if (path.startsWith('/api/video/') && identity.aud.includes(QUICKREEL_AUDIENCE)) return;
       const state = await planGateState(userId);
       if (state === 'none') {
         if (ALLOW_NONE_ONLY.has(`${req.method} ${path}`)) return;

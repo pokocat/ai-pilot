@@ -14,11 +14,16 @@ import {
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent, assertVideoUploadedContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
+import {
+  BRIEF_MAX_CHARS, REWRITE_MAX_CHARS, generateClipScriptAll, generateClipScriptFromBrief,
+  rewriteClipSegment, videoScriptEngine,
+} from '../services/video/scriptGenerate.js';
+import { extractClipIntake, INTAKE_MAX_CHARS } from '../services/video/intake.js';
 import { clonePricing, clonePricingView } from '../services/video/pricing.js';
 import { buyStoragePack, purchasedPackCount, purchasedStorageBytes, storagePlan } from '../services/video/storagePlan.js';
 import type {
-  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
-  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
+  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipIntakeExtract, ClipJobView, ClipProject,
+  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipTtsPreview, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 import { assertSafeUrl } from '../llm/tools/httpTool.js';
 
@@ -41,6 +46,30 @@ function identityOf(user: { id: string; tenantId: string }): Identity {
 
 function assertId(id: string) {
   if (!validId(id)) throw Object.assign(new Error('资源标识非法'), { statusCode: 400, code: 'CLIP_ID_INVALID' });
+}
+
+/** 上游对「这一版文案还没有预览结果」的错误码（WP-D 口径）；端上收到它就重新 POST 触发。 */
+const TTS_PREVIEW_NOT_FOUND = 'CLIP_TTS_PREVIEW_NOT_FOUND';
+
+/**
+ * 把上游的配音预览响应补成契约形状。上游序列化是全局 non_null（null 字段直接不出现），
+ * 端上却按 `null` 判断——不补齐就会拿到 `undefined`，`errorCode === null` 之类的判断全部失真。
+ * 除这几个字段外原样透传（上游新增字段不需要改 BFF）。
+ */
+function normalizeTtsPreview(view: ClipTtsPreview): ClipTtsPreview {
+  const row = (view ?? {}) as ClipTtsPreview & Record<string, unknown>;
+  return {
+    ...row,
+    segments: (Array.isArray(row.segments) ? row.segments : []).map((seg) => ({
+      ...seg,
+      // 未合成段 / 结尾固定段上游给 null；契约里是 string，空串等价「还没有音频」。
+      audioUrl: typeof seg?.audioUrl === 'string' ? seg.audioUrl : '',
+    })),
+    errorCode: typeof row.errorCode === 'string' && row.errorCode ? row.errorCode : null,
+    errorMessage: typeof row.errorMessage === 'string' && row.errorMessage ? row.errorMessage : null,
+    // 恒透传：约定 `credits > 0` 才表示端上要先 hold 钻石；上游不给就是不扣（0）。
+    credits: typeof row.credits === 'number' && Number.isFinite(row.credits) ? row.credits : 0,
+  };
 }
 
 function directCloneInput(body: unknown): ClipCloneUploadRequest {
@@ -72,13 +101,23 @@ function publicUploadStatus(status: UpstreamCloneUploadStatus): ClipCloneUploadS
   return safe;
 }
 
+/**
+ * `script/ai-rewrite` 的入参闸。
+ * · `scope:'segment'`：`text` 是要改的那一句原文，必填；`no` 是段号（缺省 null，由服务层兜底）。
+ * · `scope:'all'`：`text` 是**改写指令**，可空——空则按「润色全篇」处理。
+ * 两个 scope 的 `text` 都收 `REWRITE_MAX_CHARS` 字，与上游旧口径一致，不无声收紧端上输入。
+ */
 function rewriteBody(body: unknown) {
   const row = body && typeof body === 'object' ? body as Record<string, unknown> : {};
   const scope = row.scope === 'all' ? 'all' : row.scope === 'segment' ? 'segment' : '';
   if (!scope) throw Object.assign(new Error('改写范围非法'), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
   const text = typeof row.text === 'string' ? row.text.trim() : null;
   if (scope === 'segment' && !text) throw Object.assign(new Error('单句文案不能为空'), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
-  return { scope, no: typeof row.no === 'number' ? row.no : null, text };
+  if (text && text.length > REWRITE_MAX_CHARS) {
+    throw Object.assign(new Error(`改写内容最多 ${REWRITE_MAX_CHARS} 字`), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
+  }
+  const no = typeof row.no === 'number' && Number.isSafeInteger(row.no) && row.no > 0 ? row.no : null;
+  return { scope, no, text };
 }
 
 /** 采集类型。avatarImage = 用照片训数字人（与 AIStar 侧 kind 同名），白名单与视频那两类完全不同。 */
@@ -270,18 +309,171 @@ export async function videoRoutes(app: FastifyInstance) {
     catch (e) { return sendErr(reply, e, 422); }
   });
 
-  app.post<{ Params: { id: string }; Body: unknown }>('/video/projects/:id/script/ai-rewrite', async (req, reply) => {
-    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try {
-      assertId(req.params.id);
-      const body = rewriteBody(req.body);
-      if (body.text) await assertVideoProjectContent({ segments: [{ role: 'broll', text: body.text }] }, identityOf(user));
-      const result = await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/script/ai-rewrite`, identityOf(user), { method: 'POST', body });
-      await assertVideoRewriteOutput(result, identityOf(user));
-      return result;
-    } catch (e) { return sendErr(reply, e, 422); }
-  });
+  /**
+   * 文案 AI 改写（WP-A3：**收回军师自己的 LLM 网关**）。
+   *
+   * 为什么不再透传上游：aidrama 的 `ClipScriptService.rewrite` 第一行就是「非 mock 网关 → 503
+   * `CLIP_SCRIPT_ENGINE_NOT_CONFIGURED`」，clip 域没接 LLM，生产环境点一次「AI 改写」拿到的是 503。
+   * 现在两个 scope 都在 BFF 实现（`services/video/scriptGenerate.ts`）：
+   * · `segment`：只改这一句，保留该段 role / hint / 字数目标，并带相邻两段做语气参照。
+   *   **不落库**（与历史行为一致：端上把结果放进编辑框，保存交给它自己的防抖）。
+   * · `all`：复用 §1.3 的整稿链路，`text` 当改写指令、空则「润色全篇」；只在模板骨架内写
+   *   （段数 / role 不动），过审后走现有项目更新落库。
+   *
+   * 响应形状与历史一致（端上 video 包的 `api.js` 里 `aiRewrite` 在用）：
+   * segment → `{ scope, no, text }`；all → `{ scope, segments, shots }`。
+   *
+   * `VIDEO_SCRIPT_ENGINE=aidrama` 可退回旧透传，仅供与上游确定性引擎对拍；生产别配（必 503）。
+   */
+  app.post<{ Params: { id: string }; Body: unknown }>('/video/projects/:id/script/ai-rewrite',
+    { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        assertId(req.params.id);
+        const body = rewriteBody(req.body);
+        const identity = identityOf(user);
+        if (body.text) await assertVideoProjectContent({ segments: [{ role: 'broll', text: body.text }] }, identity);
 
+        if (videoScriptEngine() === 'aidrama') {
+          const result = await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/script/ai-rewrite`, identity, { method: 'POST', body });
+          await assertVideoRewriteOutput(result, identity);
+          return result;
+        }
+
+        const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
+        if (body.scope === 'segment') {
+          const rewritten = await rewriteClipSegment(project, body.no, body.text as string);
+          await assertVideoRewriteOutput({ text: rewritten.text }, identity);
+          await recordAudit({
+            tenantId: user.tenantId, userId: user.id, action: 'user.video.script.rewrite',
+            payload: { projectId: req.params.id, scope: 'segment', no: rewritten.no },
+          });
+          return { scope: 'segment', no: rewritten.no, text: rewritten.text };
+        }
+
+        const draft = await generateClipScriptAll(project, body.text
+          ? { kind: 'rewrite', instruction: body.text }
+          : { kind: 'polish' });
+        await assertVideoRewriteOutput({ segments: draft.segments }, identity);
+        await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity, {
+          method: 'PUT', body: { segments: draft.segments, shots: draft.shots, step: 1 },
+        });
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.script.rewrite',
+          payload: { projectId: req.params.id, scope: 'all', instructed: Boolean(body.text), segmentCount: draft.segments.length },
+        });
+        return { scope: 'all', segments: draft.segments, shots: draft.shots };
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 一句话生成全片（契约 §1.3）。**只在模板骨架内写**：段数与 role 沿用项目现有 segments，
+   * 模型只逐段填文案（上游 `script/ai-rewrite` 的 `scope:'all'` 根本不读 `text`，见
+   * services/video/scriptGenerate.ts 头注释）。
+   */
+  app.post<{ Params: { id: string }; Body: { brief?: string } }>('/video/projects/:id/script/generate',
+    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        assertId(req.params.id);
+        const brief = String(req.body?.brief ?? '').trim();
+        if (!brief || brief.length > BRIEF_MAX_CHARS) {
+          throw Object.assign(new Error(`请用 ${BRIEF_MAX_CHARS} 字以内说说你的生意和想说的话`), {
+            statusCode: 422, code: 'CLIP_BRIEF_INVALID',
+          });
+        }
+        const identity = identityOf(user);
+        await assertVideoProjectContent({ segments: [{ role: 'broll', text: brief }] }, identity);
+        const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
+        const draft = await generateClipScriptFromBrief(project, brief);
+        await assertVideoRewriteOutput({ segments: draft.segments }, identity);
+        const saved = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity, {
+          method: 'PUT', body: { segments: draft.segments, shots: draft.shots, step: 1 },
+        });
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.script.generate',
+          payload: { projectId: req.params.id, briefChars: brief.length, segmentCount: draft.segments.length },
+        });
+        return saved;
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 配音（TTS）预览时间线透传（契约 §1.5 + WP-D 实现口径）。POST 触发生成（上游按文案幂等），GET 轮询。
+   *
+   * **两种 404 必须分流**（WP-A2 第 2 条）：
+   * · 上游明确说「这一版文案还没有预览结果」（404 且 body `code === CLIP_TTS_PREVIEW_NOT_FOUND`）
+   *   → **原样 404 + 原码**。端上据此重新 POST 一次触发生成，这是正常业务流，不是故障。
+   * · 上游根本没有这条路由（404 不带该码、或 405 方法不允许）→ 503 `CLIP_TTS_PREVIEW_UNAVAILABLE`，
+   *   端上退回内部计时器，而不是把「功能没上线」显示成「项目不存在」。
+   *
+   * 成功响应过一道 `normalizeTtsPreview`：上游是全局 non_null 序列化，`errorCode` / `errorMessage`
+   * / `audioUrl` 为 null 时**字段直接不出现**，端上会拿到 undefined。契约里这三个字段是「有值或 null」，
+   * 所以在 BFF 这一层补齐；`credits` 恒透传（缺失按 0，`> 0` 才表示调用方需先 hold）。
+   */
+  for (const method of ['GET', 'POST'] as const) {
+    app.route<{ Params: { id: string }; Body: unknown }>({
+      method,
+      url: '/video/projects/:id/tts-preview',
+      handler: async (req, reply) => {
+        const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+        try {
+          assertId(req.params.id);
+          const view = await aidramaJson<ClipTtsPreview>(
+            `/api/me/clip/projects/${enc(req.params.id)}/tts-preview`, identityOf(user),
+            method === 'POST' ? { method: 'POST', body: (req.body as object) ?? {} } : {},
+          );
+          return normalizeTtsPreview(view);
+        } catch (e) {
+          if (e instanceof VideoGatewayError) {
+            // 「这一版文案还没有预览」——业务语义，原样透传给端上，让它重新 POST。
+            if (e.statusCode === 404 && e.code === TTS_PREVIEW_NOT_FOUND) {
+              return reply.code(404).send({ error: e.message, code: e.code });
+            }
+            // 上游路由不存在 / 方法不允许 —— 功能没上线。
+            if (e.statusCode === 404 || e.statusCode === 405) {
+              return reply.code(503).send({ error: '配音预览还没准备好，请稍后再试', code: 'CLIP_TTS_PREVIEW_UNAVAILABLE' });
+            }
+          }
+          return sendErr(reply, e, 502);
+        }
+      },
+    });
+  }
+
+  /**
+   * 一句话提取主体 / 目标 / 受众 / 称呼（契约 §1.4）。走 BFF 自己的 LLM 网关，不碰上游。
+   * 四个字段拿不准就给空串，**不编造**。
+   */
+  app.post<{ Body: { text?: string; templateId?: string } }>('/video/intake/extract',
+    { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        const text = String(req.body?.text ?? '').trim();
+        if (!text || text.length > INTAKE_MAX_CHARS) {
+          throw Object.assign(new Error(`请用 ${INTAKE_MAX_CHARS} 字以内说一句话`), {
+            statusCode: 422, code: 'CLIP_INTAKE_INVALID',
+          });
+        }
+        const templateId = String(req.body?.templateId ?? '').trim();
+        if (templateId) assertId(templateId);
+        const identity = identityOf(user);
+        await assertVideoProjectContent({ segments: [{ role: 'broll', text }] }, identity);
+        const result: ClipIntakeExtract = await extractClipIntake(text, templateId || undefined);
+        await assertVideoRewriteOutput({ text: [result.subject, result.goal, result.audience, result.salutation].filter(Boolean).join('\n') }, identity);
+        return result;
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 和 AI 对话写稿：回复一句 + 可选把新稿应用到 segments。
+   *
+   * **本来就在 BFF 自己的 LLM 网关上**（`services/video/scriptChat.ts`），上游 `ClipController`
+   * 压根没有 `script/chat` 这条路由，所以 WP-A3 的「收回 BFF」对它是既成事实，语义不变：
+   * 模型不可用 / 产出不合法时**保留原稿**并如实回一句「原稿没有改动」（`applied:false`），
+   * 而不是抛错——对话框里一次没答上来不该把整页打断。这与 `ai-rewrite`、`script/generate`
+   * 「产出不可用就显式报错」的口径不同，是**有意的**：那两条是一次性动作，用户在等一个结果。
+   */
   app.post<{ Params: { id: string }; Body: { message?: string } }>('/video/projects/:id/script/chat', { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {

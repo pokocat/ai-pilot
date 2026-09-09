@@ -2886,6 +2886,82 @@ export interface ClipRenderResult { jobId: string; projectId: string; status: st
 export interface ClipJobView {
   id: string; status: 'queued' | 'generating' | 'assembling' | 'succeeded' | 'failed' | 'cancelled';
   stage?: string; progress?: number; workId?: string | null; errorMessage?: string | null;
+  /** 段级出片状态（上游 `segmentJobsJson` 的投影）。上游没给就没有这个字段，端上退回整体进度。 */
+  segments?: ClipJobSegmentStatus[];
+}
+/** 出片任务里单段的状态（爱速拍「出片中」页逐段展示）。 */
+export interface ClipJobSegmentStatus {
+  /**
+   * **镜头号**，对应 `ClipShot`（上游 `ClipShotPlan.materialize` 的切分），**不是** `ClipSegment.no`。
+   * 多句共用一个画面时两者不同：端上要按 `ClipProject.shots[{startNo,endNo}]` 映射回原句。
+   */
+  no: number;
+  role: ClipSegmentRole;
+  status: 'queued' | 'generating' | 'done' | 'failed';
+  errorCode?: string | null;
+}
+/** 配音（TTS）预览时间线里的一段。`startSec` 由前面各段 `durationSec` 累加而来。 */
+export interface ClipTtsPreviewSegment {
+  /**
+   * **镜头号**，对应 `ClipShot`（与出片 worker 的 TTS 阶段同一套切分），**不是** `ClipSegment.no`。
+   * 多句共用一个画面时两者不同：端上要按 `ClipProject.shots[{startNo,endNo}]` 映射回原句。
+   */
+  no: number;
+  /**
+   * 短期签名音频地址。**空串 = 还没有音频**：未合成完的段与结尾固定段上游给 null，
+   * BFF 统一补成空串（上游全局 non_null 会把 null 字段整个删掉，端上不该拿到 undefined）。
+   */
+  audioUrl: string;
+  /** 已合成段是真实时长；未合成段是按字数的估算，结尾固定段取模板配置时长。 */
+  durationSec: number;
+  startSec: number;
+}
+/**
+ * 配音预览时间线（`POST|GET /api/video/projects/:id/tts-preview`）。
+ * `timelineHash` = 对 segments 文案 + voiceId 的哈希：文案一变就换，旧结果作废。
+ * `status:"generating"` 时也给全量 `segments`（未合成段 `audioUrl` 空串）。
+ * `GET` 没有结果或结果对应旧一版文案 → 404 `CLIP_TTS_PREVIEW_NOT_FOUND`，端上重新 `POST`。
+ */
+export interface ClipTtsPreview {
+  status: 'generating' | 'ready' | 'failed';
+  timelineHash: string;
+  voiceId: string | null;
+  totalDurationSec: number;
+  segments: ClipTtsPreviewSegment[];
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  /**
+   * 本次调用要扣的钻石。**必填、恒 ≥ 0**，BFF 始终透传（上游缺失按 0 补）。
+   * 约定 `credits > 0` 才表示调用方需要先 hold 钻石；当前 WP-D 口径是不扣，恒为 0。
+   */
+  credits: number;
+}
+/**
+ * 已备好的单段素材（方案 `docs/VIDEO_STANDALONE_MINIAPP_PLAN_2026-08-19.md` §3.5 / §11）。
+ * `sourceHash` 一样就不必重出，是分层预览复用的判据。
+ */
+export interface PreparedClip {
+  segmentNo: number;
+  role: ClipSegmentRole;
+  sourceHash: string;
+  mediaUrl: string;
+  durationSec: number;
+  generatedAt: string;
+}
+/** 分层预览产物：device=端上拼、proxy=低码率代理片、final=成片（同上，§11 timelineHash 分层）。 */
+export interface PreviewRender {
+  projectId: string;
+  timelineHash: string;
+  tier: 'device' | 'proxy' | 'final';
+  mediaUrl?: string;
+  readyAt?: string;
+}
+/** 一句话提取主体/目标/受众（`POST /api/video/intake/extract`）。拿不准给空串，不编造。 */
+export interface ClipIntakeExtract {
+  subject: string;
+  goal: string;
+  audience: string;
+  salutation: string;
 }
 /** 素材库存储占用（GET /video/assets/storage）。预置素材由平台提供，不计入用户配额。 */
 export interface ClipAssetStorage { usedBytes: number; limitBytes: number; count: number; }
