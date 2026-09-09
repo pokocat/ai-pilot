@@ -122,11 +122,17 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
 test('微信桌面端启用官方可拉伸与分栏能力，五个主 Tab 响应当前栏尺寸', () => {
   const app = JSON.parse(read(sourceRoot, 'app.json'));
   assert.equal(app.resizable, true, 'PC 最大化/自由拉伸与 iPad 旋转依赖 app.json.resizable');
-  assert.equal(app.frameset, true, 'Windows 微信自动左右分栏依赖 app.json.frameset');
+  // 2026-09-05：官方分栏（frameset）撤回。它只在 Windows 微信 3.3+ 生效，一开就把窗口
+  // 钉成左右两栏——左栏永远是手机宽的 tab 页，右栏在没有次级页面时是一整块空白；
+  // 更要命的是两栏各自都够不到 720 / 960 断点，下面这套响应式在桌面上从来没被点亮过。
+  // 现在单栏铺满窗口，排版全部由 viewportClass 自己决定。重开 frameset 前先复现那块空白。
+  assert.equal(app.frameset, undefined, '不得重新开启 app.json.frameset：官方分栏会把窗口钉成手机宽左栏 + 空白右栏');
 
   const pageService = read(sourceRoot, 'services/page.js');
   assert.match(pageService, /function viewportData\(size\)/);
-  assert.match(pageService, /windowWidth >= 1100 \? 'expanded' : \(windowWidth >= 720 \? 'medium' : 'compact'\)/);
+  // 门槛 960 是倒推的：72 导航 + 40 页边距 + 24 栏间距 + 320 副栏 = 456，主栏还剩 504px。
+  // 别退回 1100——微信 PC 默认窗口实测约 1008pt，1100 的门槛让双栏永远点不亮。
+  assert.match(pageService, /windowWidth >= 960 \? 'expanded' : \(windowWidth >= 720 \? 'medium' : 'compact'\)/);
   assert.match(pageService, /function syncViewport\(page, size\)/);
   assert.match(pageService, /navRightInset: metrics\.navRightInset/);
 
@@ -142,6 +148,348 @@ test('微信桌面端启用官方可拉伸与分栏能力，五个主 Tab 响应
   const tabbarScss = read(sourceRoot, 'custom-tab-bar/index.scss');
   assert.match(appScss, /\.viewport-medium \.pad,[\s\S]*?max-width:\s*920px/);
   assert.match(tabbarScss, /@media \(min-width:\s*720px\)[\s\S]*?width:\s*560px/);
+});
+
+test('桌面 expanded 档：问策抽屉抬成常驻左栏，对话页收回可读行宽', () => {
+  const pageService = read(sourceRoot, 'services/page.js');
+  assert.match(pageService, /isExpanded: sizeClass === 'expanded'/, '侧栏判据必须来自统一的档位计算，不许各页自己比宽度');
+
+  const js = read(sourceRoot, 'pages/sessions/index.js');
+  const wxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const scss = read(sourceRoot, 'pages/sessions/index.scss');
+
+  // 侧栏与半屏抽屉共用同一棵 WXML：多出第二套结构就意味着两边会各自漂移。
+  assert.equal((wxml.match(/class="wd-sheet/g) || []).length, 1, '常驻左栏必须复用抽屉那棵树，不得另写一份');
+  assert.match(wxml, /wx:if="\{\{drawerOpen \|\| railOn\}\}"/, '侧栏在时抽屉节点要照常渲染');
+  assert.match(wxml, /class="wd-sheet \{\{railOn \? 'as-rail' : ''\}\}"/);
+  assert.match(wxml, /class="wence-page[^"]*\{\{railOn \? 'rail-on' : ''\}\}"/, '根节点要挂 rail-on，四个 fixed 层靠它让出左栏');
+  // 遮罩只跟 drawerOpen 走：跟着侧栏一起渲染的话，桌面上会有一层灰罩盖住整页。
+  assert.match(wxml, /wx:if="\{\{drawerOpen\}\}" class="wd-mask"/);
+
+  assert.match(js, /railOn = expanded && this\.data\.form === 'chat'/, 'railOn 只在 expanded + chat 形态成立');
+  assert.match(js, /if \(this\.data\.railOn\) \{ this\.setData\(\{ drawerSeg: seg \}\); return; \}/,
+    '侧栏常驻时页头入口只切分段，不该再压一次 overlay');
+  assert.match(js, /onResize\(event\)[\s\S]{0,320}this\.syncRail\(viewport\)/, '窗口变化必须重算侧栏');
+  assert.match(js, /onLoad\(\)[\s\S]{0,600}this\.syncRail\(null\)/, 'onResize 不补第一帧，冷启动要自己算一次');
+
+  // 抽屉在 expanded 档本来是 left:50% + translateX(-50%) 居中；侧栏必须显式清掉位移，
+  // 否则整根栏往左飘半个自身宽度（首版实测左移 160px，行文被窗口边裁掉）。
+  assert.match(scss, /\.rail-on \.wd-sheet\.as-rail \{[\s\S]*?transform: none;/);
+  // 2026-09-05 桌面骨架：问策在桌面上是三栏，让位量从「侧栏」变成「导航 + 侧栏」。
+  assert.match(scss, /\.rail-on \.wence-head,\s*\n\.rail-on \.wence-scroll \{ left: calc\(var\(--nav-w\) \+ var\(--rail-w\)\); \}/,
+    '页头与滚动区必须同时让出左导航与会话栏');
+
+  // 对话分包页不是 tab，但侧栏里点任何一位军师都落到这儿；漏掉它，桌面上正文会一路铺满窗口。
+  const chatJs = read(sourceRoot, 'packages/main/chat/index.js');
+  const chatWxml = read(sourceRoot, 'packages/main/chat/index.wxml');
+  const chatScss = read(sourceRoot, 'packages/main/chat/index.scss');
+  assert.match(chatJs, /onResize\(event\) \{ syncViewport\(this, event && event\.size\); \}/, '对话页必须消费官方 Page.onResize');
+  assert.match(chatWxml, /class="chat-page \{\{themeClass\}\} \{\{viewportClass\}\}"/);
+  assert.match(chatWxml, /--window-width:\{\{windowWidth\}\}px;--window-height:\{\{windowHeight\}\}px/);
+  assert.match(chatScss, /\.viewport-expanded \.chat-stream \{[\s\S]*?max-width: 840px;/, '对话正文轴在桌面档必须收到 840px');
+  // 输入台那一条按仓库约定落在共享层，不在分包页里。
+  const chatCoreScss = read(chatCoreRoot, 'chat-core.scss');
+  assert.match(chatCoreScss, /\.viewport-expanded \.composer-box \{[\s\S]*?max-width: 840px;/, '输入台正文轴要与消息流同轴');
+  // 页头右侧留白必须继续跟 --native-menu-right 走：iPad 竖屏（medium 档、840 不生效）
+  // 换成固定值会让页头菜单键钻到胶囊底下。
+  assert.doesNotMatch(chatScss, /\.viewport-(medium|expanded) \.chat-headrow \{ padding-right: 12px; \}/);
+
+  // 今日是一条带优先级的有序待办流，主栏不做双列。
+  // （原先那条 `.viewport-expanded .exec-page { max-width: 860px }` 已在桌面骨架一步删掉：
+  //   主栏宽度改由 app.scss 的 `.pad.has-aside` grid 接管，两条叠加会把主栏压到 500 出头。）
+  const execScss = read(sourceRoot, 'pages/execution/index.scss');
+  // 这条原来钉的是 `.viewport-expanded .exec-seg { align-self: center; }`。WP-B 分栏后 expanded
+  // 改成靠主栏左沿（居中会让段控离开左沿、与军令卡差一条基线），medium 仍是整页单栏、仍居中。
+  // 断言的原意没变：段控必须显式给宽度、靠 self 对齐，绝不能用 auto 外边距——flex 纵列的交叉轴
+  // auto 外边距会把它压成内容宽，grid 里一侧 auto 也会让 stretch 失效。
+  assert.match(execScss, /\.viewport-medium \.exec-seg \{ align-self: center; width: 100%; max-width: 520px; \}/);
+  assert.match(execScss, /\.viewport-expanded \.exec-seg \{ align-self: flex-start; justify-self: start; width: 100%; max-width: 520px; \}/);
+  assert.doesNotMatch(execScss, /\.exec-seg[^{]*\{[^}]*margin-(left|right): auto/,
+    '段控一旦用 auto 外边距就会退回内容宽（实测缩成 50px、「近七日」折成两行）');
+});
+
+test('桌面 expanded 档：左导航条替代底栏', () => {
+  // —— 底栏的收起走既有的 overlay 记账，且必须成对 ——
+  // setOverlay 是按 key 记账的（问策浮岛用 'wence-isle'）。桌面档只加不减的话，
+  // 窗口缩回手机宽时 custom-tab-bar 的 `wx:if="{{!overlay}}"` 永远为假，底栏再也回不来。
+  const pageService = read(sourceRoot, 'services/page.js');
+  assert.match(pageService, /setOverlay\(true, 'desktop-rail'\)/, '桌面档必须用独立 key 收起底栏');
+  assert.match(pageService, /setOverlay\(false, 'desktop-rail'\)/, '窗口缩回手机宽必须把底栏放回来');
+  // Page.onResize 拖窗口时是连续触发的，档位没变就不能重复喊 setOverlay。
+  assert.match(pageService, /if \(desktopChromeOn === next\) return;/, '档位切换必须幂等');
+  // 冷启动直接落在桌面窗口时 onResize 不补第一帧，baseData 得自己拨一次。
+  assert.match(pageService, /function baseData\(extra\)[\s\S]{0,400}syncDesktopChrome\(viewport\.isExpanded\)/,
+    '冷启动就在桌面窗口时 onResize 不会触发，baseData 必须自己算一次');
+  assert.match(pageService, /selectComponent\('\.nav-rail'\)/, '角标与主题态要同时推给页面里的左导航');
+
+  // —— 组件四件套 ——
+  for (const ext of ['js', 'json', 'wxml', 'scss']) {
+    assert.ok(fs.existsSync(path.join(sourceRoot, `components/nav-rail/index.${ext}`)), `nav-rail 缺 index.${ext}`);
+  }
+  const railJson = JSON.parse(read(sourceRoot, 'components/nav-rail/index.json'));
+  assert.equal(railJson.component, true);
+
+  // —— 六个页面各注册一次、各挂一次 ——
+  // 范围要划死：五个 tab + 对话分包页。packages/work 下那二十多个二级页保持「全宽 + 返回」。
+  const hosts = [
+    ['pages/sessions', 0], ['pages/home', 1], ['pages/execution', 2],
+    ['pages/thinktank', 3], ['pages/profile', 4], ['packages/main/chat', 0],
+  ];
+  for (const [dir, index] of hosts) {
+    const json = JSON.parse(read(sourceRoot, `${dir}/index.json`));
+    assert.equal(json.usingComponents['nav-rail'], '/components/nav-rail/index', `${dir} 未注册 nav-rail`);
+    const markup = read(sourceRoot, `${dir}/index.wxml`);
+    // class="nav-rail" 是 services/page.js#syncTabBar 的 selectComponent 钩子，不是样式类。
+    assert.match(markup, new RegExp(`<nav-rail class="nav-rail" show="\\{\\{isExpanded\\}\\}" selected="\\{\\{${index}\\}\\}"`),
+      `${dir} 必须挂 nav-rail 并传本 tab 的下标`);
+  }
+  // 问策两棵根（chat 终态 / control 回退）都要挂，否则回退形态在桌面上没有导航。
+  assert.equal((read(sourceRoot, 'pages/sessions/index.wxml').match(/<nav-rail /g) || []).length, 2,
+    '问策的两棵根节点都要挂左导航');
+
+  // —— 切换动作只有一份 ——
+  // index 2 必须走 gotoExecution('today') 才能把段控意图带过去；两边各抄一遍迟早只改到一处。
+  const tabbarService = read(sourceRoot, 'services/tabbar.js');
+  assert.match(tabbarService, /function switchToTab\(index, selected\)/);
+  assert.match(tabbarService, /module\.exports = \{[^}]*switchToTab/);
+  assert.match(tabbarService, /if \(target === 2\) \{ gotoExecution\('today'\); return; \}/);
+  // 去重按当前真实路由，不按 selected：对话分包页传 selected=0 只是「高亮问策」，它并不在
+  // 问策 tab 上；按 selected 去重会让它点左导航「问策」完全没反应（2026-09-05 复审修）。
+  assert.match(tabbarService, /getCurrentPages\(\)/,
+    'switchToTab 必须按当前真实路由去重');
+  assert.doesNotMatch(tabbarService, /target === Number\(selected\)/,
+    'selected 是高亮口径，不是「现在就在这个 tab 上」，不许再拿它去重');
+  for (const file of ['custom-tab-bar/index.js', 'components/nav-rail/index.js']) {
+    const source = read(sourceRoot, file);
+    assert.match(source, /require\('\.\.?\/?\.?\.?\/services\/tabbar'\)/, `${file} 必须复用 services/tabbar`);
+    assert.match(source, /switchToTab\(/, `${file} 必须调用共享的切换动作`);
+    assert.doesNotMatch(source, /wx\.switchTab\(/, `${file} 不得自己再写一份 switchTab`);
+  }
+
+  // —— 容器与桌面底部留白 ——
+  const appScss = read(sourceRoot, 'app.scss');
+  // width 必须一并覆盖成 100%：medium/expanded 合写的 calc(100% - 40px) 叠上 20px 内边距会让总页边距变 80，
+  // 蓝图算的是 40（主栏 = 窗口 − 456）。
+  assert.match(appScss, /\.viewport-expanded \.pad \{ width: 100%; max-width: 1280px; padding-left: 20px; padding-right: 20px; \}/, '桌面容器：width 100%（不叠 calc 的 40）+ border-box 上限 1280 = 内容盒 1240 + 页边距 20');
+  assert.match(appScss, /\.viewport-expanded \.native-scroll \{ padding-left: 72px; \}/, '内容区要让开左导航');
+  assert.match(appScss, /\.viewport-expanded \.pad\.has-aside \{\s*\n\s*display: grid;/, '副栏工具类（下一包套用）');
+  assert.match(appScss, /\.viewport-expanded \.pad\.has-aside > \.aside \{[\s\S]*?grid-row: 2 \/ span 200;/,
+    '副栏必须整块纵跨，否则两列的行高会互相耦合');
+  // span 200 与 row-gap: 0 必须成对（2026-09-05 复审修）。越界放置会实打实生成隐式轨道，
+  // 那些轨道高度是 0，但 row-gap 加在**每一对相邻轨道之间**——今日页原来的 gap:14 让
+  // ~200 条空轨道变成 ~2800px 空白，通栏的 .tabbar-space 被推到页面最底。
+  // 只有 span 200 而没有 row-gap: 0，就是把这个坑原样留着。
+  assert.match(appScss, /\.viewport-expanded \.pad\.has-aside \{[^}]*row-gap: 0;[^}]*\}/,
+    'span 200 只有在 row-gap 归零时才不占地，两者必须成对出现');
+  // 主栏那些块要一个个钉回第 1 列，否则 grid 会把它们铺到副栏那一列。
+  // 只能按标签枚举：WXSS 不支持 `*`，wcsc 直接报 `error at token '*'`，整份 app.wxss 编不出来、
+  // 小程序连 appLaunch 都过不去（白屏 + pageStack 恒空）。全仓任何 scss 都不许再出现通配选择器。
+  assert.match(appScss, /\.viewport-expanded \.pad\.has-aside > view,\s*\n\.viewport-expanded \.pad\.has-aside > text,[\s\S]*?\{ grid-column: 1; min-width: 0; \}/);
+  // 页头通栏不是「宽一点好看」：grid 的 sparse 自动放置会把主栏第一块回填到页头右边那格空位。
+  // 用宿主 class `.pad-head` 而不是组件标签（2026-09-05 复审修）：编译后标签变成
+  // `wx-tab-header`，能否命中宿主缺少证据；预览台那边工具又吐成 <components/tab-header/index>。
+  // class 落在宿主节点上，真机与预览台消费的是同一条选择器。
+  assert.match(appScss, /\.viewport-expanded \.pad\.has-aside > \.pad-head \{ grid-column: 1 \/ -1; \}/);
+  assert.doesNotMatch(appScss, /\.pad\.has-aside > tab-header/,
+    '页头通栏不许再按组件标签写');
+  for (const dir of ['pages/home', 'pages/execution', 'pages/thinktank', 'pages/profile']) {
+    assert.match(read(sourceRoot, `${dir}/index.wxml`), /<tab-header class="pad-head" /,
+      `${dir} 的页头要带 .pad-head 宿主 class，否则那条通栏规则命不中`);
+  }
+  // 预览台看到的必须与真机同一件事：产品 CSS 里的标签选择器要跟着 WXML→HTML 的改名走，
+  // 否则 `.pad.has-aside > view`（主栏 min-width:0）这类规则在预览台一条都不命中，
+  // 量出来的溢出与间距都是假的。
+  const previewScript = read(appRoot, 'scripts/desktop-preview.mjs');
+  assert.match(previewScript, /function rewriteSelectors\(css\)/,
+    '预览台必须把 CSS 里的标签选择器一起映射，否则它对分栏的呈现与真机不一致');
+  assert.match(previewScript, /renderShell\(captured, rewriteSelectors\(appCss\), rewriteSelectors\(pageCss\)\)/,
+    'app 与页面两份 CSS 都要过映射');
+  for (const file of ['app.scss', 'pages/home/index.scss', 'pages/execution/index.scss', 'pages/thinktank/index.scss', 'pages/profile/index.scss']) {
+    assert.doesNotMatch(read(sourceRoot, file).replace(/\/\*[\s\S]*?\*\//g, ''), /(^|[\s>+~,])\*(\s*[{>+~,])/m,
+      `${file} 用了 WXSS 不支持的通配选择器，会让整个小程序编译失败`);
+  }
+  // 桌面档没有悬浮底栏了，三处「给底栏让位」的留白全部作废。
+  assert.match(appScss, /\.viewport-expanded \.native-bottom-fade \{ display: none/);
+  assert.match(appScss, /\.viewport-expanded \.tabbar-space \{ height: 24px; \}/);
+  assert.match(appScss, /\.viewport-expanded \.native-env-badge \{ left: 84px;/);
+
+  // —— 问策浮岛：桌面档去掉那排自绘 tab（导航已经常驻在左边，不能一屏两份） ——
+  const sessionsScss = read(sourceRoot, 'pages/sessions/index.scss');
+  assert.match(sessionsScss, /\.rail-on \.wence-isle \.tabbar-inner,\s*\n\.rail-on \.wence-isle \.isle-div \{ display: none; \}/);
+  assert.match(sessionsScss, /\.wence-page\.rail-on \{ --nav-w: 72px; --rail-w: 320px; \}/);
+  assert.match(sessionsScss, /\.rail-on \.wence-scroll \{ left: calc\(var\(--nav-w\) \+ var\(--rail-w\)\); \}/,
+    '问策桌面档是三栏：页头与滚动区要同时让开导航与会话栏');
+
+  // —— 对话分包页的三条 fixed 通栏 ——
+  const chatScss = read(sourceRoot, 'packages/main/chat/index.scss');
+  assert.match(chatScss, /\.viewport-expanded \.chat-header,\s*\n\.viewport-expanded \.chat-scroll \{ left: 72px; \}/);
+  // 输入台那条按仓库约定落在共享层，且必须用 .chat-page 限定，别把问策浮岛也算进去。
+  const chatCore = read(chatCoreRoot, 'chat-core.scss');
+  assert.match(chatCore, /\.chat-page\.viewport-expanded \.composer-dock \{ left: 72px; \}/);
+});
+
+// 2026-09-05 WP-B：四个 tab 的副栏归位。副栏是一层 `<view class="aside">` wrapper，桌面档被
+// app.scss 的 `.pad.has-aside` grid 拎到右列，手机档必须完全透明。这条测钉两件事：
+// ① wrapper 只收「手机上本来就相邻」的块——收错了就等于在手机上改了阅读顺序；
+// ② has-aside 与 aside 的实际渲染条件同源——挂早了 grid 会白留一条 320 的空列。
+test('桌面 expanded 档：四个 tab 的副栏只收手机上相邻的块', () => {
+  // 注释里出现类名（今日页那段就写了 `id="pouch-sec" / .pouch-sec`）会污染下面的
+  // 「在块内 / 不在块内」判定，先摘掉。摘注释也顺带保证配平计数不被注释里的标签带偏。
+  const strip = (wxml) => wxml.replace(/<!--[\s\S]*?-->/g, '');
+  const pages = {
+    home: strip(read(sourceRoot, 'pages/home/index.wxml')),
+    execution: strip(read(sourceRoot, 'pages/execution/index.wxml')),
+    thinktank: strip(read(sourceRoot, 'pages/thinktank/index.wxml')),
+    profile: strip(read(sourceRoot, 'pages/profile/index.wxml')),
+  };
+
+  // 属性值里可能有裸 `>`（如 `wx:if="{{todayOrderCount>0}}"`），所以找标签收尾要带引号态。
+  const tagEnd = (source, from) => {
+    let quote = '';
+    for (let i = from; i < source.length; i += 1) {
+      const ch = source[i];
+      if (quote) { if (ch === quote) quote = ''; continue; }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '>') return i;
+    }
+    return -1;
+  };
+
+  /**
+   * 从 startIndex 处的 `<tag` 起按开闭标签配平，截出**完整的那一块**。
+   *
+   * 2026-09-05 复审修：原来是 `wxml.slice(wxml.indexOf('class="aside"'))` 一路截到文件尾，
+   * 于是「把卡片挪到 aside 外、但仍排在它后面」这种结构错误照样能通过所有内容断言 ——
+   * 测试等于只在验证「这些类名还在文件里」。
+   * 自闭合 `<view …/>` 本仓 WXML 里不出现；真出现了按「开一个立刻关一个」处理，不破坏配平。
+   */
+  const balancedBlock = (source, startIndex, tag = 'view') => {
+    assert.ok(startIndex >= 0, `找不到 <${tag}> 的起点`);
+    const open = new RegExp(`<${tag}(?=[\\s/>])`, 'g');
+    const close = `</${tag}>`;
+    let depth = 0;
+    let i = startIndex;
+    while (i < source.length) {
+      open.lastIndex = i;
+      const nextOpen = open.exec(source);
+      const nextClose = source.indexOf(close, i);
+      if (!nextOpen && nextClose < 0) break;
+      if (nextOpen && (nextClose < 0 || nextOpen.index < nextClose)) {
+        const end = tagEnd(source, nextOpen.index);
+        assert.ok(end > 0, `<${tag}> 的开标签没有收尾`);
+        if (source[end - 1] !== '/') depth += 1;
+        i = end + 1;
+        if (depth === 0) return source.slice(startIndex, i);   // 起点本身就是自闭合标签
+      } else {
+        depth -= 1;
+        i = nextClose + close.length;
+        if (depth === 0) return source.slice(startIndex, i);
+      }
+    }
+    assert.fail(`<${tag}> 从第 ${startIndex} 字节起没有配平的闭标签`);
+    return '';
+  };
+
+  // —— 每页恰好一个 wrapper ——
+  // 两个就说明有人把不相邻的块拆成了两段：grid 里第二个 .aside 会去抢第 2 列的同一片格子。
+  for (const [name, wxml] of Object.entries(pages)) {
+    assert.equal((wxml.match(/class="aside"/g) || []).length, 1, `${name} 必须恰好有一个副栏 wrapper`);
+  }
+
+  // —— 各 aside 收了什么 ——
+  // 正向（块内有）+ 反向（块外没有）两面都要钉：只有正向的话，把卡片挪到 aside 外、
+  // 但仍排在它后面，断言照样过。
+  const asideOf = (wxml) => balancedBlock(wxml, wxml.indexOf('<view class="aside">'), 'view');
+  const outsideAside = (wxml) => wxml.replace(asideOf(wxml), '');
+  const onlyInAside = (wxml, marks, label) => {
+    const inside = asideOf(wxml);
+    const outside = outsideAside(wxml);
+    for (const mark of marks) {
+      assert.ok(inside.includes(mark), `${label}副栏里缺 ${mark}`);
+      assert.ok(!outside.includes(mark), `${label}的 ${mark} 跑到副栏外面去了`);
+    }
+  };
+
+  const homeAside = asideOf(pages.home);
+  onlyInAside(pages.home, ['class="say-strip"', 'class="guest-notice card"'], '战局');
+  assert.ok(homeAside.indexOf('class="say-strip"') < homeAside.indexOf('class="guest-notice card"'),
+    '战局副栏 = 今日献策 + 建档提示，顺序与手机一致');
+  // guest-notice 从 wx:else（已登录分支）里挪出来了，登录态判据必须自己补回来。
+  assert.match(pages.home, /<view wx:if="\{\{authed && onboardingKnown&&!onboarded\}\}" class="guest-notice card"/,
+    '建档提示离开 wx:else 后必须自带 authed 判据');
+
+  const execAside = asideOf(pages.execution);
+  onlyInAside(pages.execution,
+    ['class="today-sum card"', 'class="result-entry card"', 'class="review-entry card"', 'class="pouch-sec" id="pouch-sec"'],
+    '今日');
+  // 段 0 专属的两块（今天出的活 / 经营结果）仍受段控约束，不能在「近七日」下冒出来；
+  // 而复盘入口与锦囊段要在两个段都在 —— 所以它们必须在 aside 里、但**不在**那个 block 里。
+  const execSeg0 = balancedBlock(execAside, execAside.indexOf('<block wx:if="{{segment===0}}">'), 'block');
+  for (const cls of ['class="today-sum card"', 'class="result-entry card"']) {
+    assert.ok(execSeg0.includes(cls), `今日副栏的 ${cls} 必须仍然只在段 0 渲染`);
+  }
+  for (const cls of ['class="review-entry card"', 'class="pouch-sec" id="pouch-sec"']) {
+    assert.ok(!execSeg0.includes(cls), `${cls} 被关进了段 0，「近七日」下会整块消失`);
+  }
+  assert.ok(execAside.indexOf('class="result-entry card"') < execAside.indexOf('class="review-entry card"'),
+    '副栏内顺序：经营结果 → 今晚复盘 → 锦囊，与手机一致');
+  assert.ok(execAside.indexOf('class="review-entry card"') < execAside.indexOf('id="pouch-sec"'));
+  // aside 的实际祖先条件必须就是 has-aside 那句 `authed && coreStatus==='ready'`：
+  // 登录态分支是 `<block wx:if="{{!authed}}">` 的 wx:else，ready 是它里面的 wx:elif。
+  const execGuest = balancedBlock(pages.execution, pages.execution.indexOf('<block wx:if="{{!authed}}">'), 'block');
+  const execAuthed = balancedBlock(pages.execution,
+    pages.execution.indexOf('<block wx:else>', pages.execution.indexOf('<block wx:if="{{!authed}}">') + execGuest.length),
+    'block');
+  const execReady = balancedBlock(execAuthed, execAuthed.indexOf("<block wx:elif=\"{{coreStatus==='ready'}}\">"), 'block');
+  assert.ok(execReady.includes(execAside),
+    "今日副栏必须整块落在登录态的 wx:else 里、且在 coreStatus==='ready' 那层之内——has-aside 就是按这两条挂的");
+
+  const thinkAside = asideOf(pages.thinktank);
+  onlyInAside(pages.thinktank, ['class="quota-grid"', 'class="stage-seg"'], '图籍');
+  assert.ok(thinkAside.indexOf('class="quota-grid"') < thinkAside.indexOf('class="stage-seg"'),
+    '图籍副栏 = 额度三卡 + 三段流水段控');
+
+  // 主公：只有已登录那组菜单进副栏；游客态那组 menu-group 必须留在 wx:else 分支里（在 aside 之后）。
+  // 反向断言用 `wx:for="{{menuGroups}}"` 而不是 menu-group：后者游客组也在用，两组同名。
+  onlyInAside(pages.profile, ['wx:for="{{menuGroups}}"'], '主公');
+  assert.ok(!asideOf(pages.profile).includes('wx:for="{{guestGroups}}"'),
+    '游客菜单组不许被包进副栏');
+  assert.equal((pages.profile.match(/class="menu-group"/g) || []).length, 2, '主公仍是登录/游客两组菜单');
+  assert.ok(pages.profile.indexOf('wx:for="{{guestGroups}}"') > pages.profile.indexOf('wx:for="{{menuGroups}}"'),
+    '游客菜单组在 aside 之后的 wx:else 里，没被一起包进副栏');
+
+  // —— has-aside 的判据与副栏是否渲染同源 ——
+  assert.match(pages.home, /<view class="pad home has-aside">/, '战局 say-strip 恒渲染，has-aside 恒挂');
+  assert.match(pages.execution, /class="pad execution exec-page \{\{authed && coreStatus==='ready' \? 'has-aside' : ''\}\}"/);
+  assert.match(pages.thinktank, /class="pad think think-native \{\{authed && segment===0 \? 'has-aside' : ''\}\}"/);
+  assert.match(pages.profile, /class="pad account \{\{authed \? 'has-aside' : ''\}\}"/);
+
+  // —— 手机档必须透明 ——
+  // 今日是唯一一页靠容器 gap（而非各块自带 margin）分隔的：四块进了 wrapper 就不再是 .exec-page
+  // 的 flex item，不补这条会在手机上贴成一坨——这是「wrapper 必须透明」唯一需要写代码的地方。
+  const execScss = read(sourceRoot, 'pages/execution/index.scss');
+  assert.match(execScss, /\.exec-page \.aside \{ display: flex; flex-direction: column; gap: 11px; \}/);
+  assert.match(execScss, /\.exec-page \.aside > view \{ margin-top: 0; margin-bottom: 0; \}/,
+    '.review-entry 从 home/index.scss 带着 margin-top 过来，进 wrapper 后要接着抹掉');
+  assert.match(execScss, /\.viewport-medium \.exec-page \.aside \{ gap: 14px; \}/, 'medium 档还没有副栏，节奏要跟着页面放大');
+  // expanded 档主栏的节奏改由子块 margin 供给：app.scss 那条 grid 把 row-gap 归零了
+  // （否则 span 200 生成的 ~200 条空轨道 × 14px ≈ 2800px 空白），今日页是唯一靠容器 gap 的一页，
+  // 不补这条主栏就会整条贴死。页头是组件，不是 view/text，要按宿主 class .pad-head 单列。
+  assert.match(execScss, /\.viewport-expanded \.exec-page\.has-aside > view,\s*\n\.viewport-expanded \.exec-page\.has-aside > text,\s*\n\.viewport-expanded \.exec-page\.has-aside > \.pad-head \{ margin-bottom: 14px; \}/,
+    'expanded 档今日页主栏的行间距要由子块 margin 供给（row-gap 已归零）');
+  assert.match(execScss, /\.viewport-expanded \.exec-page\.has-aside > \.aside,\s*\n\.viewport-expanded \.exec-page\.has-aside > \.tabbar-space \{ margin-bottom: 0; \}/,
+    '副栏自己用 flex gap 排节奏、页尾留白是页尾，两块都不参与主栏行间距');
+
+  // —— 桌面档：按「整页单栏很宽」写的旧规则，落进 552–896 的主栏后要重判 ——
+  assert.doesNotMatch(read(sourceRoot, 'pages/profile/index.scss'), /\.viewport-expanded \.account \{ max-width: 840px/,
+    '840 行宽闸会连副栏一起框住，桌面档已交给 .pad.has-aside 的 grid');
+  // grid 子元素只要有一侧 auto 外边距，justify-self 的 stretch 就失效、盒子退回内容宽（实测 83px）。
+  assert.match(read(sourceRoot, 'pages/thinktank/index.scss'), /\.viewport-expanded \.think-tabs \{ width: 100%; max-width: 520px; margin-left: 0; margin-right: 0; \}/,
+    '段控在主栏里居中会离开左沿；靠左也必须显式给宽度，不能留 auto 外边距');
+  assert.match(read(sourceRoot, 'pages/thinktank/index.scss'), /\.viewport-expanded \.folder-tile \{ width: calc\(\(100% - 12px\) \/ 2\);/,
+    '960 窗口主栏只有 504，三列瓦片会压到 160px');
+  assert.match(read(sourceRoot, 'pages/home/index.scss'), /\.viewport-expanded \.aside \.say-strip \{ margin: 0; \}/,
+    '副栏用 gap 排节奏，say-strip 自带的 margin 会与之相加');
 });
 
 test('数字分身训练通知必须由用户点击授权并回写 avatar 场景', () => {

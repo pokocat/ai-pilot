@@ -1,9 +1,13 @@
 <view class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
+  <!-- 桌面 ≥960 的 72px 左导航（底栏此时已被 setOverlay('desktop-rail') 整条收起）。 -->
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{3}}"></nav-rail>
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced class="native-scroll">
     <view class="native-nav-inset"></view>
-    <view class="pad think think-native">
-      <tab-header title="图籍" kicker="军师断事的依据" glyph="籍"></tab-header>
+    <!-- has-aside 与 aside 的渲染条件同源：副栏写在 `authed` 套 `segment===0` 之内，
+         游客态与「数据源」段没有副栏，挂上去 grid 会白留一条 320 的空列。 -->
+    <view class="pad think think-native {{authed && segment===0 ? 'has-aside' : ''}}">
+      <tab-header class="pad-head" title="图籍" kicker="军师断事的依据" glyph="籍"></tab-header>
 
       <view wx:if="{{loadFailed}}" class="think-retry card" bindtap="retry">
         <text class="think-retry-t">图籍没读出来，网络不畅或服务端在忙</text>
@@ -27,15 +31,19 @@
       </view>
 
       <block wx:if="{{segment===0}}">
-        <view class="quota-grid">
-          <view class="quota-card card"><text class="qc-v serif">{{quotaDocs}}</text><text class="qc-l">免费资料额度</text></view>
-          <view class="quota-card card"><text class="qc-v serif">{{quotaText}}</text><text class="qc-l">可用空间 · 可扩容</text></view>
-          <view class="quota-card card" bindtap="deepFirst"><text class="qc-v serif">深度整理</text><text class="qc-l">去重 / 分类 / 优化</text></view>
-        </view>
+        <!-- 副栏（桌面 ≥960 落到右列，手机档这层 view 完全透明）：额度三卡 + 三段流水段控。
+             两块在手机上本来就紧挨着，都是「这一页的状态盘」，与下面按 stage 切换的资料流是并列关系。 -->
+        <view class="aside">
+          <view class="quota-grid">
+            <view class="quota-card card"><text class="qc-v serif">{{quotaDocs}}</text><text class="qc-l">免费资料额度</text></view>
+            <view class="quota-card card"><text class="qc-v serif">{{quotaText}}</text><text class="qc-l">可用空间 · 可扩容</text></view>
+            <view class="quota-card card" bindtap="deepFirst"><text class="qc-v serif">深度整理</text><text class="qc-l">去重 / 分类 / 优化</text></view>
+          </view>
 
-        <view class="stage-seg">
-          <view wx:for="{{stageTabs}}" wx:key="key" class="stage-tab {{stage===item.key?'on':''}} {{confirming?'locked':''}}" data-stage="{{item.key}}" bindtap="setStage">
-            <text class="stage-t">{{item.label}}</text><text class="stage-n">{{item.count}}</text>
+          <view class="stage-seg">
+            <view wx:for="{{stageTabs}}" wx:key="key" class="stage-tab {{stage===item.key?'on':''}} {{confirming?'locked':''}}" data-stage="{{item.key}}" bindtap="setStage">
+              <text class="stage-t">{{item.label}}</text><text class="stage-n">{{item.count}}</text>
+            </view>
           </view>
         </view>
 

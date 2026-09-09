@@ -108,6 +108,9 @@ Page(withShare({
     // 终态专属
     isleTabs: visualTabs('theme-green'), unread: 0, reviewDue: false, councilUnreadText: '', historyUnreadText: '',
     headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false,
+    // railOn = 抽屉改常驻左栏（只在 expanded + chat 形态成立）。它与 drawerOpen 互斥：
+    // 侧栏在的时候没有半屏抽屉，也就没有遮罩、没有 overlay 记账、提示 pill 照常出现。
+    railOn: false,
     hintText: '', hintId: '', hintFade: false,
   }),
 
@@ -120,11 +123,30 @@ Page(withShare({
     this._booting = false;
     this._streamReady = this.setupStreamRenderer();
     this.setData({ headHeight: Number(this.data.navInset || 0) + 105 });
+    // 冷启动就可能落在桌面大窗口里（onResize 只在**变化**时触发，不会补第一帧）。
+    this.syncRail(null);
   },
 
   onResize(event) {
     const viewport = syncViewport(this, event && event.size);
     this.setData({ headHeight: Number(viewport && viewport.navInset || this.data.navInset || 0) + 105 });
+    this.syncRail(viewport);
+  },
+
+  /**
+   * 桌面大窗口把「军师团 / 历史会话」从半屏抽屉抬成常驻左栏：同一棵 WXML、同一份数据，
+   * 只是不再需要先点一下才看得见。窗口收窄回去（或形态不是 chat）就自动落回抽屉。
+   * 抬栏时要把已经开着的抽屉一并收掉，否则遮罩会盖在自己的侧栏上。
+   */
+  syncRail(viewport) {
+    const expanded = !!(viewport ? viewport.isExpanded : this.data.viewportClass.includes('expanded'));
+    const railOn = expanded && this.data.form === 'chat';
+    if (railOn === this.data.railOn) return;
+    if (railOn && this.data.drawerOpen) {
+      store.setOverlay(false, 'wence-drawer');
+      this.setData({ drawerOpen: false });
+    }
+    this.setData({ railOn });
   },
 
   onShow() {
@@ -209,7 +231,7 @@ Page(withShare({
       const me = authed ? await store.loadMe() : null;
       const form = await this.resolveForm(authed, me);
       const changed = form !== this.data.form;
-      if (changed) this.setData({ form });
+      if (changed) { this.setData({ form }); this.syncRail(null); }
       safeSet(this.formCacheKey(), form === 'chat' ? 'chat' : '');
       if (form !== 'chat') {
         store.setOverlay(false, 'wence-isle');
@@ -499,6 +521,8 @@ Page(withShare({
     // 游客可看军师团（目录是公开的），但翻历史是个人内容 → 动作级登录门（§6）。
     if (seg === 'history' && !this.requireLogin('history')) return;
     api.track('drawer_open', { entry: seg });
+    // 侧栏常驻时这两个页头入口不再「打开」什么——栏本来就在，它们只切换分段。
+    if (this.data.railOn) { this.setData({ drawerSeg: seg }); return; }
     store.setOverlay(true, 'wence-drawer');
     this.setData({ drawerOpen: true, drawerSeg: seg });
   },

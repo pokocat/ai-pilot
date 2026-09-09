@@ -209,3 +209,23 @@
 .mpg-t { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--ink-1); }
 .mpg-cost { display: flex; align-items: center; gap: 3px; }
 .mpg-c { font-size: 12.5px; font-weight: 600; color: var(--accent); }
+
+/* 大窗口（2026-09-05）：输入台内容收到 840px 居中，与消息流同一条阅读轴；
+   宿主自己的通栏底纹不动。这条放在 chat-core 而不是 chat 分包页，是因为 `.composer-box`
+   是两个宿主（问策 tab 的浮岛 + chat 分包页的输入台）共用的类。
+   问策浮岛在 expanded 档本身就 ≤840 宽，这条在那儿是空操作。 */
+.viewport-medium .composer-box,
+.viewport-expanded .composer-box {
+  width: 100%;
+  max-width: 840px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+/* 桌面骨架（2026-09-05）：expanded 档窗口最左边常驻一条 72px 导航（components/nav-rail），
+   通栏 fixed 的输入台底纹要让开它，否则那条横板会从导航底下穿过去。
+   `.chat-page` 前缀是必须的：这个类的另一个宿主是问策终态的浮岛，它在浮岛里被改成了
+   position:static（见 pages/sessions/index.scss），左沿由浮岛自己算，
+   不加前缀这条虽然不生效也会让人以为问策也归它管。 */
+.chat-page.viewport-expanded .composer-dock { left: 72px; }

@@ -3,6 +3,13 @@
 
 .exec-page { display: flex; flex-direction: column; gap: 11px; }
 .exec-page > view, .exec-page > block, .exec-page > scroll-view { margin-top: 0; margin-bottom: 0; }
+/* 副栏 wrapper（2026-09-05 WP-B）：桌面档右列，手机档必须**看不出来**。
+   .exec-page 是 flex 纵列、块间距全靠 gap，被包进 .aside 的那四块从此不是它的 flex item——
+   不补这条，今天的活 / 经营结果 / 今晚复盘 / 锦囊在手机上会贴成一坨。
+   第二条把上面那个「直接子元素 margin 归零」延伸进副栏：.review-entry 从 home/index.scss 带着
+   `margin-top: 10px` 过来，原先靠 `.exec-page > view` 抹掉，进了 wrapper 就抹不到，会变成 11+10。 */
+.exec-page .aside { display: flex; flex-direction: column; gap: 11px; }
+.exec-page .aside > view { margin-top: 0; margin-bottom: 0; }
 .exec-seg-sticky { position: sticky; top: 0; z-index: 12; margin: 0 -2px 2px; box-shadow: 0 7px 18px rgba(42,35,24,.04); }
 .exec-guest { display:flex; flex-direction:column; align-items:center; padding:34px 22px 28px; text-align:center; }
 .eg-mark { width:52px; height:52px; border-radius:18px; display:flex; align-items:center; justify-content:center; background:var(--accent-soft); }
@@ -82,6 +89,49 @@
 /* 桌面栏宽允许同时看更多执行信息，但任务仍保持单一纵向完成顺序。 */
 .viewport-medium .exec-page,
 .viewport-expanded .exec-page { gap: 14px; }
+/* iPad 竖屏（medium）还没有副栏，.aside 只是纵列里的一个 flex item，内部节奏要跟着放大到 14。
+   expanded 不写：那一档副栏归 app.scss 的 `.pad.has-aside > .aside`（gap 12）管，
+   五个 tab 的副栏用同一档节奏；那条选择器权重更高，这里再写 14 也是条死规则。 */
+.viewport-medium .exec-page .aside { gap: 14px; }
+
+/* expanded + has-aside：主栏的纵向节奏改由子块自己的 margin 供给（2026-09-05 复审修）。
+   为什么不能继续用容器 gap：这一档 .pad 是 grid，副栏 `grid-row: 2 / span 200` 会实打实
+   生成 200 条隐式轨道（写不到的那些高度为 0），而 row-gap 加在**每一对相邻轨道之间**——
+   14px × ~200 ≈ 2800px 的空白会把通栏的 .tabbar-space 推到页面最底。app.scss 里那条
+   grid 因此把 row-gap 归零，代价就由这里补回来。其余三页主栏子块本来就各自带 margin，
+   row-gap 也本来是 0，不受影响。
+   ⚠️ 不用 `+` 相邻兄弟选择器：WXSS 对它的支持不稳，最后一块多出来的 14px 由
+   .tabbar-space 自己吸收（它在页尾，本来就是一段呼吸）。
+   .pad-head 是 <tab-header> 的宿主 class：页头不是 view/text，不列上去的话页头与段控之间会贴死。
+   权重：这三条各带 3 个 class（.viewport-expanded + .exec-page + .has-aside），压得过
+   基础规则 `.exec-page > view { margin-top:0; margin-bottom:0 }`（1 class + 1 标签）。 */
+.viewport-expanded .exec-page.has-aside > view,
+.viewport-expanded .exec-page.has-aside > text,
+.viewport-expanded .exec-page.has-aside > .pad-head { margin-bottom: 14px; }
+/* 副栏自己用 flex gap 12 排节奏（app.scss），页尾留白是页尾——两块都不参与主栏的行间距。
+   4 个 class 压过上面那条 3 class + 1 标签。 */
+.viewport-expanded .exec-page.has-aside > .aside,
+.viewport-expanded .exec-page.has-aside > .tabbar-space { margin-bottom: 0; }
 .viewport-expanded .task { padding: 18px 20px; }
 .viewport-expanded .cr-art { width: 80px; height: 80px; flex-basis: 80px; }
 .viewport-expanded .week-card { padding: 18px 20px; }
+
+/* —— 桌面窗口的行宽（2026-09-05）——
+   这一页是一条**有序**的待办流（军令带「优先级 1 / 2 / 3」），所以主栏不做双列——
+   分两列就等于让人从两个方向读同一个顺序。
+   ⚠️ 这里原先有一条 `.viewport-expanded .exec-page { max-width: 860px; }`（把整页从 .pad 的
+   1080 收回可读行宽），桌面骨架这一步删掉了：主栏宽度从此由 app.scss 的
+   `.viewport-expanded .pad.has-aside` 那套 grid 接管（主栏弹性 + 副栏固定 320）。
+   两条叠加的话 860 会连副栏一起框住，主栏被压到 500 出头。要收正文行长请改 grid 那边。 */
+
+/* 段控（今天 / 近七日）只有两个字段，跟着栏宽拉到主栏满宽会变成两条大横条。
+   与图籍的 .think-tabs 用同一档 520px，桌面上五个 tab 的段控宽度因此一致。
+   ⚠️ 两档的对齐不同（2026-09-05 WP-B）：medium 还是整页单栏，居中；expanded 改成靠主栏左沿——
+   分栏之后「居中」是在 552 的主栏里居中，段控会离开左沿、与下面的军令卡对不上一条基线
+   （图籍的 .think-tabs 同一处理）。段控在 coreStatus 未 ready 时也渲染，所以两态必须同一个对齐，
+   否则加载完成的瞬间它会横着跳一下：expanded 下 .pad 是 grid（ready 态）或 .exec-page 那条 flex
+   纵列（其它态），align-self 管前者的块轴、justify-self 管后者用不上的行轴，两条都写才两态一致。
+   ⚠️ 无论居中还是靠左，都不能用 `margin-left/right: auto`：flex 纵列的交叉轴 auto 外边距会把它
+   压成内容宽（实测缩成 50px 宽、「近七日」折成两行），grid 里一侧 auto 也会让 stretch 失效。 */
+.viewport-medium .exec-seg { align-self: center; width: 100%; max-width: 520px; }
+.viewport-expanded .exec-seg { align-self: flex-start; justify-self: start; width: 100%; max-width: 520px; }

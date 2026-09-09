@@ -1,0 +1,195 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    code { background: #F3F1EA; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+    .card { background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 14px; }
+    .step-n { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+    .fl { font-size: 11.5px; line-height: 1.85; color: #565C63; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 30px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid #D2CBB9; padding-bottom: 13px;">
+    <span class="sf" style="font-size: 24px; font-weight: 600;">实施与风险</span>
+    <span style="font-size: 12px; color: #7E848B;">分三步落，每步自己能跑能验、能单独回滚</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 16px;">
+
+    <!-- 第一步 -->
+    <div class="card" style="padding: 18px; background: #FBFAF6; border-color: #1E5A43;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="step-n" style="background: #1E5A43; color: #fff;">1</div>
+        <div>
+          <div class="sf" style="font-size: 16px; font-weight: 600;">拆掉官方分栏</div>
+          <div style="font-size: 11px; color: #1E5A43; font-weight: 600;">已完成 · 提交 611b2c5</div>
+        </div>
+      </div>
+      <div class="fl" style="margin-top: 12px;">
+        撤 <code>frameset</code>；问策抽屉抬成常驻左栏；对话页补 <code>onResize</code> 与正文轴；今日收行宽。
+        全量 257 + 109 用例绿。
+      </div>
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #D2CBB9;">
+        <div style="font-size: 11px; font-weight: 600; color: #7E848B; margin-bottom: 5px;">动过的文件</div>
+        <div class="fl" style="font-size: 11px;">
+          <code>app.json</code> · <code>services/page.js</code><br>
+          <code>pages/sessions/*</code> · <code>pages/execution/index.scss</code><br>
+          <code>packages/main/chat/*</code> · <code>chat-core/chat-core.scss</code>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; color: #9C4A38; font-weight: 600;">回滚：单条 revert 即可</div>
+    </div>
+
+    <!-- 第二步 -->
+    <div class="card" style="padding: 18px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="step-n" style="background: #E7EEE9; color: #0F2B20; border: 1px solid #1E5A43;">2</div>
+        <div>
+          <div class="sf" style="font-size: 16px; font-weight: 600;">桌面骨架</div>
+          <div style="font-size: 11px; color: #7E848B;">断点 + 导航条 + 双栏容器</div>
+        </div>
+      </div>
+      <div class="fl" style="margin-top: 12px;">
+        断点 1100 → <b style="color:#16191D;">960</b>；新增 <code>nav-rail</code> 组件并在五个 tab + 对话分包页共 6 个页面注册；
+        桌面档用 <code>store.setOverlay</code> 把 <code>custom-tab-bar</code> 整条隐藏；
+        <code>.pad</code> 容器上限 1080 → <b style="color:#16191D;">1240</b>，加一组 <code>.aside</code> 双栏工具类。
+      </div>
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #D2CBB9;">
+        <div style="font-size: 11px; font-weight: 600; color: #7E848B; margin-bottom: 5px;">要动的文件</div>
+        <div class="fl" style="font-size: 11px;">
+          <code>services/page.js</code>（断点）<br>
+          <code>components/nav-rail/*</code>（新，四件套）<br>
+          <code>app.scss</code>（容器 + 双栏工具类 + 桌面底部留白）<br>
+          6 个页面的 <code>index.json</code> / <code>index.wxml</code> 各加一行
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; color: #9C4A38; font-weight: 600;">这一步结束时页面仍是单栏，只是有了左导航 —— 可以先发一版看真机</div>
+    </div>
+
+    <!-- 第三步 -->
+    <div class="card" style="padding: 18px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="step-n" style="background: #F3F1EA; color: #565C63; border: 1px solid #D2CBB9;">3</div>
+        <div>
+          <div class="sf" style="font-size: 16px; font-weight: 600;">四个 tab 归位</div>
+          <div style="font-size: 11px; color: #7E848B;">副栏 wrapper + 降级回归</div>
+        </div>
+      </div>
+      <div class="fl" style="margin-top: 12px;">
+        战局 / 今日 / 图籍 / 主公 各自把副栏那几块用一个 <code>&lt;view class="aside"&gt;</code> 包起来；
+        问策去掉浮岛里那排 tab 行；把降级表里每一条钉进 <code>native-weapp.test.mjs</code>。
+      </div>
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #D2CBB9;">
+        <div style="font-size: 11px; font-weight: 600; color: #7E848B; margin-bottom: 5px;">要动的文件</div>
+        <div class="fl" style="font-size: 11px;">
+          <code>pages/home/index.wxml + .scss</code><br>
+          <code>pages/execution/index.wxml + .scss</code><br>
+          <code>pages/thinktank/index.wxml + .scss</code><br>
+          <code>pages/profile/index.wxml + .scss</code><br>
+          <code>pages/sessions/index.wxml</code>（去 tab 行）<br>
+          <code>scripts/native-weapp.test.mjs</code>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 11px; color: #9C4A38; font-weight: 600;">这一步是唯一改 WXML 层级的，回滚成本最高</div>
+    </div>
+  </div>
+
+  <!-- 风险 -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 14px;">
+
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 11px;">三个要盯住的风险</div>
+
+      <div class="card" style="padding: 12px 16px; margin-bottom: 8px; border-left: 3px solid #9C4A38;">
+        <div style="font-size: 13px; font-weight: 600;"><span style="display:inline-flex; width:15px; height:15px; border-radius:50%; background:#9C4A38; color:#fff; font-size:9.5px; font-weight:600; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px;">1</span>WXML 加一层 wrapper 会打断现有选择器</div>
+        <div class="fl" style="margin-top: 5px;">
+          现有样式里有不少 <code>.exec-page &gt; view</code> 这种直接子选择器。副栏一包，被包住的那几块就不再是直接子元素。
+          <b style="color:#16191D;">对策：</b>包之前先把每个页面的直接子选择器扫一遍，改成不依赖层级的写法，
+          这一条单独一个提交，与布局改动分开。
+          <br><br>
+          <b style="color:#9C4A38;">连带的设计约束：</b>wrapper 只能收「在手机上本来就相邻」的块 ——
+          包一层就意味着它们在窄屏只能出现在一个位置。战局的天时、图籍的主 CTA 因此留在主栏，
+          换来的是<b style="color:#16191D;">手机版一个节点都不动</b>。
+        </div>
+      </div>
+
+      <div class="card" style="padding: 12px 16px; margin-bottom: 8px; border-left: 3px solid #9C4A38;">
+        <div style="font-size: 13px; font-weight: 600;"><span style="display:inline-flex; width:15px; height:15px; border-radius:50%; background:#9C4A38; color:#fff; font-size:9.5px; font-weight:600; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px;">2</span>底栏隐藏后的 overlay 记账</div>
+        <div class="fl" style="margin-top: 5px;">
+          <code>setOverlay</code> 是按 key 成对记账的（问策的浮岛就用它）。桌面档隐藏底栏时如果只加不减，
+          窗口缩回手机宽时底栏就再也回不来了。
+          <b style="color:#16191D;">对策：</b>用独立 key <code>desktop-rail</code>，在 <code>syncRail</code> 那种「值变了才动」的地方成对开关。
+        </div>
+      </div>
+
+      <div class="card" style="padding: 12px 16px; border-left: 3px solid #9C4A38;">
+        <div style="font-size: 13px; font-weight: 600;"><span style="display:inline-flex; width:15px; height:15px; border-radius:50%; background:#9C4A38; color:#fff; font-size:9.5px; font-weight:600; align-items:center; justify-content:center; margin-right:6px; vertical-align:1px;">3</span>本地验不了真机</div>
+        <div class="fl" style="margin-top: 5px;">
+          开发者工具模拟器只给手机宽度，微信 PC 的真实窗口没法在本地驱动。
+          <b style="color:#16191D;">对策：</b>排版继续用 <code>npm run preview:desktop</code>（抓真渲染 WXML + 真编译 WXSS）在 960/1008/1280/1440 逐档核；
+          <b style="color:#16191D;">但导航条和底栏隐藏这两件事必须传体验版</b>，在你的桌面微信上实看。
+          建议第二步做完就发一版。
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 11px;">要你拍板的三件事</div>
+
+      <div class="card" style="padding: 16px 18px;">
+        <div style="display: flex; gap: 10px; align-items: flex-start; padding-bottom: 13px; border-bottom: 1px solid #E7E4DB;">
+          <div style="width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid #1E5A43; flex-shrink: 0; margin-top: 1px;"></div>
+          <div>
+            <div style="font-size: 13.5px; font-weight: 600;">决策 A：走方案乙（左侧 72px 导航条）？</div>
+            <div class="fl" style="margin-top: 3px;">我推荐乙。选甲的话第二步只剩断点和容器，第三步不变。</div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #E7E4DB;">
+          <div style="width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid #1E5A43; flex-shrink: 0; margin-top: 1px;"></div>
+          <div>
+            <div style="font-size: 13.5px; font-weight: 600;">决策 B：副栏固定 320 / 主栏弹性 / 正文轴 840？</div>
+            <div class="fl" style="margin-top: 3px;">
+              主栏 = 窗口 − 456，到 1440 撞上容器 1240 封顶后定格 896，正文轴 840 从这里开始生效；
+              再宽的窗口只增加两侧留白，正文行长在任何显示器上都一样。
+              如果你更想「窗口越大内容越多」，那是另一套（副栏也弹性、正文轴不封顶），我可以改。
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: flex-start; padding-top: 13px;">
+          <div style="width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid #1E5A43; flex-shrink: 0; margin-top: 1px;"></div>
+          <div>
+            <div style="font-size: 13.5px; font-weight: 600;">决策 C：双栏门槛定在 960？</div>
+            <div class="fl" style="margin-top: 3px;">
+              按你截图那个窗口（约 1008pt）倒推的。如果你平时是最大化用，门槛可以更高、副栏可以更宽；
+              <b style="color:#16191D;">告诉我你常用的窗口大概多大，这个数就能钉死。</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 12px; padding: 12px 16px;">
+        <div style="font-size: 12.5px; font-weight: 600; margin-bottom: 6px;">确认后我按这个顺序干</div>
+        <div class="fl">
+          先把「直接子选择器」那一条清干净（独立提交）→ 第二步骨架 → 发一版体验版给你在桌面微信上看导航条 →
+          你点头之后再做第三步四个 tab 的归位。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

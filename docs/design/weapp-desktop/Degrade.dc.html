@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    .tag { font-size: 10px; color: #9C4A38; font-weight: 600; }
+    .card { background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 14px; }
+    .th { padding: 9px 12px; font-size: 11px; font-weight: 600; color: #565C63; }
+    .td { padding: 11px 12px; font-size: 12px; line-height: 1.55; border-top: 1px solid #E7E4DB; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 30px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid #D2CBB9; padding-bottom: 13px;">
+    <span class="sf" style="font-size: 24px; font-weight: 600;">对话分包页 · 与降级路径</span>
+    <span style="font-size: 12px; color: #7E848B;">窗口从 1280 缩到 720 时，每一栏怎么退</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 520px 1fr; gap: 30px; margin-top: 20px;">
+
+    <!-- 对话分包页 -->
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 10px;">对话分包页（点某位专业军师进入）</div>
+
+      <div style="width: 520px; height: 300px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; overflow: hidden; display: flex;">
+        <div style="width: 30px; flex-shrink: 0; border-right: 1px solid #D2CBB9; padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+          <div class="sf" style="width: 16px; height: 16px; border-radius: 5px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 9px;">军</div>
+          <div style="width: 12px; height: 12px; border-radius: 3px; background: #1E5A43;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 3px; background: #E7E4DB;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 3px; background: #E7E4DB;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 3px; background: #E7E4DB;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 3px; background: #E7E4DB;"></div>
+        </div>
+        <div style="flex-grow: 1; display: flex; flex-direction: column;">
+          <div style="height: 40px; border-bottom: 1px solid #E7E4DB; display: flex; align-items: center; padding: 0 14px; gap: 10px; background: rgba(251,250,246,.96);">
+            <div style="width: 16px; height: 16px; border-left: 2px solid #16191D; border-bottom: 2px solid #16191D; transform: rotate(45deg) scale(.6);"></div>
+            <div style="flex-grow: 1; text-align: center;"><span class="sf" style="font-size: 14px; font-weight: 600;">总军师</span> <span style="font-size: 11px; color: #1E5A43;">玄衡</span></div>
+            <div style="width: 16px; height: 16px; border-radius: 4px; border: 1px solid #D2CBB9;"></div>
+          </div>
+          <div style="flex-grow: 1; padding: 14px;">
+            <div style="max-width: 340px; margin: 0 auto;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="width: 14px; height: 14px; border-radius: 50%; background: #16191D;"></div>
+                <span style="font-size: 10px; font-weight: 600;">总军师</span>
+              </div>
+              <div style="font-size: 12px; line-height: 1.75; margin-top: 7px; padding-left: 20px;">说说你的处境，我先判断主要矛盾，再调度专业军师。</div>
+            </div>
+          </div>
+          <div style="padding: 10px 14px 14px;">
+            <div style="max-width: 340px; margin: 0 auto; border: 1px solid #D2CBB9; border-radius: 14px; background: #FFFFFF; padding: 10px 12px; min-height: 46px; font-size: 11px; color: #7E848B;">把你正拿不准的事告诉军师</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; background: #FBFAF6; border-left: 3px solid #1E5A43; padding: 12px 14px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 12px; font-weight: 600; color: #1E5A43; margin-bottom: 5px;">自绘导航条的额外好处</div>
+        <div style="font-size: 12px; line-height: 1.8; color: #565C63;">
+          微信官方的 custom-tab-bar <b>只在 tabBar 页渲染</b>，二级页面天生没有导航。
+          但方案乙的导航条是<b style="color:#16191D;">我们自己的组件</b>，所以对话页也能挂 —— 桌面上从 tab 进到对话，
+          左边那条不会突然消失。
+          <br><br>
+          <b style="color:#9C4A38;">范围要划死：</b>只给五个 tab + 这一个对话页挂。
+          packages/work 里另外二十多个二级页（方案库、命盘、账本…）保持「全宽 + 返回」，
+          它们本来就是进去办一件事就出来。
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; font-size: 12px; line-height: 1.8; color: #565C63;">
+        <b style="color:#16191D;">不给对话页加副栏。</b>这一页只有一件事：说话。
+        右边硬塞「引用的资料 / 本次方案」会把注意力从对话里拽走，而且那些内容在图籍和锦囊里各有正主。
+      </div>
+    </div>
+
+    <!-- 降级表 -->
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 10px;">降级阶梯</div>
+
+      <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+        <div style="flex-grow: 1; text-align: center; padding: 8px; border-radius: 8px; background: #E7EEE9; border: 1px solid #1E5A43;">
+          <div style="font-size: 12px; font-weight: 600; color: #0F2B20;">≥ 960</div>
+          <div style="font-size: 10.5px; color: #565C63; margin-top: 2px;">导航条 + 双栏</div>
+        </div>
+        <div style="width: 18px; display: flex; align-items: center; justify-content: center;"><div style="width: 8px; height: 8px; border-top: 1.5px solid #7E848B; border-right: 1.5px solid #7E848B; transform: rotate(45deg);"></div></div>
+        <div style="flex-grow: 1; text-align: center; padding: 8px; border-radius: 8px; background: #FFFFFF; border: 1px solid #D2CBB9;">
+          <div style="font-size: 12px; font-weight: 600;">720 – 959</div>
+          <div style="font-size: 10.5px; color: #565C63; margin-top: 2px;">底栏 + 单栏收窄</div>
+        </div>
+        <div style="width: 18px; display: flex; align-items: center; justify-content: center;"><div style="width: 8px; height: 8px; border-top: 1.5px solid #7E848B; border-right: 1.5px solid #7E848B; transform: rotate(45deg);"></div></div>
+        <div style="flex-grow: 1; text-align: center; padding: 8px; border-radius: 8px; background: #FFFFFF; border: 1px solid #D2CBB9;">
+          <div style="font-size: 12px; font-weight: 600;">&lt; 720</div>
+          <div style="font-size: 10.5px; color: #565C63; margin-top: 2px;">手机原样</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr; background: #F3F1EA;">
+          <div class="th">页面</div>
+          <div class="th">副栏怎么退</div>
+          <div class="th">导航怎么退</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">问策</div>
+          <div class="td">会话栏收回<b>半屏抽屉</b>；页头「军师团 / 历史」重新变回打开抽屉的按钮</div>
+          <div class="td">底栏回来，且回到<b>浮岛内那排自绘 tab 行</b>（对话终态的原样）</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">战局</div>
+          <div class="td">献策 + 建档整组落回<b>页面最前</b>的原位；天时本来就没进副栏，一直在主栏</div>
+          <div class="td">底栏回来</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">今日</div>
+          <div class="td">整组落回军令流<b>之后</b>的原位，组内顺序不变</div>
+          <div class="td">底栏回来</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">图籍</div>
+          <div class="td">配额 + 阶段筛选整组落回<b>段控之后</b>的原位，配额恢复横排；主 CTA 一直在主栏页尾</div>
+          <div class="td">底栏回来</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">主公</div>
+          <div class="td">整组落回<b>主栏之下</b>的原位</div>
+          <div class="td">底栏回来</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 76px 1fr 1fr;">
+          <div class="td" style="font-weight: 600;">对话页</div>
+          <div class="td">本来就没有副栏；正文轴由 840 退成满宽</div>
+          <div class="td">导航条消失，只剩返回键</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; background: #FBFAF6; border-left: 3px solid #9C4A38; padding: 12px 14px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 12px; font-weight: 600; color: #9C4A38; margin-bottom: 5px;">降级必须是「同一棵 DOM 换排布」，不是「另写一套」</div>
+        <div style="font-size: 12px; line-height: 1.8; color: #565C63;">
+          问策那一版已经验证了这条路：常驻侧栏和半屏抽屉是<b style="color:#16191D;">同一棵 WXML、同一份数据</b>，
+          只有 CSS 和一个布尔量不同。剩下四个 tab 也照这个来 ——
+          副栏是一个 <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">&lt;view class="aside"&gt;</code> 包住原有的那几块，
+          窄档下它只是个透明容器，宽档下才移到右侧成栏。
+          <br><br>
+          <b style="color:#9C4A38;">正因为是 wrapper，副栏只能收「在手机上本来就相邻」的块。</b>
+          包一层就意味着这几块在手机上只能出现在<b>一个</b>位置 —— 所以战局的天时（手机上排在三势之后）
+          和图籍的主 CTA（排在页尾）都<b>不进副栏</b>，否则窄屏会被动改版。
+          四个 tab 的副栏都是按这条挑出来的，<b style="color:#16191D;">手机版一个节点都不动</b>。
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; gap: 10px; align-items: flex-start;">
+        <div style="width: 4px; height: 40px; background: #D2CBB9; border-radius: 2px; flex-shrink: 0;"></div>
+        <div style="font-size: 11.5px; line-height: 1.75; color: #7E848B;">
+          窗口拖动时 <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">Page.onResize</code> 会连续触发，
+          档位切换要幂等（问策的 <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">syncRail</code> 已经是「值没变就直接 return」），
+          否则拖一次窗口会打出上百次 setData。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

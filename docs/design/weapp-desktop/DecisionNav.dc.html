@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 900px; box-sizing: border-box; padding: 36px 40px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid #D2CBB9; padding-bottom: 14px;">
+    <span class="sf" style="font-size: 26px; font-weight: 600;">决策 A · 桌面上的导航放哪</span>
+    <span style="font-size: 12px; color: #7E848B;">底部胶囊底栏 vs 左侧导航条</span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; margin-top: 16px;">
+
+    <!-- 方案甲 -->
+    <div style="background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 14px; padding: 18px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span class="sf" style="font-size: 18px; font-weight: 600;">方案甲 · 保留底部胶囊底栏</span>
+        <span style="margin-left: auto; font-size: 11px; color: #7E848B; border: 1px solid #D2CBB9; padding: 2px 8px; border-radius: 999px;">改动最小</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 12px; color: #565C63;">桌面只做内容分栏，导航沿用手机的悬浮底栏（已居中收窄到 560px）</div>
+
+      <!-- 示意 -->
+      <div style="margin-top: 14px; height: 258px; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 10px; padding: 12px; box-sizing: border-box; position: relative; display: flex; flex-direction: column;">
+        <div style="height: 26px; background: #F3F1EA; border-radius: 4px; display: flex; align-items: center; padding: 0 10px; font-size: 10px; color: #7E848B;">页头 · 通栏</div>
+        <div style="flex-grow: 1; display: flex; gap: 12px; margin-top: 10px;">
+          <div style="flex-grow: 1; background: #F3F1EA; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #565C63;">主栏</div>
+          <div style="width: 112px; background: #FBFAF6; border: 1px dashed #D2CBB9; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7E848B;">副栏 320</div>
+        </div>
+        <div style="position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; width: 250px; height: 34px; background: rgba(246,243,235,.96); border: 1px solid #D2CBB9; border-radius: 17px; box-shadow: 0 6px 16px rgba(22,25,29,.14); display: flex; align-items: center; justify-content: space-around; font-size: 10px; color: #565C63;">
+          <span style="color:#1E5A43; font-weight:600;">问策</span><span>战局</span><span>今日</span><span>图籍</span><span>主公</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; font-size: 12px; line-height: 1.85; color: #565C63;">
+        <div style="color:#1E5A43; font-weight:600; margin-bottom:2px;">好处</div>
+        改一行都不用碰导航；手机 / iPad / PC 完全同一套导航记忆。
+        <div style="color:#9C4A38; font-weight:600; margin: 8px 0 2px;">代价</div>
+        一块 1280px 宽的屏幕，导航却挂在屏幕正下方 —— 鼠标要从内容区一路甩到底部中央。
+        底栏还会横在主栏和副栏之上，副栏最下面那张卡永远被压住一截，每页都要额外留 90px 空白。
+      </div>
+    </div>
+
+    <!-- 方案乙 -->
+    <div style="background: #FBFAF6; border: 2px solid #1E5A43; border-radius: 14px; padding: 17px; box-shadow: 0 3px 14px rgba(30,90,67,.12);">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span class="sf" style="font-size: 18px; font-weight: 600; color: #1E5A43;">方案乙 · 左侧 72px 导航条</span>
+        <span style="margin-left: auto; font-size: 11px; color: #FFFFFF; background: #1E5A43; padding: 3px 9px; border-radius: 999px; font-weight: 600;">推荐</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 12px; color: #565C63;">≥960 时底栏整条收起，五个 tab 竖排在左，常驻不滚动</div>
+
+      <!-- 示意 -->
+      <div style="margin-top: 14px; height: 258px; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 10px; padding: 12px; box-sizing: border-box; display: flex; gap: 12px;">
+        <div style="width: 52px; background: #FBFAF6; border-right: 1px solid #D2CBB9; margin: -12px 0 -12px -12px; padding: 12px 0; border-radius: 10px 0 0 10px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <div style="width: 26px; height: 26px; border-radius: 8px; background: #E7EEE9; border: 1px solid #1E5A43;"></div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+            <div style="width: 18px; height: 18px; border-radius: 5px; background: #1E5A43;"></div>
+            <span style="font-size: 9px; color: #1E5A43; font-weight: 600;">问策</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+            <div style="width: 18px; height: 18px; border-radius: 5px; background: #E7E4DB;"></div>
+            <span style="font-size: 9px; color: #7E848B;">战局</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+            <div style="width: 18px; height: 18px; border-radius: 5px; background: #E7E4DB;"></div>
+            <span style="font-size: 9px; color: #7E848B;">今日</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+            <div style="width: 18px; height: 18px; border-radius: 5px; background: #E7E4DB;"></div>
+            <span style="font-size: 9px; color: #7E848B;">图籍</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+            <div style="width: 18px; height: 18px; border-radius: 5px; background: #E7E4DB;"></div>
+            <span style="font-size: 9px; color: #7E848B;">主公</span>
+          </div>
+        </div>
+        <div style="flex-grow: 1; display: flex; flex-direction: column;">
+          <div style="height: 26px; background: #F3F1EA; border-radius: 4px; display: flex; align-items: center; padding: 0 10px; font-size: 10px; color: #7E848B;">页头</div>
+          <div style="flex-grow: 1; display: flex; gap: 12px; margin-top: 10px;">
+            <div style="flex-grow: 1; background: #F3F1EA; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #565C63;">主栏</div>
+            <div style="width: 112px; background: #FBFAF6; border: 1px dashed #D2CBB9; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7E848B;">副栏 320</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; font-size: 12px; line-height: 1.85; color: #565C63;">
+        <div style="color:#1E5A43; font-weight:600; margin-bottom:2px;">好处</div>
+        导航永远在视线起点；主栏和副栏拿到完整的垂直高度，不必为底栏留 90px；
+        竖排 72px 正好放下「问策」这样的两字标签 + 22px 图标，中文不用缩写。
+        <div style="color:#9C4A38; font-weight:600; margin: 8px 0 2px;">代价</div>
+        问策 tab 变三栏（见下方尺寸），底部浮岛里那排自绘 tab 行要在桌面档去掉，
+        五个页面的底部留白规则都要改一遍。
+      </div>
+    </div>
+  </div>
+
+  <!-- 关键实现说明 + 三栏尺寸 -->
+  <div style="display: grid; grid-template-columns: 1fr 400px; gap: 28px; margin-top: 16px;">
+
+    <div style="background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 12px; padding: 16px 18px;">
+      <div class="sf" style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">方案乙怎么落，才不会被微信的容器卡住</div>
+      <div style="font-size: 12px; line-height: 1.85; color: #565C63;">
+        <b style="color:#9C4A38;">不要去搬官方的 custom-tab-bar。</b>
+        它由微信放在自己的固定容器里，把它拉成整列高的左栏，命中区会不会跟着走是没有保证的 —— 这类改法在真机上翻车的概率不低。
+        <br><br>
+        走已经验证过的那条路：<b style="color:#16191D">桌面档把 custom-tab-bar 整条隐藏</b>（复用 <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">store.setOverlay</code>，
+        问策的对话终态现在就是这么把底栏藏掉的），左导航改成<b style="color:#16191D">我们自己的 nav-rail 组件</b>，
+        由五个 tab 页 + 对话分包页各引一次。定位、命中区、层级全在我们手里，不受微信容器约束。
+        <br><br>
+        代价是 6 个页面的 <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">index.json</code> 各加一行组件注册、
+        <code style="background:#F3F1EA; padding:1px 4px; border-radius:3px;">index.wxml</code> 各加一行标签。可控。
+      </div>
+    </div>
+
+    <div>
+      <div class="sf" style="font-size: 16px; font-weight: 600; margin-bottom: 10px;">问策三栏在两种窗口下</div>
+      <div style="background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 12px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 84px 1fr 1fr 1fr; background: #F3F1EA; font-size: 11px; font-weight: 600; color: #565C63;">
+          <div style="padding: 8px 12px;">窗口</div>
+          <div style="padding: 8px 6px; text-align: right;">导航</div>
+          <div style="padding: 8px 6px; text-align: right;">会话栏</div>
+          <div style="padding: 8px 12px; text-align: right;">对话主栏</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 84px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB; background: #E7EEE9;">
+          <div style="padding: 10px 12px; font-weight: 600;">1008</div>
+          <div style="padding: 10px 6px; text-align: right; color:#565C63;">72</div>
+          <div style="padding: 10px 6px; text-align: right; color:#565C63;">320</div>
+          <div style="padding: 10px 12px; text-align: right; font-weight: 600;">616</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 84px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB;">
+          <div style="padding: 10px 12px; font-weight: 600;">1280</div>
+          <div style="padding: 10px 6px; text-align: right; color:#565C63;">72</div>
+          <div style="padding: 10px 6px; text-align: right; color:#565C63;">320</div>
+          <div style="padding: 10px 12px; text-align: right; font-weight: 600;">888</div>
+        </div>
+      </div>
+      <div style="margin-top: 9px; font-size: 11px; line-height: 1.7; color: #7E848B;">
+        <b style="color:#9C4A38;">这三栏是齐边的</b>，用的不是另外四个 tab 那套预算：会话栏本身就是一条通栏，
+        不走内容区的 20 页边距与 24 栏间距，所以主栏 = 窗口 − 392（而不是 − 456）。
+        对话主栏里的正文轴仍封顶 840：1008 下正文实占 568（616 − 48 内边距），1280 下正好吃满 840。
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

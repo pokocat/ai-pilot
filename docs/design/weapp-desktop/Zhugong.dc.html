@@ -1,0 +1,172 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    .tag { font-size: 10px; color: #9C4A38; font-weight: 600; }
+    .rail-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .rail-ic { width: 22px; height: 22px; border-radius: 6px; background: #E7E4DB; }
+    .rail-tx { font-size: 11px; color: #7E848B; }
+    .card { background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 16px; }
+    .aside-h { font-size: 10px; letter-spacing: .34em; color: #7E848B; font-weight: 600; }
+    .mrow { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid #E7E4DB; }
+    .mrow:last-child { border-bottom: 0; }
+    .mtx { flex-grow: 1; font-size: 13.5px; }
+    .mnote { font-size: 11.5px; color: #7E848B; flex-shrink: 0; }
+    .chev { width: 8px; height: 8px; border-top: 1.4px solid #7E848B; border-right: 1.4px solid #7E848B; transform: rotate(45deg); flex-shrink: 0; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 24px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;">
+    <span class="sf" style="font-size: 22px; font-weight: 600;">主公 · 桌面双栏</span>
+    <span style="font-size: 12px; color: #7E848B;">窗口 1280 · 导航 72 + 主栏 824 + 副栏 320</span>
+    <span style="margin-left: auto;" class="tag">左边是「你是谁 / 你打成什么样」，右边是「你能去哪」</span>
+  </div>
+
+  <div style="width: 1280px; height: 821px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; overflow: hidden; display: flex; box-shadow: 0 4px 20px rgba(22,25,29,.08);">
+
+    <div style="width: 72px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #D2CBB9; padding: 18px 0; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+      <div class="sf" style="width: 32px; height: 32px; border-radius: 10px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600;">军</div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">问策</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">战局</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">今日</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">图籍</span></div>
+      <div class="rail-item"><div class="rail-ic" style="background:#1E5A43;"></div><span class="rail-tx" style="color:#1E5A43; font-weight:600;">主公</span></div>
+    </div>
+
+    <div style="flex-grow: 1; padding: 22px 20px; box-sizing: border-box; position: relative; overflow: hidden;">
+      <div class="sf" style="position: absolute; right: 26px; top: 8px; font-size: 88px; line-height: 1; font-weight: 600; color: #1E5A43; opacity: .085;">主</div>
+
+      <div style="position: relative;">
+        <div style="font-size: 12px; letter-spacing: .2em; color: #1E5A43;">你自己</div>
+        <div class="sf" style="font-size: 29px; font-weight: 600; letter-spacing: .03em; margin-top: 4px;">主公</div>
+        <div style="height: 1px; background: #E7E4DB; margin-top: 14px;"></div>
+      </div>
+
+      <div style="display: flex; gap: 24px; margin-top: 18px;">
+
+        <!-- 主栏 -->
+        <div style="width: 824px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+
+          <!-- 账户卡 -->
+          <div style="background: #1E5A43; border-radius: 18px; padding: 20px 22px; color: #FFFFFF;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div class="sf" style="width: 52px; height: 52px; border-radius: 16px; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600;">老</div>
+              <div style="flex-grow: 1;">
+                <div class="sf" style="font-size: 20px; font-weight: 600;">老板</div>
+                <div style="font-size: 12px; opacity: .72; margin-top: 3px;">你的经营案卷</div>
+              </div>
+              <div style="padding: 7px 15px; border-radius: 999px; border: 1px solid rgba(255,255,255,.4); font-size: 12.5px; font-weight: 600;">尚未开通</div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 12px; opacity: .8;">
+              <span>手机 · 未绑定</span>
+              <span>邀请码 JS2026</span>
+              <span style="margin-left: auto; padding: 4px 11px; border-radius: 999px; background: rgba(255,255,255,.14); font-size: 11.5px;">邀请卡</span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px;">
+              <div style="background: rgba(255,255,255,.10); border-radius: 12px; padding: 12px 14px;">
+                <div style="font-size: 13.5px; font-weight: 600;">算力</div>
+                <div style="font-size: 11.5px; opacity: .72; margin-top: 3px;">0% · 0 钻石</div>
+              </div>
+              <div style="background: rgba(255,255,255,.10); border-radius: 12px; padding: 12px 14px;">
+                <div style="font-size: 13.5px; font-weight: 600;">深度报告</div>
+                <div style="font-size: 11.5px; opacity: .72; margin-top: 3px;">军师执笔</div>
+              </div>
+              <div style="background: rgba(255,255,255,.10); border-radius: 12px; padding: 12px 14px;">
+                <div style="font-size: 13.5px; font-weight: 600;">企业服务</div>
+                <div style="font-size: 11.5px; opacity: .72; margin-top: 3px;">工商 / 财税 / 商标</div>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; margin-top: 16px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.16); font-size: 12px;">
+              <span style="opacity: .72;">年度谶语 · 你还没有今年的谶</span>
+              <span style="margin-left: auto; font-weight: 600;">去命盘领一句</span>
+            </div>
+          </div>
+
+          <!-- 统计行 -->
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div class="card" style="padding: 16px; text-align: center;">
+              <div class="sf" style="font-size: 24px; font-weight: 600;">1</div>
+              <div style="font-size: 12px; color: #7E848B; margin-top: 3px;">案卷</div>
+            </div>
+            <div class="card" style="padding: 16px; text-align: center;">
+              <div class="sf" style="font-size: 24px; font-weight: 600;">3</div>
+              <div style="font-size: 12px; color: #7E848B; margin-top: 3px;">方案</div>
+            </div>
+            <div class="card" style="padding: 16px; text-align: center;">
+              <div class="sf" style="font-size: 24px; font-weight: 600;">0</div>
+              <div style="font-size: 12px; color: #7E848B; margin-top: 3px;">资料</div>
+            </div>
+          </div>
+
+          <!-- 段位卡 -->
+          <div class="card" style="padding: 18px 20px; display: flex; align-items: center; gap: 16px;">
+            <div class="sf" style="width: 54px; height: 54px; border-radius: 16px; background: #E7EEE9; color: #0F2B20; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 600; flex-shrink: 0;">尉官</div>
+            <div style="flex-grow: 1;">
+              <div class="sf" style="font-size: 17px; font-weight: 600;">战略段位 · 尉官</div>
+              <div style="font-size: 12.5px; color: #565C63; margin-top: 5px;">连续复盘 15 天 · 使用第 16 天 · 决策准确率 60%</div>
+              <div style="font-size: 11.5px; color: #7E848B; margin-top: 5px;">下一段位 校尉：连续复盘 30 天 + 完成首次月度战报</div>
+            </div>
+          </div>
+
+          <div style="flex-grow: 1; display: flex; align-items: flex-end;">
+            <div class="tag" style="line-height: 1.6;">
+              主栏三块在手机上就是首屏的三块，顺序不变 —— 桌面只是把下面那串菜单挪走，让它们不必再挤在一列里
+            </div>
+          </div>
+        </div>
+
+        <!-- 副栏 -->
+        <div style="width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;">
+
+          <div class="aside-h">档 案</div>
+          <div class="card" style="padding: 0;">
+            <div class="mrow"><span class="mtx">个人 / 企业档案</span><span class="mnote">待补 2 项</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx">公司与事业架构</span><span class="mnote">待建立</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx">命盘报告 · 八字紫微印证</span><div class="chev"></div></div>
+          </div>
+
+          <div class="aside-h" style="margin-top: 4px;">资 产</div>
+          <div class="card" style="padding: 0;">
+            <div class="mrow"><span class="mtx">锦囊 · 军师替你出的成品</span><span class="mnote">方案 / 海报 / 成片</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx">我的品牌资产</span><span class="mnote">数字人 / 短视频</span><div class="chev"></div></div>
+          </div>
+
+          <div class="aside-h" style="margin-top: 4px;">系 统</div>
+          <div class="card" style="padding: 0;">
+            <div class="mrow"><span class="mtx">提醒与日历</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx">设置 · 资料与偏好</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx">已启用的兵器 · 管理与续费</span><div class="chev"></div></div>
+            <div class="mrow"><span class="mtx" style="color: #9C4A38;">退出登录</span></div>
+          </div>
+
+          <div style="margin-top: auto; border-top: 1px dashed #D2CBB9; padding-top: 10px;" class="tag">
+            三组菜单在手机上本来就连续排在最后，包成副栏后手机版零改动。桌面上要滑两屏才到底的「系统」组一眼可见
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 28px; margin-top: 12px; font-size: 11.5px; color: #565C63;">
+    <span><b style="color:#16191D;">主栏</b> 账户卡 · 统计行 · 段位卡</span>
+    <span><b style="color:#16191D;">副栏</b> 档案 / 资产 / 系统 三组菜单</span>
+    <span style="color:#9C4A38;"><b>降级</b> &lt;960 时三组菜单回到主栏之下，与今天完全一致</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

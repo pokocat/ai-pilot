@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 900px; box-sizing: border-box; padding: 36px 40px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid #D2CBB9; padding-bottom: 14px;">
+    <span class="sf" style="font-size: 26px; font-weight: 600; letter-spacing: .02em;">桌面双栏 · 布局系统</span>
+    <span style="font-size: 12px; color: #7E848B;">微信 PC / Mac · resizable 单窗口</span>
+    <span style="margin-left: auto; font-size: 11px; color: #9C4A38; font-weight: 600;">红色标注 = 需要你确认的数字</span>
+  </div>
+
+  <!-- 三档断点 -->
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 18px;">
+
+    <!-- compact -->
+    <div style="background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 14px; padding: 16px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span class="sf" style="font-size: 16px; font-weight: 600;">compact</span>
+        <span style="font-size: 12px; color: #7E848B;">&lt; 720px</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 12px; color: #565C63;">手机 / 窄 iPad —— 一个像素都不动</div>
+      <div style="margin-top: 12px; height: 168px; display: flex; justify-content: center; align-items: flex-start;">
+        <div style="width: 108px; height: 168px; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 10px; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px;">
+          <div style="height: 16px; background: #EFEDE5; border-radius: 3px;"></div>
+          <div style="flex-grow: 1; background: #F3F1EA; border-radius: 3px;"></div>
+          <div style="height: 20px; background: #E7EEE9; border: 1px solid #D2CBB9; border-radius: 10px;"></div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #7E848B; line-height: 1.7;">单栏 · 底部胶囊底栏 · 抽屉走半屏</div>
+    </div>
+
+    <!-- medium -->
+    <div style="background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 14px; padding: 16px;">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span class="sf" style="font-size: 16px; font-weight: 600;">medium</span>
+        <span style="font-size: 12px; color: #7E848B;">720 – 959px</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 12px; color: #565C63;">iPad 竖屏 / 小窗口 —— 单栏收窄居中</div>
+      <div style="margin-top: 12px; height: 168px; display: flex; justify-content: center; align-items: flex-start;">
+        <div style="width: 200px; height: 168px; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 10px; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+          <div style="width: 130px; height: 16px; background: #EFEDE5; border-radius: 3px;"></div>
+          <div style="width: 130px; flex-grow: 1; background: #F3F1EA; border-radius: 3px;"></div>
+          <div style="width: 130px; height: 20px; background: #E7EEE9; border: 1px solid #D2CBB9; border-radius: 10px;"></div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #7E848B; line-height: 1.7;">正文轴上限 840 · 段控上限 520 · 仍是单栏</div>
+    </div>
+
+    <!-- expanded -->
+    <div style="background: #FBFAF6; border: 1px solid #1E5A43; border-radius: 14px; padding: 16px; box-shadow: 0 2px 10px rgba(30,90,67,.10);">
+      <div style="display: flex; align-items: baseline; gap: 8px;">
+        <span class="sf" style="font-size: 16px; font-weight: 600; color: #1E5A43;">expanded</span>
+        <span style="font-size: 12px; color: #9C4A38; font-weight: 600;">≥ 960px（原为 1100）</span>
+      </div>
+      <div style="margin-top: 4px; font-size: 12px; color: #565C63;">微信 PC / Mac / iPad 横屏 —— 双栏</div>
+      <div style="margin-top: 12px; height: 168px; display: flex; justify-content: center; align-items: flex-start;">
+        <div style="width: 300px; height: 168px; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 10px; padding: 8px; box-sizing: border-box; display: flex; gap: 8px;">
+          <div style="width: 26px; background: #E7EEE9; border: 1px solid #D2CBB9; border-radius: 5px;"></div>
+          <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px;">
+            <div style="height: 16px; background: #EFEDE5; border-radius: 3px;"></div>
+            <div style="flex-grow: 1; background: #F3F1EA; border-radius: 3px;"></div>
+          </div>
+          <div style="width: 78px; background: #F3F1EA; border: 1px dashed #D2CBB9; border-radius: 5px;"></div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #7E848B; line-height: 1.7;">左导航 72 · 主栏弹性 · 副栏 320</div>
+    </div>
+  </div>
+
+  <!-- 栅格规格 -->
+  <div style="display: grid; grid-template-columns: 1fr 470px; gap: 28px; margin-top: 20px;">
+
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 12px;">expanded 栅格</div>
+
+      <div style="position: relative; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 12px; padding: 18px 16px 34px;">
+        <div style="display: flex; gap: 0; align-items: stretch; height: 116px;">
+          <div style="width: 72px; background: #E7EEE9; border: 1px solid #1E5A43; border-radius: 8px 0 0 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #0F2B20; font-weight: 600; writing-mode: vertical-rl;">左导航 72</div>
+          <div style="width: 20px;"></div>
+          <div style="flex-grow: 1; background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px;">
+            <span style="font-size: 13px; font-weight: 600;">主栏 · 弹性</span>
+            <span style="font-size: 11px; color: #7E848B;">内部正文轴上限 840，超出留白</span>
+          </div>
+          <div style="width: 24px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #9C4A38;">24</div>
+          <div style="width: 320px; background: #F3F1EA; border: 1px dashed #D2CBB9; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px;">
+            <span style="font-size: 13px; font-weight: 600;">副栏 · 固定 320</span>
+            <span style="font-size: 11px; color: #7E848B;">上下文，不抢主线</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; gap: 22px; font-size: 11px; color: #565C63; flex-wrap: wrap;">
+          <span><b style="color:#16191D">容器上限</b> 1240px（原 <s style="color:#7E848B">1080</s>）</span>
+          <span><b style="color:#16191D">页边距</b> 左右各 20px</span>
+          <span><b style="color:#16191D">栏间距</b> 24px</span>
+          <span><b style="color:#16191D">正文轴</b> ≤ 840px</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; background: #FBFAF6; border-left: 3px solid #9C4A38; padding: 12px 14px; border-radius: 0 8px 8px 0;">
+        <div style="font-size: 12px; font-weight: 600; color: #9C4A38; margin-bottom: 5px;">为什么门槛必须降到 960</div>
+        <div style="font-size: 12px; line-height: 1.75; color: #565C63;">
+          你截图那个窗口实测约 <b style="color:#16191D">1008pt</b> 宽（图 2016px ÷ 2x，手机栏 405pt）。
+          按现在 1100 的门槛，<b style="color:#16191D">默认窗口根本进不了双栏档</b> —— 双栏做了也白做。
+          960 这个数是倒推出来的：72 导航 + 320 副栏 + 24 间距 + 40 页边距 = 456，留给主栏 <b style="color:#16191D">504px</b>，
+          刚好还能放下一张完整的军令卡。再低就该退回单栏。
+        </div>
+      </div>
+    </div>
+
+    <!-- 实际宽度表 -->
+    <div>
+      <div class="sf" style="font-size: 17px; font-weight: 600; margin-bottom: 12px;">四种窗口下的实际栏宽</div>
+      <div style="background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 12px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 1fr; background: #F3F1EA; font-size: 11px; font-weight: 600; color: #565C63;">
+          <div style="padding: 9px 12px;">窗口宽</div>
+          <div style="padding: 9px 8px; text-align: right;">左导航</div>
+          <div style="padding: 9px 8px; text-align: right;">主栏</div>
+          <div style="padding: 9px 12px; text-align: right;">副栏</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB;">
+          <div style="padding: 10px 12px; font-weight: 600;">960</div>
+          <div style="padding: 10px 8px; text-align: right; color: #565C63;">72</div>
+          <div style="padding: 10px 8px; text-align: right; font-weight: 600;">504</div>
+          <div style="padding: 10px 12px; text-align: right; color: #565C63;">320</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB; background: #E7EEE9;">
+          <div style="padding: 10px 12px; font-weight: 600;">1008 <span style="font-weight:400; color:#9C4A38; font-size:10px;">你的窗口</span></div>
+          <div style="padding: 10px 8px; text-align: right; color: #565C63;">72</div>
+          <div style="padding: 10px 8px; text-align: right; font-weight: 600;">552</div>
+          <div style="padding: 10px 12px; text-align: right; color: #565C63;">320</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB;">
+          <div style="padding: 10px 12px; font-weight: 600;">1280</div>
+          <div style="padding: 10px 8px; text-align: right; color: #565C63;">72</div>
+          <div style="padding: 10px 8px; text-align: right; font-weight: 600;">824</div>
+          <div style="padding: 10px 12px; text-align: right; color: #565C63;">320</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 1fr; font-size: 12px; border-top: 1px solid #E7E4DB;">
+          <div style="padding: 10px 12px; font-weight: 600;">1440+</div>
+          <div style="padding: 10px 8px; text-align: right; color: #565C63;">72</div>
+          <div style="padding: 10px 8px; text-align: right; font-weight: 600;">896</div>
+          <div style="padding: 10px 12px; text-align: right; color: #565C63;">320</div>
+        </div>
+      </div>
+      <div style="margin-top: 10px; font-size: 11px; line-height: 1.7; color: #7E848B;">
+        主栏 = 窗口 − 456（72 导航 + 40 页边距 + 24 栏间距 + 320 副栏）。窗口再大，容器就撞上 1240 封顶、
+        <b style="color:#16191D;">主栏定格 896</b>，栏内<b style="color:#16191D;">正文轴 840</b> 左右各留 28 —— 正文行长在任何显示器上都一样。
+      </div>
+
+      <div style="margin-top: 16px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; padding: 12px 14px;">
+        <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">分栏语法（五个 tab 统一）</div>
+        <div style="font-size: 12px; line-height: 1.8; color: #565C63;">
+          <b style="color:#16191D">主栏</b> = 你要读、要动的那一件事<br>
+          <b style="color:#16191D">副栏</b> = 支撑它成立的上下文
+        </div>
+        <div style="margin-top: 8px; font-size: 11px; line-height: 1.7; color: #7E848B;">
+          唯一例外是问策：它的副栏是<b>导航</b>（选军师、选会话），所以放左边，与其余四个 tab 的右副栏相反。
+          这正是桌面软件的通例 —— 导航在左、上下文在右。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

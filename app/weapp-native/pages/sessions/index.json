@@ -1,6 +1,7 @@
 {
   "navigationStyle": "custom",
   "usingComponents": {
+    "nav-rail": "/components/nav-rail/index",
     "tab-header": "/components/tab-header/index",
     "login-sheet": "/components/login-sheet/index",
     "agent-unlock": "/components/agent-unlock/index",

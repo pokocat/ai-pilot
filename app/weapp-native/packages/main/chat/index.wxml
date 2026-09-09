@@ -1,7 +1,11 @@
 <import src="/chat-core/message-list.wxml"></import>
 <import src="/chat-core/composer.wxml"></import>
 
-<view class="chat-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-menu-top:{{navTop}}px;--native-menu-height:{{navRowHeight}}px;--native-menu-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px">
+<view class="chat-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-menu-top:{{navTop}}px;--native-menu-height:{{navRowHeight}}px;--native-menu-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
+  <!-- 桌面 ≥960 的 72px 左导航。官方 custom-tab-bar 只在 tabBar 页渲染，二级页天生没有导航；
+       这条是我们自己的组件，所以从 tab 进到对话页时左边那条不会突然消失。
+       selected 传 0：对话是从问策 tab 落进来的。 -->
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{0}}"></nav-rail>
   <view class="chat-header">
     <view class="chat-safe"></view>
     <view class="chat-headrow">

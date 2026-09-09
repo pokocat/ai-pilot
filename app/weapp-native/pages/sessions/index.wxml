@@ -4,7 +4,11 @@
 <!-- 问策 tab 分形态渲染（/me.features.wenceForm，游客读 /wence/hints 的 guestForm）：
      form==='chat' 走终态「总军师对话即 tab」；其余（control / dock / 字段缺失 / 取数失败）
      一律落到下面那棵现状军师列表，一个节点都不动，灰度回退才有意义。-->
-<view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
+<view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}} {{viewportClass}} {{railOn ? 'rail-on' : ''}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
+  <!-- 桌面 ≥960 的 72px 左导航（底栏此时已被 setOverlay('desktop-rail') 整条收起）。
+       问策终态在桌面上是三栏：导航 72 + 会话栏 320 + 对话主栏；两棵根都要挂，
+       control 形态回退时同样需要导航。 -->
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{0}}"></nav-rail>
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
 
   <!-- 合一页头：固定不滚。kicker 位换成对话对象身份（总军师 + 花名 + 在线），
@@ -66,10 +70,12 @@
     </view>
   </view>
 
-  <!-- 军师团 / 历史抽屉：双入口同一抽屉、各落各段，顶部分段器互切。z-index 900 = --z-sheet。-->
+  <!-- 军师团 / 历史抽屉：双入口同一抽屉、各落各段，顶部分段器互切。z-index 900 = --z-sheet。
+       桌面大窗口（railOn）下同一棵树抬成常驻左栏：不再有遮罩、不再压 overlay，
+       页头那两个入口只切分段。窗口收窄回去自动落回半屏抽屉。-->
   <view wx:if="{{drawerOpen}}" class="wd-mask" bindtap="closeDrawer"></view>
-  <view wx:if="{{drawerOpen}}" class="wd-sheet" catchtap="stop">
-    <view class="wd-grab"></view>
+  <view wx:if="{{drawerOpen || railOn}}" class="wd-sheet {{railOn ? 'as-rail' : ''}}" catchtap="stop">
+    <view wx:if="{{!railOn}}" class="wd-grab"></view>
     <view class="wd-seg">
       <view class="wd-seg-item {{drawerSeg === 'council' ? 'on' : ''}}" data-seg="council" bindtap="switchSeg"><text>军师团</text></view>
       <view class="wd-seg-item {{drawerSeg === 'history' ? 'on' : ''}}" data-seg="history" bindtap="switchSeg"><text>历史会话</text></view>
@@ -124,6 +130,7 @@
 </view>
 
 <view wx:else class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{0}}"></nav-rail>
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>

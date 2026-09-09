@@ -1,9 +1,12 @@
 <view class="native-page {{themeClass}} {{viewportClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--window-width:{{windowWidth}}px;--window-height:{{windowHeight}}px">
+  <!-- 桌面 ≥960 的 72px 左导航（底栏此时已被 setOverlay('desktop-rail') 整条收起）。 -->
+  <nav-rail class="nav-rail" show="{{isExpanded}}" selected="{{4}}"></nav-rail>
   <view wx:if="{{showBackendEnvironmentBadge}}" class="native-env-badge {{isMock ? 'is-switchable' : ''}}" bindtap="switchMockProfile"><text>{{backendEnvironmentLabel}}</text><text wx:if="{{isMock}}"> · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
-    <view class="pad account">
-      <tab-header title="主公" kicker="你自己" glyph="主"></tab-header>
+    <!-- has-aside 与 aside 的渲染条件同源：菜单副栏只在已登录分支里，游客态没有副栏。 -->
+    <view class="pad account {{authed ? 'has-aside' : ''}}">
+      <tab-header class="pad-head" title="主公" kicker="你自己" glyph="主"></tab-header>
 
       <!-- /me 挂了整页会退化成「全新空账号」（0 案卷 / 尚未开通 / 完整度 0%），
            与真实空账号无法区分——必须明说是读失败并给重试。 -->
@@ -44,12 +47,17 @@
 
         <view wx:if="{{showRank}}" class="rank-card card" data-route="/packages/work/ledger/index" bindtap="openRoute"><view class="rk-badge"><text class="serif">{{progress.rank}}</text></view><view class="rk-b"><text class="rk-t serif">战略段位 · {{progress.rank}}</text><text class="rk-s">{{progressDesc}}</text><text class="rk-next">{{progressNext}}</text></view><native-icon name="arrow" tone="gold" size="15"></native-icon></view>
 
-        <view wx:for="{{menuGroups}}" wx:key="title" class="menu-group">
-          <text class="menu-group-title">{{item.title}}</text>
-          <view class="menu card">
-            <view wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="label" class="menu-row" data-group="{{index}}" data-index="{{rowIndex}}" bindtap="tapMenu">
-              <view class="menu-ic"><native-icon name="{{row.icon}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view>
-              <text class="menu-t">{{row.label}}</text><text class="menu-s">{{row.status}}</text><view class="menu-go"><native-icon name="arrow" tone="neutral" size="15"></native-icon></view>
+        <!-- 副栏（桌面 ≥960 落到右列，手机档这层 view 完全透明）：已登录态的功能菜单整组。
+             身份卡 / 统计 / 段位是「你是谁」的主栏叙述，菜单是导航，两者本来就是手机上前后相邻的两段。
+             游客分支那组 menu-group 不进副栏——游客态没有 has-aside。 -->
+        <view class="aside">
+          <view wx:for="{{menuGroups}}" wx:key="title" class="menu-group">
+            <text class="menu-group-title">{{item.title}}</text>
+            <view class="menu card">
+              <view wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="label" class="menu-row" data-group="{{index}}" data-index="{{rowIndex}}" bindtap="tapMenu">
+                <view class="menu-ic"><native-icon name="{{row.icon}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view>
+                <text class="menu-t">{{row.label}}</text><text class="menu-s">{{row.status}}</text><view class="menu-go"><native-icon name="arrow" tone="neutral" size="15"></native-icon></view>
+              </view>
             </view>
           </view>
         </view>

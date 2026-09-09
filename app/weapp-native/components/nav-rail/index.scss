@@ -1,0 +1,47 @@
+/* 桌面 expanded 档的 72px 通高左导航。
+   角标（.tab-badge / .tab-dot）与图标（.tab-icon）直接 @use 底栏那份 SCSS，不另抄一套尺寸：
+   同一个未读数在底栏和左导航上必须长得一模一样，各写一份的话迟早只改到一处。
+   代价是 `.tabbar` / `.tabbar-inner` 那几条随文件带了进来 —— 本组件没有 .tabbar 节点，
+   它们只是死规则（问策页 index.scss 同样这么做，见该文件顶部说明）。 */
+@use "../../custom-tab-bar/index.scss";
+
+.nav-rail-body {
+  position: fixed;
+  left: 0; top: 0; bottom: 0;
+  width: 72px;
+  box-sizing: border-box;
+  /* 与 custom-tab-bar 同层（100 = --z-nav）：桌面档两者不共存（底栏被 setOverlay 收起），
+     压在页头(60)与常驻侧栏(70)之上，模态层(900)之下。
+     教学层(90) 在它之下是**故意的**：手机上 custom-tab-bar 同样是 100 压在教学遮罩之上，
+     因为教学的箭头指的就是导航本身。 */
+  z-index: 100;
+  background: var(--paper);
+  border-right: 1px solid var(--line-strong);
+  /* 顶部让开微信胶囊那一行：导航条贴着窗口顶，不让位第一个 tab 会被胶囊压住。
+     变量由页面根节点透出（--native-nav-inset），兜底 60px 约等于「状态栏 + 胶囊行」。 */
+  padding-top: var(--native-nav-inset, 60px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.rail-tab {
+  flex: 0 0 auto;
+  height: 62px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 5px;
+  /* 整格可点：72×62 的命中区比手机底栏还宽裕，鼠标不用瞄。 */
+  box-sizing: border-box;
+}
+.rail-tab:active { opacity: .7; }
+
+/* 选中态：与底栏同一套语言（图标换主题色资产 + 原位稍稍放大 + 文字变色加粗），
+   不加框、不铺色。左导航上再加一条竖色带会让 72px 这条本就窄的栏显得更挤。 */
+.rail-tab.on .tab-ic { transform: scale(1.14); }
+
+.rail-label {
+  font-family: var(--sans);
+  font-size: 11px; line-height: 1; letter-spacing: .04em;
+  color: var(--ink-3); font-weight: 400;
+}
+.rail-tab.on .rail-label { color: var(--accent); font-weight: 600; }

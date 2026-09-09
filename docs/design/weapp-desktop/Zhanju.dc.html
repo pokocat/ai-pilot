@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; }
+    a { color: #1E5A43; } a:hover { color: #163F30; }
+    .sf { font-family: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif; }
+    .tag { font-size: 10px; color: #9C4A38; font-weight: 600; }
+    .rail-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .rail-ic { width: 22px; height: 22px; border-radius: 6px; background: #E7E4DB; }
+    .rail-tx { font-size: 11px; color: #7E848B; }
+    .card { background: #FFFFFF; border: 1px solid #D2CBB9; border-radius: 16px; }
+    .aside-h { font-size: 10px; letter-spacing: .34em; color: #7E848B; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 1360px; height: 940px; box-sizing: border-box; padding: 24px 40px 20px; background: #F4F2EC; color: #16191D;">
+
+  <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;">
+    <span class="sf" style="font-size: 22px; font-weight: 600;">战局 · 桌面双栏</span>
+    <span style="font-size: 12px; color: #7E848B;">窗口 1280 · 导航 72 + 主栏 824 + 副栏 320</span>
+    <span style="margin-left: auto;" class="tag">主栏 = 军师的判断链；副栏 = 判断之外的天时与提醒</span>
+  </div>
+
+  <div style="width: 1280px; height: 821px; background: #FBFAF6; border: 1px solid #D2CBB9; border-radius: 10px; overflow: hidden; display: flex; box-shadow: 0 4px 20px rgba(22,25,29,.08);">
+
+    <!-- 导航 -->
+    <div style="width: 72px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #D2CBB9; padding: 18px 0; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+      <div class="sf" style="width: 32px; height: 32px; border-radius: 10px; background: #1E5A43; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 600;">军</div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">问策</span></div>
+      <div class="rail-item"><div class="rail-ic" style="background:#1E5A43;"></div><span class="rail-tx" style="color:#1E5A43; font-weight:600;">战局</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">今日</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">图籍</span></div>
+      <div class="rail-item"><div class="rail-ic"></div><span class="rail-tx">主公</span></div>
+    </div>
+
+    <!-- 内容区 -->
+    <div style="flex-grow: 1; padding: 22px 20px; box-sizing: border-box; position: relative; overflow: hidden;">
+      <div class="sf" style="position: absolute; right: 26px; top: 8px; font-size: 88px; line-height: 1; font-weight: 600; color: #1E5A43; opacity: .085;">势</div>
+
+      <div style="position: relative;">
+        <div style="font-size: 12px; letter-spacing: .2em; color: #1E5A43;">先看清，再行动</div>
+        <div class="sf" style="font-size: 29px; font-weight: 600; letter-spacing: .03em; margin-top: 4px;">战局</div>
+        <div style="height: 1px; background: #E7E4DB; margin-top: 14px;"></div>
+      </div>
+
+      <div style="display: flex; gap: 24px; margin-top: 18px;">
+
+        <!-- 主栏 824 -->
+        <div style="width: 824px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+
+          <!-- 判断 hero -->
+          <div style="background: #1E5A43; border-radius: 18px; padding: 22px 24px; color: #FFFFFF;">
+            <div style="font-size: 10px; letter-spacing: .38em; opacity: .75;">军 师 判 断 · 主 要 矛 盾</div>
+            <div class="sf" style="font-size: 25px; line-height: 1.45; font-weight: 600; margin-top: 12px;">线索不缺，缺的是到店转化——本周一切动作围绕到店率</div>
+            <div style="font-size: 12px; opacity: .72; margin-top: 12px;">当前案卷 · 门店增长方案 v3 · 随变而调</div>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 18px;">
+              <div style="display: flex; gap: 10px;">
+                <div style="padding: 8px 18px; border-radius: 999px; background: #FFFFFF; color: #0F2B20; font-size: 13px; font-weight: 600;">问军师</div>
+                <div style="padding: 8px 18px; border-radius: 999px; border: 1px solid rgba(255,255,255,.4); font-size: 13px; font-weight: 600;">判断依据 · 已引 4 类</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 三势 -->
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div class="card" style="padding: 14px 16px;">
+              <div style="font-size: 11px; color: #1E5A43; font-weight: 600;">天势 · 强</div>
+              <div class="sf" style="font-size: 15px; line-height: 1.5; margin-top: 8px; min-height: 46px;">开学季客流回升，未来三周是窗口。</div>
+              <div style="height: 4px; border-radius: 2px; background: #E7E4DB; margin-top: 10px; overflow: hidden;"><div style="width: 82%; height: 100%; background: #1E5A43;"></div></div>
+            </div>
+            <div class="card" style="padding: 14px 16px;">
+              <div style="font-size: 11px; color: #A8772E; font-weight: 600;">市势 · 中</div>
+              <div class="sf" style="font-size: 15px; line-height: 1.5; margin-top: 8px; min-height: 46px;">同商圈三家竞对都在打折，硬拼价格会先伤客单。</div>
+              <div style="height: 4px; border-radius: 2px; background: #E7E4DB; margin-top: 10px; overflow: hidden;"><div style="width: 54%; height: 100%; background: #A8772E;"></div></div>
+            </div>
+            <div class="card" style="padding: 14px 16px;">
+              <div style="font-size: 11px; color: #9C4A38; font-weight: 600;">人势 · 弱</div>
+              <div class="sf" style="font-size: 15px; line-height: 1.5; margin-top: 8px; min-height: 46px;">老客口碑未外显，好评只留在私聊里。</div>
+              <div style="height: 4px; border-radius: 2px; background: #E7E4DB; margin-top: 10px; overflow: hidden;"><div style="width: 30%; height: 100%; background: #9C4A38;"></div></div>
+            </div>
+          </div>
+
+          <!-- 天时：留在主栏。手机上它就在三势之后，收进副栏会把它顶到判断之上 -->
+          <div class="card" style="padding: 13px 16px; display: flex; align-items: center; gap: 10px;">
+            <div style="font-size: 10px; letter-spacing: .38em; color: #7E848B; font-weight: 600;">天 时</div>
+            <span style="flex-grow: 1; font-size: 13.5px;">录生辰，让军师参天时定节奏</span>
+            <span style="font-size: 12.5px; font-weight: 600; color: #1E5A43;">命盘</span>
+            <div style="width: 9px; height: 9px; border-top: 1.5px solid #1E5A43; border-right: 1.5px solid #1E5A43; transform: rotate(45deg);"></div>
+          </div>
+
+          <!-- 现在不能做 -->
+          <div class="card" style="padding: 16px 18px;">
+            <div style="font-size: 10px; letter-spacing: .38em; color: #9C4A38; font-weight: 600;">现 在 不 能 做</div>
+            <div style="display: flex; align-items: flex-start; gap: 9px; margin-top: 11px;">
+              <div style="width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #9C4A38; flex-shrink: 0; margin-top: 2px;"></div>
+              <span style="font-size: 14px; line-height: 1.6;">到店转化没跑通前，不要再加投第二个渠道。</span>
+            </div>
+            <div style="font-size: 11px; color: #7E848B; margin-top: 10px;">来自你定下的《门店增长方案 v3》</div>
+          </div>
+
+          <!-- 去执行桥 -->
+          <div class="card" style="padding: 16px 18px; display: flex; align-items: center; gap: 12px; border-color: rgba(99,160,130,.32); background: #E7EEE9;">
+            <div style="flex-grow: 1;">
+              <div class="sf" style="font-size: 16px; font-weight: 600; color: #0F2B20;">今日军令 3 条 · 去执行</div>
+              <div style="font-size: 12px; color: #565C63; margin-top: 3px;">判断已经落成动作，去打卡、回填和复盘</div>
+            </div>
+            <div style="width: 18px; height: 18px; border-top: 2px solid #1E5A43; border-right: 2px solid #1E5A43; transform: rotate(45deg);"></div>
+          </div>
+        </div>
+
+        <!-- 副栏 320 -->
+        <div style="width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+          <div class="aside-h">今 日 献 策</div>
+          <div class="card" style="padding: 16px; background: #FBFAF6;">
+            <div class="sf" style="font-size: 16px; line-height: 1.7; color: #0F2B20;">谋定而后动，先把主要矛盾看清。</div>
+            <div style="font-size: 11px; color: #7E848B; margin-top: 8px;">9月5日</div>
+          </div>
+
+          <div class="aside-h" style="margin-top: 4px;">建 档 位</div>
+          <div class="card" style="padding: 16px; border-style: dashed; background: rgba(255,255,255,.45);">
+            <div style="font-size: 12px; line-height: 1.85; color: #565C63;">
+              本图画的是<b style="color:#16191D;">已建档态</b>（hero 里挂着《门店增长方案 v3》），所以这一格是空的。<br><br>
+              未建档 / 游客时这里出现「你的战局还没有建档 · 开始建档」那张卡 —— 它和上面的判断 hero <b style="color:#16191D;">互斥</b>，不会同时出现。
+            </div>
+          </div>
+
+          <div style="margin-top: auto; border-top: 1px dashed #D2CBB9; padding-top: 10px;" class="tag">
+            副栏只收「献策 + 建档」这两块 —— 它们在手机上本来就紧挨着排在最前面。天时留在主栏，因为它在手机上排在三势之后，收进副栏会把它顶到判断之上
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 28px; margin-top: 12px; font-size: 11.5px; color: #565C63;">
+    <span><b style="color:#16191D;">主栏</b> 判断 hero → 三势 → 现在不能做 → 去执行</span>
+    <span><b style="color:#16191D;">副栏</b> 今日献策 · 建档位（天时留主栏）</span>
+    <span style="color:#9C4A38;"><b>降级</b> &lt;960 时副栏整组落回它在手机版里的原位（页面最前），手机版顺序一个都不动</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

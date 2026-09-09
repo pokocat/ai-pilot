@@ -8,6 +8,8 @@ dist/
 **/dist-native/
 **/dist-h5/
 **/dist-pc/
+# 桌面窗口预览台产物（scripts/desktop-preview.mjs 从 dist-native 现抓现拼）
+**/dist-desktop-preview/
 lib/
 # 上面那条裸 `lib/` 是给构建产物的，但它按 gitignore 语义匹配**任意层级**的 lib 目录，
 # 于是把 shadcn 约定的源码目录 admin/src/lib/（cn() 与 Radix 浮层挂载点）一起吞了：
@@ -83,3 +85,7 @@ app/dist-native-e2e-shots/
 
 # 部署全量日志（本地留痕，远端只记 .deploy-history 一行结论）
 .deploy-logs/
+
+# 设计画布的拼装产物（2.5MB 单页，源文件在 docs/design/，每次现拼）
+.design-canvas/
+docs/design/**/junshi-desktop-two-column.html

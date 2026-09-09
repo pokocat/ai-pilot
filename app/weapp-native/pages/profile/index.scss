@@ -51,8 +51,12 @@
 .pf-qr-ph { display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
 
 /* 主公页信息密度较高，大窗口控制在舒适阅读宽度，并放大核心身份卡而非拉长菜单行。 */
-.viewport-medium .account,
-.viewport-expanded .account { max-width: 840px; }
+.viewport-medium .account { max-width: 840px; }
+/* ⚠️ expanded 那半边删掉了（2026-09-05 WP-B）：整页单栏时 840 是行宽闸，进了双栏 grid 之后
+   它框住的是「主栏 + 24 + 副栏」整条，主栏被压到 496 而副栏还占着 320。桌面档的宽度上限
+   已经由 app.scss 的 `.viewport-expanded .pad`（1240）与 `.pad.has-aside` 的 grid 接管，
+   主栏本来就 ≤ 896，不需要再收一道。 */
+.viewport-expanded .aside > .menu-group { margin-top: 0; }
 .viewport-expanded .account-service-card { padding: 22px 24px 20px; }
 .viewport-expanded .account-benefit { padding: 12px; }
 .viewport-expanded .menu-row { height: 58px; }

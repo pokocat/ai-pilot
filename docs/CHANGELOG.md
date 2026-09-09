@@ -58,6 +58,40 @@
 
 新增环境变量：`ID_ISSUER`、`ID_AUDIENCES`（默认 `quickreel-api,junshi-api`），以及可选的机密客户端 `ID_SERVER_CLIENT_ID` / `ID_SERVER_CLIENT_SECRET`（只用于首登后 best-effort 回报产品链接，不配就 WARN 一次跳过）。新增集成测试 `server/test/identity.test.ts`（现生成 RSA 密钥对 + 假 JWKS，覆盖手机号闸、首登建档、并发只建一行、手机号回填与冲突、`aud`/`iss`/签名/过期拒绝、关闭态一律 401、换钥刷新、老 `x-user-id` 不受影响、`identifyRequest` 分桶键）与 `server/test/videoOneLiner.test.ts`（四条新端点的入参闸、失败形态与透传）。未做的账号中心 outbox（合并/注销事件）已记入 AGENTS.md §13 TODO。
 
+### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
+
+接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
+
+**断点**：expanded 门槛 1100 → **960**。1100 是拍脑袋的数，实测微信 PC 默认窗口约 1008pt，按 1100 永远进不了双栏档；960 是倒推的下限（72 导航 + 40 页边距 + 24 栏间距 + 320 副栏 = 456，留给主栏 504，刚好放下一张完整军令卡）。
+
+**导航**：桌面档用既有的 `store.setOverlay(true, 'desktop-rail')` 把官方 `custom-tab-bar` 整条隐藏（key 独立于问策的 `'wence-isle'`；`syncDesktopChrome` 成对且幂等，`baseData()` 冷启动与 `syncViewport()` 拖窗都拨，缩回 <960 底栏自动回来），导航换成自绘 `components/nav-rail`（72px 通高左栏，五个 tab + 对话分包页各挂一次）。不搬 custom-tab-bar 本体——微信把它放在自己的固定容器里，拉成整列高之后命中区没保证；自绘的附带好处是二级页也能挂（官方 tab bar 只在 tabBar 页渲染）。tab 表、图标、切换动作全部收进 `services/tabbar.js#switchToTab`，底栏与导航条同源；去重按**当前真实路由**而不是高亮项——Codex 审出对话分包页高亮问策却点不回去。
+
+**容器与骨架**：`.viewport-expanded .pad` 改 `width:100%; max-width:1280px; padding:0 20px`（border-box，内容盒 1240）：主栏 = 窗口 − 456，撞上限后定格 896、正文轴 840 左右各留 28，正文行长在任何显示器上一样；`.native-scroll` 吃 `padding-left:72px` 让出导航；没有底栏之后 `.tabbar-space` 24px、`.native-bottom-fade` 隐藏、环境角标贴回左下。
+
+**副栏**：`.pad.has-aside` 在 expanded 档变 2 列 grid，`.aside` 是一个 wrapper 落第 2 列并 `grid-row: 2 / span 200` 纵跨，两列各自独立的纵向节奏（grid 显式放置会让行高跨列耦合）。**副栏只收手机上本来就相邻的块**——包一层就意味着它们在窄屏只能出现在一个位置：战局 = 今日献策 + 建档提示（天时留主栏，否则手机上会被顶到判断之上）；今日 = 今天出了什么 / 经营结果 / 今晚复盘 / 锦囊（前两块仍套 `segment===0`，两个段的渲染顺序与改前逐节点相同）；图籍 = 配额 + 阶段筛选（主 CTA 留主栏页尾）；主公 = 三组菜单（游客分支不进）。`has-aside` 的挂载条件与 aside 的实际渲染条件同源（`authed && coreStatus==='ready'` / `authed && segment===0` / `authed`），空副栏不会留一条 320 的空列。窄档 wrapper 逐节点透明，今日页自己补了 `.exec-page .aside` 的 flex gap 与子块 margin 归零。
+
+**踩到的坑**（全部钉进 `native-weapp.test.mjs`）：① `.pad.has-aside > *`——WXSS 不支持通配选择器，且是硬编译失败：wcsc 报 `error at token '*'`，整份 app.wxss 编不出来、小程序白屏，自动化侧 `pageStack` 恒空；改按标签枚举 `> view, > text, > button, > scroll-view, > image`。② `span 200` 的隐式轨道会生成（原注释说不会，错），高度 0 但 row-gap 加在每对轨道之间，今日页 `gap:14px` 拖出约 2800px 空白（预览台实测 `.tabbar-space` 在 3497、主栏底 849）；expanded 档 `row-gap: 0`，主栏纵向节奏改由子元素 margin 供给。③ 页头必须通栏（`<tab-header class="pad-head">`），否则 grid 的 sparse 自动放置会把主栏第一块回填到页头右边那格。④ `.viewport-expanded .think-tabs` 只写 `margin-right:auto` 会让 grid 子元素 stretch 失效缩成 83px；`.exec-seg` 用 `align-self:center` 会在 `coreStatus` 变 ready、`.pad` 变 grid 的瞬间横跳一下，两处都改成靠主栏左沿。⑤ 既有 `.viewport-expanded .account { max-width: 840px }` 在 grid 里会连副栏一起框住把主栏压到 496，撤掉（medium 保留）。
+
+**预览台**（`npm run preview:desktop`）：六页抓取时 `prepare` 打开 `isExpanded` 让 nav-rail 渲染进快照、<960 档再藏回去；组件样式（nav-rail 等）一并内联；CSS 标签选择器随 WXML→HTML 的 TAG_MAP 改写——此前 `.pad.has-aside > view` 在预览里不命中、间距与溢出结论不可信（Codex 审出）。
+
+**验收**：`npm run build:weapp` + `npm test`（typecheck 在内）全绿；预览台 390 / 720 / 960 / 1008 / 1280 / 1440 六页逐档核；390 档四个 wrapper 透明性以 DOM 几何核过（今日 aside `flex/gap 11px`、战局 aside 普通 block、渲染顺序与改前一致）。Codex 只读审阅七项：WXSS 兼容 / overlay 配对 / 手机透明 / has-aside 同源 / nav-rail / 问策公式 均未发现问题，P1（span 200）与三条 P2（路由去重、测试切片到 EOF、预览台选择器）已修。**导航条与底栏隐藏本地验不了真机**（模拟器只有手机宽度），需传体验版在桌面微信上实看。
+
+### 2026-09-05 · 撤回微信官方分栏，桌面大窗口改由自家断点排版 · 影响面：微信 PC / iPad 五个主 Tab、问策桌面形态、桌面排版验收链路
+
+桌面版微信打开小程序只用得上左边一条手机宽的窄栏、右边一整块空白，原因是 `app.json` 里的 `frameset:true`。官方分栏（仅 Windows 微信 3.3+）一旦开启就把窗口钉成左右两栏：左栏固定放 tab 页，右栏要等 `navigateTo` 出来的次级页面才有内容，在五个 tab 之间浏览时它自始至终是空的（官方只提供 `frameset/placeholder.png` 一张兜底图）。连带后果更隐蔽——每一栏的宽度都够不到 720 / 1100 断点，2026-08-18 那套 `viewport-medium / expanded` 响应式在桌面上从来没有被点亮过一次。
+
+现在只保留 `resizable:true`：单栏铺满窗口，窗口宽度就是排版宽度，Windows / macOS / iPad 走同一条路径。`services/page.js#viewportData` 增加 `isExpanded`，档位判据仍然只有这一处。
+
+expanded（≥1100px）档三处落地：
+
+- **问策**把「军师团 / 历史会话」从半屏抽屉抬成 320px 常驻左栏（`railOn`）。用的是**同一棵 `.wd-sheet`**、同一份 `councilRows / historyRows`，没有第二套侧栏结构，也没有额外取数；页头那两个入口在侧栏在时只切分段，不再压 overlay、不再有遮罩，提示 pill 因此照常出现。窗口收窄到 1100 以下自动落回抽屉。页头/滚动区/浮岛/pill 四个 fixed 层靠根节点 `rail-on` 让出左栏宽度，正文轴仍是 840px——桌面上变宽的是「同时看得见多少东西」，不是行长。`.as-rail` 必须显式 `transform: none`：抽屉在 expanded 档本来是 `left:50% + translateX(-50%)` 居中，只覆盖 left/width 会让整根侧栏左飘半个自身宽度（实测 160px，行文被窗口边裁掉）。
+- **今日**是一条带「优先级 1 / 2 / 3」的有序待办流，**不做双列**（分两列等于让人从两个方向读同一个顺序）。要收的是被 `.pad` 拉到 1080px 的行宽：正文轴回到 860px、段控回到 520px，一张只装七八个字的军令卡不再横着拉满一屏。段控居中用 `align-self` 而不是 `margin: auto`——`.exec-page` 是 flex 纵列，交叉轴上的 auto 外边距会把它压成内容宽（实测缩成 50px、「近七日」折成两行）。
+- 战局的三势格、图籍的目录列数、主公的 840px 账户轴维持原状，本轮实测在 1280 / 1440 下没有被拉变形。
+
+新增 `app/scripts/desktop-preview.mjs`（`npm run preview:desktop`）：从开发者工具抓五个 tab **真实渲染后**的 WXML，配 `dist-native` 的编译产物 WXSS 拼成一张可任意拉宽的 HTML，用来在 390 / 720 / 900 / 1100 / 1280 / 1440 各档核桌面排版——模拟器只给手机宽度，微信 PC 的真实窗口本地驱动不了，此前这套响应式实际上没有验收手段。桌面专属节点靠 `prepare` 钩子改页面自己的 data 打开，抓到的仍是真渲染的树；改 SCSS 时 `--reuse` 可跳过开发者工具。
+
+`native-weapp.test.mjs` 把 `frameset` 缺省、侧栏复用同一棵树、遮罩只跟 `drawerOpen` 走、`transform: none`、今日的 860 / 520 与 `align-self` 全部钉死。开发者工具自动化实测：390 → `railOn=false`、1280 → `railOn=true` 且侧栏渲染、900 → 落回、缩回 390 → 落回且点「历史」照常开抽屉。`app` 全量 257 + 109 用例绿。
+
 ### 2026-09-02 · 修复后台 StrictMode 骨架屏与刚写入记录短暂不可见 · 影响面：运营后台取数、调用诊断、审计工作台、时间筛选回归
 
 `useResource` 原先用组件级 `alive` ref 管理异步响应，只在卸载 cleanup 置为 `false`。React 18 StrictMode 在开发环境会执行 mount → cleanup → mount，第一次 cleanup 因而把该 ref 永久烧死，第二次挂载发出的请求无论成功、失败还是 finally 都被丢弃：数据始终为空、loading 永远为 true，所有后台页面只剩骨架屏。现改为每一轮 effect 的局部 `cancelled` 标记，cleanup 仅作废本轮请求；跨筛选请求仍以递增 `reqId` 保证旧响应不能覆盖新结果。新增真实 `react-dom/client + StrictMode` 回归，覆盖成功、失败、403、旧请求晚回与卸载后到货。
