@@ -95,9 +95,25 @@ printf '\033[1;33m========================================================\033[0
 # `/opt/junshi/`、`/opt/junshi/.`、`/opt//junshi` 这些等价写法，而后面的
 # `rm -rf "$APP_ROOT/<path>"` 照样会删到军师目录里去。
 normalize_root() {
-  printf '%s' "$1" | sed -E 's#/+#/#g; s#(/\.)+/?$##; s#/+$##'
+  printf '%s' "$1" | sed -E 's#/+#/#g; s#(/\.)+#/#g; s#/+#/#g; s#/+$##'
 }
 REMOTE_ROOT="$(normalize_root "$REMOTE_ROOT")"
+
+# REMOTE_ROOT 会被原样拼进 SSH 的远端命令串（`REMOTE_ROOT='$REMOTE_ROOT' bash -se`），
+# 单引号包不住带单引号的值 —— 一个 `'; rm -rf /; '` 就是远端任意命令执行。
+# 它还会参与 `rm -rf "$APP_ROOT/<path>"`，所以路径形态也必须先卡死：
+# 必须是绝对路径、只含安全字符、不含 `..`。这几条一起把注入和越界都挡在打包之前。
+case "$REMOTE_ROOT" in
+  /*) ;;
+  *) echo "[deploy] 拒绝：REMOTE_ROOT 必须是绝对路径（当前：$REMOTE_ROOT）" >&2; exit 1;;
+esac
+case "$REMOTE_ROOT" in
+  *..*) echo "[deploy] 拒绝：REMOTE_ROOT 不能包含 ..（当前：$REMOTE_ROOT）" >&2; exit 1;;
+esac
+if ! printf '%s' "$REMOTE_ROOT" | grep -Eq '^(/[A-Za-z0-9._-]+)+$'; then
+  echo "[deploy] 拒绝：REMOTE_ROOT 含不安全字符，只允许字母数字与 . _ - /（当前：$REMOTE_ROOT）" >&2
+  exit 1
+fi
 if [ "$QUICKREEL_ONLY" = "1" ] && { [ "$REMOTE_ROOT" = "/opt/junshi" ] || case "$REMOTE_ROOT" in /opt/junshi/*) true;; *) false;; esac; }; then
   echo "[deploy] 拒绝：QUICKREEL_ONLY=1 不能发到军师的安装目录（$REMOTE_ROOT）—— 那会换掉军师的代码却不重启它。" >&2
   echo "[deploy] 爱速拍请用自己的目录（默认 /opt/junshi-quickreel）。" >&2
@@ -369,8 +385,11 @@ wait_ready() {
 # 只发爱速拍时 APP_ROOT 是另一个目录，那里没有 monitoring/，照原逻辑会在
 # 「爱速拍已经重启、版本已记为 switched」之后才失败退出，留下一次半截发布。
 # 监控栈本来也不归爱速拍这次发布管，直接跳过。
+# 三个执行块（grafana / alertmanager / prometheus）也各自带了同一个判断 ——
+# 只跳过这段准备是不够的：跳过之后 MONITOR_DIR 没设、cd 没做，后面几块照样会在
+# 错误的目录里执行 docker compose，而那时爱速拍已经重启、版本已记为 switched。
 if [ "$QUICKREEL_ONLY" = "1" ]; then
-  echo "== 监控栈校验跳过（只发爱速拍；那套装在军师目录下，不归本次发布管）=="
+  echo "== 监控栈整段跳过（只发爱速拍；那套装在军师目录下，不归本次发布管）=="
 elif [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ] || [ "$GRAFANA_PRESENT" = "1" ]; then
   MONITOR_DIR="$APP_ROOT/deploy/monitoring"
   sudo test -f "$MONITOR_DIR/.env" || { echo "监控栈运行中但 monitoring/.env 缺失" >&2; exit 1; }
@@ -380,7 +399,7 @@ elif [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ] || [ "$GRAFANA_PRES
   sudo docker compose config --quiet
 fi
 
-if [ "$GRAFANA_PRESENT" = "1" ]; then
+if [ "$QUICKREEL_ONLY" != "1" ] && [ "$GRAFANA_PRESENT" = "1" ]; then
   echo "== grafana dashboards verify =="
   HOST_DASHBOARD_COUNT="$(sudo find "$GRAFANA_DASHBOARDS" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
   [ "${HOST_DASHBOARD_COUNT:-0}" -gt 0 ] || { echo "Grafana 主机看板目录为空" >&2; exit 1; }
@@ -402,7 +421,7 @@ if [ "$GRAFANA_PRESENT" = "1" ]; then
   echo "  已挂载看板：${CONTAINER_DASHBOARD_COUNT} 个"
 fi
 
-if [ "$ALERT_PRESENT" = "1" ]; then
+if [ "$QUICKREEL_ONLY" != "1" ] && [ "$ALERT_PRESENT" = "1" ]; then
   echo "== alertmanager config verify =="
   # 即使 alertmanager.yml 没变，docker-compose.yml 的 user/挂载等配置也可能变；普通 up 会按
   # compose config hash 精确重建。配置文件内容变化则明确 force-recreate，避免旧进程持有旧解析结果。
@@ -417,7 +436,7 @@ if [ "$ALERT_PRESENT" = "1" ]; then
   [ "$ALERT_CONFIG_IN_CONTAINER" = "$ALERT_CONFIG_AFTER" ] || { echo "Alertmanager 容器配置哈希与主机不一致" >&2; exit 1; }
 fi
 
-if [ "$PROM_PRESENT" = "1" ]; then
+if [ "$QUICKREEL_ONLY" != "1" ] && [ "$PROM_PRESENT" = "1" ]; then
   echo "== prometheus config and rules verify =="
   if [ "$PROM_CONFIG_BEFORE" != "$PROM_CONFIG_AFTER" ]; then
     sudo docker compose up -d --force-recreate prometheus

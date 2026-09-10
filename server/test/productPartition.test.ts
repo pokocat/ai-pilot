@@ -190,7 +190,48 @@ test('时间区间非法当场拒收', async () => {
   assert.equal(res.status, 422);
 });
 
-test('并发写账时，一次汇总里的三个聚合互相自洽（RepeatableRead 快照）', async () => {
+/**
+ * 汇总必须以 RepeatableRead 跑。
+ *
+ * 这是这一组里**唯一能真正证明修复在位**的断言。并发跑一跑「看起来对」证明不了什么：
+ * Read Committed 下三条语句各取快照，撕裂窗口只有毫秒级，绝大多数时候照样绿。
+ * 所以直接盯住那个决定 —— 谁把隔离级别去掉，这条当场红。
+ *
+ * 背景：PostgreSQL 的 RC 是「每条语句开始时取一次快照」，只把三条聚合包进事务
+ * 并不给一致视图；RR 才是在事务第一条语句取一次、后续复用。
+ */
+test('分产品汇总以 RepeatableRead 跑，只包事务是不够的', async () => {
+  const { Prisma } = await import('@prisma/client');
+  const original = prisma.$transaction.bind(prisma);
+  const seen: unknown[] = [];
+  (prisma as unknown as { $transaction: unknown }).$transaction = ((fn: never, opts: never) => {
+    seen.push(opts);
+    return original(fn, opts);
+  }) as never;
+  try {
+    await productLedgerSlices(new Date(Date.now() - 3600_000));
+  } finally {
+    (prisma as unknown as { $transaction: unknown }).$transaction = original;
+  }
+  assert.equal(seen.length, 1, '应当只开一个事务');
+  assert.deepEqual(
+    seen[0],
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    'RC 下三条聚合各取快照，包了事务也不一致',
+  );
+});
+
+/**
+ * 并发写账时汇总不炸、不串产品。
+ *
+ * 说清楚它证明**不了**什么：它抓不到快照撕裂（RC 下也大概率绿），上面那条才是。
+ * 它盯的是另一类问题 —— 汇总在持续写入下会不会抛错、会不会把产品串到 unattributed。
+ *
+ * 判据只用「出现在结果里就至少有一条流水」。**不能断言「有条数必有金额」**：
+ * delta=0 的备注型流水是合法的（purchase 的 SKU 备注就是），那种产品 entries>0
+ * 而 granted=spent=0，拿金额去卡会对着正常账本假报。
+ */
+test('并发写账时汇总不抛错、不串产品', async () => {
   // 只开事务不够：PostgreSQL 默认 Read Committed 是「每条语句各取快照」，
   // 三条语句照样会看见不同数据 —— 表现是 entries>0 但金额少了，或整行丢失。
   // 这条用例一边汇总一边持续写流水，撞的就是那个窗口。
@@ -211,12 +252,12 @@ test('并发写账时，一次汇总里的三个聚合互相自洽（RepeatableR
     for (let i = 0; i < 12; i += 1) {
       const slices = await productLedgerSlices(new Date(Date.now() - 3600_000));
       for (const row of slices) {
-        // 自洽的最低要求：有条数就必有金额，有金额就必有条数。
-        // 快照撕裂时这两条会一真一假。
-        const hasMoney = row.granted > 0 || row.spent > 0;
         assert.ok(row.entries > 0, `${row.productCode} 出现在结果里却没有条数`);
-        assert.equal(hasMoney, true, `${row.productCode} entries=${row.entries} 却一分钱都没有`);
-        assert.ok(row.entries >= 1, '条数至少覆盖它自己的那些流水');
+        assert.ok(row.granted >= 0 && row.spent >= 0, `${row.productCode} 金额不该为负`);
+        assert.ok(
+          row.productCode === PRODUCT.junshi || row.productCode === PRODUCT.quickreel,
+          `冒出了预期之外的归属：${row.productCode}（本用例只写这两个产品）`,
+        );
       }
     }
   } finally {

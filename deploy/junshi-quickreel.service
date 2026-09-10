@@ -16,30 +16,42 @@
 # 代码一起换掉、只是先不重启它 —— 军师下次自动重启就静默加载新版，运行期懒加载还可能新旧混跑。
 # 部署脚本对「QUICKREEL_ONLY=1 却指向 /opt/junshi」直接拒绝。
 #
-# 一次性初始化。**顺序不能换**：先把目录和 .env 备好 → 先发一次代码 → 最后才 enable。
-# 反过来做会失败两次：往还不存在的 server/ 复制 .env 报错；没有 dist/index.js 就 enable
-# 会让 unit 起不来、Restart=always 还会一直重试。
+# 一次性初始化。**顺序不能换**，而且每一步都要求真的成功 —— 不要用 `|| true` 吞失败：
+# 引导阶段一旦吞掉错误，就可能在「共享库的 schema 已经被改过、代码却没落位」的半截状态上
+# 继续装服务，而这次发布连历史记录都没写。
 #
-#   # ① 目标机上：建目录（含 server 子目录，.env 要放进去）
-#   sudo install -d -o junshi -g junshi /opt/junshi-quickreel
+#   # ① 目标机：装 unit 但**先不 enable、不 start**（脚本里的 restart 会把它拉起来）
+#   sudo cp <本仓>/deploy/junshi-quickreel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+#   # ② 目标机：建目录，并把 .env 复制一份过去
+#   #    两边配置值相同，但各存一份 —— 这是目录隔离的代价，换来发布互不牵连。
+#   #    后续改配置要两边同步。
 #   sudo install -d -o junshi -g junshi /opt/junshi-quickreel/server
-#   # ② .env：与军师同一套配置值，先复制一份。两边后续改配置要同步 ——
-#   #    这是目录隔离的代价，换来的是发布互不牵连。
 #   sudo install -o junshi -g junshi -m 600 \
 #     /opt/junshi/server/.env /opt/junshi-quickreel/server/.env
-#   # ③ 开发机上：先发一次代码进去（此时 unit 还没装，脚本重启会失败，属正常，代码已经落位）
-#   QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh || true
-#   # ④ 目标机上：确认 dist 在了，再装 unit 并启动
-#   test -f /opt/junshi-quickreel/server/dist/index.js
-#   sudo cp deploy/junshi-quickreel.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now junshi-quickreel
+#
+#   # ③ 开发机：正常发一次，**必须整条成功**（脚本会 restart 这个 unit，等于首次启动）
+#   QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh
+#
+#   # ④ 目标机：确认在跑，再设为开机自启
 #   curl -fsS http://127.0.0.1:4010/api/health
+#   sudo systemctl enable junshi-quickreel
 #
 # 之后每次发布：
 #   QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh      # 只发爱速拍，军师完全不动
 #
 # 反向也成立：军师的发布**不会**重启爱速拍这个进程（它跑在另一个目录，那次发布没更新它，
 # 重启只是白中断）。两边各发各的。
+#
+# ⚠️ 但**数据库仍然是共用的一个**，两边的发布都会各自跑 prisma db push。
+# 所以「独立」只到进程和磁盘代码这一层，schema 层没有独立：
+#   · 军师先发一个不向后兼容的 schema，还跑着旧代码的爱速拍可能当场查询失败；
+#   · 从较老的爱速拍提交发布时，它那份旧 schema 会试图把军师新加的结构推回去
+#     （默认的 data-loss 闸会挡住，但会留下半截发布；误带 ACCEPT_DATA_LOSS=1 则可能真删）。
+# 结论：schema 变更必须按「先加不减 → 两边都升上去 → 回填 → 再删」的顺序做，
+# 并且只由一个人在一处执行。凡是不是纯新增的 schema 改动，这次就得按协调发布处理，
+# 不能当成两边各发各的。
 #
 # nginx 可选：把 wxapi.aibuzz.cn 的 /api/video/ 与 /api/me 转到 127.0.0.1:4010。
 # 不改也能跑 —— 主进程仍然全量提供这些面，这个进程先作为可独立发布的备用路径存在。
