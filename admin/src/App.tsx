@@ -35,6 +35,7 @@ import { PlansView, SkusView, EcoToolsView } from './views/catalog';
 import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
 import { CreativeView } from './views/creative';
+import { ProductsView } from './views/products';
 import { WenceView } from './views/wence';
 
 export default function App() {
@@ -197,6 +198,7 @@ export default function App() {
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
+              {key === 'products' && <ProductsView toast={showToast} isSuper={isOwner} />}
               {key === 'wence' && <WenceView toast={showToast} />}
               {key === 'form' && <SurveyView />}
               {key === 'plan' && <PlansView toast={showToast} />}

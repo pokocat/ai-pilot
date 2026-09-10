@@ -30,7 +30,7 @@ export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral' | 'invites' | 'chain' | 'distribution';
+  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products';
 
 export type GroupKey = 'today' | 'people' | 'revenue' | 'growth' | 'studio' | 'observe' | 'catalog' | 'settings';
 
@@ -79,6 +79,10 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'funnel', label: '处方漏斗', hint: '处方六态转化与开通来源归因', icon: 'target', group: 'revenue', aliases: ['转化', '漏斗', 'funnel', '处方', '归因'] },
   { key: 'usage', label: '钻石消耗', hint: '权益点发放与消耗汇总', icon: 'crown', group: 'revenue', aliases: ['权益点', '钻石', '积分', 'credit', '消耗'] },
   { key: 'tokens', label: 'Token 成本', hint: '按模型 / 用户看 token 与真实成本', icon: 'trend', group: 'revenue', aliases: ['成本', 'token', '用量', '模型成本'] },
+  // 多产品：后台是一个、按产品分区。这一屏是那条分区键（productCode）的落地面 ——
+  // 分产品的账 + 谁能管哪个产品。归「经营」而不是「商品」：它回答「哪个产品在挣钱」，
+  // 不是「卖什么」；爱速拍自己的可写面（克隆定价）在「配置 · 功能开关」里。
+  { key: 'products', label: '产品', hint: '分产品的钻石账 · 运营的产品授权', icon: 'grid', group: 'revenue', aliases: ['产品', '爱速拍', '军师', '分产品', '归属', '授权', 'product', 'quickreel', 'junshi'] },
 
   // —— 增长（邀请体系的运营面 + 只读分析） ——
   // 顺序即动线：先查一条关系（谁邀了谁）→ 再看一个人的整条链（上溯 + 团队 + 下钻）→

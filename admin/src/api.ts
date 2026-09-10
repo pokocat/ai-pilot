@@ -297,9 +297,16 @@ export type {
 } from '../../shared/contracts';
 // —— 短视频克隆动作定价（数字人 / 专属声音的钻石单价）——
 export type { AdminClonePricing, AdminClonePricingUpdate } from '../../shared/contracts';
+export type {
+  AdminProductsView, AdminProductLedgerView, AdminProductLedgerSlice,
+  AdminAccountProductsView, AdminAccountProductGrant,
+} from '../../shared/contracts';
 // —— 附身登录（impersonation，owner-only）——
 export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
+import type {
+  AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
+} from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
 function referralQs(q: { days?: number; tenantId?: string; roots?: number }): string {
@@ -595,6 +602,29 @@ export const api = {
   // 切换用户作品 / 内部任务（仅 owner/master）：内部任务不会进入 C 端作品库，也不能被用户详情/改字/重出/取消。
   setCreativeJobAudience: (id: string, body: AdminCreativeJobAudienceRequest) =>
     req<AdminCreativeJobAudienceResult>(`/admin/creative/jobs/${encodeURIComponent(id)}/audience`, 'POST', body),
+  // —— 多产品：分区与分产品的账 ————————————————————————————————————
+  // 后台是一个、按产品分区（不给每个小程序各配一个后台：产品专属的面很少，
+  // 而 AI 路由 / 账号角色 / 审计 / SKU / 流水这些共享面复制 N 份代价远大于收益）。
+  // 分区键是 productCode，与账号中心的 product_code 同一套。
+  adminProducts: () => req<AdminProductsView>('/admin/products'),
+  // 分产品的钻石账。钱包是一个，归属记在流水行上：
+  // delta>0 = 从哪个产品的入口卖出去的，delta<0 = 花在哪个产品上。
+  // 不传 to 就没有上界（服务端刻意不用「此刻」兜底：createdAt 由库写入，
+  // 应用时钟慢一点就会漏掉刚落的几笔）。
+  productLedger: (from?: string, to?: string) => {
+    const p = new URLSearchParams();
+    if (from) p.set('from', from);
+    if (to) p.set('to', to);
+    const qs = p.toString();
+    return req<AdminProductLedgerView>(`/admin/products/ledger${qs ? '?' + qs : ''}`);
+  },
+  accountProducts: (accountId: string) =>
+    req<AdminAccountProductsView>(`/admin/accounts/${encodeURIComponent(accountId)}/products`),
+  // role=null 收回。仅 owner/master —— 权限变更是最需要能倒查的一类操作，服务端每次都留审计。
+  setAccountProduct: (accountId: string, productCode: string, role: 'viewer' | 'editor' | null) =>
+    req<{ ok: boolean; productCode: string; role: string | null }>(
+      `/admin/accounts/${encodeURIComponent(accountId)}/products`, 'PUT', { productCode, role }),
+
   // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
   // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。
   clonePricing: () => req<AdminClonePricing>('/admin/video/clone-pricing'),

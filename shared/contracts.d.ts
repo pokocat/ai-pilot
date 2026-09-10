@@ -3027,6 +3027,60 @@ export interface ClipClonePricing {
  * `configured=false` 在后台的含义比端上更重：它表示这四个数字还是 pricing.ts 里
  * `TODO(定价待运营核定)` 的兜底价，没有任何商务结论背书。后台必须把这件事显式写在页面上。
  */
+/* ── 多产品：后台分区与分产品的账 ──────────────────────────────────────
+ *
+ * 后台是**一个**、按产品分区。不给每个小程序各配一个后台：产品专属的面很少
+ * （爱速拍只有模板、单价、供应商对账），而共享的那些 —— AI 端点与路由、账号与角色、
+ * 审计、SKU、钱包流水 —— 复制 N 份的代价远大于收益，其中角色管理最不该分叉。
+ *
+ * 分区键 productCode 与统一账号中心 aibuzz-id 的 product_code 同一命名空间：
+ * 「令牌来自哪个产品」和「这笔钱花在哪个产品」用同一把尺子，对账不必再做一层映射。
+ */
+export interface AdminProductsView {
+  /** 平台已知的全部产品码。 */
+  all: string[];
+  /** 当前操作者看得见的那些。超管 = 全部。 */
+  accessible: string[];
+  /** 超管隐式拥有全部产品，前端据此不显示「申请授权」这类入口。 */
+  superActor: boolean;
+}
+
+/**
+ * 一个产品在某段时间里的账。
+ *
+ * 钱包是一个，归属记在流水行上，靠 delta 正负分开两种归属：
+ *   granted  卖出 —— 这批钻石是从哪个产品的充值入口卖出去的（收入归属）
+ *   spent    消耗 —— 这批钻石是花在哪个产品上的（消耗归属）
+ * 「军师打通爱速拍出片」因此不需要跨钱包转账：同一个钱包付钱，那行流水记 quickreel，
+ * 收入仍算在当初卖出这批钻石的产品头上。两笔各归各的，账是通的。
+ */
+export interface AdminProductLedgerSlice {
+  /** 产品码；`unattributed` = 本列上线之前的历史流水，无从追认，不摊进任何产品。 */
+  productCode: string;
+  granted: number;
+  spent: number;
+  entries: number;
+}
+
+export interface AdminProductLedgerView {
+  from: string;
+  /** null = 没有上界（查到此刻）。服务端刻意不用「此刻」兜底：createdAt 由数据库写入，
+   *  应用时钟慢一点就会把刚落的几笔挡在窗口外，报表看起来像少了钱。 */
+  to: string | null;
+  slices: AdminProductLedgerSlice[];
+}
+
+export interface AdminAccountProductGrant {
+  productCode: string;
+  role: 'viewer' | 'editor';
+  createdAt: string;
+}
+
+export interface AdminAccountProductsView {
+  accountId: string;
+  grants: AdminAccountProductGrant[];
+}
+
 export type AdminClonePricing = ClipClonePricing;
 /**
  * 后台写入形状（PUT /admin/video/clone-pricing，仅 owner/master）。
