@@ -7,6 +7,7 @@
 //   不落流水，但 hold 行照常创建（留审计）。**不要为「免费」加任何代码分支** —— 那会让
 //   「线上到底收不收钱」取决于发版而不是运营配置。
 import type { Prisma, VideoCloneHold } from '@prisma/client';
+import { PRODUCT } from '../products.js';
 import { prisma } from '../../db.js';
 import { chargeCreditsOnce, ensureCredits, refundCreditsOnce } from '../credits.js';
 import { CLONE_ACTION_LABELS, type CloneAction, type ClonePricing } from './pricing.js';
@@ -90,6 +91,7 @@ export async function reserveCloneCredits(input: {
       await chargeCreditsOnce(
         input.tenantId, input.userId, credits,
         `快出片 · ${CLONE_ACTION_LABELS[item.action]}预扣`,
+        PRODUCT.quickreel,
         `video-clone:charge:${input.userId}:${clientRequestId}`,
         tx,
       );
@@ -146,6 +148,7 @@ export async function refundCloneHold(holdId: string, lastTrainStatus = 'failed'
     await refundCreditsOnce(
       hold.tenantId, hold.userId, hold.credits,
       `快出片 · ${CLONE_ACTION_LABELS[hold.action as CloneAction] ?? '克隆'}失败退回`,
+      PRODUCT.quickreel,
       `video-clone:refund:${hold.id}`,
       tx,
     );

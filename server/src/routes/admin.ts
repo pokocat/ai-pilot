@@ -1,6 +1,9 @@
 // 运营后台 API（《投产开发指导》§7）：概览看板 / 每日献策 / 智能体（提示词+记忆）/ 问卷 / 套餐。
 // 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
+import {
+  PRODUCT, isProductCode, productCodes, productLedgerSlices,
+} from '../services/products.js';
 import { prisma, utcTimestamp } from '../db.js';
 import { getAiConfig, effectiveProvider, mergedTestConfig } from '../services/aiConfig.js';
 import {
@@ -20,6 +23,7 @@ import { pingModel, pingAgentRuntime, generateDeliverable, chatComplete } from '
 import { buildSandboxContext } from '../services/context.js';
 import {
   requireAdmin, actorOf, isSuperActor, requireAgentAccess, actorAccountId, type AdminActor,
+  requireProductAccess, accessibleProductCodes,
 } from '../services/adminAuth.js';
 import {
   createOperator, listAccounts, setAccountDisabled, setAccountRole, resetAccountPassword,
@@ -892,8 +896,8 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '扣减后余额将为负，已拒绝', code: 'BALANCE_UNDERFLOW' });
     }
     const stored = `admin:${reason}`;
-    if (delta > 0) await grantCredits(user.tenantId, userId, delta, stored);
-    else await chargeCredits(user.tenantId, userId, -delta, stored);
+    if (delta > 0) await grantCredits(user.tenantId, userId, delta, stored, PRODUCT.junshi);
+    else await chargeCredits(user.tenantId, userId, -delta, stored, PRODUCT.junshi);
     const after = await getBalance(userId);
     await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.credits.adjust', payload: { by: actorName(actor), delta, reason: stored, before, after } });
     return { ok: true, balance: after };
@@ -1466,13 +1470,114 @@ export async function adminRoutes(app: FastifyInstance) {
    * GET 用 fresh=true 绕过 60s 读缓存：后台必须读得回自己刚写的值，否则运营会以为没保存上
    * 而重复提交（C 端热路径照旧走缓存，见 GET /video/clone-pricing）。
    */
-  app.get('/admin/video/clone-pricing', async (): Promise<AdminClonePricing> => {
+  /* ── 平台后台：按产品分区 ────────────────────────────────────────────────
+   *
+   * 不给每个小程序各配一个后台。产品专属的面很少（爱速拍只有模板、单价、供应商对账），
+   * 而共享的那些 —— AI 端点与路由、账号与角色、审计、SKU、钱包流水 —— 复制 N 份的代价
+   * 远大于收益，其中角色管理最不该分叉。所以是**一个后台、按产品分区、权限键用 productCode**。
+   */
+
+  /** 当前操作者能看见哪些产品。后台据此渲染分区；超管拿到全集。 */
+  app.get('/admin/products', async (req) => {
+    const actor = actorOf(req);
+    const allowed = await accessibleProductCodes(actor);
+    const all = productCodes();
+    return {
+      all,
+      accessible: allowed === null ? all : all.filter((c) => allowed.has(c)),
+      /** 超管：隐式全部，前端据此不显示「申请授权」这类入口。 */
+      superActor: isSuperActor(actor),
+    };
+  });
+
+  /**
+   * 分产品的钻石账。
+   *
+   * 一个账号一个钱包，归属记在流水行上（credit_ledger.productCode）：
+   * delta>0 记「从哪个产品的充值入口卖出去的」，delta<0 记「花在哪个产品上」。
+   * 「军师打通爱速拍出片」因此不需要跨钱包转账，收入与消耗各归各的，账仍然是通的。
+   *
+   * 归属为空的历史流水单列 `unattributed`，不摊进任何产品 —— 摊了就是编造归属。
+   */
+  app.get<{ Querystring: { from?: string; to?: string } }>('/admin/products/ledger', async (req, reply) => {
+    const actor = actorOf(req);
+    // 不传 to 就没有上界（见 productLedgerSlices 里那段关于库钟的注释）。
+    const to = req.query?.to ? new Date(req.query.to) : undefined;
+    const anchor = to ?? new Date();
+    const from = req.query?.from ? new Date(req.query.from) : new Date(anchor.getTime() - 30 * 24 * 3600 * 1000);
+    if (Number.isNaN(from.getTime()) || (to && Number.isNaN(to.getTime())) || (to && from >= to)) {
+      return reply.code(422).send({ error: '时间区间非法', code: 'ADMIN_RANGE_INVALID' });
+    }
+    const slices = await productLedgerSlices(from, to);
+    const allowed = await accessibleProductCodes(actor);
+    // 只给看得见的产品。unattributed 是历史遗留，只有超管该看到 —— 普通运营看到它
+    // 只会以为自己产品的账少了一块。
+    const visible = allowed === null ? slices : slices.filter((row) => allowed.has(row.productCode));
+    return { from: from.toISOString(), to: to ? to.toISOString() : null, slices: visible };
+  });
+
+  /** 某个运营账号被授权了哪些产品。 */
+  app.get<{ Params: { id: string } }>('/admin/accounts/:id/products', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const rows = await prisma.adminProductAccess.findMany({
+      where: { accountId: req.params.id },
+      select: { productCode: true, role: true, createdAt: true },
+      orderBy: { productCode: 'asc' },
+    });
+    return { accountId: req.params.id, grants: rows };
+  });
+
+  /**
+   * 授予 / 调整 / 收回一个运营账号对某产品的权限。
+   * `role: null` = 收回。只有超管能改，且每次都留审计 —— 权限变更是最需要能倒查的一类操作。
+   */
+  app.put<{ Params: { id: string }; Body: { productCode?: string; role?: 'viewer' | 'editor' | null } }>(
+    '/admin/accounts/:id/products', async (req, reply) => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const productCode = String(req.body?.productCode ?? '');
+      if (!isProductCode(productCode)) {
+        return reply.code(422).send({ error: '未知的产品码', code: 'ADMIN_PRODUCT_UNKNOWN' });
+      }
+      const account = await prisma.adminAccount.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!account) return reply.code(404).send({ error: '运营账号不存在', code: 'ADMIN_ACCOUNT_NOT_FOUND' });
+      const role = req.body?.role ?? null;
+      if (role !== null && role !== 'viewer' && role !== 'editor') {
+        return reply.code(422).send({ error: 'role 只能是 viewer / editor / null', code: 'ADMIN_ROLE_INVALID' });
+      }
+      if (role === null) {
+        await prisma.adminProductAccess.deleteMany({ where: { accountId: req.params.id, productCode } });
+      } else {
+        await prisma.adminProductAccess.upsert({
+          where: { productCode_accountId: { productCode, accountId: req.params.id } },
+          create: { productCode, accountId: req.params.id, role },
+          update: { role },
+        });
+      }
+      await recordAudit({
+        tenantId: null, userId: null, action: 'admin.product.access',
+        payload: { accountId: req.params.id, productCode, role, by: actorAccountId(actor) ?? 'master' },
+      });
+      return { ok: true, productCode, role };
+    });
+
+  app.get('/admin/video/clone-pricing', async (req, reply): Promise<AdminClonePricing | undefined> => {
+    // 爱速拍的面：非超管要被授予 quickreel 才看得到
+    try { await requireProductAccess(actorOf(req), PRODUCT.quickreel, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
     return clonePricingView(await clonePricing({ fresh: true }));
   });
 
   app.put<{ Body: AdminClonePricingUpdate }>('/admin/video/clone-pricing', async (req, reply) => {
     const actor = actorOf(req);
+    // 两道闸叠加，不是替换：
+    //   · requireSuper —— 既有政策，改价是营收动作，与套餐改价、海报改价同级（videoClonePricing 用例写明了）。
+    //     加产品分区不该顺手把营收管控放松掉，那是两件事。
+    //   · requireProductAccess —— 新加的产品维度。超管隐式拥有全部产品，所以这一道对他是空转；
+    //     它挡的是「以后把改价下放给产品运营」时，别忘了他还得先被授予这个产品。
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    try { await requireProductAccess(actor, PRODUCT.quickreel, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
     const before = clonePricingView(await clonePricing({ fresh: true }));
     try {
       const after = clonePricingView(await updateClonePricing(req.body ?? {}));

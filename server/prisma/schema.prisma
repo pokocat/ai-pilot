@@ -275,6 +275,7 @@ model AdminAccount {
   lastLoginAt    DateTime?
   sessions       AdminSession[]
   collaborations AgentCollaborator[]
+  productAccess  AdminProductAccess[]
 
   @@map("admin_account")
 }
@@ -418,6 +419,31 @@ model AgentVersion {
 }
 
 /// 智能体协作者（多运营）：哪个后台账户能编辑/查看哪个 agent。owner 角色账户隐式拥有全部 agent。
+/// 运营账号对某个产品的授权。
+///
+/// 后台是**一个**，按产品分区，不给每个小程序各配一个后台：产品专属的面很少
+/// （爱速拍只有模板、单价、供应商对账），而共享的那些 —— AI 端点与路由、账号与角色、
+/// 审计、SKU、钱包流水 —— 复制 N 份的代价远大于收益，其中角色管理最不该分叉。
+///
+/// 分区的键就用 `productCode`（services/products.ts），与账号中心的 product_code 同一套。
+/// 超管隐式拥有全部产品；operator 只能看见并操作被授权的那些。
+///
+/// 与 AgentCollaborator 是两个维度：那个管「哪个智能体」，这个管「哪个产品」，
+/// 一个运营可以只被授予爱速拍，而完全看不到军师的智能体与话术。
+model AdminProductAccess {
+  id          String   @id @default(cuid())
+  productCode String
+  accountId   String
+  role        String   @default("editor") // editor 可改 | viewer 只读
+  createdAt   DateTime @default(now())
+
+  account AdminAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([productCode, accountId])
+  @@index([accountId])
+  @@map("admin_product_access")
+}
+
 model AgentCollaborator {
   id        String   @id @default(cuid())
   agentKey  String
@@ -1149,6 +1175,15 @@ model CreditLedger {
   delta          Int // 正充值 / 负消耗
   reason         String
   balance        Int
+  /// 这笔钱花在哪个产品上（services/products.ts 的 PRODUCT）。
+  ///
+  /// 钱包是**一个**：用户在军师充的钻石在爱速拍能花，反过来也一样。要是分钱包，
+  /// 跨产品功能每加一个就得设计一次转账协议，用户还得在两边各充一次。
+  /// 「独立运营」独立的是定价、SKU、入口和**账**，不是钱包 —— 账靠这一列切。
+  ///
+  /// 可空只为了历史流水：本列上线之前的行没有归属，不许硬塞一个值假装它有。
+  /// 新写入一律带值，写入口在 credits.ts，那里是必填参数。
+  productCode    String?
   idempotencyKey String?  @unique // 跨 worker/重启的 reserve/refund 唯一键；旧流水为空
   createdAt      DateTime @default(now())
 
@@ -1157,6 +1192,8 @@ model CreditLedger {
 
   // 余额读(getBalance)按 userId + createdAt desc 取最近一行，是每次产出/扣费的热路径；无索引则随流水线性扫。
   @@index([userId, createdAt])
+  // 按产品切账（运营后台的分产品收入 / 成本视图）。没有它就得全表扫。
+  @@index([productCode, createdAt])
   @@map("credit_ledger")
 }
 
@@ -2393,6 +2430,8 @@ model VideoCreditHold {
   id              String    @id @default(cuid())
   tenantId        String
   userId          String
+  /// 归属产品。与 CreditLedger.productCode 同一套取值，对账时两张表能对上。
+  productCode     String?
   projectId       String
   clientRequestId String
   upstreamJobId   String?   @unique

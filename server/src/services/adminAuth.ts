@@ -123,6 +123,44 @@ export async function accessibleAgentKeys(actor: AdminActor): Promise<Set<string
   return new Set(rows.map((r) => r.agentKey));
 }
 
+export class AdminProductForbiddenError extends Error {
+  statusCode = 403;
+  code = 'ADMIN_PRODUCT_FORBIDDEN';
+  constructor(msg = '你没有该产品的操作权限') { super(msg); }
+}
+
+/**
+ * 按产品授权。超管放行；operator 需要被显式授予这个产品。
+ *
+ * 与 requireAgentAccess 是两个维度：那个管「哪个智能体」，这个管「哪个产品」。
+ * 平台后台是一个、按产品分区，靠的就是这一层 —— 运营 A 能管爱速拍，
+ * 同时完全看不到军师的智能体和话术。
+ */
+export async function requireProductAccess(
+  actor: AdminActor,
+  productCode: string,
+  level: 'viewer' | 'editor',
+): Promise<void> {
+  if (isSuperActor(actor)) return;
+  if (actor.kind !== 'account') throw new AdminProductForbiddenError();
+  const grant = await prisma.adminProductAccess.findUnique({
+    where: { productCode_accountId: { productCode, accountId: actor.id } },
+  });
+  if (!grant) throw new AdminProductForbiddenError();
+  if (level === 'editor' && grant.role !== 'editor') throw new AdminProductForbiddenError('你对该产品仅有只读权限');
+}
+
+/** 操作者可见的产品集合；超管返回 null（= 全部）。后台按它决定显示哪些分区。 */
+export async function accessibleProductCodes(actor: AdminActor): Promise<Set<string> | null> {
+  if (isSuperActor(actor)) return null;
+  if (actor.kind !== 'account') return new Set();
+  const rows = await prisma.adminProductAccess.findMany({
+    where: { accountId: actor.id },
+    select: { productCode: true },
+  });
+  return new Set(rows.map((r) => r.productCode));
+}
+
 /** 当前操作者的 AdminAccount.id（master/legacyUser 无账户行 → null），用于 createdBy 归属。 */
 export function actorAccountId(actor: AdminActor): string | null {
   return actor.kind === 'account' ? actor.id : null;

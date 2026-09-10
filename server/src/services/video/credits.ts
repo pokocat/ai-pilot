@@ -1,4 +1,5 @@
 import type { Prisma, VideoCreditHold } from '@prisma/client';
+import { PRODUCT } from '../products.js';
 import { prisma } from '../../db.js';
 import { chargeCreditsOnce, refundCreditsOnce } from '../credits.js';
 
@@ -31,10 +32,11 @@ export async function reserveVideoCredits(input: {
       input.userId,
       credits,
       '快出片 · 出片预扣',
+      PRODUCT.quickreel,
       `video:charge:${input.userId}:${input.clientRequestId}`,
       tx,
     );
-    const hold = await tx.videoCreditHold.create({ data: { ...input, credits, status: 'submitting' } });
+    const hold = await tx.videoCreditHold.create({ data: { ...input, credits, productCode: PRODUCT.quickreel, status: 'submitting' } });
     return { hold, reused: false };
   });
 }
@@ -77,6 +79,7 @@ export async function refundVideoHold(holdId: string, lastJobStatus = 'failed') 
       hold.userId,
       hold.credits,
       ['cancelled', 'work_deleted'].includes(lastJobStatus) ? '快出片 · 取消退回' : '快出片 · 失败退回',
+      PRODUCT.quickreel,
       `video:refund:${hold.id}`,
       tx,
     );

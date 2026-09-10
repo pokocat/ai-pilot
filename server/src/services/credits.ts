@@ -6,6 +6,7 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 import { noteCreditDelta } from './metrics.js';
+import type { ProductCode } from './products.js';
 
 // P2-4：CREDIT_COST 已移除（仅被死函数 entitlements.agentCost 引用；实际计费走 meterUnit/billingRatio）。
 
@@ -43,12 +44,20 @@ export async function ensureCredits(userId: string, cost: number): Promise<void>
   if (bal < cost) throw new InsufficientCreditsError();
 }
 
+/**
+ * 每一笔流水都必须说清楚花在哪个产品上。
+ *
+ * `productCode` 是**必填**，不是可选：留空的那条路一旦存在，新代码就会顺手不填，
+ * 半年后分产品的账就对不齐了，而那时已经无从追认。历史流水的列为空是既成事实，
+ * 不给它一个默认值假装有归属（见 schema 里那段注释）。
+ */
 async function appendCreditDelta(
   db: CreditDb,
   tenantId: string,
   userId: string,
   delta: number,
   reason: string,
+  productCode: ProductCode,
   idempotencyKey?: string,
 ): Promise<number> {
   await lockCreditAccount(db, userId);
@@ -60,7 +69,7 @@ async function appendCreditDelta(
   if (isUnlimited(bal)) return bal;
   const balance = bal + delta;
   if (balance < 0) throw new InsufficientCreditsError();
-  await db.creditLedger.create({ data: { tenantId, userId, delta, reason, balance, idempotencyKey } });
+  await db.creditLedger.create({ data: { tenantId, userId, delta, reason, balance, productCode, idempotencyKey } });
   noteCreditDelta(delta, reason); // 观测口径=「尝试落账」：外层事务仍可能回滚，容忍少量偏差（对账以 credit_ledger 为准）
   return balance;
 }
@@ -71,11 +80,12 @@ export async function chargeCreditsOnce(
   userId: string,
   cost: number,
   reason: string,
+  productCode: ProductCode,
   idempotencyKey: string,
   db: CreditDb,
 ): Promise<number> {
   if (cost <= 0) return balanceIn(db, userId);
-  return appendCreditDelta(db, tenantId, userId, -cost, reason, idempotencyKey);
+  return appendCreditDelta(db, tenantId, userId, -cost, reason, productCode, idempotencyKey);
 }
 
 /** GenerationJob/worker 使用的跨进程幂等退款。 */
@@ -84,11 +94,12 @@ export async function refundCreditsOnce(
   userId: string,
   cost: number,
   reason: string,
+  productCode: ProductCode,
   idempotencyKey: string,
   db: CreditDb,
 ): Promise<number> {
   if (cost <= 0) return balanceIn(db, userId);
-  return appendCreditDelta(db, tenantId, userId, cost, reason, idempotencyKey);
+  return appendCreditDelta(db, tenantId, userId, cost, reason, productCode, idempotencyKey);
 }
 
 /** 原子扣费：追加一条 delta=-cost 的流水，返回新余额。 */
@@ -97,10 +108,11 @@ export async function chargeCredits(
   userId: string,
   cost: number,
   reason: string,
+  productCode: ProductCode,
   db?: CreditDb,
 ): Promise<number> {
   if (cost <= 0) return getBalance(userId);
-  const apply = (client: CreditDb) => appendCreditDelta(client, tenantId, userId, -cost, reason);
+  const apply = (client: CreditDb) => appendCreditDelta(client, tenantId, userId, -cost, reason, productCode);
   return db ? apply(db) : prisma.$transaction((tx) => apply(tx));
 }
 
@@ -110,10 +122,11 @@ export async function refundCredits(
   userId: string,
   cost: number,
   reason: string,
+  productCode: ProductCode,
   db?: CreditDb,
 ): Promise<number> {
   if (cost <= 0) return getBalance(userId);
-  const apply = (client: CreditDb) => appendCreditDelta(client, tenantId, userId, cost, reason);
+  const apply = (client: CreditDb) => appendCreditDelta(client, tenantId, userId, cost, reason, productCode);
   return db ? apply(db) : prisma.$transaction((tx) => apply(tx));
 }
 
@@ -123,6 +136,7 @@ export async function grantCredits(
   userId: string,
   amount: number,
   reason: string,
+  productCode: ProductCode,
   db?: CreditDb,
 ): Promise<number> {
   const apply = async (client: CreditDb) => {
@@ -133,7 +147,7 @@ export async function grantCredits(
     if (!unlimited && amount === 0) return isUnlimited(bal) ? -1 : bal;
     const delta = unlimited ? 0 : amount;
     const balance = unlimited ? -1 : (isUnlimited(bal) ? amount : bal + amount);
-    await client.creditLedger.create({ data: { tenantId, userId, delta, reason, balance } });
+    await client.creditLedger.create({ data: { tenantId, userId, delta, reason, balance, productCode } });
     noteCreditDelta(delta, reason);
     return balance;
   };
@@ -153,12 +167,13 @@ export async function reserveCredits(
   userId: string,
   cost: number,
   reason: string,
+  productCode: ProductCode,
 ): Promise<CreditReservation> {
   const bal = await getBalance(userId);
   if (cost <= 0 || isUnlimited(bal)) {
     return { charged: false, balance: bal, refund: async () => bal };
   }
-  const balance = await chargeCredits(tenantId, userId, cost, reason);
+  const balance = await chargeCredits(tenantId, userId, cost, reason, productCode);
   // 幂等护栏（对齐 tokenQuota.QuotaReservation 的 done 标志）：调用方有多条退款路径会叠在一起——
   // sessions.ts 降级退款（settleCreditForDeliverable）跑完后，若紧随的 quotaReservation.settle 抛错，
   // catch 块会照着 `charged` 再退一次 → 同一次预扣追加两条正向流水 = 双退资损。
@@ -170,7 +185,7 @@ export async function reserveCredits(
     balance,
     refund: (refundReason = `${reason} · 失败退回`) => {
       if (!refunded) {
-        refunded = refundCredits(tenantId, userId, cost, refundReason).catch((e) => {
+        refunded = refundCredits(tenantId, userId, cost, refundReason, productCode).catch((e) => {
           refunded = null;
           throw e;
         });

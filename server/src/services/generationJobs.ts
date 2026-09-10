@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { PRODUCT } from './products.js';
 import { envNum } from '../env.js';
 import { noteLeaseThrashing } from './metrics.js';
 import {
@@ -464,6 +465,7 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
         input.userId,
         creditCost,
         `产出预扣 · ${input.agentKey}`,
+        PRODUCT.junshi,
         `generation:${job.id}:credit:reserve`,
         tx,
       );
@@ -662,6 +664,7 @@ export async function requestGenerationCancel(
           job.userId,
           job.creditReserved,
           '生成取消 · 退回钻石',
+          PRODUCT.junshi,
           `generation:${job.id}:credit:refund`,
           tx,
         );
@@ -1158,6 +1161,7 @@ export async function finalizeGeneration(args: {
           job.userId,
           job.creditReserved,
           '生成未交付 · 退回钻石',
+          PRODUCT.junshi,
           `generation:${job.id}:credit:refund`,
           tx,
         );

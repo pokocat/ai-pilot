@@ -12,6 +12,7 @@
 // 安全注记：回调先用与 Wechatpay-Serial 匹配的平台证书/公钥验签，再做 AEAD 解密；任一步缺失或失败都拒绝。
 
 import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
+import { PRODUCT } from './products.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant, skuPackAmount } from './purchase.js';
@@ -1069,7 +1070,7 @@ async function revokeOrderGrant(
         const last = await tx.creditLedger.findFirst({ where: { userId: order.userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
         const balance = last?.balance ?? 0;
         if (balance > 0) {
-          await chargeCredits(order.tenantId, order.userId, Math.min(balance, packAmount), `退款追回 · ${snapshotItemName(order)}`, tx);
+          await chargeCredits(order.tenantId, order.userId, Math.min(balance, packAmount), `退款追回 · ${snapshotItemName(order)}`, PRODUCT.junshi, tx);
         }
       }
     } else if (kind === 'quota') {
@@ -1100,7 +1101,7 @@ async function revokeOrderGrant(
       const balance = last?.balance ?? 0;
       // 不限量（-1）与零余额不追扣；只追回「本单发放且尚未消耗」的部分。
       if (balance > 0) {
-        await chargeCredits(order.tenantId, order.userId, Math.min(balance, granted), `退款追回 · ${snapshotItemName(order)}`, tx);
+        await chargeCredits(order.tenantId, order.userId, Math.min(balance, granted), `退款追回 · ${snapshotItemName(order)}`, PRODUCT.junshi, tx);
       }
     }
   }

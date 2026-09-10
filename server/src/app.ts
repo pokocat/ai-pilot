@@ -1,6 +1,7 @@
 // 应用工厂：构建并注册所有路由的 Fastify 实例（不监听端口）。
 // index.ts 用它来 listen；集成测试用它来 app.inject(...) 免端口直测。
 import Fastify, { type FastifyInstance } from 'fastify';
+import { serviceProfile, shouldRegister, shouldRunJunshiWorkers } from './serviceProfile.js';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -276,66 +277,73 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   registerHttpAudit(app);
 
-  await app.register(authRoutes, { prefix: '/api' });
-  await app.register(metaRoutes, { prefix: '/api' });
-  await app.register(metricsRoutes, { prefix: '/api' }); // Prometheus 指标（需 METRICS_TOKEN，未配则 404）
-  await app.register(alertRoutes, { prefix: '/api' }); // Alertmanager 告警回传 → 飞书转发（同一把 METRICS_TOKEN）
-  await app.register(agentRoutes, { prefix: '/api' });
-  await app.register(profileRoutes, { prefix: '/api' });
-  await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）
-  await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
-  await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
-  await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
-  await app.register(creativeRoutes, { prefix: '/api' }); // 海报成品图（canvas_design：产物型技能 kind='artifact'）
-  await app.register(videoRoutes, { prefix: '/api' }); // 快出片 BFF：军师鉴权/钻石账/审核 → aidrama clip
-  await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
-  await app.register(sayingRoutes, { prefix: '/api' });
-  await app.register(sessionRoutes, { prefix: '/api' });
-  await app.register(generationRoutes, { prefix: '/api' });
-  await app.register(libraryRoutes, { prefix: '/api' });
-  await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
-  await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告
-  await app.register(decisionRoutes, { prefix: '/api' }); // 决策日志（M2：记账/验证/准确率）
-  await app.register(prophecyRoutes, { prefix: '/api' }); // 预言账本（M2：天机验证/命中率）
-  await app.register(cardRoutes, { prefix: '/api' }); // B 级卡片（M4：每日战报/天时日历/天命速写）
-  await app.register(projectRoutes, { prefix: '/api' });
-  await app.register(reportRoutes, { prefix: '/api' });
-  await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)
-  await app.register(knowledgeRoutes, { prefix: '/api' });
-  await app.register(knowledgePipelineRoutes, { prefix: '/api' }); // V7-06：智库三段式资料整理管道
-  await app.register(dataSourceRoutes, { prefix: '/api' }); // V7-07：数据源状态持久化 + 授权流程
-  await app.register(moduleRoutes, { prefix: '/api' }); // V7-08：能力/模块中心（目录×用户态 + tier 分流启用）
-  await app.register(searchRoutes, { prefix: '/api' }); // V7-14：跨域搜索
-  await app.register(reminderRoutes, { prefix: '/api' }); // V7-11：提醒日历（纯读派生）
-  await app.register(communityRoutes, { prefix: '/api' }); // V7-13：邀请码 / 社群服务 / 档案工作台
-  await app.register(wenceRoutes, { prefix: '/api' }); // 问策入口 WP1：提示词池下发 + 客户端埋点（两条均游客可用）
-  await app.register(memoryRoutes, { prefix: '/api' });
-  await app.register(factRoutes, { prefix: '/api' }); // 可审计客户事实确认；按钮不产生聊天消息
-  await app.register(graphRoutes, { prefix: '/api' });
-  await app.register(planRoutes, { prefix: '/api' });
-  await app.register(skuRoutes, { prefix: '/api' }); // V7-12：单次付费商品（SKU 下单，回调复用 pay 幂等底座）
-  await app.register(payRoutes, { prefix: '/api' }); // 支付回调（封装插件含原文 JSON 解析器，验签用）
-  await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
-  await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
-  await app.register(adminRoutes, { prefix: '/api' });
+  /* ── 路由注册：按服务档位挑 ──────────────────────────────────────────────
+   * `SERVICE_PROFILE=quickreel` 起出来的进程只注册爱速拍真正用到的那几组
+   * （src/serviceProfile.ts 里的白名单），可以单独发布、单独重启，不牵动军师。
+   * 默认 all，与本档位上线之前逐字节一致。
+   */
+  const allProfile = serviceProfile() === 'all';
+
+  if (shouldRegister('auth')) await app.register(authRoutes, { prefix: '/api' });
+  if (shouldRegister('meta')) await app.register(metaRoutes, { prefix: '/api' });
+  if (shouldRegister('metrics')) await app.register(metricsRoutes, { prefix: '/api' }); // Prometheus 指标（需 METRICS_TOKEN，未配则 404）
+  if (shouldRegister('alerts')) await app.register(alertRoutes, { prefix: '/api' }); // Alertmanager 告警回传 → 飞书转发（同一把 METRICS_TOKEN）
+  if (allProfile) await app.register(agentRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(profileRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）
+  if (allProfile) await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
+  if (allProfile) await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
+  if (allProfile) await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
+  if (allProfile) await app.register(creativeRoutes, { prefix: '/api' }); // 海报成品图（canvas_design：产物型技能 kind='artifact'）
+  if (shouldRegister('video')) await app.register(videoRoutes, { prefix: '/api' }); // 快出片 BFF：军师鉴权/钻石账/审核 → aidrama clip
+  if (allProfile) await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
+  if (allProfile) await app.register(sayingRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(sessionRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(generationRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(libraryRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
+  if (allProfile) await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告
+  if (allProfile) await app.register(decisionRoutes, { prefix: '/api' }); // 决策日志（M2：记账/验证/准确率）
+  if (allProfile) await app.register(prophecyRoutes, { prefix: '/api' }); // 预言账本（M2：天机验证/命中率）
+  if (allProfile) await app.register(cardRoutes, { prefix: '/api' }); // B 级卡片（M4：每日战报/天时日历/天命速写）
+  if (allProfile) await app.register(projectRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(reportRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)
+  if (allProfile) await app.register(knowledgeRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(knowledgePipelineRoutes, { prefix: '/api' }); // V7-06：智库三段式资料整理管道
+  if (allProfile) await app.register(dataSourceRoutes, { prefix: '/api' }); // V7-07：数据源状态持久化 + 授权流程
+  if (allProfile) await app.register(moduleRoutes, { prefix: '/api' }); // V7-08：能力/模块中心（目录×用户态 + tier 分流启用）
+  if (allProfile) await app.register(searchRoutes, { prefix: '/api' }); // V7-14：跨域搜索
+  if (allProfile) await app.register(reminderRoutes, { prefix: '/api' }); // V7-11：提醒日历（纯读派生）
+  if (allProfile) await app.register(communityRoutes, { prefix: '/api' }); // V7-13：邀请码 / 社群服务 / 档案工作台
+  if (allProfile) await app.register(wenceRoutes, { prefix: '/api' }); // 问策入口 WP1：提示词池下发 + 客户端埋点（两条均游客可用）
+  if (allProfile) await app.register(memoryRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(factRoutes, { prefix: '/api' }); // 可审计客户事实确认；按钮不产生聊天消息
+  if (allProfile) await app.register(graphRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(planRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(skuRoutes, { prefix: '/api' }); // V7-12：单次付费商品（SKU 下单，回调复用 pay 幂等底座）
+  if (allProfile) await app.register(payRoutes, { prefix: '/api' }); // 支付回调（封装插件含原文 JSON 解析器，验签用）
+  if (shouldRegister('wechat')) await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
+  if (allProfile) await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
+  if (allProfile) await app.register(adminRoutes, { prefix: '/api' });
   // 运营后台「邀请增长」三视图的只读聚合。单独封装（自挂同一把 requireAdmin）而不是塞进
   // adminRoutes：admin.ts 已 2900+ 行，三个投影各自要做一次成形，详见该文件头注释。
-  await app.register(adminReferralRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(adminReferralRoutes, { prefix: '/api' });
   // 运营后台「增长 · 代理分销」：代理名册 / 分销规则 / 佣金流水 / 结算单（同样自挂 requireAdmin）。
-  await app.register(adminDistributionRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(adminDistributionRoutes, { prefix: '/api' });
   // 「增长」组的邀请关系账本 / 归因日志 / CSV / 运营补绑 / 邀请链（同样自挂 requireAdmin）。
-  await app.register(adminInvitesRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(adminInvitesRoutes, { prefix: '/api' });
 
   // 创作任务 worker（海报成品图）：DB 队列 + FOR UPDATE SKIP LOCKED 抢占，2s 轮询。
   // test 环境内部直接 return（测试用 tickCreativeWorker 手动驱动）。功能开关在每轮 tick 里判
   // （后台 FeatureFlag 'creative-poster'，走 60s 缓存），所以运营放量/熔断都不需要重启进程。
-  {
+  if (shouldRunJunshiWorkers()) {
     const { startCreativeWorker } = await import('./services/creative/worker.js');
     startCreativeWorker();
   }
   // 对话/成果生成 worker：HTTP/SSE 只负责建单与订阅，客户端离开不再中止真实生成。
   // test 环境不自动轮询，集成测试用 tickGenerationWorker 精确驱动。
-  {
+  if (shouldRunJunshiWorkers()) {
     const { startGenerationWorker } = await import('./services/generationWorker.js');
     startGenerationWorker();
   }

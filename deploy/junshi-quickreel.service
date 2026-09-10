@@ -1,0 +1,42 @@
+# 爱速拍 · 独立服务进程
+#
+# 为什么单起一个进程：爱速拍原来没有自己的服务端，军师 BFF 同时接受 junshi-api 和
+# quickreel-api 两个 audience，是代管形态。代价在 2026-09-10 那次发布上真实付过 ——
+# 为了把爱速拍的六条分段路由发上生产，不得不把军师落后的十个提交连同 admin 一起发。
+# 装上这个 unit 之后，`QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh` 只换这一个进程，
+# 军师主进程不动。
+#
+# 同一份代码、同一个库、同一个 .env，只是 SERVICE_PROFILE 不同：
+# quickreel 档只注册爱速拍真正用到的那几组路由（server/src/serviceProfile.ts 的白名单），
+# 军师的 40 多组一组都不注册，军师的两个 worker 也不在这里跑
+# （两个进程同时轮询同一张队列表，行为取决于抢锁顺序，出问题说不清是谁干的）。
+#
+# 安装：
+#   拷到 /etc/systemd/system/junshi-quickreel.service
+#   systemctl daemon-reload && systemctl enable --now junshi-quickreel
+#   nginx 把 wxapi.aibuzz.cn 的 /api/video/ 与 /api/me 转到 127.0.0.1:4010
+#   （不改 nginx 也无妨：主进程仍然全量提供这些面，这个进程只是多一条可单独发布的路）
+# 日志：journalctl -u junshi-quickreel -f
+[Unit]
+Description=Junshi API · quickreel profile (爱速拍独立进程)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=junshi
+WorkingDirectory=/opt/junshi/server
+Environment=TZ=Asia/Shanghai
+# 这两个是与主进程唯一的差别。
+# 拼错 SERVICE_PROFILE 会让进程**起不来**而不是静默退回全量（serviceProfile() 会抛），
+# 这是故意的：静默退回等于这条边界形同虚设。
+Environment=SERVICE_PROFILE=quickreel
+Environment=PORT=4010
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

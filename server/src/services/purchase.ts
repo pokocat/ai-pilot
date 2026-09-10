@@ -1,6 +1,7 @@
 // 套餐权益发放（被「演示购买」与「微信支付回调」共用，保证两条路径口径一致）。
 // 发放 = 切换套餐 + 写有效期(D1/D2) + 叠加钻石(点)流水 + 覆盖式授予当月 token 额度。
 import { prisma } from '../db.js';
+import { PRODUCT } from './products.js';
 import type { Prisma } from '@prisma/client';
 import { grantCredits } from './credits.js';
 import { setQuota, grantQuotaPack } from './tokenQuota.js';
@@ -70,7 +71,7 @@ export async function applyPlanPurchase(
       where: { id: user.id },
       data: { planId: plan.id, planActivatedAt: activatedAt, planExpiresAt: expiresAt },
     });
-    const creditBalance = await grantCredits(user.tenantId, user.id, creditGrantAmount, opts.reason, tx);
+    const creditBalance = await grantCredits(user.tenantId, user.id, creditGrantAmount, opts.reason, PRODUCT.junshi, tx);
     // skipFreeRegrant 同样必须挡住 token 额度覆盖式授予：setQuota 是硬覆盖 balance=quota（见 tokenQuota.ts），
     // 与"月度额度由锚点重置链单独发放"这句注释描述的惰性重置是两条独立路径——不挡住这里会让重复点击
     // 免费套餐的"购买"把已用尽的 token 额度刷回满额，形成与钻石防刷同源但未被堵上的刷额度口子。
@@ -188,7 +189,7 @@ export async function applySkuGrant(
         creditsSkippedUnlimited = true;
         grantedPackAmount = 0;
       } else {
-        await grantCredits(user.tenantId, user.id, packAmount, opts.reason, tx);
+        await grantCredits(user.tenantId, user.id, packAmount, opts.reason, PRODUCT.junshi, tx);
         skipNoteLedger = true;
       }
     }

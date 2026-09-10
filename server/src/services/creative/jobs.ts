@@ -11,6 +11,7 @@
 // 门禁顺序（方案 §9.1）：功能开关 → 智能体已解锁 → 套餐有效 → brief 校验 → 输入审核 → 幂等 → 日限额 → 扣费建单。
 // 顺序不是随意的：不该让一个功能关着的接口去查用户余额，也不该让校验不过的请求先扣钻石。
 import { Prisma } from '@prisma/client';
+import { PRODUCT } from '../products.js';
 import { prisma } from '../../db.js';
 import { now, dayStart } from '../clock.js';
 import { chargeCredits, refundCredits, ensureCredits } from '../credits.js';
@@ -361,7 +362,7 @@ export async function refundJob(jobId: string, reason: string): Promise<{ refund
     });
     if (claimed.count === 0) return false; // 别人先抢到了
     if (job.creditCost <= 0) return false; // 名义价 0：标记已处理即可，无流水可退
-    await refundCredits(job.tenantId, job.userId, job.creditCost, `海报成品图 · ${reason}`, tx);
+    await refundCredits(job.tenantId, job.userId, job.creditCost, `海报成品图 · ${reason}`, PRODUCT.junshi, tx);
     return true;
   });
 
@@ -493,7 +494,7 @@ async function insertJob(input: {
       });
       if (input.charge && !unlimited && nominalCost > 0) {
         // 同事务扣费：余额不足在这里抛 402，整个事务回滚 → 不会留下一个没付钱的任务。
-        await chargeCredits(input.tenantId, input.userId, nominalCost, `海报成品图 · ${input.brief.templateKey}`, tx);
+        await chargeCredits(input.tenantId, input.userId, nominalCost, `海报成品图 · ${input.brief.templateKey}`, PRODUCT.junshi, tx);
       }
       return { jobId: created.id, status: created.status, creditCost: created.creditCost, reused: false };
     });

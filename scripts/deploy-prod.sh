@@ -25,6 +25,13 @@ DEPLOY_H5="${DEPLOY_H5:-0}"
 DEPLOY_PC="${DEPLOY_PC:-0}"
 TARO_APP_API="${TARO_APP_API:-https://wxapi.aibuzz.cn/api}"
 ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data-loss（按需，默认关）
+# 1=不发 admin 前端。爱速拍的服务端改动不该顺带把运营后台也换一版：
+# 2026-09-10 发爱速拍那六条路由时，被迫连 admin 和军师落后的十个提交一起发，
+# 这正是「爱速拍绑在军师发布节奏上」的具体代价。
+SKIP_ADMIN="${SKIP_ADMIN:-0}"
+# 1=只重启爱速拍那个进程（junshi-quickreel），不动军师主进程。
+# 需要目标机上已经装好该 unit（见 deploy/junshi-quickreel.service）。
+QUICKREEL_ONLY="${QUICKREEL_ONLY:-0}"
 SKIP_DB_PUSH="${SKIP_DB_PUSH:-0}"           # 1=已完成只读 schema 核对且本次无 DB 变更时跳过 db push
 
 # ── 锁定本次要发布的提交 ──────────────────────────────────────────────────────
@@ -222,12 +229,32 @@ sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$
 echo "== server build and restart =="
 sudo rm -rf dist
 npm run build
-sudo systemctl restart junshi-api
-sleep 3
-sudo systemctl is-active --quiet junshi-api
-curl -fsS http://127.0.0.1:4000/api/health
-echo
+if [ "$QUICKREEL_ONLY" = "1" ]; then
+  # 只换爱速拍那个进程。军师主进程不动 —— 这就是把爱速拍从军师的发布节奏上解开的那一步。
+  echo "== 只重启爱速拍进程（QUICKREEL_ONLY=1），军师主进程不动 =="
+  sudo systemctl restart junshi-quickreel
+  sleep 3
+  sudo systemctl is-active --quiet junshi-quickreel
+  curl -fsS http://127.0.0.1:4010/api/health
+  echo
+else
+  sudo systemctl restart junshi-api
+  sleep 3
+  sudo systemctl is-active --quiet junshi-api
+  curl -fsS http://127.0.0.1:4000/api/health
+  echo
+  # 爱速拍进程若已装，跟着一起换（同一份代码，档位不同）。没装就跳过，不影响主发布。
+  if sudo systemctl list-unit-files junshi-quickreel.service >/dev/null 2>&1 \
+     && sudo systemctl is-enabled --quiet junshi-quickreel 2>/dev/null; then
+    sudo systemctl restart junshi-quickreel
+    sleep 2
+    sudo systemctl is-active --quiet junshi-quickreel && curl -fsS http://127.0.0.1:4010/api/health && echo
+  fi
+fi
 
+if [ "$SKIP_ADMIN" = "1" ]; then
+  echo "== admin 跳过（SKIP_ADMIN=1）=="
+else
 echo "== admin build and publish =="
 cd "$APP_ROOT/admin"
 npm ci
@@ -235,6 +262,7 @@ npm run build -- --base=/admin/
 sudo mkdir -p /var/www/junshi/admin
 sudo find /var/www/junshi/admin -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 sudo cp -R dist/. /var/www/junshi/admin/
+fi
 
 if [ "$DEPLOY_H5" = "1" ]; then
   echo "== h5 build and publish =="
