@@ -45,6 +45,7 @@ export function productCodes(): ProductCode[] {
  * 记 quickreel，收入仍算在当初卖出这批钻石的那个产品头上。两笔各归各的，账是通的。
  */
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 
 export interface ProductLedgerSlice {
@@ -82,6 +83,10 @@ export async function productLedgerSlices(
   // 三次聚合必须在**同一个快照**里。各查各的时，营业时间里随时可能有新流水落在两次查询之间：
   // 先跑 counts 的话，新产品有金额却没有行，整行丢失；先跑金额聚合的话，返回 entries>0
   // 而 granted/spent 少钱。刷新一下又对了 —— 是最难查的那种间歇性对不上账。
+  //
+  // **只开事务不够，必须指定 RepeatableRead。** PostgreSQL 默认的 Read Committed
+  // 是「每条语句各取一次快照」，同一个事务里的三条语句照样会看见不同的数据，
+  // 包起来只是看着安全。RepeatableRead 才是在事务的第一条语句取一次快照、后续复用。
   // 用交互式事务而不是数组式：数组式在 groupBy 的可选 where 字段上类型对不齐。
   const { positive, negative, counts } = await prisma.$transaction(async (tx) => ({
     positive: await tx.creditLedger.groupBy({
@@ -93,7 +98,7 @@ export async function productLedgerSlices(
     counts: await tx.creditLedger.groupBy({
       by: ['productCode'], where: window, _count: { _all: true },
     }),
-  }));
+  }), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   const key = (code: string | null) => code ?? 'unattributed';
   const granted = new Map(positive.map((r) => [key(r.productCode), r._sum.delta ?? 0]));
   const spent = new Map(negative.map((r) => [key(r.productCode), Math.abs(r._sum.delta ?? 0)]));

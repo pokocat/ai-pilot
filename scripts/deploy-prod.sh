@@ -90,8 +90,16 @@ die(){ printf "\033[1;31m[deploy] %s\033[0m\n" "$*" >&2; exit 1; }
 printf '\033[1;33m========================================================\033[0m\n'
 # 显式把 REMOTE_ROOT 指回军师目录 + QUICKREEL_ONLY=1，正是上面那段注释要避免的事：
 # 会换掉军师的代码却不重启它。宁可拒绝，也不要发出一个「看起来成功」的危险发布。
-if [ "$QUICKREEL_ONLY" = "1" ] && [ "$REMOTE_ROOT" = "/opt/junshi" ]; then
-  echo "[deploy] 拒绝：QUICKREEL_ONLY=1 不能发到军师的安装目录 /opt/junshi —— 那会换掉军师的代码却不重启它。" >&2
+#
+# 比较前先规范化：去掉重复斜杠、结尾斜杠和 `/.` 段。裸字符串比较挡不住
+# `/opt/junshi/`、`/opt/junshi/.`、`/opt//junshi` 这些等价写法，而后面的
+# `rm -rf "$APP_ROOT/<path>"` 照样会删到军师目录里去。
+normalize_root() {
+  printf '%s' "$1" | sed -E 's#/+#/#g; s#(/\.)+/?$##; s#/+$##'
+}
+REMOTE_ROOT="$(normalize_root "$REMOTE_ROOT")"
+if [ "$QUICKREEL_ONLY" = "1" ] && { [ "$REMOTE_ROOT" = "/opt/junshi" ] || case "$REMOTE_ROOT" in /opt/junshi/*) true;; *) false;; esac; }; then
+  echo "[deploy] 拒绝：QUICKREEL_ONLY=1 不能发到军师的安装目录（$REMOTE_ROOT）—— 那会换掉军师的代码却不重启它。" >&2
   echo "[deploy] 爱速拍请用自己的目录（默认 /opt/junshi-quickreel）。" >&2
   exit 1
 fi
@@ -266,13 +274,9 @@ else
   sudo systemctl is-active --quiet junshi-api
   curl -fsS http://127.0.0.1:4000/api/health
   echo
-  # 爱速拍进程若已装，跟着一起换（同一份代码，档位不同）。没装就跳过，不影响主发布。
-  if sudo systemctl list-unit-files junshi-quickreel.service >/dev/null 2>&1 \
-     && sudo systemctl is-enabled --quiet junshi-quickreel 2>/dev/null; then
-    sudo systemctl restart junshi-quickreel
-    sleep 2
-    sudo systemctl is-active --quiet junshi-quickreel && curl -fsS http://127.0.0.1:4010/api/health && echo
-  fi
+  # **不碰爱速拍进程。** 它跑在自己的安装目录，这次发布没有更新那份代码 ——
+  # 重启它既拿不到新版本，又白白中断一次；库 schema 若已经不兼容旧代码，还可能起不来。
+  # 爱速拍要发新版就跑 QUICKREEL_ONLY=1，那是它自己的发布。
 fi
 
 if [ "$SKIP_ADMIN" = "1" ]; then
@@ -361,7 +365,13 @@ wait_ready() {
   return 1
 }
 
-if [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ] || [ "$GRAFANA_PRESENT" = "1" ]; then
+# 监控栈按容器名发现（全局），但它的 compose 与密钥装在**军师**的安装目录下。
+# 只发爱速拍时 APP_ROOT 是另一个目录，那里没有 monitoring/，照原逻辑会在
+# 「爱速拍已经重启、版本已记为 switched」之后才失败退出，留下一次半截发布。
+# 监控栈本来也不归爱速拍这次发布管，直接跳过。
+if [ "$QUICKREEL_ONLY" = "1" ]; then
+  echo "== 监控栈校验跳过（只发爱速拍；那套装在军师目录下，不归本次发布管）=="
+elif [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ] || [ "$GRAFANA_PRESENT" = "1" ]; then
   MONITOR_DIR="$APP_ROOT/deploy/monitoring"
   sudo test -f "$MONITOR_DIR/.env" || { echo "监控栈运行中但 monitoring/.env 缺失" >&2; exit 1; }
   sudo test -f "$MONITOR_DIR/secrets/metrics.token" || { echo "监控栈运行中但 metrics.token 缺失" >&2; exit 1; }

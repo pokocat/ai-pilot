@@ -189,3 +189,38 @@ test('时间区间非法当场拒收', async () => {
   const res = await api('GET', '/api/admin/products/ledger?from=2026-02-01&to=2026-01-01');
   assert.equal(res.status, 422);
 });
+
+test('并发写账时，一次汇总里的三个聚合互相自洽（RepeatableRead 快照）', async () => {
+  // 只开事务不够：PostgreSQL 默认 Read Committed 是「每条语句各取快照」，
+  // 三条语句照样会看见不同数据 —— 表现是 entries>0 但金额少了，或整行丢失。
+  // 这条用例一边汇总一边持续写流水，撞的就是那个窗口。
+  const { tenantId, userId } = await mkUser();
+  await grantCredits(tenantId, userId, 10_000, '充值', PRODUCT.junshi);
+
+  let stop = false;
+  const churn = (async () => {
+    let n = 0;
+    while (!stop && n < 400) {
+      // 交替写两个产品，让「新产品在两次查询之间出现」这个场景也能撞上
+      await chargeCredits(tenantId, userId, 1, '并发', n % 2 ? PRODUCT.quickreel : PRODUCT.junshi);
+      n += 1;
+    }
+  })();
+
+  try {
+    for (let i = 0; i < 12; i += 1) {
+      const slices = await productLedgerSlices(new Date(Date.now() - 3600_000));
+      for (const row of slices) {
+        // 自洽的最低要求：有条数就必有金额，有金额就必有条数。
+        // 快照撕裂时这两条会一真一假。
+        const hasMoney = row.granted > 0 || row.spent > 0;
+        assert.ok(row.entries > 0, `${row.productCode} 出现在结果里却没有条数`);
+        assert.equal(hasMoney, true, `${row.productCode} entries=${row.entries} 却一分钱都没有`);
+        assert.ok(row.entries >= 1, '条数至少覆盖它自己的那些流水');
+      }
+    }
+  } finally {
+    stop = true;
+    await churn;
+  }
+});
