@@ -6,16 +6,28 @@
 # 装上这个 unit 之后，`QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh` 只换这一个进程，
 # 军师主进程不动。
 #
-# 同一份代码、同一个库、同一个 .env，只是 SERVICE_PROFILE 不同：
+# 同一份代码、同一个数据库，各自一个安装目录和一份 .env，差别只在 SERVICE_PROFILE：
 # quickreel 档只注册爱速拍真正用到的那几组路由（server/src/serviceProfile.ts 的白名单），
 # 军师的 40 多组一组都不注册，军师的两个 worker 也不在这里跑
 # （两个进程同时轮询同一张队列表，行为取决于抢锁顺序，出问题说不清是谁干的）。
 #
-# 安装：
-#   拷到 /etc/systemd/system/junshi-quickreel.service
-#   systemctl daemon-reload && systemctl enable --now junshi-quickreel
-#   nginx 把 wxapi.aibuzz.cn 的 /api/video/ 与 /api/me 转到 127.0.0.1:4010
-#   （不改 nginx 也无妨：主进程仍然全量提供这些面，这个进程只是多一条可单独发布的路）
+# **它有自己的安装目录** /opt/junshi-quickreel，与军师的 /opt/junshi 物理隔离。
+# 这是「独立发布」成立的前提：共用一份 dist/node_modules 的话，发爱速拍会把军师正在跑的
+# 代码一起换掉、只是先不重启它 —— 军师下次自动重启就静默加载新版，运行期懒加载还可能新旧混跑。
+# 部署脚本对「QUICKREEL_ONLY=1 却指向 /opt/junshi」直接拒绝。
+#
+# 一次性初始化（在目标机上做一遍）：
+#   sudo install -d -o junshi -g junshi /opt/junshi-quickreel
+#   # .env 与军师共用同一套配置值，先复制一份过去；后续两边改配置要同步
+#   sudo install -o junshi -g junshi -m 600 /opt/junshi/server/.env /opt/junshi-quickreel/server/.env
+#   sudo cp deploy/junshi-quickreel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now junshi-quickreel
+#
+# 发布：
+#   QUICKREEL_ONLY=1 bash scripts/deploy-prod.sh      # 只发爱速拍，军师完全不动
+#
+# nginx 可选：把 wxapi.aibuzz.cn 的 /api/video/ 与 /api/me 转到 127.0.0.1:4010。
+# 不改也能跑 —— 主进程仍然全量提供这些面，这个进程先作为可独立发布的备用路径存在。
 # 日志：journalctl -u junshi-quickreel -f
 [Unit]
 Description=Junshi API · quickreel profile (爱速拍独立进程)
@@ -25,7 +37,7 @@ Wants=postgresql.service
 [Service]
 Type=simple
 User=junshi
-WorkingDirectory=/opt/junshi/server
+WorkingDirectory=/opt/junshi-quickreel/server
 Environment=TZ=Asia/Shanghai
 # 这两个是与主进程唯一的差别。
 # 拼错 SERVICE_PROFILE 会让进程**起不来**而不是静默退回全量（serviceProfile() 会抛），

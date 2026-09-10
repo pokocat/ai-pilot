@@ -77,18 +77,23 @@ export async function productLedgerSlices(
   // 不要用 `lt: new Date()` 兜底：createdAt 是数据库用 CURRENT_TIMESTAMP 写的，
   // 应用进程的时钟只要比库慢一点点，刚落的那几笔就落在上界之外，报表看起来像少了钱。
   // 没有上界就没有这个偏差，也少一处需要解释的行为。
-  const window = to ? { createdAt: { gte: from, lt: to } } : { createdAt: { gte: from } };
-  const [positive, negative, counts] = await Promise.all([
-    prisma.creditLedger.groupBy({
+  const createdAt = to ? { gte: from, lt: to } : { gte: from };
+  const window = { createdAt };
+  // 三次聚合必须在**同一个快照**里。各查各的时，营业时间里随时可能有新流水落在两次查询之间：
+  // 先跑 counts 的话，新产品有金额却没有行，整行丢失；先跑金额聚合的话，返回 entries>0
+  // 而 granted/spent 少钱。刷新一下又对了 —— 是最难查的那种间歇性对不上账。
+  // 用交互式事务而不是数组式：数组式在 groupBy 的可选 where 字段上类型对不齐。
+  const { positive, negative, counts } = await prisma.$transaction(async (tx) => ({
+    positive: await tx.creditLedger.groupBy({
       by: ['productCode'], where: { ...window, delta: { gt: 0 } }, _sum: { delta: true },
     }),
-    prisma.creditLedger.groupBy({
+    negative: await tx.creditLedger.groupBy({
       by: ['productCode'], where: { ...window, delta: { lt: 0 } }, _sum: { delta: true },
     }),
-    prisma.creditLedger.groupBy({
+    counts: await tx.creditLedger.groupBy({
       by: ['productCode'], where: window, _count: { _all: true },
     }),
-  ]);
+  }));
   const key = (code: string | null) => code ?? 'unattributed';
   const granted = new Map(positive.map((r) => [key(r.productCode), r._sum.delta ?? 0]));
   const spent = new Map(negative.map((r) => [key(r.productCode), Math.abs(r._sum.delta ?? 0)]));

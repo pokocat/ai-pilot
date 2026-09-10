@@ -17,7 +17,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 DEPLOY_HOST="${DEPLOY_HOST:-ecs-user@8.136.36.175}"
 SSH_KEY="${SSH_KEY:-/Users/donis/dev/aliyun/aiartist.pem}"
-REMOTE_ROOT="${REMOTE_ROOT:-/opt/junshi}"
+# 安装根目录。爱速拍发到自己的目录，与军师物理隔离 —— 这是「独立发布」成立的前提，
+# 不隔离的话两个进程共用一份 dist/node_modules，发谁都会动到另一个。
+if [ "${QUICKREEL_ONLY:-0}" = "1" ]; then
+  REMOTE_ROOT="${REMOTE_ROOT:-/opt/junshi-quickreel}"
+else
+  REMOTE_ROOT="${REMOTE_ROOT:-/opt/junshi}"
+fi
 REMOTE_RUNTIME_USER="${REMOTE_RUNTIME_USER:-junshi}"
 PUBLIC_BASE="${PUBLIC_BASE:-http://8.136.36.175}"
 PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-https://wxapi.aibuzz.cn}"
@@ -29,8 +35,15 @@ ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data
 # 2026-09-10 发爱速拍那六条路由时，被迫连 admin 和军师落后的十个提交一起发，
 # 这正是「爱速拍绑在军师发布节奏上」的具体代价。
 SKIP_ADMIN="${SKIP_ADMIN:-0}"
-# 1=只重启爱速拍那个进程（junshi-quickreel），不动军师主进程。
-# 需要目标机上已经装好该 unit（见 deploy/junshi-quickreel.service）。
+# 1=只发爱速拍。
+#
+# **它发到自己的安装目录**（默认 /opt/junshi-quickreel），不是和军师共用一份代码。
+# 共用目录的话，所谓「只重启爱速拍」其实是把军师正在跑的那份代码和 node_modules
+# 一起换掉、只是先不重启它 —— 军师下次自动重启就会静默加载这一版，运行期的懒加载
+# 还可能新旧混跑。那比直接重启更糟，也根本不叫独立发布。
+#
+# 需要目标机上先装好 deploy/junshi-quickreel.service，并把 .env 放到该目录下
+# （见该 unit 头部的一次性初始化说明）。
 QUICKREEL_ONLY="${QUICKREEL_ONLY:-0}"
 SKIP_DB_PUSH="${SKIP_DB_PUSH:-0}"           # 1=已完成只读 schema 核对且本次无 DB 变更时跳过 db push
 
@@ -75,6 +88,16 @@ die(){ printf "\033[1;31m[deploy] %s\033[0m\n" "$*" >&2; exit 1; }
 
 # 醒目声明本次到底发的是哪个提交——发错版本的代价太大，不能只靠日志里一行小字。
 printf '\033[1;33m========================================================\033[0m\n'
+# 显式把 REMOTE_ROOT 指回军师目录 + QUICKREEL_ONLY=1，正是上面那段注释要避免的事：
+# 会换掉军师的代码却不重启它。宁可拒绝，也不要发出一个「看起来成功」的危险发布。
+if [ "$QUICKREEL_ONLY" = "1" ] && [ "$REMOTE_ROOT" = "/opt/junshi" ]; then
+  echo "[deploy] 拒绝：QUICKREEL_ONLY=1 不能发到军师的安装目录 /opt/junshi —— 那会换掉军师的代码却不重启它。" >&2
+  echo "[deploy] 爱速拍请用自己的目录（默认 /opt/junshi-quickreel）。" >&2
+  exit 1
+fi
+# 只发爱速拍时不碰 admin：运营后台是军师那一侧的东西，跟着爱速拍换版没有道理。
+if [ "$QUICKREEL_ONLY" = "1" ]; then SKIP_ADMIN=1; fi
+
 printf '\033[1;33m[deploy] 本次发布提交：%s  %s\033[0m\n' "$SHA" "$( (cd "$ROOT" && git log -1 --format=%s "$DEPLOY_SHA") 2>/dev/null || echo '(subject 读取失败)')"
 printf '\033[1;33m========================================================\033[0m\n'
 
@@ -98,7 +121,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' SKIP_DB_PUSH='$SKIP_DB_PUSH' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' SKIP_DB_PUSH='$SKIP_DB_PUSH' SKIP_ADMIN='$SKIP_ADMIN' QUICKREEL_ONLY='$QUICKREEL_ONLY' DEPLOY_OPERATOR='${DEPLOY_OPERATOR}' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"

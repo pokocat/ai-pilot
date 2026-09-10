@@ -90,6 +90,8 @@ async function main(): Promise<void> {
       delta: 1000,
       reason: '隔离压测数据',
       balance: 1000,
+      // 压测数据也带归属，否则它会混进 unattributed，把「无从追认的历史」这一档搅浑
+      productCode: 'junshi',
     });
     wallets.push({
       tenantId,

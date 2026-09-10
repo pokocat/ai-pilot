@@ -226,7 +226,13 @@ export async function applySkuGrant(
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${user.id}`}))`;
     const last = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     await tx.creditLedger.create({
-      data: { tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason, balance: last?.balance ?? 0 },
+      // 归属也要写。这条是绕开 credits.ts 直接落的备注流水，漏了它就会伪装成
+      // 「本列上线之前的历史流水」跑进 unattributed —— 那一档的语义是「无从追认」，
+      // 掺进上线之后的新流水就毁掉了它的可信度。
+      data: {
+        tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason,
+        balance: last?.balance ?? 0, productCode: PRODUCT.junshi,
+      },
     }).catch(() => {});
   }
   await tx.auditLog.create({
