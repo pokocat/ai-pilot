@@ -94,9 +94,17 @@ printf '\033[1;33m========================================================\033[0
 # 比较前先规范化：去掉重复斜杠、结尾斜杠和 `/.` 段。裸字符串比较挡不住
 # `/opt/junshi/`、`/opt/junshi/.`、`/opt//junshi` 这些等价写法，而后面的
 # `rm -rf "$APP_ROOT/<path>"` 照样会删到军师目录里去。
+# 规范化只做两件安全的事：压掉重复斜杠、去掉「整段就是一个点」的路径段。
+# **不能用 `s#(/\.)+#/#g`** —— 它会把隐藏目录 `/opt/.quickreel` 改成 `/opt/quickreel`
+# （把人往一个不存在或不该动的目录上发），还会把 `..` 先消成 `.`，
+# 让后面那道「拒绝 ..」的检查扑空。`(/\.)(?=/|$)` 那层意思要靠先补尾斜杠再整段匹配来表达。
 normalize_root() {
-  printf '%s' "$1" | sed -E 's#/+#/#g; s#(/\.)+#/#g; s#/+#/#g; s#/+$##'
+  printf '%s/' "$1" | sed -E 's#/+#/#g; s#(/\.)+/#/#g; s#/+#/#g; s#/$##'
 }
+# 顺序要紧：先按原值拒掉 `..`，再规范化。反过来的话 `..` 会被规范化吃掉一部分。
+case "$REMOTE_ROOT" in
+  *..*) echo "[deploy] 拒绝：REMOTE_ROOT 不能包含 ..（当前：$REMOTE_ROOT）" >&2; exit 1;;
+esac
 REMOTE_ROOT="$(normalize_root "$REMOTE_ROOT")"
 
 # REMOTE_ROOT 会被原样拼进 SSH 的远端命令串（`REMOTE_ROOT='$REMOTE_ROOT' bash -se`），
@@ -106,9 +114,6 @@ REMOTE_ROOT="$(normalize_root "$REMOTE_ROOT")"
 case "$REMOTE_ROOT" in
   /*) ;;
   *) echo "[deploy] 拒绝：REMOTE_ROOT 必须是绝对路径（当前：$REMOTE_ROOT）" >&2; exit 1;;
-esac
-case "$REMOTE_ROOT" in
-  *..*) echo "[deploy] 拒绝：REMOTE_ROOT 不能包含 ..（当前：$REMOTE_ROOT）" >&2; exit 1;;
 esac
 if ! printf '%s' "$REMOTE_ROOT" | grep -Eq '^(/[A-Za-z0-9._-]+)+$'; then
   echo "[deploy] 拒绝：REMOTE_ROOT 含不安全字符，只允许字母数字与 . _ - /（当前：$REMOTE_ROOT）" >&2
