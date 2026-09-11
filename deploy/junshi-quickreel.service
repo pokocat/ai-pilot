@@ -11,6 +11,14 @@
 # 军师的 40 多组一组都不注册，军师的两个 worker 也不在这里跑
 # （两个进程同时轮询同一张队列表，行为取决于抢锁顺序，出问题说不清是谁干的）。
 #
+# 定时任务同理，但方向不对称（2026-09-11 补的洞，见 0dd6c31）：
+#   · 本进程只跑 owner='quickreel' 的三个 —— 出片通知、数字人训练通知、hold 兜底退款；
+#   · 军师主进程（all 档）照旧跑**全部** 17 个，含爱速拍那三个。
+# 后者是故意的，和上面 nginx 的 backup 同一个思路：爱速拍进程挂了，军师进程既接得住它的
+# 请求，也接得住它的轮询。那三个任务里有出片结算和超时退款，停掉就是用户的钻石退不回来。
+# .env 里两边唯一的差别是 PORT（4010 / 4000）—— systemd 的 Environment 本来就压过 dotenv，
+# 改它只为防「有人在这个目录手跑一次 node dist/index.js」时去抢军师的端口。
+#
 # **它有自己的安装目录** /opt/junshi-quickreel，与军师的 /opt/junshi 物理隔离。
 # 这是「独立发布」成立的前提：共用一份 dist/node_modules 的话，发爱速拍会把军师正在跑的
 # 代码一起换掉、只是先不重启它 —— 军师下次自动重启就静默加载新版，运行期懒加载还可能新旧混跑。
@@ -53,8 +61,28 @@
 # 并且只由一个人在一处执行。凡是不是纯新增的 schema 改动，这次就得按协调发布处理，
 # 不能当成两边各发各的。
 #
-# nginx 可选：把 wxapi.aibuzz.cn 的 /api/video/ 与 /api/me 转到 127.0.0.1:4010。
-# 不改也能跑 —— 主进程仍然全量提供这些面，这个进程先作为可独立发布的备用路径存在。
+# ── nginx（2026-09-11 已做，不再是「可选」）──────────────────────────────────
+# /etc/nginx/conf.d/junshi.conf 的 wxapi.aibuzz.cn 块里：
+#
+#   upstream junshi_quickreel {
+#       server 127.0.0.1:4010;
+#       server 127.0.0.1:4000 backup;
+#   }
+#   location /api/video/ { proxy_pass http://junshi_quickreel; ... }
+#
+# 两点说明：
+#
+# ① **只切 /api/video/**。那是唯一只属于爱速拍的前缀。/api/me、/api/auth/、/api/wechat/
+#    军师自己的端也在用，切过去等于让军师的用户依赖爱速拍的进程，把隔离反着做了一遍。
+#    代价要说清：爱速拍的登录与余额仍走 4000，军师发布时那一段仍会短暂中断。
+#
+# ② **4000 是 4010 的 backup**，不是直连。两个进程同一份代码、同一个库，4010 只是少注册了
+#    军师那些路由，所以军师进程能原样接住爱速拍的请求 —— 这让切换比直连更安全。
+#    只在**连不上**时才转（nginx 默认 proxy_next_upstream = error timeout），且默认不会把
+#    已经发出去的 POST/PATCH 重投；应用自己返回的 5xx 也不会被重投到另一个进程。
+#    2026-09-11 验过：systemctl stop junshi-quickreel 之后 /api/video/templates 仍返回 401
+#    而不是 502。
+#
 # 日志：journalctl -u junshi-quickreel -f
 [Unit]
 Description=Junshi API · quickreel profile (爱速拍独立进程)
