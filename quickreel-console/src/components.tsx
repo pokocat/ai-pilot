@@ -103,6 +103,7 @@ export interface ConfirmSpec {
 
 export function Confirm({ spec, onClose }: { spec: ConfirmSpec; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   // 打开后焦点进弹层、Esc 可退 —— 这里承载退款/上下架这类不可逆动作，
@@ -114,9 +115,17 @@ export function Confirm({ spec, onClose }: { spec: ConfirmSpec; onClose: () => v
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onClose]);
 
+  // 失败必须**在弹层里说出来**。原来只有 try/finally，onConfirm 抛出时错误会变成
+  // 未处理的 promise rejection：弹层留在原地、busy 归位、界面一个字都不给 ——
+  // 而这里承载的是会退款的动作，「没反应」和「已经做了」在操作者眼里分不开。
   const go = async () => {
-    setBusy(true);
-    try { await spec.onConfirm(); onClose(); } finally { setBusy(false); }
+    setBusy(true); setErr('');
+    try {
+      await spec.onConfirm();
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '没做成，请稍后重试');
+    } finally { setBusy(false); }
   };
 
   return (
@@ -138,6 +147,7 @@ export function Confirm({ spec, onClose }: { spec: ConfirmSpec; onClose: () => v
           </div>
         )}
         {spec.warn && <div className="err" style={{ marginBottom: 10 }}>{spec.warn}</div>}
+        {err && <div className="err" style={{ marginBottom: 10 }} role="alert">没做成：{err}</div>}
         <div className="dlg-act">
           <button type="button" className="btn" disabled={busy} onClick={onClose}>取消</button>
           <button
