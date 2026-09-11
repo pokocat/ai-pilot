@@ -109,6 +109,16 @@ export default function App() {
     if (target) setScope(target);
   }, [section, invalid, scope, options]);
 
+  // 切不过去的情况：只被授予爱速拍的运营，手上一个军师分区的旧链接（或命令面板搜到的）。
+  // 上面那个 effect 找不到可切的视角，于是页面会**照常渲染那一屏军师的内容**。
+  //
+  // 这里拦一道，但要说清它**不是权限**：军师那些路由（/admin/agents 等）服务端至今没有
+  // 产品闸，真要拿数据绕过前端就行。不加那层闸是因为今天所有运营账号的
+  // AdminProductAccess 都是空的，一上来就按产品拦会把现有运营全锁在门外，
+  // 那是一次需要先发授权、再切换的迁移，不能顺手做。
+  const outOfScope = !!section && !invalid && !inScope(section, scope)
+    && !section.products?.some((c) => options.includes(c));
+
   const activeGroup: GroupKey = section && !invalid ? section.group : 'today';
   const siblings = useMemo(() => sectionsOf(activeGroup, isOwner, scope), [activeGroup, isOwner, scope]);
 
@@ -215,6 +225,18 @@ export default function App() {
 
           <div className="content">
             <div className="wrap">
+              {outOfScope ? (
+                <div className="pad">
+                  <div className="empty">
+                    这一屏属于「{(section!.products ?? []).map(productLabel).join(' / ')}」，
+                    不在你能切换的产品视角里。
+                    <div className="usage-meta">
+                      链接可能是别人发的，或者这个产品的授权被收回了。要看它，得先让超管在
+                      「经营 · 产品」里授予对应产品。
+                    </div>
+                  </div>
+                </div>
+              ) : <>
               {key === 'home' && <OverviewView onGo={go} />}
               {key === 'users' && <UsersView onOpen={openUser} initialQ={route.params.q ?? ''} />}
               {/* 产品视角影响的是**数据**，不只是导航：切到爱速拍就只统计花在爱速拍上的钻石。
@@ -252,6 +274,7 @@ export default function App() {
               {key === 'sku' && <SkusView toast={showToast} />}
               {key === 'eco' && <EcoToolsView toast={showToast} />}
               {key === 'benchmark' && <BenchmarksView toast={showToast} />}
+              </>}
             </div>
           </div>
 
