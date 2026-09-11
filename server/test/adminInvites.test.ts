@@ -28,9 +28,18 @@ process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 before(async () => { await getApp(); });
 after(async () => { await closeApp(); });
 
-/** operator（非 owner/master）会话 token —— 用来验证 requireSuper 把写操作挡在门外。 */
+/**
+ * operator（非 owner/master）会话 token —— 用来验证 requireSuper 把写操作挡在门外。
+ *
+ * **要先发军师的授权**：2026-09-11 起后台路由前面还有一道产品闸
+ * （services/adminProductGate.ts），邀请体系归军师。不发授权的话请求会先被产品闸挡下，
+ * 这组用例就验不到 requireSuper 那一层了 —— 两个都是 403，但原因不是一回事。
+ */
 async function operatorToken(): Promise<string> {
   const acc = await createOperator(`op_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, 'pw-123456', 'operator');
+  await prisma.adminProductAccess.create({
+    data: { productCode: 'junshi', accountId: acc.id, role: 'editor' },
+  });
   return createSession(acc.id);
 }
 

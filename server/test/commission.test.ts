@@ -188,9 +188,18 @@ async function entriesOf(outTradeNo: string) {
   return prisma.commissionEntry.findMany({ where: { outTradeNo }, orderBy: [{ kind: 'asc' }, { level: 'asc' }] });
 }
 
-/** 普通运营（role=operator）的会话 token —— 用于验证 requireSuper 拒绝。 */
+/**
+ * 普通运营（role=operator）的会话 token —— 用于验证 requireSuper 拒绝。
+ *
+ * **要先发军师的授权**：2026-09-11 起后台路由前面还有一道产品闸
+ * （services/adminProductGate.ts），代理分销归军师。不发授权的话请求会先被产品闸挡下，
+ * 这组用例就验不到 requireSuper 那一层了 —— 两个都是 403，但原因不是一回事。
+ */
 async function operatorToken(): Promise<string> {
   const acc = await createOperator(`dop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, 'pw-123456', 'operator');
+  await prisma.adminProductAccess.create({
+    data: { productCode: 'junshi', accountId: acc.id, role: 'editor' },
+  });
   return createSession(acc.id);
 }
 

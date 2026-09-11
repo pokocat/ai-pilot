@@ -78,6 +78,22 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Pr
   const actor = await getAdminActor(req);
   if (actor) {
     (req as unknown as WithActor).adminActor = actor;
+    // 产品闸。挂在这里而不是 admin.ts 的 preHandler 里，是因为 requireAdmin 被四个路由插件
+    // 共用（admin / referral / distribution / invites）—— 后三个是「增长」组，同样是军师的面，
+    // 在这之前一道产品闸都没有。挂在共用入口上，四个插件一次都盖住。
+    //
+    // ⚠️ 这一闸只判「有没有这个产品的 viewer」。写操作各自的 requireSuper /
+    // requireProductAccess('editor') 一条都没动 —— 能不能看和能不能改是两件事，不在一处收口。
+    const { enforceAdminProductAccess } = await import('./adminProductGate.js');
+    try {
+      await enforceAdminProductAccess(req, actor);
+    } catch (e) {
+      const err = e as { statusCode?: number; code?: string; message?: string };
+      return reply.code(err.statusCode ?? 403).send({
+        error: err.message ?? '你没有该产品的操作权限',
+        code: err.code ?? 'ADMIN_PRODUCT_FORBIDDEN',
+      });
+    }
     return;
   }
   // 区分「已登录非管理员 → 403」与「无凭证 → 401」（沿用旧行为）。
