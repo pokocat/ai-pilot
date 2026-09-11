@@ -29,6 +29,12 @@ Page(withShare({
   // 这一页是问策侧栏里点任何一位军师之后落地的地方，没有它，对话在 1400px 的窗口里
   // 会一路铺满——正文行长比手机上宽三倍，谁都读不下去。
   onResize(event) { syncViewport(this, event && event.size); },
+  // 这一页是 navigateTo 落地的普通页：点「查看报告」/海报/方案卡会 navTo 盖一页上来，
+  // 只触发 onHide、不触发 onUnload。若不在这里停自动滚底，流式还没结束时那个每 180ms
+  // 一次的 toBottom()+setData 会一直在被盖住的页上空转（微信后台 setData 告警 + 烧 CPU），
+  // 直到流结束或页真正卸载。与 pages/sessions/index.js 同一套（chatCoreHide/Show 自带守卫）。
+  onHide() { this.chatCoreHide(); },
+  onShow() { this.chatCoreShow(); },
   onUnload() { this.chatCoreUnload(); },
   back() { wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/sessions/index' }) }); },
   openChatMenu() {

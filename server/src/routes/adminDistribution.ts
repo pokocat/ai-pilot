@@ -788,8 +788,17 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         for (const t of targets) {
           const made = await prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:settle:${t.id}`}))`;
+            // 纳入口径 = 「已成熟(confirmed) + 还没挂在别的单上(settlementId=null) + 计提于本期结束前」。
+            // **不按 createdAt 的下界 `start` 过滤**：流水的成熟(confirmed)晚于计提(createdAt，
+            // 支付时刻)——冻结期默认 7 天、可配 0–90，且没有 confirmedAt 列可依。若按 createdAt∈[start,end)
+            // 圈定，则「在本期结束前若干天内计提、要到下期才成熟」的流水会被永久漏结：它计提所在的那一期
+            // 生成结算单时它还 pending 被正确排除，等它成熟后，任何按期(createdAt 窗口)生成的后续单又都
+            // 圈不到它（createdAt < 下一期的 start）。改为只卡上界 `lt: end`——按「结到本期末为止、凡是欠着
+            // 的都结」的语义（与本端点注释「欠人家的钱照结」及运营弹窗「只纳入可结算且未挂单的流水」一致），
+            // 迟熟的上期流水会被下一张单兜住；settlementId=null + updateMany 同条件 + 行级 advisory lock
+            // 保证每条流水只会被挂进一张单，不会重复结算。
             const rows = await tx.commissionEntry.findMany({
-              where: { distributorId: t.id, status: 'confirmed', settlementId: null, createdAt: { gte: start, lt: end } },
+              where: { distributorId: t.id, status: 'confirmed', settlementId: null, createdAt: { lt: end } },
               select: { id: true },
             });
             if (rows.length === 0) return null;

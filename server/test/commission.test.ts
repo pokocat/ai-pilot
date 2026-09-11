@@ -536,6 +536,52 @@ test('已结算后退款 → 另落一条负额 clawback，绝不改写已打款
   assert.equal(next.body.created[0].entryCount, 1);
 });
 
+test('迟熟的上期流水不被漏结：结算按「已成熟 + 未挂单」纳入，不按计提时刻是否落在本期窗口', async () => {
+  // 复现「计提临近某期期末、要到下期才成熟」的经典漏结：老实现按 createdAt ∈ [start,end) 圈定，
+  // 这条流水在它计提所在那期生成结算单时还 pending 被排除，成熟后又落在后续任何一期的 createdAt
+  // 窗口之外（createdAt < 下期 start），于是永久领不到这笔钱。正确实现只看「confirmed + 未挂单 +
+  // createdAt < 本期结束」。
+  await openFlags(0);
+  const { c, buyer } = await chain();
+  const tierId = await makeTier('金牌', [{ level: 1, itemType: 'all', rateBp: 1000 }]);
+  const dc = await makeDistributor(c, tierId);
+  const no = await payPlan(buyer);
+  assert.equal(await confirmMatured(), 1, '冻结期 0 → 立刻成熟');
+
+  // 把计提时刻挪到 60 天前，模拟「上一期就已计提」的流水（状态仍是 confirmed、未挂单）。
+  const accrual = (await entriesOf(no)).find((r) => r.kind === 'accrual')!;
+  assert.equal(accrual.status, 'confirmed');
+  assert.equal(accrual.settlementId, null);
+  await prisma.commissionEntry.update({
+    where: { id: accrual.id },
+    data: { createdAt: new Date(Date.now() - 60 * 86_400_000) },
+  });
+
+  // 生成一张「本期」结算单，窗口 [now-1d, now+1d) —— 完全不含那条 60 天前计提的流水。
+  // 老实现下 created.length 会是 0（那笔钱被漏结）；修好后应被本期兜住。
+  const gen = await api<AdminSettlementGenerateResult>('POST', '/api/admin/distribution/settlements/generate', {
+    body: {
+      distributorId: dc.id,
+      periodStart: new Date(Date.now() - 86_400_000).toISOString(),
+      periodEnd: new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  });
+  assert.equal(gen.status, 200, JSON.stringify(gen.body));
+  assert.equal(gen.body.created.length, 1, '迟熟的上期流水必须被本期结算纳入，不能永久漏结');
+  assert.equal(gen.body.created[0].entryCount, 1);
+  assert.ok(gen.body.created[0].totalAmount > 0);
+
+  // 已挂单后再生成一次不会重复结算（settlementId 双闸）。
+  const again = await api<AdminSettlementGenerateResult>('POST', '/api/admin/distribution/settlements/generate', {
+    body: {
+      distributorId: dc.id,
+      periodStart: new Date(Date.now() - 86_400_000).toISOString(),
+      periodEnd: new Date(Date.now() + 86_400_000).toISOString(),
+    },
+  });
+  assert.equal(again.body.created.length, 0, '同一条流水只能被挂进一张单');
+});
+
 /* ── 结算单生命周期 ─────────────────────────────────────────────────────── */
 
 describe('结算单：generate → approve → paid / void', () => {
