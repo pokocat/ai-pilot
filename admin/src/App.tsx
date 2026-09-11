@@ -37,6 +37,7 @@ import { SessionsView, SessionDetailPanel } from './views/sessions';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
 import { BenchmarksView, ClonePricingView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
+import { ClipOpsView } from './views/clipops';
 import { ModelView } from './views/model';
 import { CreativeView } from './views/creative';
 import { ProductsView } from './views/products';
@@ -216,7 +217,9 @@ export default function App() {
             <div className="wrap">
               {key === 'home' && <OverviewView onGo={go} />}
               {key === 'users' && <UsersView onOpen={openUser} initialQ={route.params.q ?? ''} />}
-              {key === 'usage' && <UsageView />}
+              {/* 产品视角影响的是**数据**，不只是导航：切到爱速拍就只统计花在爱速拍上的钻石。
+                  'all' 不传 product，行为与加视角之前逐字节一致。 */}
+              {key === 'usage' && <UsageView product={scope === 'all' ? undefined : scope} />}
               {key === 'payments' && <PaymentsView toast={showToast} isSuper={isOwner} onFindUser={findUser} />}
               {key === 'funnel' && <FunnelView />}
               {key === 'referral' && <ReferralView />}
@@ -240,6 +243,7 @@ export default function App() {
               {key === 'clone' && <ClonePricingView toast={showToast} isSuper={isOwner} />}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
               {key === 'products' && <ProductsView toast={showToast} isSuper={isOwner} />}
+              {key === 'clipops' && <ClipOpsView toast={showToast} isSuper={isOwner} />}
               {key === 'wence' && <WenceView toast={showToast} />}
               {key === 'form' && <SurveyView />}
               {key === 'plan' && <PlansView toast={showToast} />}

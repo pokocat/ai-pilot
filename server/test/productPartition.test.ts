@@ -265,3 +265,65 @@ test('并发写账时汇总不抛错、不串产品', async () => {
     await churn;
   }
 });
+
+/* ── 「钻石消耗」按产品切 ── */
+
+test('钻石消耗按产品切：发放与消耗各归各的', async () => {
+  const { tenantId, userId } = await mkUser();
+  await grantCredits(tenantId, userId, 100, '充值', PRODUCT.junshi);
+  await chargeCredits(tenantId, userId, 30, '产出', PRODUCT.junshi);
+  await chargeCredits(tenantId, userId, 20, '出片', PRODUCT.quickreel);
+
+  const all = await api<{ summary: { totalGranted: number; totalSpent: number } }>('GET', '/api/admin/usage');
+  assert.equal(all.status, 200);
+  assert.equal(all.body.summary.totalGranted, 100);
+  assert.equal(all.body.summary.totalSpent, 50, '不传 product = 全部合计，与本功能上线前一致');
+
+  const qr = await api<{ productCode: string; summary: { totalGranted: number; totalSpent: number } }>(
+    'GET', '/api/admin/usage?product=quickreel');
+  assert.equal(qr.status, 200);
+  assert.equal(qr.body.productCode, 'quickreel');
+  assert.equal(qr.body.summary.totalSpent, 20, '只该看见花在爱速拍上的');
+  assert.equal(qr.body.summary.totalGranted, 0, '爱速拍还没有自己的充值入口');
+});
+
+// 钱包只有一个，「爱速拍的余额」这个东西不存在。切出来的那个数既不等于用户能花的钱，
+// 也不等于任何一笔真实负债 —— 谁把它当余额显示，运营就会拿一个不存在的数去跟用户对账。
+test('按产品切的时候，余额仍然是全局余额，不跟着切', async () => {
+  const { tenantId, userId } = await mkUser();
+  await grantCredits(tenantId, userId, 100, '充值', PRODUCT.junshi);
+  await chargeCredits(tenantId, userId, 20, '出片', PRODUCT.quickreel);
+
+  const qr = await api<{ summary: { currentBalanceTotal: number }; users: { creditBalance: number }[] }>(
+    'GET', '/api/admin/usage?product=quickreel');
+  assert.equal(qr.body.summary.currentBalanceTotal, 80, '余额是一个钱包的余额，不是「爱速拍那部分」');
+  assert.equal(qr.body.users[0].creditBalance, 80);
+});
+
+// 余额取的是全量流水的最后一行。按产品过滤时若把该用户最新那笔跳过了，
+// 余额就会停在更早的一行 —— 显示成一个历史上存在过、现在早已不是的数。
+test('最后一笔属于另一个产品时，余额不会倒退到更早的那一行', async () => {
+  const { tenantId, userId } = await mkUser();
+  await grantCredits(tenantId, userId, 100, '充值', PRODUCT.junshi);
+  await chargeCredits(tenantId, userId, 20, '出片', PRODUCT.quickreel); // 余额 80，最后一笔是爱速拍的
+  const junshi = await api<{ users: { creditBalance: number }[] }>('GET', '/api/admin/usage?product=junshi');
+  assert.equal(junshi.body.users[0].creditBalance, 80, '按军师切，但余额该是当前的 80，不是 100');
+});
+
+test('产品码不认识就 422，不当成「不筛」放过去', async () => {
+  const r = await api('GET', '/api/admin/usage?product=nope');
+  assert.equal(r.status, 422);
+  assert.equal((r.body as { code?: string }).code, 'ADMIN_PRODUCT_UNKNOWN');
+});
+
+test('按产品查要有那个产品的权限 —— 否则这个查询串就是绕过分区的后门', async () => {
+  const op = await operator();
+  const r = await api('GET', '/api/admin/usage?product=quickreel', { adminToken: op.token });
+  assert.equal(r.status, 403);
+
+  await prisma.adminProductAccess.create({
+    data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'viewer' },
+  });
+  const ok = await api('GET', '/api/admin/usage?product=quickreel', { adminToken: op.token });
+  assert.equal(ok.status, 200);
+});

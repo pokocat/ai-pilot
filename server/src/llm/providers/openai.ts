@@ -23,7 +23,7 @@ import {
   MAX_CHAT_CONTINUATIONS,
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
-import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
+import { acquireLlmSlot, noteUpstreamRateLimited, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';

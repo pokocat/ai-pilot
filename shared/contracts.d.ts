@@ -2055,6 +2055,8 @@ export interface AdminUsageSummary {
   creditEvents: number;
 }
 export interface AdminUsageView {
+  /** 当前按哪个产品切的；null = 全部合计。注意 summary 里的余额两项从不跟着切（钱包只有一个）。 */
+  productCode?: string | null;
   summary: AdminUsageSummary;
   users: AdminUserItem[];
 }
@@ -3617,4 +3619,79 @@ export interface AdminDistributorDetail {
   team: AdminChainLevelStat[];
   recentCommissions: AdminCommissionEntry[];
   settlements: AdminSettlement[];
+}
+
+/* ─────────── 爱速拍 · 出片对账台 ───────────
+ * VideoCreditHold 是唯一一张记着「钱扣了、片子还没交付」的表。这组类型是它在运营后台的投影。
+ */
+
+export interface AdminClipHoldStatusSlice {
+  status: string;
+  /** 中文态名。服务端给，避免前端各写一份对照表然后和日志里的叫法对不上。 */
+  label: string;
+  count: number;
+  credits: number;
+}
+
+export interface AdminClipOpsView {
+  from: string;
+  to: string;
+  byStatus: AdminClipHoldStatusSlice[];
+  /**
+   * 悬挂：已从余额扣走、既没交付也没退回。
+   * **不按时间窗口算** —— 卡了 40 天的单照样是今天悬着的钱，按窗口算会把最该看见的那些藏起来。
+   */
+  openCount: number;
+  openCredits: number;
+  /** 悬挂里最危险的一档：连上游 jobId 都没拿到。只能按 clientRequestId 查单，不许按超时猜失败。 */
+  unanchoredCount: number;
+  unanchoredCredits: number;
+  settledCount: number;
+  settledCredits: number;
+  refundedCount: number;
+  refundedCredits: number;
+  /** 分母只含已收口的单（settled+refunded）。窗口内一单都没收口 = null，前端显示「—」。 */
+  successRate: number | null;
+  /** 最老的一笔悬挂单的建单时间。null = 当前没有悬挂。 */
+  oldestOpenAt: string | null;
+}
+
+export interface AdminClipHoldItem {
+  id: string;
+  userId: string;
+  userName: string | null;
+  projectId: string;
+  clientRequestId: string;
+  upstreamJobId: string | null;
+  credits: number;
+  status: string;
+  statusLabel: string;
+  lastJobStatus: string | null;
+  /** null = 本列上线之前建的单，没有归属，不追认。 */
+  productCode: string | null;
+  chargedAt: string;
+  refundedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** 能不能手工查单补交。由服务端按状态判定，前端不猜。 */
+  reconcilable: boolean;
+}
+
+export interface AdminClipHoldListView {
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+  items: AdminClipHoldItem[];
+}
+
+export interface AdminClipReconcileResult {
+  /** accepted=上游其实收了（已回填锚点）；rejected=上游明确拒绝（已退款）；unknown=问不清，原样保留。 */
+  outcome: 'accepted' | 'rejected' | 'unknown';
+  status: string;
+  statusLabel: string;
+  upstreamJobId: string | null;
+  /** 本次是否真的退了钱。unknown 恒为 false —— 问不清绝不退款，退了就是白送一次出片。 */
+  refunded: boolean;
+  message: string;
 }

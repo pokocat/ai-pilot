@@ -254,30 +254,44 @@ export function FunnelView() {
   );
 }
 
-export function UsageView() {
-  const res = useResource(api.usage, []);
+/**
+ * @param product 左栏选的产品视角。传了就只统计那个产品的发放 / 消耗。
+ *
+ * ⚠️ 余额相关的数**不跟着切**，服务端也不切：钱包只有一个，「爱速拍的余额」这回事不存在。
+ * 所以按产品看的时候，「当前余额合计」这一格要明说它是全局的，否则运营会拿它去对账。
+ */
+export function UsageView({ product }: { product?: string }) {
+  const res = useResource(useCallback(() => api.usage(product), [product]), [product]);
   return (
     <>
       <PageHead k="usage" res={res} />
       <ViewState res={res} skeleton="stats">
         {(data: AdminUsageView) => {
           const maxSpent = Math.max(1, ...data.users.map((u) => u.totalSpent));
+          const scoped = !!data.productCode;
           return (
             <div className="pad">
               <div className="usage-summary">
-                <div><b>{data.summary.totalSpent}</b><span>累计消耗（点）</span></div>
-                <div><b>{data.summary.currentBalanceTotal}</b><span>当前余额合计</span></div>
+                <div><b>{data.summary.totalSpent}</b><span>{scoped ? '本产品消耗（钻石）' : '累计消耗（钻石）'}</span></div>
+                <div><b>{data.summary.currentBalanceTotal}</b><span>{scoped ? '当前余额合计（全局）' : '当前余额合计'}</span></div>
                 <div><b>{data.summary.activeUsers}</b><span>30 天活跃</span></div>
                 <div><b>{data.summary.reportCount}</b><span>成果产出</span></div>
               </div>
-              {data.users.length === 0 && <div className="empty">还没有权益点流水。</div>}
+              {scoped && (
+                <div className="usage-meta">
+                  「消耗 / 赠送」已按当前产品视角切过；<b>余额是钱包余额，不分产品</b> ——
+                  一个账号一个钱包，军师充的钻石在爱速拍也花得动，所以不存在「本产品的余额」。
+                  跨产品的收入与消耗归属看「经营 · 产品」。
+                </div>
+              )}
+              {data.users.length === 0 && <div className="empty">{scoped ? '这个产品还没有钻石流水。' : '还没有钻石流水。'}</div>}
               {data.users.map((u) => (
                 <div key={u.id} className="usage-row">
                   <div className="usage-h">
                     <div className="usage-name">{u.name}<span>{u.phone}</span></div>
                     <div className="usage-num">{u.totalSpent} 次</div>
                   </div>
-                  <div className="usage-meta">赠送 {u.totalGranted} · 余额 {creditText(u.creditBalance)} · 成果 {u.deliverableCount}</div>
+                  <div className="usage-meta">赠送 {u.totalGranted} · 余额 {creditText(u.creditBalance)}{scoped ? '（全局）' : ''} · 成果 {u.deliverableCount}</div>
                   <div className="meter"><i style={{ width: `${Math.max(3, Math.round((u.totalSpent / maxSpent) * 100))}%` }} /></div>
                 </div>
               ))}

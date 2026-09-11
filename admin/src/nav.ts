@@ -25,12 +25,12 @@
 // （代理与佣金是业务对象，不是平台参数），故另立一组，并把只读的「邀请增长」一并搬进来——
 // 运营查邀请的动线本来就该收在一处。搬完「经营」回到 4 项，「增长」4 项，两组都在 8 项以内。
 
-/** 31 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 32 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone';
+  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops';
 
 /** 与服务端 services/products.ts 的 PRODUCT 同一套取值。 */
 export type ProductCode = 'junshi' | 'quickreel';
@@ -101,6 +101,9 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'funnel', products: ['junshi'], label: '处方漏斗', hint: '处方六态转化与开通来源归因', icon: 'target', group: 'revenue', aliases: ['转化', '漏斗', 'funnel', '处方', '归因'] },
   { key: 'usage', label: '钻石消耗', hint: '权益点发放与消耗汇总', icon: 'crown', group: 'revenue', aliases: ['权益点', '钻石', '积分', 'credit', '消耗'] },
   { key: 'tokens', label: 'Token 成本', hint: '按模型 / 用户看 token 与真实成本', icon: 'trend', group: 'revenue', aliases: ['成本', 'token', '用量', '模型成本'] },
+  // 爱速拍的钱在哪卡住了。与同组「订单」同形制：主体是只读的账，外加一个落审计的修复动作，
+  // 所以归「经营」而不是「配置」。放在「产品」前面 —— 值班时先看有没有钱悬着，再看分产品的账。
+  { key: 'clipops', products: ['quickreel'], label: '出片对账', hint: '悬挂的钻石 · 卡住的出片单 · 向上游查单', icon: 'doc', group: 'revenue', aliases: ['出片', '对账', '卡单', '悬挂', '退款', '结算', 'hold', 'clip', '爱速拍', '视频', '任务'] },
   // 多产品：后台是一个、按产品分区。这一屏是那条分区键（productCode）的落地面 ——
   // 分产品的账 + 谁能管哪个产品。归「经营」而不是「商品」：它回答「哪个产品在挣钱」，
   // 不是「卖什么」；爱速拍自己的可写面（克隆定价）在「配置 · 功能开关」里。

@@ -28,7 +28,7 @@ import {
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。挂在 provider 层而不是 gateway 的业务分支，
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
-import { withLlmSlot, acquireLlmSlot, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
+import { acquireLlmSlot, endpointLane, assertUpstreamCallBudget } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt, noteUpstreamId, upstreamIdOfHeaders } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';

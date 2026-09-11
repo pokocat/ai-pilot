@@ -306,6 +306,12 @@ export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
 import type {
   AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
+  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult,
+} from '../../shared/contracts';
+// —— 爱速拍 · 出片对账台 ——
+export type {
+  AdminClipOpsView, AdminClipHoldListView, AdminClipHoldItem, AdminClipReconcileResult,
+  AdminClipHoldStatusSlice,
 } from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
@@ -353,7 +359,10 @@ export const api = {
   userKnowledgeDetail: (id: string, kid: string) => req<KnowledgeDetail>(`/admin/users/${id}/knowledge/${kid}`),
   delUserKnowledge: (id: string, kid: string) => req<{ ok: boolean }>(`/admin/users/${id}/knowledge/${kid}`, 'DELETE'),
   reembedUserKnowledge: (id: string, kid: string) => req<{ chunks: number }>(`/admin/users/${id}/knowledge/${kid}/reembed`, 'POST'),
-  usage: () => req<AdminUsageView>('/admin/usage'),
+  // product 传了就只看那个产品的发放 / 消耗。**余额两项从不跟着切** —— 钱包只有一个，
+  // 「爱速拍的余额」不存在，切出来的数既不是用户能花的钱也不是任何一笔真实负债。
+  usage: (product?: string) =>
+    req<AdminUsageView>(`/admin/usage${product ? `?product=${encodeURIComponent(product)}` : ''}`),
   tokenUsage: (range: number | { days?: number; from?: string; to?: string } = 30) => {
     const p = new URLSearchParams();
     if (typeof range === 'number') p.set('days', String(range));
@@ -624,6 +633,19 @@ export const api = {
   setAccountProduct: (accountId: string, productCode: string, role: 'viewer' | 'editor' | null) =>
     req<{ ok: boolean; productCode: string; role: string | null }>(
       `/admin/accounts/${encodeURIComponent(accountId)}/products`, 'PUT', { productCode, role }),
+
+  // —— 爱速拍 · 出片对账台 ——
+  // VideoCreditHold 是唯一一张记着「钱扣了、片子还没交付」的表，在这之前后台读不到它。
+  clipOps: (days: number) => req<AdminClipOpsView>(`/admin/video/ops?days=${days}`),
+  clipHolds: (p: { status?: string; days: number; page: number }) => {
+    const q = new URLSearchParams({ days: String(p.days), page: String(p.page) });
+    if (p.status) q.set('status', p.status);
+    return req<AdminClipHoldListView>(`/admin/video/holds?${q}`);
+  },
+  // 仅 owner/master。判定复用定时任务那条路径：能补交就补交，明确被拒才退款，
+  // 问不清原样保留 —— 上游可能已经在跑了，退了就是白送一次出片。
+  reconcileClipHold: (id: string) =>
+    req<AdminClipReconcileResult>(`/admin/video/holds/${encodeURIComponent(id)}/reconcile`, 'POST'),
 
   // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
   // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。
