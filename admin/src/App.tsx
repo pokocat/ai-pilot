@@ -36,8 +36,7 @@ import { ObservabilityView, ModerationView, AuditView } from './views/observe';
 import { SessionsView, SessionDetailPanel } from './views/sessions';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
-import { BenchmarksView, ClonePricingView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
-import { ClipOpsView, ClipTemplatesView, ClipVendorView } from './views/clipops';
+import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
 import { CreativeView } from './views/creative';
 import { ProductsView } from './views/products';
@@ -262,12 +261,8 @@ export default function App() {
               {key === 'moderation' && <ModerationView onOpenUser={openUser} />}
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
-              {key === 'clone' && <ClonePricingView toast={showToast} isSuper={isOwner} />}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
               {key === 'products' && <ProductsView toast={showToast} isSuper={isOwner} />}
-              {key === 'clipops' && <ClipOpsView toast={showToast} isSuper={isOwner} />}
-              {key === 'templates' && <ClipTemplatesView toast={showToast} isSuper={isOwner} />}
-              {key === 'vendor' && <ClipVendorView />}
               {key === 'wence' && <WenceView toast={showToast} />}
               {key === 'form' && <SurveyView />}
               {key === 'plan' && <PlansView toast={showToast} />}

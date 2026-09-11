@@ -25,12 +25,12 @@
 // （代理与佣金是业务对象，不是平台参数），故另立一组，并把只读的「邀请增长」一并搬进来——
 // 运营查邀请的动线本来就该收在一处。搬完「经营」回到 4 项，「增长」4 项，两组都在 8 项以内。
 
-/** 34 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 30 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops' | 'templates' | 'vendor';
+  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products';
 
 /** 与服务端 services/products.ts 的 PRODUCT 同一套取值。 */
 export type ProductCode = 'junshi' | 'quickreel';
@@ -101,12 +101,6 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'funnel', products: ['junshi'], label: '处方漏斗', hint: '处方六态转化与开通来源归因', icon: 'target', group: 'revenue', aliases: ['转化', '漏斗', 'funnel', '处方', '归因'] },
   { key: 'usage', label: '钻石消耗', hint: '权益点发放与消耗汇总', icon: 'crown', group: 'revenue', aliases: ['权益点', '钻石', '积分', 'credit', '消耗'] },
   { key: 'tokens', label: 'Token 成本', hint: '按模型 / 用户看 token 与真实成本', icon: 'trend', group: 'revenue', aliases: ['成本', 'token', '用量', '模型成本'] },
-  // 爱速拍的钱在哪卡住了。与同组「订单」同形制：主体是只读的账，外加一个落审计的修复动作，
-  // 所以归「经营」而不是「配置」。放在「产品」前面 —— 值班时先看有没有钱悬着，再看分产品的账。
-  { key: 'clipops', products: ['quickreel'], label: '出片对账', hint: '悬挂的钻石 · 卡住的出片单 · 向上游查单', icon: 'doc', group: 'revenue', aliases: ['出片', '对账', '卡单', '悬挂', '退款', '结算', 'hold', 'clip', '爱速拍', '视频', '任务'] },
-  // 供应商侧的账。与「出片对账」是一对：那个看我们欠用户的，这个看供应商欠我们的
-  // （孤儿每月照样收钱）和还能用多少（槽位用完用户就练不了新形象）。同归「经营」。
-  { key: 'vendor', products: ['quickreel'], label: '供应商', hint: '石榴额度与槽位 · 与我方库对账（只读）', icon: 'trend', group: 'revenue', aliases: ['供应商', '石榴', '额度', '槽位', '对账', '孤儿', '悬挂', 'vendor', 'quota'] },
   // 多产品：后台是一个、按产品分区。这一屏是那条分区键（productCode）的落地面 ——
   // 分产品的账 + 谁能管哪个产品。归「经营」而不是「商品」：它回答「哪个产品在挣钱」，
   // 不是「卖什么」；爱速拍自己的可写面（克隆定价）在「配置 · 功能开关」里。
@@ -136,29 +130,15 @@ export const NAV_SECTIONS: NavSection[] = [
   // —— 商品（卖什么） ——
   { key: 'plan', label: '套餐', hint: '订阅档位价格与权益', icon: 'layers', group: 'catalog', aliases: ['订阅', 'plan', '定价', '档位'] },
   { key: 'sku', label: '单次付费', hint: '单次付费商品改价与启停', icon: 'layers', group: 'catalog', aliases: ['sku', '商品', '单次', '改价'] },
-  // 模板是爱速拍的首页货架 —— 用户进来第一屏就是挑它，内容即产品，上下架是最高频的运营动作。
-  // 归「商品」：它回答的正是「卖什么」，与同组「套餐 / 单次付费」同一个问题。
-  // 排在克隆定价前面：先有货架才谈得上定价。
-  { key: 'templates', products: ['quickreel'], label: '模板货架', hint: '爱速拍首页的模板 · 上架 / 下架', icon: 'grid', group: 'catalog', aliases: ['模板', '货架', '上架', '下架', '首页', '爱速拍', 'template', 'shelf'] },
-  // 爱速拍唯一的产品专属可写面。原来它是「配置 · 功能开关」页尾的第三段 ——
-  // 军师的合规降级开关、告警阈值、飞书 webhook 下面，突然接四个数字人训练单价。
-  // 那正是「两个产品混在一起」最具体的一处：爱速拍的运营改个价，得先滚过军师一整页开关。
-  //
-  // 归「商品」而不是「配置」：整页只回答一件事 —— **这个能力卖多少**。
-  // 与同组的「单次付费」是同一个动词作用在同一类对象上（给用户要买的东西定价）。
-  // 「创作任务」里也有钻石单价却归了配置，那是因为那页主体是开关 / 供应商 key / 任务台，
-  // 定价只是其中一段；这页只有定价。
-  //
-  // 当初不单开一项的理由是「配置组已 8 项，顶到 DESIGN.md 的拆组上限」——
-  // 挪到商品组之后这条不再是问题（配置仍 8 项，商品 4 项）。加了产品视角后规则也要重述：
-  // 要守的是**每个视角下**一组不超 8 项，不是所有视角叠加后的总数（见 nav.test.ts）。
-  { key: 'clone', products: ['quickreel'], label: '爱速拍定价', hint: '生成六档（只读）+ 数字人与声音的训练单价', icon: 'crown', group: 'catalog', aliases: ['克隆', '克隆定价', '定价', '单价', '数字人', '形象', '声音', '音色', '训练价格', '钻石单价', '出片价', '合成', '配音', '爱速拍', 'clone', 'pricing', 'avatar', 'voice'] },
   { key: 'eco', products: ['junshi'], label: '生态工具', hint: '可开方的外部工具注册表', icon: 'spark', group: 'catalog', aliases: ['生态', '外部工具', 'eco', '开方'] },
 
   // —— 配置（平台级可写项） ——
   // 模型配置归这里而不是「观测」：该页主体是写操作（换模型 / key / 单价 / 池权重 / 嵌入重排）。
   { key: 'model', label: '模型配置', hint: '切换模型、端点池分流与探活', icon: 'insight', group: 'settings', aliases: ['大模型', 'model', '端点', '池', 'api key', '切换', '嵌入', '重排'] },
-  { key: 'flags', label: '功能开关', hint: '合规一键降级、数值配置与告警阈值', icon: 'shield', group: 'settings', aliases: ['开关', 'flag', '降级', '合规', '灰度', '告警', '阈值', '飞书', 'webhook'] },
+  // 「短视频克隆定价」也在这一屏（页面第三段）。2026-09-11 一度拆成独立分区，
+  // 同轮又连同其余爱速拍运营屏一起撤回 —— 爱速拍要单独做自己的控制台，不跟军师挤一个。
+  // 别名要带上运营嘴里的叫法，否则那段配置只能靠滚页面撞见。
+  { key: 'flags', label: '功能开关', hint: '合规一键降级、数值配置与短视频克隆定价', icon: 'shield', group: 'settings', aliases: ['开关', 'flag', '降级', '合规', '灰度', '告警', '阈值', '飞书', 'webhook', '克隆定价', '克隆', '数字人', '声音', '音色', '短视频', '钻石单价', '训练价格', 'clone', 'pricing'] },
   // 海报成品图归「配置」而不是「观测」：本页主体是写操作（功能开关 / 改单价 / 填供应商 key / 模板启停），
   // 任务台只是这套配置的验收面（同「模型配置」——端点冷却是次要属性，不足以把唯一写屏塞进只读组）。
   { key: 'creative', products: ['junshi'], label: '创作任务', hint: '海报成品图开关、单价、图片供应商与任务台', icon: 'image', group: 'settings', aliases: ['海报', '成品图', '出图', '创作', 'canvas', 'canvas_design', 'poster', '供应商', '图片', '任务台', '重试', '钻石单价'] },

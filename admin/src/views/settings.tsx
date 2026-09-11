@@ -4,7 +4,7 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type AdminAccountItem, type AdminClonePricing, type AdminFeatureFlag, type AdminMonitorNotify, type AdminBenchmark, type ClipGenerationPricing } from '../api';
+import { api, type AdminAccountItem, type AdminClonePricing, type AdminFeatureFlag, type AdminMonitorNotify, type AdminBenchmark } from '../api';
 import { PageHead, ErrorState, ViewState, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
@@ -276,134 +276,14 @@ function cloneOrderWarnings(d: CloneDraft): string[] {
  * 这六个数配在 AIStar 的 Spring 配置里，不是数据库。本仓的定价铁律是「对外定价数据归运营
  * 后台，代码不许当真相源」（见 services/video/pricing.ts），这六档今天不满足，是一笔明账。
  */
-/** 六档的字段名与中文名。顺序按运营心里的顺序：先出镜与配音，再三种画面，最后总装。 */
-const GEN_PRICE_FIELDS = [
-  { key: 'creditPerAvatarSecond', label: '数字人出镜', unit: '钻 / 秒' },
-  { key: 'creditPerKChar', label: '配音', unit: '钻 / 千字' },
-  { key: 'creditPerImage', label: '文生图', unit: '钻 / 张' },
-  { key: 'creditPerT2vSecond', label: '文生视频', unit: '钻 / 秒' },
-  { key: 'creditPerI2vSecond', label: '图生视频', unit: '钻 / 秒' },
-  { key: 'creditPerAssemble', label: '合成整片', unit: '钻 / 次' },
-] as const;
-
-type GenDraft = Record<(typeof GEN_PRICE_FIELDS)[number]['key'], number>;
-
-const genDraftOf = (p: ClipGenerationPricing): GenDraft => ({
-  creditPerAvatarSecond: p.creditPerAvatarSecond,
-  creditPerKChar: p.creditPerKChar,
-  creditPerImage: p.creditPerImage,
-  creditPerT2vSecond: p.creditPerT2vSecond,
-  creditPerI2vSecond: p.creditPerI2vSecond,
-  creditPerAssemble: p.creditPerAssemble,
-});
-
-const genDirty = (d: GenDraft, p: ClipGenerationPricing) =>
-  GEN_PRICE_FIELDS.some((f) => d[f.key] !== p[f.key]);
-
 /**
- * 六档生成单价。
+ * 短视频克隆定价（数字人形象 / 专属声音的训练单价）。
  *
- * 2026-09-11 起可改：真源是出片服务的 clip_pricing 单行表，表空着就回落它的配置兜底值。
- *
- * **整份提交，不发脏字段。** 只改一档会把另外五档「没人核定过的兜底值」一并升格成
- * 「运营配过的价」—— 从此页面显示「已核定」，而那五个数从来没有人看过。与克隆定价同一条规矩。
+ * 2026-09-11 一度拆成独立分区，同轮又撤回这一页 —— 爱速拍要单独做自己的运营控制台，
+ * 不跟军师挤在一个后台里。在那套控制台落地之前，这四个数还是留在这儿，
+ * 至少改得动；真源是 FeatureFlag 单行（services/video/pricing.ts），与放在哪一屏无关。
  */
-function GenerationPricingSection({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
-  const res = useResource(api.clipGenerationPricing, []);
-  const [draft, setDraft] = useState<GenDraft | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
-  const cur = res.data;
-  useEffect(() => { if (cur) setDraft(genDraftOf(cur)); }, [cur]);
-
-  const submit = () => {
-    if (!draft || !cur) return;
-    setConfirmSpec({
-      title: cur.configured ? '修改生成单价' : '首次核定生成单价',
-      desc: cur.configured
-        ? '保存后最迟一分钟内，小程序按新价报价与扣费。'
-        : '这六个数现在还是出片服务配置里的兜底值，没有商务结论背书。保存之后它们才成为运营核定的对外价。',
-      echo: GEN_PRICE_FIELDS
-        .filter((f) => draft[f.key] !== cur[f.key])
-        .map((f) => ({ k: f.label, v: `${cur[f.key]} → ${draft[f.key]} ${f.unit}`, amount: true })),
-      warn: '改价生效有约一分钟的窗口：这期间端上可能还攥着旧价目表，提交时会被服务端按新价拒掉一次'
-        + '（提示「报价已过期，请重新确认」）。这是有意的 —— 宁可让用户重看一眼，也不按另一个数扣钱。',
-      confirmText: cur.configured ? '确认改价' : '确认核定',
-      onConfirm: async () => {
-        setBusy(true);
-        try {
-          const saved = await api.saveClipGenerationPricing(draft);
-          res.setData(saved);
-          setDraft(genDraftOf(saved));
-          toast('生成单价已保存 · 最迟一分钟内按新价扣费');
-        } catch (e) {
-          toast((e as Error)?.message || '保存失败');
-        }
-        setBusy(false);
-      },
-    });
-  };
-
-  return (
-    <div className="pad">
-      <div className="sec-h">
-        <span className="t">生成单价</span>
-        <span className="s">出片链路的六档钻石单价 · 六档一起核定，保存后最迟一分钟内生效</span>
-      </div>
-      {res.error && !cur && <div className="ai-note">读不到当前生成单价：{res.error}。下面的克隆定价不受影响。</div>}
-      {cur && draft && (
-        <>
-          {!cur.configured && (
-            <div className="ai-note">
-              <b>当前是出片服务配置里的兜底价，尚未经运营核定。</b>
-              保存一次之后，真源就变成数据库里那一行，改价不再需要改配置或重启。
-            </div>
-          )}
-          {!isSuper && (
-            <div className="ai-note">当前账户为普通运营：改价直接影响营收，需要超级管理员。这里只读。</div>
-          )}
-          <div className="crd new-agent">
-            {GEN_PRICE_FIELDS.map((f) => (
-              <div key={f.key} className="ai-field">
-                <div className="ai-fl">{f.label}（{f.unit} · 0–1000000 · 0 = 这一档免费）</div>
-                <NumInput
-                  className="ai-input" min={0} max={1_000_000} step={1}
-                  value={draft[f.key]} disabled={!isSuper}
-                  onChange={(n) => setDraft((d) => (d ? { ...d, [f.key]: n } : d))}
-                />
-              </div>
-            ))}
-            <div className="ai-note">
-              端上与服务端必须按同一组数算出同一个报价，差一分钱就是每次生成都 409 ——
-              所以这六个数只能整组核定，不能一档一档改。
-            </div>
-            {isSuper && (
-              <div className="ai-actions">
-                <button className="mini-btn primary" disabled={busy || !genDirty(draft, cur)} onClick={submit}>
-                  {cur.configured ? '保存' : '核定这六档'}
-                </button>
-                <button className="mini-btn" disabled={busy || !genDirty(draft, cur)} onClick={() => setDraft(genDraftOf(cur))}>
-                  还原
-                </button>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
-    </div>
-  );
-}
-
-/**
- * 爱速拍 · 克隆定价。
- *
- * 2026-09-11 从「配置 · 功能开关」页尾搬出来独立成屏。原来它接在军师的合规降级开关、
- * 告警阈值、飞书 webhook 后面 —— 爱速拍的运营改个价要先滚过军师的一整页开关，
- * 这正是「两个产品混在一起」最具体的一处。现在它是 nav 里 products:['quickreel'] 的一项，
- * 切到军师视角就不出现。
- */
-export function ClonePricingView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const res = useResource(api.clonePricing, []);
   const [draft, setDraft] = useState<CloneDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -452,8 +332,10 @@ export function ClonePricingView({ toast, isSuper }: { toast: (m: string) => voi
 
   return (
     <>
-      <PageHead k="clone" res={res} badge={res.data ? (res.data.configured ? '已核定' : '兜底价') : undefined} />
-      <GenerationPricingSection toast={toast} isSuper={isSuper} />
+      <div className="sec-h">
+        <span className="t">短视频克隆定价</span>
+        <span className="s">数字人形象与专属声音的钻石单价 · 保存即生效，无需发版</span>
+      </div>
       <ViewState res={res} skeleton="rows">
         {(p: AdminClonePricing) => !draft ? null : (
           <div className="pad">
@@ -646,6 +528,7 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
           </div>
         </>
       )}
+      <ClonePricingSection toast={toast} isSuper={isSuper} />
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );

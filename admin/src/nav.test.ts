@@ -27,10 +27,6 @@ test('全部视角不过滤任何一屏', () => {
 });
 
 test('产品专属面只在自己的视角里出现', () => {
-  const clone = findSection('clone')!;
-  assert.equal(inScope(clone, 'quickreel'), true);
-  assert.equal(inScope(clone, 'junshi'), false, '克隆定价是爱速拍的，军师视角不该看见');
-
   const agent = findSection('agent')!;
   assert.equal(inScope(agent, 'junshi'), true);
   assert.equal(inScope(agent, 'quickreel'), false, '顾问调教是军师的，爱速拍视角不该看见');
@@ -60,20 +56,13 @@ test('爱速拍视角下看不到军师的内容调教', () => {
   assert.ok(visibleGroups(true, 'junshi').some((g) => g.key === 'studio'));
 });
 
-test('克隆定价是爱速拍视角下「商品」组里真实存在的一项', () => {
-  // 它原来是军师「配置 · 功能开关」页尾的第三段，爱速拍运营改个价要先滚过军师一整页开关。
-  // 归商品而不是配置：整页只回答「这个能力卖多少」，与同组的「单次付费」同一个动词。
-  assert.ok(sectionsOf('catalog', true, 'quickreel').some((s) => s.key === 'clone'));
-  assert.ok(!sectionsOf('catalog', true, 'junshi').some((s) => s.key === 'clone'));
-  assert.ok(!sectionsOf('settings', true, 'quickreel').some((s) => s.key === 'clone'));
-});
-
-test('「功能开关」不再自称管克隆定价', () => {
+// 克隆定价 2026-09-11 一度拆成独立分区，同轮又连同其余爱速拍运营屏一起撤回
+// （爱速拍要单独做自己的控制台）。它现在还在「功能开关」页里，命令面板得搜得到。
+test('命令面板搜「克隆定价」要能命中「功能开关」', () => {
   const flags = findSection('flags')!;
-  assert.ok(!flags.hint.includes('克隆'), 'hint 还在宣称管克隆定价，但那一段已经搬走了');
-  assert.ok(!(flags.aliases ?? []).includes('克隆定价'), '别名也要跟着搬，否则命令面板会把人送到错的页');
-  // 搬走了但搜得到：命令面板搜「克隆」应当命中新的那一项
-  assert.ok((findSection('clone')!.aliases ?? []).includes('克隆定价'));
+  assert.ok(flags.hint.includes('克隆'), '页头副标题不提的话，那段配置只能靠滚页面撞见');
+  assert.ok((flags.aliases ?? []).includes('克隆定价'));
+  assert.ok((flags.aliases ?? []).includes('数字人'));
 });
 
 // DESIGN.md：一组超 ~8 项就得拆组（底栏 8 格 flex 均分，组内 segmented 也会挤）。
@@ -100,6 +89,16 @@ test('每一屏都至少属于一个视角 —— 不会有谁都看不见的孤
     const seen = (['junshi', 'quickreel'] as const).some((c) => inScope(s, c));
     assert.ok(seen, `${s.key} 在两个产品视角下都不可见，只有「全部」能找到它`);
   }
+});
+
+// 爱速拍的四屏运营面（出片对账 / 供应商 / 模板货架 / 爱速拍定价）2026-09-11 撤出了这个后台 ——
+// 它要单独做自己的控制台。所以现在爱速拍视角下**一个专属屏都没有**，只剩共享面。
+// 这不是坏事，但要写明白：否则下次有人看见「爱速拍视角好空」会以为是过滤写错了。
+test('爱速拍视角现在只剩共享面，没有专属屏', () => {
+  const own = NAV_SECTIONS.filter((s) => s.products?.includes('quickreel'));
+  assert.deepEqual(own, [], '爱速拍的运营面已经撤出这个后台，改在它自己的控制台里做');
+  // 但视角本身仍然有用：它把军师专属的那些屏过滤掉
+  assert.ok(visibleGroups(true, 'quickreel').length < visibleGroups(true, 'junshi').length);
 });
 
 // —— 可选视角 ——

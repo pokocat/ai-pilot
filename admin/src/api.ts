@@ -306,14 +306,6 @@ export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
 import type {
   AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
-  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
-  ClipGenerationPricing, ClipVendorOverview, ClipGenerationPricingUpdate, ClipTemplateFromProject,
-} from '../../shared/contracts';
-// —— 爱速拍 · 出片对账台 / 模板货架 ——
-export type {
-  AdminClipOpsView, AdminClipHoldListView, AdminClipHoldItem, AdminClipReconcileResult,
-  AdminClipHoldStatusSlice, ClipAdminTemplate, ClipGenerationPricing, ClipVendorOverview,
-  ClipVendorReconcile, ClipGenerationPricingUpdate, ClipTemplateFromProject,
 } from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
@@ -636,38 +628,6 @@ export const api = {
     req<{ ok: boolean; productCode: string; role: string | null }>(
       `/admin/accounts/${encodeURIComponent(accountId)}/products`, 'PUT', { productCode, role }),
 
-  // —— 爱速拍 · 出片对账台 ——
-  // VideoCreditHold 是唯一一张记着「钱扣了、片子还没交付」的表，在这之前后台读不到它。
-  clipOps: (days: number) => req<AdminClipOpsView>(`/admin/video/ops?days=${days}`),
-  clipHolds: (p: { status?: string; days: number; page: number }) => {
-    const q = new URLSearchParams({ days: String(p.days), page: String(p.page) });
-    if (p.status) q.set('status', p.status);
-    return req<AdminClipHoldListView>(`/admin/video/holds?${q}`);
-  },
-  // 仅 owner/master。判定复用定时任务那条路径：能补交就补交，明确被拒才退款，
-  // 问不清原样保留 —— 上游可能已经在跑了，退了就是白送一次出片。
-  reconcileClipHold: (id: string) =>
-    req<AdminClipReconcileResult>(`/admin/video/holds/${encodeURIComponent(id)}/reconcile`, 'POST'),
-
-  // —— 爱速拍 · 模板货架（代理 AIStar）——
-  // 模板就是爱速拍的首页，上下架是最高频的运营动作。只做看和上下架：
-  // 创建与整体编辑是内容创作（scriptSkeleton / timeline），不在后台做半吊子表单。
-  clipTemplates: () => req<ClipAdminTemplate[]>('/admin/video/templates'),
-  // 六档生成单价：**只读**，配在 AIStar 的 Spring 配置里，后台改不了（见契约注释）。
-  clipGenerationPricing: () => req<ClipGenerationPricing>('/admin/video/generation-pricing'),
-  // 仅 owner/master。**六档一起提交** —— 只改一档会把另外五档没人核定过的兜底值
-  // 一并升格成「运营配过的价」。改价生效约 30 秒（上游读缓存）。
-  saveClipGenerationPricing: (body: ClipGenerationPricingUpdate) =>
-    req<ClipGenerationPricing>('/admin/video/generation-pricing', 'PUT', body),
-  // 把一条草稿存成模板。userId = 那条草稿属主的 C 端账号（后台账号和 C 端账号是两套体系）。
-  // 属主不在这儿传 —— 服务端只认当前后台账号绑定的那个小程序账号（见契约注释）。
-  clipTemplateFromProject: (body: ClipTemplateFromProject) =>
-    req<ClipAdminTemplate>('/admin/video/templates/from-project', 'POST', body),
-  // 供应商（石榴）额度 + 对账。实时打上游、还要和本地库比对，慢 —— 别放进任何轮询里。
-  clipVendor: () => req<ClipVendorOverview>('/admin/video/vendor'),
-  // 仅 owner/master（与改价同级：直接改变小程序首页看得到什么）。
-  setClipTemplateStatus: (id: string, status: 'published' | 'draft') =>
-    req<ClipAdminTemplate>(`/admin/video/templates/${encodeURIComponent(id)}/status`, 'PUT', { status }),
 
   // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
   // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。
