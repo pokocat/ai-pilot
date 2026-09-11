@@ -13,8 +13,12 @@ import AgentDetailPanel from './AgentDetailPanel';
 import AdminLogin from './AdminLogin';
 import CommandPalette from './CommandPalette';
 import { useDialogFocus } from './components';
+import { useResource } from './useResource';
 import { getAdminToken, clearAdminToken } from './auth';
-import { NAV_GROUPS, findSection, sectionsOf, visibleGroups, type GroupKey, type SectionKey } from './nav';
+import {
+  NAV_GROUPS, findSection, inScope, productLabel, scopeOptions, sectionsOf, visibleGroups,
+  type GroupKey, type ProductScope, type SectionKey,
+} from './nav';
 import { navigate, onRouteChange, parseHash } from './router';
 import logo from './assets/logo.png';
 
@@ -32,7 +36,7 @@ import { ObservabilityView, ModerationView, AuditView } from './views/observe';
 import { SessionsView, SessionDetailPanel } from './views/sessions';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
-import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
+import { BenchmarksView, ClonePricingView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
 import { CreativeView } from './views/creative';
 import { ProductsView } from './views/products';
@@ -65,14 +69,47 @@ export default function App() {
   useEffect(() => { if (authed) api.me().then(setMe).catch(() => setMe(null)); }, [authed]);
   const isOwner = !!me?.isSuper;
 
-  const groups = useMemo(() => visibleGroups(isOwner), [isOwner]);
+  // —— 产品视角 ——
+  // 后台是一个、按产品分区（见 views/products.tsx 顶部）。这里切的只是**看什么**：
+  // 公共面（用户 / 订单 / 钱包流水 / 模型 / 审计 / 账户）在哪个视角下都在，
+  // 产品专属面只在自己的视角下出现。权限仍由服务端的 requireProductAccess 决定，
+  // 切视角改不了任何一次请求的鉴权结果 —— 这里少切一刀不会漏权，多切一刀也不会提权。
+  // 未登录时不发这个请求 —— 登录页也会跑这些 hook，不挡住就是每次打开后台先来一记 401。
+  const perms = useResource(
+    useCallback(() => (authed ? api.adminProducts() : Promise.resolve(null)), [authed]),
+    [authed],
+  );
+  const options = useMemo(
+    () => scopeOptions(perms.data?.accessible ?? [], isOwner),
+    [perms.data?.accessible, isOwner],
+  );
+  const [scope, setScope] = useState<ProductScope>(() => {
+    try { return (localStorage.getItem('admin.scope') as ProductScope) || 'all'; } catch { return 'all'; }
+  });
+  // 存下来的视角可能已经不合法了（运营被收回了某个产品的授权）。等权限读回来再校正，
+  // 别在 options 还是空数组时把用户的选择重置掉。
+  useEffect(() => {
+    if (!perms.data) return;
+    if (!options.includes(scope)) setScope(options[0] ?? 'all');
+  }, [perms.data, options, scope]);
+  useEffect(() => { try { localStorage.setItem('admin.scope', scope); } catch { /* 隐私模式下写不了，无所谓 */ } }, [scope]);
+
+  const groups = useMemo(() => visibleGroups(isOwner, scope), [isOwner, scope]);
   const section = findSection(route.section);
   // 非法 / 无权限的 hash（改错链接、被降权）统一兜回概览，而不是白屏。
   const invalid = !section || (section.ownerOnly && !isOwner);
   useEffect(() => { if (authed && invalid) navigate('home', undefined, { replace: true }); }, [authed, invalid]);
 
+  // 命令面板搜的是**全部**分区（那是它作为逃生口的价值）。搜到一个当前视角看不见的，
+  // 点进去要把视角跟着切过去 —— 否则页面开着、导航里却找不到它，看着像 bug。
+  useEffect(() => {
+    if (!section || invalid || inScope(section, scope)) return;
+    const target = section.products?.find((c) => options.includes(c));
+    if (target) setScope(target);
+  }, [section, invalid, scope, options]);
+
   const activeGroup: GroupKey = section && !invalid ? section.group : 'today';
-  const siblings = useMemo(() => sectionsOf(activeGroup, isOwner), [activeGroup, isOwner]);
+  const siblings = useMemo(() => sectionsOf(activeGroup, isOwner, scope), [activeGroup, isOwner, scope]);
 
   // 记录当前组停留位置
   useEffect(() => {
@@ -80,7 +117,7 @@ export default function App() {
   }, [section, invalid]);
 
   const goGroup = (g: GroupKey) => {
-    const secs = sectionsOf(g, isOwner);
+    const secs = sectionsOf(g, isOwner, scope);
     const remembered = lastOf[g];
     navigate(remembered && secs.some((s) => s.key === remembered) ? remembered : secs[0].key);
   };
@@ -113,15 +150,16 @@ export default function App() {
   return (
     <div className="screen">
       <div className="shell">
-        {/* 桌面端左栏：品牌 + 运营场景组（见 nav.ts）+ 命令面板入口 + 账户 */}
+        {/* 桌面端左栏：品牌 + 产品视角 + 运营场景组（见 nav.ts）+ 命令面板入口 + 账户 */}
         <aside className="rail">
           <div className="rail-brand">
             <img className="rail-mk" src={logo} alt="军师" />
             <div className="rail-bt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
           </div>
+          <ScopeBar options={options} scope={scope} onChange={setScope} />
           <nav className="rail-groups" aria-label="功能分组">
             {groups.map((g) => {
-              const n = sectionsOf(g.key, isOwner).length;
+              const n = sectionsOf(g.key, isOwner, scope).length;
               return (
                 <button
                   key={g.key}
@@ -154,6 +192,8 @@ export default function App() {
             <button type="button" className="top-key" onClick={() => setPalOpen(true)} aria-label="跳转或找人"><Icon name="search" size={16} /></button>
             <AccountMenu username={me?.username} onChangePassword={() => setPwOpen(true)} onLogout={logout} />
           </div>
+          {/* 移动端：左栏整条 display:none，视角选择器跟到顶栏下面自成一行 */}
+          <ScopeBar options={options} scope={scope} onChange={setScope} mobile />
 
           {/* 组内分区（只有一屏的组不渲染，避免摆一个假 tab） */}
           {siblings.length > 1 && (
@@ -197,6 +237,7 @@ export default function App() {
               {key === 'moderation' && <ModerationView onOpenUser={openUser} />}
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
+              {key === 'clone' && <ClonePricingView toast={showToast} isSuper={isOwner} />}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
               {key === 'products' && <ProductsView toast={showToast} isSuper={isOwner} />}
               {key === 'wence' && <WenceView toast={showToast} />}
@@ -268,6 +309,38 @@ export default function App() {
 }
 
 /** 账户菜单必须是「触发按钮 + 同级 menu」，不能把可点击 div 塞进 button。 */
+/**
+ * 产品视角选择器。
+ *
+ * 只切**看什么**：公共面（用户 / 订单 / 钱包流水 / 模型 / 审计 / 账户）在哪个视角下都在，
+ * 产品专属面只在自己的视角下出现。不是权限开关 —— 服务端的 requireProductAccess
+ * 该拦的照拦，切到「军师」也不会让一个只被授予爱速拍的运营多看见任何数据。
+ *
+ * 只有一个选项时整条不渲染：给只被授权一个产品的运营摆一个切不动的控件，
+ * 只会让人以为自己少了权限。
+ */
+function ScopeBar({ options, scope, onChange, mobile = false }: {
+  options: ProductScope[];
+  scope: ProductScope;
+  onChange: (s: ProductScope) => void;
+  mobile?: boolean;
+}) {
+  if (options.length < 2) return null;
+  return (
+    <div className={mobile ? 'scope m' : 'scope'} role="group" aria-label="产品视角">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          className={`scope-i ${scope === o ? 'on' : ''}`}
+          onClick={() => onChange(o)}
+          aria-pressed={scope === o}
+        >{o === 'all' ? '全部' : productLabel(o)}</button>
+      ))}
+    </div>
+  );
+}
+
 function AccountMenu({ username, onChangePassword, onLogout }: {
   username?: string | null;
   onChangePassword: () => void;

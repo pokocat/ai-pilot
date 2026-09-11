@@ -266,7 +266,15 @@ function cloneOrderWarnings(d: CloneDraft): string[] {
   return out;
 }
 
-function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+/**
+ * 爱速拍 · 克隆定价。
+ *
+ * 2026-09-11 从「配置 · 功能开关」页尾搬出来独立成屏。原来它接在军师的合规降级开关、
+ * 告警阈值、飞书 webhook 后面 —— 爱速拍的运营改个价要先滚过军师的一整页开关，
+ * 这正是「两个产品混在一起」最具体的一处。现在它是 nav 里 products:['quickreel'] 的一项，
+ * 切到军师视角就不出现。
+ */
+export function ClonePricingView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const res = useResource(api.clonePricing, []);
   const [draft, setDraft] = useState<CloneDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -315,10 +323,7 @@ function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; i
 
   return (
     <>
-      <div className="sec-h">
-        <span className="t">短视频克隆定价</span>
-        <span className="s">数字人形象与专属声音的钻石单价 · 保存即生效，无需发版</span>
-      </div>
+      <PageHead k="clone" res={res} badge={res.data ? (res.data.configured ? '已核定' : '兜底价') : undefined} />
       <ViewState res={res} skeleton="rows">
         {(p: AdminClonePricing) => !draft ? null : (
           <div className="pad">
@@ -511,7 +516,6 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
           </div>
         </>
       )}
-      <ClonePricingSection toast={toast} isSuper={isSuper} />
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );

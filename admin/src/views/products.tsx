@@ -11,15 +11,9 @@ import { api, type AdminAccountItem } from '../api';
 import { PageHead, ViewState, EmptyState } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
-
-/** 产品码 → 中文名。未知码原样显示，不猜。 */
-const PRODUCT_LABEL: Record<string, string> = {
-  junshi: '军师',
-  quickreel: '爱速拍',
-  unattributed: '未归属',
-};
-
-const label = (code: string) => PRODUCT_LABEL[code] ?? code;
+// 产品码 → 中文名与 nav 共用一份：左栏的视角选择器和这一屏的表头必须叫同一个名字，
+// 两处各维护一张表迟早会对不上。
+import { productLabel as label } from '../nav';
 
 /** 最近 N 天的起点，交给服务端当 from；不传 to = 查到此刻。 */
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 3600 * 1000).toISOString();
