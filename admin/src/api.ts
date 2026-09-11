@@ -306,12 +306,12 @@ export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
 import type {
   AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
-  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult,
+  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
 } from '../../shared/contracts';
-// —— 爱速拍 · 出片对账台 ——
+// —— 爱速拍 · 出片对账台 / 模板货架 ——
 export type {
   AdminClipOpsView, AdminClipHoldListView, AdminClipHoldItem, AdminClipReconcileResult,
-  AdminClipHoldStatusSlice,
+  AdminClipHoldStatusSlice, ClipAdminTemplate,
 } from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
@@ -646,6 +646,14 @@ export const api = {
   // 问不清原样保留 —— 上游可能已经在跑了，退了就是白送一次出片。
   reconcileClipHold: (id: string) =>
     req<AdminClipReconcileResult>(`/admin/video/holds/${encodeURIComponent(id)}/reconcile`, 'POST'),
+
+  // —— 爱速拍 · 模板货架（代理 AIStar）——
+  // 模板就是爱速拍的首页，上下架是最高频的运营动作。只做看和上下架：
+  // 创建与整体编辑是内容创作（scriptSkeleton / timeline），不在后台做半吊子表单。
+  clipTemplates: () => req<ClipAdminTemplate[]>('/admin/video/templates'),
+  // 仅 owner/master（与改价同级：直接改变小程序首页看得到什么）。
+  setClipTemplateStatus: (id: string, status: 'published' | 'draft') =>
+    req<ClipAdminTemplate>(`/admin/video/templates/${encodeURIComponent(id)}/status`, 'PUT', { status }),
 
   // —— 短视频克隆动作的钻石定价（FeatureFlag 单行 id='video-clone-pricing' 的 payload）——
   // configured=false 表示这四个数字还是代码兜底价（pricing.ts 的 TODO(定价待运营核定)），没有商务结论。

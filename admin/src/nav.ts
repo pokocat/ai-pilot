@@ -25,12 +25,12 @@
 // （代理与佣金是业务对象，不是平台参数），故另立一组，并把只读的「邀请增长」一并搬进来——
 // 运营查邀请的动线本来就该收在一处。搬完「经营」回到 4 项，「增长」4 项，两组都在 8 项以内。
 
-/** 32 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 33 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops';
+  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops' | 'templates';
 
 /** 与服务端 services/products.ts 的 PRODUCT 同一套取值。 */
 export type ProductCode = 'junshi' | 'quickreel';
@@ -133,6 +133,10 @@ export const NAV_SECTIONS: NavSection[] = [
   // —— 商品（卖什么） ——
   { key: 'plan', label: '套餐', hint: '订阅档位价格与权益', icon: 'layers', group: 'catalog', aliases: ['订阅', 'plan', '定价', '档位'] },
   { key: 'sku', label: '单次付费', hint: '单次付费商品改价与启停', icon: 'layers', group: 'catalog', aliases: ['sku', '商品', '单次', '改价'] },
+  // 模板是爱速拍的首页货架 —— 用户进来第一屏就是挑它，内容即产品，上下架是最高频的运营动作。
+  // 归「商品」：它回答的正是「卖什么」，与同组「套餐 / 单次付费」同一个问题。
+  // 排在克隆定价前面：先有货架才谈得上定价。
+  { key: 'templates', products: ['quickreel'], label: '模板货架', hint: '爱速拍首页的模板 · 上架 / 下架', icon: 'grid', group: 'catalog', aliases: ['模板', '货架', '上架', '下架', '首页', '爱速拍', 'template', 'shelf'] },
   // 爱速拍唯一的产品专属可写面。原来它是「配置 · 功能开关」页尾的第三段 ——
   // 军师的合规降级开关、告警阈值、飞书 webhook 下面，突然接四个数字人训练单价。
   // 那正是「两个产品混在一起」最具体的一处：爱速拍的运营改个价，得先滚过军师一整页开关。

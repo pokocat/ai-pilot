@@ -3703,3 +3703,25 @@ export interface AdminClipReconcileResult {
   refunded: boolean;
   message: string;
 }
+
+/**
+ * 模板货架的一行（AIStar 的 TemplateDto 子集）。
+ *
+ * 只取运营判断「上不上架」真正要看的字段。整份 TemplateDto 还带 scriptSkeleton / timeline /
+ * tailClips 这些内容创作产物，后台既不展示也不编辑，透传过来只会让契约跟着上游的内容结构漂。
+ */
+export interface ClipAdminTemplate {
+  id: string;
+  name: string;
+  industry: string;
+  themeKey: string;
+  description: string;
+  /** published = 小程序里看得到；draft = 只有运营看得到。 */
+  status: string;
+  ownerScope: string;
+  previewCoverUrl?: string | null;
+  previewVideoUrl?: string | null;
+  estDurationSec: number;
+  segmentCount: number;
+  creditHint?: number | null;
+}

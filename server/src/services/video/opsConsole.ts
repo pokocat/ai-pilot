@@ -10,8 +10,11 @@
 //
 // 与「订单」页的卡单处置同一形制：先给数，再给一个能落审计的修复动作，
 // 修复动作复用定时任务那条路径，不另写一套判定。
-import type { AdminClipOpsView, AdminClipHoldItem, AdminClipHoldListView } from '../../../../shared/contracts';
+import type {
+  AdminClipOpsView, AdminClipHoldItem, AdminClipHoldListView, ClipAdminTemplate,
+} from '../../../../shared/contracts';
 import { prisma } from '../../db.js';
+import { aidramaJson, type VideoGatewayIdentity } from './aidramaGateway.js';
 import { PRODUCT } from '../products.js';
 
 /**
@@ -143,3 +146,32 @@ export async function listClipHolds(input: {
 
 /** 这一屏归爱速拍。单列出来，免得路由那边把产品码写成字面量。 */
 export const CLIP_OPS_PRODUCT = PRODUCT.quickreel;
+
+
+/* ─────────── 模板货架 ───────────
+ * 模板就是爱速拍的首页：内容即产品，上下架是最高频的运营动作。
+ *
+ * 模板存在 AIStar 那边（clip_template 表），这里只做代理。之前没有任何控制台能碰它 ——
+ * AIStar 的 /api/admin/clip/templates 需要一枚 staff JWT，军师 BFF 手里只有 clip service token，
+ * 调过去必然 403；而全仓也没有任何前端调过那几条接口。为此在 AIStar 侧加了一条
+ * service token 鉴权的只读 + 上下架路径（ClipServiceAdminController），这里对接它。
+ *
+ * **只做看和上下架，不做创建与整体编辑**：模板的 scriptSkeleton / timeline 是内容创作产物，
+ * 不是几个表单字段。给它做半吊子的编辑表单，运营一存就可能把配好的片尾和分镜清掉。
+ */
+
+/** AIStar 的运营面不需要属主，但 ClipServiceIdentity.require 仍要求一个合法 owner id。 */
+const ADMIN_SENTINEL: VideoGatewayIdentity = { userId: 'junshi-admin-console', tenantId: 'junshi' };
+
+export async function listClipTemplates(): Promise<ClipAdminTemplate[]> {
+  const rows = await aidramaJson<ClipAdminTemplate[]>(
+    '/api/service/clip/admin/templates', ADMIN_SENTINEL, { timeoutCapMs: 15_000 });
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function setClipTemplateStatus(id: string, status: 'published' | 'draft'): Promise<ClipAdminTemplate> {
+  return aidramaJson<ClipAdminTemplate>(
+    `/api/service/clip/admin/templates/${encodeURIComponent(id)}/status`, ADMIN_SENTINEL,
+    { method: 'PUT', body: { status }, timeoutCapMs: 15_000 },
+  );
+}

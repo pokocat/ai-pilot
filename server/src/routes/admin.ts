@@ -49,6 +49,7 @@ import {
 import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
 import {
   CLIP_OPS_PRODUCT, UNANCHORED_STATUSES, clipOpsSummary, holdStatusLabel, listClipHolds, normalizeHoldStatus,
+  listClipTemplates, setClipTemplateStatus,
 } from '../services/video/opsConsole.js';
 // 手工对单复用定时任务那条判定路径，不另写一套 —— 两套规则迟早分叉。
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
@@ -99,7 +100,7 @@ import type {
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
-  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult,
+  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -1660,6 +1661,42 @@ export async function adminRoutes(app: FastifyInstance) {
         refunded,
         message,
       };
+    });
+
+  /* ─────────── 爱速拍 · 模板货架 ───────────
+   * 模板就是爱速拍的首页，内容即产品。这两条代理到 AIStar 的 service token 运营面
+   * （ClipServiceAdminController），只做看和上下架 —— 创建与整体编辑是内容创作，不在后台做。
+   */
+
+  app.get('/admin/video/templates', async (req, reply): Promise<ClipAdminTemplate[] | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    // 上游挂了要如实报 502，不能吞成空数组 —— 「一个模板都没有」和「问不到」在运营眼里
+    // 是完全不同的两件事，前者会让人以为货架被清空了。
+    try { return await listClipTemplates(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
+
+  app.put<{ Params: { id: string }; Body: { status?: string } }>(
+    '/admin/video/templates/:id/status', async (req, reply): Promise<ClipAdminTemplate | undefined> => {
+      const actor = actorOf(req);
+      // 上下架直接改变小程序首页看得到什么，是对外动作，与改价同级：超管 + 产品 editor 两道叠加。
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+      const status = req.body?.status;
+      if (status !== 'published' && status !== 'draft') {
+        reply.code(422).send({ error: '状态只能是 published 或 draft', code: 'CLIP_TEMPLATE_STATUS_INVALID' });
+        return undefined;
+      }
+      let row: ClipAdminTemplate;
+      try { row = await setClipTemplateStatus(req.params.id, status); }
+      catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        action: 'admin.clip.template.status',
+        payload: { templateId: req.params.id, status, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
     });
 
   app.get('/admin/video/clone-pricing', async (req, reply): Promise<AdminClonePricing | undefined> => {

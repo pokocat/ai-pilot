@@ -11,6 +11,7 @@
 import { useCallback, useState } from 'react';
 import {
   api, type AdminClipHoldItem, type AdminClipOpsView, type AdminClipHoldListView,
+  type ClipAdminTemplate,
 } from '../api';
 import { PageHead, ViewState, EmptyState, ErrorState, Skeleton, Pager, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
@@ -169,6 +170,105 @@ export function ClipOpsView({ toast, isSuper }: { toast: (m: string) => void; is
               {list.pages > 1 && (
                 <Pager page={list.page} pages={list.pages} total={list.total} onChange={setPage} />
               )}
+            </>
+          )}
+        </ViewState>
+      </div>
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
+    </>
+  );
+}
+
+/**
+ * 爱速拍 · 模板货架。
+ *
+ * 模板就是爱速拍的首页：用户进来第一屏就是挑模板，内容即产品。而在这之前**没有任何控制台
+ * 能碰它** —— AIStar 的 /api/admin/clip/templates 要一枚 staff JWT，军师 BFF 只有 service token，
+ * 全仓也没有任何前端调过那几条接口。运营要下架一个模板，只能 curl + 手搓 JWT。
+ *
+ * **只做看和上下架。** 模板的文案骨架 / 时间线 / 片尾是内容创作产物，不是几个表单字段；
+ * 给它做半吊子的编辑表单，运营一存就可能把配好的片尾和分镜清掉。创建与整体编辑仍走
+ * AIStar 那边，或由内容同学导入。
+ */
+export function ClipTemplatesView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+  const res = useResource(useCallback(() => api.clipTemplates(), []), []);
+  const [busy, setBusy] = useState('');
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+
+  const toggle = (t: ClipAdminTemplate) => {
+    const next = t.status === 'published' ? 'draft' : 'published';
+    setConfirmSpec({
+      title: next === 'published' ? '上架模板' : '下架模板',
+      desc: next === 'published'
+        ? '上架后，小程序首页的模板货架里立刻能看到它，用户可以直接拿它开始做片子。'
+        : '下架后，小程序里看不到它了。已经用它做过的草稿和作品不受影响，不会被删。',
+      echo: [
+        { k: '模板', v: t.name },
+        { k: '行业', v: t.industry || '（未填）' },
+        { k: '时长 / 分段', v: `${t.estDurationSec} 秒 · ${t.segmentCount} 段` },
+      ],
+      confirmText: next === 'published' ? '上架' : '下架',
+      onConfirm: async () => {
+        setBusy(t.id);
+        try {
+          await api.setClipTemplateStatus(t.id, next);
+          toast(next === 'published' ? `已上架「${t.name}」` : `已下架「${t.name}」`);
+          res.reload();
+        } finally { setBusy(''); }
+      },
+    });
+  };
+
+  const published = (res.data ?? []).filter((t) => t.status === 'published').length;
+
+  return (
+    <>
+      <PageHead
+        k="templates"
+        res={res}
+        badge={res.data ? `${published}/${res.data.length} 已上架` : undefined}
+      />
+      <div className="pad">
+        <div className="usage-meta">
+          模板是爱速拍的首页货架，用户进来第一屏就是挑它。这里只管**看和上下架** ——
+          文案骨架、时间线、片尾这些是内容创作产物，不做成表单：一个字段没填对就可能把配好的
+          分镜清掉。新建模板与整体编辑走内容侧导入。
+        </div>
+        {/* 读失败绝不能长成「货架是空的」—— 那会让人以为模板被清了，跑去重新导一遍 */}
+        <ViewState res={res}>
+          {(list: ClipAdminTemplate[]) => (
+            <>
+              {list.length === 0 ? (
+                <EmptyState msg="还没有模板" hint="模板由内容侧导入，导入后在这里上架" />
+              ) : list.map((t) => (
+                <div key={t.id} className="usage-row">
+                  <div className="usage-h">
+                    <div className="usage-name">
+                      {t.name}
+                      <span>{t.status === 'published' ? '已上架' : '未上架'}</span>
+                    </div>
+                    <div className="usage-num">{t.estDurationSec}s</div>
+                  </div>
+                  <div className="usage-meta">
+                    {t.industry || '未分类'} · {t.themeKey} · {t.segmentCount} 段
+                    {t.creditHint ? ` · 约 ${t.creditHint} 钻` : ''}
+                    {t.ownerScope !== 'official' ? ' · 用户自建' : ''}
+                    {t.description ? ` · ${t.description}` : ''}
+                  </div>
+                  <div className="crd-actions">
+                    {isSuper ? (
+                      <button
+                        type="button"
+                        className={`mini-btn ${t.status === 'published' ? '' : 'primary'}`}
+                        disabled={busy === t.id}
+                        onClick={() => toggle(t)}
+                      >{t.status === 'published' ? '下架' : '上架'}</button>
+                    ) : (
+                      <span className="usage-meta">上下架会改变小程序首页，需要超级管理员</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </>
           )}
         </ViewState>

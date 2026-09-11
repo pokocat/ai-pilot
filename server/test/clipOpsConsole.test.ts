@@ -223,3 +223,42 @@ test('手工对单会落审计 —— 动钱的操作必须能倒查是谁点的
   assert.equal((log!.payloadJson as { holdId?: string })?.holdId, hold.id);
   assert.equal((log!.payloadJson as { outcome?: string })?.outcome, 'unknown');
 });
+
+/* ── 模板货架（代理 AIStar） ── */
+
+test('模板货架要爱速拍的权限；上下架还要超管', async () => {
+  const op = await operator();
+  assert.equal((await api('GET', '/api/admin/video/templates', { adminToken: op.token })).status, 403);
+
+  await prisma.adminProductAccess.create({
+    data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'editor' },
+  });
+  // 有权限了，但测试环境没有真上游 → 502（不是 403、也不是伪装成空数组）
+  const listed = await api('GET', '/api/admin/video/templates', { adminToken: op.token });
+  assert.notEqual(listed.status, 403, '授权后不该再被产品闸挡住');
+  assert.notEqual(listed.status, 200, '测试环境没有真上游，不该返回成功');
+
+  // 上下架直接改变小程序首页看得到什么，与改价同级：产品 editor 也不够，仍要超管
+  const w = await api('PUT', '/api/admin/video/templates/ct_x/status', {
+    adminToken: op.token, body: { status: 'published' },
+  });
+  assert.equal(w.status, 403);
+});
+
+test('状态只收 published / draft —— 别的一律 422，不静默当成下架', async () => {
+  // AIStar 的 upsert 里是 `"published".equals(x) ? "published" : "draft"`：拼错一个字母
+  // 就静默下架。运营点「上架」却下了架还不报错，是最难查的那类，两边都得挡。
+  for (const status of ['Published', 'PUBLISHED', '', 'online', undefined]) {
+    const r = await api('PUT', '/api/admin/video/templates/ct_x/status', { body: { status } });
+    assert.equal(r.status, 422, `status=${String(status)} 应该被拒`);
+    assert.equal((r.body as { code?: string }).code, 'CLIP_TEMPLATE_STATUS_INVALID');
+  }
+});
+
+test('上游挂了要如实报 502，不能吞成「一个模板都没有」', async () => {
+  // 「货架是空的」和「问不到货架」在运营眼里是完全不同的两件事：前者会让人以为模板被清空了，
+  // 跑去重新导入一遍。测试环境没有配上游，正好走的就是这条路径。
+  const r = await api('GET', '/api/admin/video/templates');
+  assert.ok(r.status >= 500, `期望 5xx，实际 ${r.status}`);
+  assert.ok(!Array.isArray(r.body), '绝不能返回空数组冒充成功');
+});
