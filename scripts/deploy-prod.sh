@@ -198,9 +198,12 @@ fi
 # server/.env, backups, logos, and other host-owned runtime artifacts.
 #
 # **deploy/ 不在这个列表里**——它被监控栈 bind mount 着，见下面单独处理。
+# 新增顶层目录要记得加进来。这是白名单：漏了不会静默发旧代码，而是当场
+# `cd: No such file or directory` 失败（quickreel-console 上线时踩过一次）——
+# 比静默强，但还是要记得加。
 for path in \
   AGENTS.md PRODUCT.md IMPLEMENTATION.md README.md package.json .gitignore \
-  .github admin app chats docs project scripts server shared
+  .github admin app chats docs project scripts server shared quickreel-console
 do
   sudo rm -rf "$APP_ROOT/$path"
   if [ -e "$RELEASE/$path" ]; then
