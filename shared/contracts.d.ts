@@ -3746,3 +3746,42 @@ export interface ClipGenerationPricing {
   /** 配音，每千字（全片一次取整，不按镜摊 —— 按镜摊十个短镜头能把同样字数收成十倍）。 */
   creditPerKChar: number;
 }
+
+/** 供应商对账的一类行数（明细不透传到后台 —— 后台只需要知道有几条、要不要去处理）。 */
+export interface ClipVendorReconcile {
+  /** 非空 = 这一类没查成。绝不能把查失败显示成「0 条，一切正常」。 */
+  error?: string | null;
+  /** 供应商侧的对象数；null = 没查到。 */
+  vendorCount?: number | null;
+  /** 我方库里的对象数。 */
+  localCount: number;
+  matchedCount: number;
+  /** 供应商有、我们没有。每个月照样按它收钱。 */
+  orphanCount: number;
+  /** 我们有、供应商没有。用户点进去会失败。 */
+  danglingCount: number;
+  unmatchableCount: number;
+}
+
+/**
+ * 供应商（石榴）总览。**只读，实时打上游。**
+ *
+ * `mock=true` 时页面必须显著标注：走的是本地假网关，额度是编的 ——
+ * 不标的话运营会把假额度当真账读，然后以为槽位还很充裕。
+ */
+export interface ClipVendorOverview {
+  mock: boolean;
+  checkedAt: string;
+  quota: {
+    error?: string | null;
+    /** 还能练几个数字人 / 几条声音。用完了用户就练不了新的。 */
+    availableAvatar?: number | null;
+    availableSpeaker?: number | null;
+    validPoint?: number | null;
+    validToTime?: string | null;
+    avatarSlotsExhausted: boolean;
+    speakerSlotsExhausted: boolean;
+  };
+  avatars: ClipVendorReconcile;
+  voices: ClipVendorReconcile;
+}

@@ -114,7 +114,15 @@ export async function productLedgerSlices(
     cost: await tx.tokenUsage.groupBy({
       by: ['productCode'], where: window, _sum: { costMicros: true },
     }),
-  }), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }), {
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    // Prisma 交互式事务默认 5s 超时，而 `from` 是请求参数、可以一路往前拉到 1970。
+    // 四次聚合串行跑，流水表一大就会在 5s 处回滚，账本接口直接 500 —— 时间范围拉大一点
+    // 就整屏报错，运营会以为后台坏了（codex 2026-09-11 审出）。
+    // 给一个够宽的预算。RepeatableRead 只持 MVCC 快照，不阻塞正常写入，等久一点不伤别人。
+    timeout: 30_000,
+    maxWait: 5_000,
+  });
   const key = (code: string | null) => code ?? 'unattributed';
   const granted = new Map(positive.map((r) => [key(r.productCode), r._sum.delta ?? 0]));
   const spent = new Map(negative.map((r) => [key(r.productCode), Math.abs(r._sum.delta ?? 0)]));

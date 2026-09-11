@@ -12,7 +12,7 @@
 // 修复动作复用定时任务那条路径，不另写一套判定。
 import type {
   AdminClipOpsView, AdminClipHoldItem, AdminClipHoldListView, ClipAdminTemplate,
-  ClipGenerationPricing,
+  ClipGenerationPricing, ClipVendorOverview,
 } from '../../../../shared/contracts';
 import { prisma } from '../../db.js';
 import { aidramaJson, type VideoGatewayIdentity } from './aidramaGateway.js';
@@ -193,4 +193,22 @@ export async function setClipTemplateStatus(id: string, status: 'published' | 'd
  */
 export async function clipGenerationPricing(): Promise<ClipGenerationPricing> {
   return aidramaJson<ClipGenerationPricing>('/api/me/clip/pricing', ADMIN_SENTINEL, { timeoutCapMs: 10_000 });
+}
+
+
+/**
+ * 供应商（石榴）总览：额度快照 + 与我方 DB 的对账。**只读，实时打上游，不走缓存。**
+ *
+ * 独立运营要能回答两件事：数字人 / 声音的槽位还剩几个（用完了用户就练不了新形象），
+ * 以及两边有没有对不上的对象（孤儿 = 供应商那边有、我们这边没有，每个月照样收钱）。
+ *
+ * 不做任何清理动作。清孤儿要连本地记录与素材一起处理，误删就是把用户练好的数字人弄没了，
+ * 那不是一个按钮能收口的事（AIStar 侧 AdminClipController.vendorOverview 上也是这么写的）。
+ */
+export async function clipVendorOverview(): Promise<ClipVendorOverview> {
+  return aidramaJson<ClipVendorOverview>(
+    '/api/service/clip/admin/vendor/overview', ADMIN_SENTINEL,
+    // 实时打上游、还要和本地库对账，比普通读接口慢得多；给它单独一个更宽的预算。
+    { timeoutCapMs: 30_000 },
+  );
 }

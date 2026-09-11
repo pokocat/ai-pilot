@@ -214,11 +214,16 @@ test('分产品汇总以 RepeatableRead 跑，只包事务是不够的', async (
     (prisma as unknown as { $transaction: unknown }).$transaction = original;
   }
   assert.equal(seen.length, 1, '应当只开一个事务');
-  assert.deepEqual(
-    seen[0],
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    'RC 下三条聚合各取快照，包了事务也不一致',
+  const opts = seen[0] as { isolationLevel?: unknown; timeout?: number };
+  assert.equal(
+    opts.isolationLevel,
+    Prisma.TransactionIsolationLevel.RepeatableRead,
+    'RC 下几条聚合各取快照，包了事务也不一致',
   );
+  // 隔离级别之外还要有够宽的超时：Prisma 交互式事务默认 5s，而 from 是请求参数，
+  // 四次聚合串行跑，窗口一大就在 5s 处回滚、整屏 500（codex 2026-09-11 审出）。
+  // 这里不写死具体数值，只要求它显式抬过默认值 —— 调参不该让用例变红。
+  assert.ok((opts.timeout ?? 0) > 5_000, `事务超时没抬过 Prisma 默认的 5s：${String(opts.timeout)}`);
 });
 
 /**
@@ -400,4 +405,78 @@ test('爱速拍的 AI 写稿会带上产品归属落库', async () => {
   const hits = src.split('usageMeta: { productCode: PRODUCT.quickreel }').length - 1;
   assert.equal(hits, 2, 'scriptGenerate 的两个 LLM 调用点都要标归属，漏一个那部分成本就归不了');
   assert.ok(typeof generateClipScriptAll === 'function');
+});
+
+/* ── codex 2026-09-11 审出的三条 ── */
+
+// 原来只在传了 product 时才查权限。一个没有任何产品授权的 operator 只要不带这个参数
+// （或带 `?product=%20`，trim 后为空），就能拿到全平台的用户名单与汇总。
+test('不传 product 不等于放行全量 —— 没授权的运营拿不到全平台数据', async () => {
+  const a = await mkUser();
+  await grantCredits(a.tenantId, a.userId, 100, '充值', PRODUCT.junshi);
+  const op = await operator();
+
+  for (const qs of ['', '?product=', '?product=%20', '?product=++']) {
+    const r = await api<{ users: unknown[]; summary: { totalGranted: number } }>('GET', `/api/admin/usage${qs}`, { adminToken: op.token });
+    assert.equal(r.status, 200, `${qs} 不该报错，但也不该给全量`);
+    assert.deepEqual(r.body.users, [], `${qs} 漏了用户名单`);
+    assert.equal(r.body.summary.totalGranted, 0, `${qs} 漏了汇总金额`);
+  }
+});
+
+test('超管不传 product 仍然看全量 —— 这条修复不许顺手把超管也关掉', async () => {
+  const a = await mkUser();
+  await grantCredits(a.tenantId, a.userId, 100, '充值', PRODUCT.junshi);
+  const r = await api<{ summary: { totalGranted: number } }>('GET', '/api/admin/usage');
+  assert.equal(r.body.summary.totalGranted, 100);
+});
+
+test('被授权的运营不传 product，自动收窄到自己被授予的产品', async () => {
+  const a = await mkUser();
+  await grantCredits(a.tenantId, a.userId, 100, '充值', PRODUCT.junshi);
+  await chargeCredits(a.tenantId, a.userId, 20, '出片', PRODUCT.quickreel);
+  const op = await operator();
+  await prisma.adminProductAccess.create({
+    data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'viewer' },
+  });
+  const r = await api<{ summary: { totalGranted: number; totalSpent: number } }>('GET', '/api/admin/usage', { adminToken: op.token });
+  assert.equal(r.body.summary.totalSpent, 20);
+  assert.equal(r.body.summary.totalGranted, 0, '军师的充值不该出现在爱速拍运营眼里');
+});
+
+// 只被授予爱速拍的运营，不该看见一堆只用过军师的人的姓名、手机号、会话数和成果数。
+test('收窄视角时用户名单也跟着收窄，不只是数字', async () => {
+  const onlyJunshi = await mkUser();
+  await grantCredits(onlyJunshi.tenantId, onlyJunshi.userId, 50, '充值', PRODUCT.junshi);
+  const usedQuickreel = await mkUser();
+  await grantCredits(usedQuickreel.tenantId, usedQuickreel.userId, 50, '充值', PRODUCT.junshi);
+  await chargeCredits(usedQuickreel.tenantId, usedQuickreel.userId, 10, '出片', PRODUCT.quickreel);
+
+  const r = await api<{ users: { id: string }[] }>('GET', '/api/admin/usage?product=quickreel');
+  const ids = r.body.users.map((u) => u.id);
+  assert.ok(ids.includes(usedQuickreel.userId), '用过爱速拍的人该在');
+  assert.ok(!ids.includes(onlyJunshi.userId), '只用过军师的人不该出现在爱速拍视角里');
+});
+
+// 权威余额读取是 [createdAt desc, id desc]；这一屏只按 createdAt 排的话，
+// 同一毫秒落的两行谁在后面由数据库决定，显示的余额会和用户真实余额对不上。
+test('同一时刻的两笔流水，这一屏算出的余额与 getBalance 一致', async () => {
+  const { tenantId, userId } = await mkUser();
+  const at = new Date();
+  await prisma.creditLedger.createMany({
+    data: [
+      { tenantId, userId, delta: 100, reason: '充值', balance: 100, productCode: PRODUCT.junshi, createdAt: at },
+      { tenantId, userId, delta: -20, reason: '出片', balance: 80, productCode: PRODUCT.quickreel, createdAt: at },
+    ],
+  });
+  const authoritative = await getBalance(userId);
+  const r = await api<{ users: { id: string; creditBalance: number }[] }>('GET', '/api/admin/usage');
+  const row = r.body.users.find((u) => u.id === userId);
+  assert.equal(row?.creditBalance, authoritative, '后台显示的余额和真实余额对不上');
+});
+
+test('时间范围超过两年直接 422，而不是让事务跑到超时再 500', async () => {
+  const r = await api('GET', '/api/admin/products/ledger?from=1970-01-01T00:00:00.000Z');
+  assert.equal(r.status, 422);
+  assert.equal((r.body as { code?: string }).code, 'ADMIN_RANGE_TOO_WIDE');
 });

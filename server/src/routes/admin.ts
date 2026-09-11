@@ -1516,6 +1516,12 @@ export async function adminRoutes(app: FastifyInstance) {
     if (Number.isNaN(from.getTime()) || (to && Number.isNaN(to.getTime())) || (to && from >= to)) {
       return reply.code(422).send({ error: '时间区间非法', code: 'ADMIN_RANGE_INVALID' });
     }
+    // 窗口上限。没有上限的话 `from=1970-01-01` 会让四次聚合扫全表，事务撞上超时后整屏 500。
+    // 与其让它跑到超时再报错，不如在这里说清楚「最多看两年」。
+    const MAX_WINDOW_MS = 730 * 24 * 3600 * 1000;
+    if (anchor.getTime() - from.getTime() > MAX_WINDOW_MS) {
+      return reply.code(422).send({ error: '时间范围最多两年，请缩小区间', code: 'ADMIN_RANGE_TOO_WIDE' });
+    }
     const slices = await productLedgerSlices(from, to);
     const allowed = await accessibleProductCodes(actor);
     // 只给看得见的产品。unattributed 是历史遗留，只有超管该看到 —— 普通运营看到它
@@ -1634,9 +1640,13 @@ export async function adminRoutes(app: FastifyInstance) {
       let refunded = false;
       let message = '';
       if (probe.outcome === 'accepted') {
-        await attachVideoJob(hold.id, probe.jobId);
-        if (probe.status && probe.status !== 'queued') await settleVideoJob(probe.jobId, probe.status);
-        message = `上游其实收了（任务 ${probe.jobId}），已回填任务号，后续交给出片完成扫描`;
+        // attachVideoJob 是条件更新：这单在我们查上游那几秒里可能已经被别的路径退款或结算了。
+        // 回填没落上就别宣称回填成功 —— 运营看到「已回填」却查不到任务号，只会以为后台在骗人。
+        const attached = await attachVideoJob(hold.id, probe.jobId);
+        if (attached && probe.status && probe.status !== 'queued') await settleVideoJob(probe.jobId, probe.status);
+        message = attached
+          ? `上游其实收了（任务 ${probe.jobId}），已回填任务号，后续交给出片完成扫描`
+          : `上游其实收了（任务 ${probe.jobId}），但这单在查单期间已被其它路径收口，未改动它的状态`;
       } else if (probe.outcome === 'rejected') {
         const row = await refundVideoHold(hold.id, probe.reason ?? 'submit_rejected').catch(() => null);
         refunded = row?.status === 'refunded';
@@ -1837,25 +1847,32 @@ export async function adminRoutes(app: FastifyInstance) {
    * 没有「爱速拍的余额」这回事。切了就是造一个不存在的负债数出来。
    */
   app.get<{ Querystring: { product?: string } }>('/admin/usage', async (req, reply): Promise<AdminUsageView | undefined> => {
+    const actor = actorOf(req);
     const raw = String(req.query?.product ?? '').trim();
     if (raw && !isProductCode(raw)) {
       reply.code(422).send({ error: '未知的产品码', code: 'ADMIN_PRODUCT_UNKNOWN' });
       return undefined;
     }
-    // 想按产品看，就得有那个产品的权限 —— 否则这个查询串就成了绕过分区的后门。
+    // 想按产品看，就得有那个产品的权限。
     if (raw) {
-      try { await requireProductAccess(actorOf(req), raw, 'viewer'); }
+      try { await requireProductAccess(actor, raw, 'viewer'); }
       catch (e) { sendErr(reply, e, 403); return undefined; }
     }
-    const productCode = raw || undefined;
-    const users = await buildAdminUsers(productCode);
+    // **不传 product 不等于放行全量。** 原来只在传了 product 时才查权限，于是一个
+    // 没有任何产品授权的 operator 只要不带这个参数（或带 `?product=%20`，trim 后为空），
+    // 就能拿到全平台的用户名单与汇总 —— 这个查询串成了绕过分区的后门
+    // （codex 2026-09-11 审出）。现在：超管照旧看全量；非超管一律收窄到自己被授予的产品，
+    // 一个都没有就是空视图，而不是全量。
+    const allowed = await accessibleProductCodes(actor);
+    const scope = raw ? [raw] : (allowed === null ? undefined : [...allowed]);
+    const users = await buildAdminUsers(scope);
     const activeSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [reportCount, creditEvents] = await Promise.all([
       prisma.deliverable.count(),
-      prisma.creditLedger.count(productCode ? { where: { productCode } } : undefined),
+      prisma.creditLedger.count(scope ? { where: { productCode: { in: scope } } } : undefined),
     ]);
     return {
-      productCode: productCode ?? null,
+      productCode: raw || null,
       summary: {
         registeredUsers: users.length,
         activeUsers: users.filter((u) => u.lastSessionAt && new Date(u.lastSessionAt) >= activeSince).length,
@@ -3148,13 +3165,21 @@ export async function adminRoutes(app: FastifyInstance) {
 }
 
 /**
- * @param productCode 只统计这个产品的钻石收支。省略 = 全部产品合计（原行为，逐字节一致）。
+ * @param products 只统计这些产品的钻石收支，并且**只返回在这些产品下有过流水的用户**。
+ *                 省略 = 全部产品合计、全部用户（原行为，逐字节一致）。
  *
  * ⚠️ 只影响 `totalGranted` / `totalSpent`。**`creditBalance` 永远是全局余额** ——
  * 钱包只有一个，「爱速拍的余额」这个东西不存在；按产品切出来的那个数既不等于用户能花的钱，
  * 也不等于任何一笔真实负债。谁要是把它当余额显示，运营就会拿一个不存在的数去跟用户对账。
+ *
+ * 用户名单也跟着收窄，不只是数字：只被授予爱速拍的运营，不该在这一屏看见一堆只用过军师的人
+ * 的姓名、手机号、会话数和成果数（codex 2026-09-11 审出）。
  */
-async function buildAdminUsers(productCode?: string): Promise<AdminUserItem[]> {
+async function buildAdminUsers(products?: readonly string[]): Promise<AdminUserItem[]> {
+  // `undefined` = 不收窄（全量）；**空数组 = 收窄到「什么都没有」**，不是全量。
+  // 这两者必须分开：一个没有任何产品授权的运营拿到的就是空数组，
+  // 若在这里当成「没传过滤条件」，刚堵上的后门就原样又开了一遍。
+  const scope = products ? new Set(products) : null;
   const since30 = new Date(now().getTime() - 30 * 864e5);
   const [users, sessions, deliverables, ledgers, tokenAgg, wallets] = await Promise.all([
     prisma.user.findMany({
@@ -3164,7 +3189,10 @@ async function buildAdminUsers(productCode?: string): Promise<AdminUserItem[]> {
     }),
     prisma.session.groupBy({ by: ['userId'], _count: { _all: true }, _max: { updatedAt: true } }),
     prisma.deliverable.groupBy({ by: ['userId'], _count: { _all: true } }),
-    prisma.creditLedger.findMany({ orderBy: { createdAt: 'asc' } }),
+    // 排序必须与权威余额读取（services/credits.ts 的 balanceIn，[createdAt desc, id desc]）
+    // 镜像一致。只按 createdAt 排的话，同一毫秒落的两行谁在后面由数据库决定 ——
+    // 这一屏显示的余额会和用户真实余额对不上，而且时对时不对（codex 2026-09-11 审出）。
+    prisma.creditLedger.findMany({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
     // 近 30 天 token 用量：一次 groupBy（[userId,createdAt] 索引），避免 per-user N+1。
     prisma.tokenUsage.groupBy({ by: ['userId'], where: { userId: { not: null }, createdAt: { gte: since30 } }, _sum: { totalTokens: true } }),
     // 月度额度剩余：一次 findMany 取齐所有钱包（不触发 per-user 惰性重置，列表展示用原值）。
@@ -3175,6 +3203,8 @@ async function buildAdminUsers(productCode?: string): Promise<AdminUserItem[]> {
   const tokenMap = new Map(tokenAgg.map((t) => [t.userId as string, t._sum.totalTokens ?? 0]));
   const walletMap = new Map(wallets.map((w) => [w.userId, w.quota < 0 ? -1 : w.balance])); // -1=不限量
   const creditMap = new Map<string, { balance: number; granted: number; spent: number }>();
+  // 收窄视角时，谁在这些产品下有过流水。用于把用户名单也一起收窄。
+  const seen = new Set<string>();
   for (const l of ledgers) {
     const s = creditMap.get(l.userId) ?? { balance: 0, granted: 0, spent: 0 };
     // 余额是**全量**流水的最后一行，不受产品过滤影响 —— 钱包只有一个。
@@ -3182,11 +3212,12 @@ async function buildAdminUsers(productCode?: string): Promise<AdminUserItem[]> {
     // 余额就会停在更早的一行，显示成一个历史上存在过、现在早已不是的数。
     s.balance = l.balance;
     creditMap.set(l.userId, s);
-    if (productCode && l.productCode !== productCode) continue;
+    if (scope && !scope.has(l.productCode ?? '')) continue;
+    seen.add(l.userId);
     if (l.delta > 0) s.granted += l.delta;
     if (l.delta < 0) s.spent += Math.abs(l.delta);
   }
-  return users.map((u) => {
+  return users.filter((u) => !scope || seen.has(u.id)).map((u) => {
     const sess = sessionMap.get(u.id);
     const credit = creditMap.get(u.id) ?? { balance: 0, granted: 0, spent: 0 };
     return {

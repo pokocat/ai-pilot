@@ -262,3 +262,78 @@ test('上游挂了要如实报 502，不能吞成「一个模板都没有」', a
   assert.ok(r.status >= 500, `期望 5xx，实际 ${r.status}`);
   assert.ok(!Array.isArray(r.body), '绝不能返回空数组冒充成功');
 });
+
+/* ── 终态保护（codex 2026-09-11 审出的两条，都能让用户既拿退款又拿到片子） ── */
+
+test('已退款的单，回填任务号不许把它复活', async () => {
+  const u = await mkUser();
+  await grantCredits(u.tenantId, u.userId, 100, '充值', PRODUCT.junshi);
+  const hold = await mkHold({ ...u, status: 'refunded', credits: 20 });
+  await prisma.videoCreditHold.update({ where: { id: hold.id }, data: { refundedAt: new Date() } });
+
+  const { attachVideoJob } = await import('../src/services/video/credits.js');
+  // 真实撞法：手工对单向上游查单（慢），期间用户取消 → 退款写 refunded；
+  // 查单回 accepted → 原来这里无条件 update，把 refunded 改回 submitted，refundedAt 还留着。
+  // 这单看起来又活了，出片完成扫描随后结算掉 —— 用户既拿了退款又拿到片子。
+  const ok = await attachVideoJob(hold.id, 'job-late-arrival');
+  assert.equal(ok, false, '终态的单不该被回填');
+
+  const after = await prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
+  assert.equal(after?.status, 'refunded', '被复活了');
+  assert.equal(after?.upstreamJobId, null);
+});
+
+test('已结算的单也不许被重新回填', async () => {
+  const u = await mkUser();
+  const hold = await mkHold({ ...u, status: 'settled', upstreamJobId: 'job-settled' });
+  const { attachVideoJob } = await import('../src/services/video/credits.js');
+  assert.equal(await attachVideoJob(hold.id, 'job-other'), false);
+  const after = await prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
+  assert.equal(after?.upstreamJobId, 'job-settled', '任务号被改掉了');
+});
+
+test('正常路径仍然回填得上', async () => {
+  const u = await mkUser();
+  const hold = await mkHold({ ...u, status: 'submitting' });
+  const { attachVideoJob } = await import('../src/services/video/credits.js');
+  assert.equal(await attachVideoJob(hold.id, 'job-normal'), true);
+  const after = await prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
+  assert.equal(after?.status, 'submitted');
+  assert.equal(after?.upstreamJobId, 'job-normal');
+});
+
+/**
+ * ⚠️ 这一条**验的是不变式，不是那个竞态本身**。
+ *
+ * 真正的 TOCTOU 是：settleVideoJob 先 findUnique 读到 submitted，几行之后才写 —— 中间
+ * 并发的取消路径完成退款并写 refunded，那次写就把 refunded 盖成 settled。顺序执行的用例
+ * 复现不了这个交错（把 hold 直接建成 refunded 的话，函数开头那个 refunded 快速分支就先接住了），
+ * 而用 Promise.all 去撞时序会得到一条时好时坏的用例，比没有更糟。
+ *
+ * 所以防线不在这条用例上，在实现里：终态判断被挪进了 updateMany 的 where，
+ * 判定与写入是同一条 SQL，由数据库裁决。这条用例守的是「refunded 绝不会变成 settled」
+ * 这个结果 —— 两条路径（快速分支、条件更新）任何一条被拆掉，它都还在。
+ */
+test('succeeded 结算不许盖掉已经发生的退款', async () => {
+  const u = await mkUser();
+  await grantCredits(u.tenantId, u.userId, 100, '充值', PRODUCT.junshi);
+  const hold = await mkHold({ ...u, status: 'refunded', upstreamJobId: 'job-refunded', credits: 30 });
+  await prisma.videoCreditHold.update({ where: { id: hold.id }, data: { refundedAt: new Date() } });
+
+  const { settleVideoJob } = await import('../src/services/video/credits.js');
+  await settleVideoJob('job-refunded', 'succeeded');
+
+  const after = await prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
+  assert.equal(after?.status, 'refunded', 'refunded 是终点，任何路径都不许迁出去');
+  assert.ok(after?.refundedAt, '退款时间还在，状态却成了已结算 —— 那是账面与资金不一致');
+  assert.equal(after?.lastJobStatus, 'succeeded', '上游最后状态照记，只是不动 status');
+});
+
+test('succeeded 正常结算仍然结得掉', async () => {
+  const u = await mkUser();
+  await mkHold({ ...u, status: 'submitted', upstreamJobId: 'job-ok' });
+  const { settleVideoJob } = await import('../src/services/video/credits.js');
+  await settleVideoJob('job-ok', 'succeeded');
+  const after = await prisma.videoCreditHold.findFirst({ where: { upstreamJobId: 'job-ok' } });
+  assert.equal(after?.status, 'settled');
+});
