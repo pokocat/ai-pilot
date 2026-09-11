@@ -205,3 +205,16 @@ test('一个授权都没有的运营：共享面还在，产品面全关', async
   assert.equal((await api('GET', '/api/admin/agents', { adminToken: op.token })).status, 403);
   assert.equal((await api('GET', '/api/admin/video/ops', { adminToken: op.token })).status, 403);
 });
+
+// 撤屏之后克隆定价搬回了共享的「功能开关」页（65d08ac）。服务端这道闸没变 ——
+// 于是没有 quickreel 授权的军师运营打开那一屏，页尾会固定看到一块 403。
+// 前端已按产品授权决定渲不渲染（App.tsx 传 canQuickreel）；这条用例盯住服务端这一半的事实，
+// 免得以后有人以为「既然前端不渲染了，服务端可以放开」而顺手拆掉闸。
+test('克隆定价仍然要 quickreel 授权 —— 前端不渲染是另一回事，不是替代', async () => {
+  const junshiOnly = await operator({ product: PRODUCT.junshi, role: 'editor' });
+  assert.equal((await api('GET', '/api/admin/video/clone-pricing', { adminToken: junshiOnly.token })).status, 403);
+
+  const qr = await operator({ product: PRODUCT.quickreel, role: 'viewer' });
+  assert.equal((await api('GET', '/api/admin/video/clone-pricing', { adminToken: qr.token })).status, 200,
+    'quickreel viewer 该看得到价 —— 值班要答得出训一个数字人扣多少钻');
+});

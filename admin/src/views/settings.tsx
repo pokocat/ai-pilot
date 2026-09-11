@@ -267,16 +267,6 @@ function cloneOrderWarnings(d: CloneDraft): string[] {
 }
 
 /**
- * 六档生成单价（只读）。
- *
- * 放在克隆定价这一屏上：运营心里的问题是「爱速拍怎么收费」，那是六档生成 + 四档克隆
- * 一共十个数，分两屏只会让人以为看全了。可改的和不可改的摆在一起，但**必须写明哪些改不了
- * 以及为什么** —— 不写的话，运营会一直找那个不存在的编辑按钮。
- *
- * 这六个数配在 AIStar 的 Spring 配置里，不是数据库。本仓的定价铁律是「对外定价数据归运营
- * 后台，代码不许当真相源」（见 services/video/pricing.ts），这六档今天不满足，是一笔明账。
- */
-/**
  * 短视频克隆定价（数字人形象 / 专属声音的训练单价）。
  *
  * 2026-09-11 一度拆成独立分区，同轮又撤回这一页 —— 爱速拍要单独做自己的运营控制台，
@@ -402,7 +392,11 @@ function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; i
 // （api.ts 的 401/403 已分流，403 不再踢回登录页）。
 // 「短视频克隆定价」是本页第三段：非超管**也渲染**（只读），与告警通知那卡的取舍不同 ——
 // 值班运营需要答得出「训一个数字人扣多少钻」，看不到反而要去问人。
-export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+export function FlagsView({ toast, isSuper, canQuickreel }: {
+  toast: (m: string) => void; isSuper: boolean;
+  /** 有没有爱速拍的 viewer（超管隐式有）。没有就不渲染克隆定价那一段 —— 服务端会 403。 */
+  canQuickreel: boolean;
+}) {
   const [list, setList] = useState<AdminFeatureFlag[]>([]);
   const [busy, setBusy] = useState('');
   const [draft, setDraft] = useState<Record<string, number>>({}); // number 类的编辑中数值
@@ -528,7 +522,9 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
           </div>
         </>
       )}
-      <ClonePricingSection toast={toast} isSuper={isSuper} />
+      {/* 克隆定价是爱速拍的数据。这一屏是共享面（军师视角也会打开），
+          所以要按产品授权决定渲不渲染，不能无条件挂上去让它去撞 403。 */}
+      {canQuickreel && <ClonePricingSection toast={toast} isSuper={isSuper} />}
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );

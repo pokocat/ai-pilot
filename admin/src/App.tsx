@@ -260,7 +260,17 @@ export default function App() {
               {key === 'audit' && <AuditView onOpenUser={openUser} onOpenSession={(id) => navigate('sessions', id)} />}
               {key === 'moderation' && <ModerationView onOpenUser={openUser} />}
               {key === 'model' && <ModelView toast={showToast} />}
-              {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
+              {/* canQuickreel：克隆定价是爱速拍的数据，服务端要 quickreel viewer（非超管）。
+                  这一屏本身是共享面，军师视角也会打开它 —— 不把这个判断传进去，
+                  没有 quickreel 授权的运营会在页尾固定看到一块 403。同页「告警通知」卡
+                  早就是这个做法：别摆一个注定 403 的入口。 */}
+              {key === 'flags' && (
+                <FlagsView
+                  toast={showToast}
+                  isSuper={isOwner}
+                  canQuickreel={isOwner || (perms.data?.accessible ?? []).includes('quickreel')}
+                />
+              )}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
               {key === 'products' && <ProductsView toast={showToast} isSuper={isOwner} />}
               {key === 'wence' && <WenceView toast={showToast} />}
