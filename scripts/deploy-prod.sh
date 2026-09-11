@@ -312,6 +312,22 @@ sudo find /var/www/junshi/admin -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 sudo cp -R dist/. /var/www/junshi/admin/
 fi
 
+# 爱速拍运营台。与 admin 是两个前端、两个 URL：
+# 军师后台 30 屏，爱速拍四屏挤进去谁也找不着（2026-09-11 试过，当天撤了）。
+# 它调的是同一个 BFF 的 /admin/video/*，所以跟着军师这条发布走，不单独开一条。
+# SKIP_ADMIN=1 时一起跳过：那个开关的本意就是「这次别动运营前端」。
+if [ "$SKIP_ADMIN" = "1" ]; then
+  echo "== quickreel-console 跳过（SKIP_ADMIN=1）=="
+else
+echo "== quickreel-console build and publish =="
+cd "$APP_ROOT/quickreel-console"
+npm ci
+npm run build -- --base=/quickreel/
+sudo mkdir -p /var/www/junshi/quickreel
+sudo find /var/www/junshi/quickreel -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+sudo cp -R dist/. /var/www/junshi/quickreel/
+fi
+
 if [ "$DEPLOY_H5" = "1" ]; then
   echo "== h5 build and publish =="
   cd "$APP_ROOT/app"
