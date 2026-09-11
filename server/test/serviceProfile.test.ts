@@ -6,7 +6,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  serviceProfile, shouldRegister, shouldRunJunshiWorkers, QUICKREEL_ROUTE_GROUPS,
+  serviceProfile, shouldRegister, shouldRunJunshiWorkers, shouldRunSchedulerJob, QUICKREEL_ROUTE_GROUPS,
 } from '../src/serviceProfile.js';
 
 const original = process.env.SERVICE_PROFILE;
@@ -49,6 +49,32 @@ test('军师的 worker 不在爱速拍进程里跑', () => {
   process.env.SERVICE_PROFILE = 'quickreel';
   // 两个进程同时轮询同一张队列表时，行为取决于抢锁顺序，出了问题说不清是谁干的
   assert.equal(shouldRunJunshiWorkers(), false);
+});
+
+// —— 定时任务的归属 ——
+// 2026-09-11 生产上抓到的：上面那条断言一直是绿的，scheduler 却从没问过档位 ——
+// 爱速拍进程起来就把 16 个任务全挂上计时器，其中 13 个是军师的。
+// advisory lock 保证了不会重复执行，所以不是数据事故；但断言与生产行为相反，
+// 这种绿灯比红灯更坏。下面几条盯的就是「scheduler 真的按档位裁」。
+test('爱速拍进程只跑爱速拍自己的定时任务', () => {
+  process.env.SERVICE_PROFILE = 'quickreel';
+  assert.equal(shouldRunSchedulerJob('quickreel'), true);
+  assert.equal(shouldRunSchedulerJob('junshi'), false, '军师的对账扫单不该在这里跑');
+});
+
+test('不写 owner 的任务默认算军师的 —— 漏写不会漏进爱速拍进程', () => {
+  process.env.SERVICE_PROFILE = 'quickreel';
+  assert.equal(shouldRunSchedulerJob(undefined), false);
+});
+
+test('all 档照旧跑全部任务，含爱速拍那三个', () => {
+  delete process.env.SERVICE_PROFILE;
+  // 不对称是故意的：nginx 里 4000 是 4010 的 backup，爱速拍进程挂了，
+  // 军师进程既要接住它的请求，也要接住它的轮询 —— 出片结算和超时退款都在那三个任务里，
+  // 停掉就是用户的钻石退不回来。
+  assert.equal(shouldRunSchedulerJob('quickreel'), true);
+  assert.equal(shouldRunSchedulerJob('junshi'), true);
+  assert.equal(shouldRunSchedulerJob(), true);
 });
 
 test('拼错档位名就起不来，绝不静默退回全量', () => {
@@ -100,4 +126,26 @@ test('quickreel 档装配出来的路由表：爱速拍的面都在，军师的�
   for (const p of ['/api/agents', '/api/sessions', '/api/prescriptions', '/api/admin/', '/api/reports']) {
     assert.ok(!routes.includes(p), `${p} 不该出现在爱速拍进程里`);
   }
+});
+
+/**
+ * 真按档位裁一遍定时任务表。
+ *
+ * 这条是上面那条路由装配用例的姊妹篇，也是 2026-09-11 那个洞的直接补丁：
+ * 路由边界有人验，任务边界没有，于是 scheduler 全量挂了 16 个计时器还没人发现。
+ * 断言的是**裁剪结果**（哪些任务留下了），不是判定函数 —— 判定对了但忘了接线，
+ * 前面几条全绿这条会红。
+ */
+test('quickreel 档裁出来的定时任务表：只剩爱速拍那几个', async (t) => {
+  if ((original ?? '').toLowerCase() !== 'quickreel') {
+    t.skip('需要以 SERVICE_PROFILE=quickreel 启动；见 npm run test:profile');
+    return;
+  }
+  const { scheduledJobsForThisProcess } = await import('../src/services/scheduler.js');
+  const names = scheduledJobsForThisProcess().map((j) => j.name).sort();
+  assert.deepEqual(names, [
+    'avatar-training-notification',   // 数字人训练完成通知
+    'clip-render-notification',       // 出片完成通知 + 失败退钻石（漏跑 = 用户的钱退不回来）
+    'video-maintenance-sweep',        // 超时未提交 / 卡住的 hold 兜底退款
+  ], '爱速拍进程只该有这三个任务；多出来的是军师的，少掉的是爱速拍自己的');
 });

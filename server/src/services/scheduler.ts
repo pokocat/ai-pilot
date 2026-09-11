@@ -29,13 +29,22 @@ import {
   noteSchedulerJobSkipped,
   noteSchedulerJobStarted,
   registerSchedulerJobMetric,
+  setSchedulerJobEnabled,
   setSchedulerMetricsEnabled,
 } from './metrics.js';
+import { shouldRunSchedulerJob, type JobOwner } from '../serviceProfile.js';
 
 export interface ScheduledJob {
   name: string;
   intervalMs: number;
   run: () => Promise<void>;
+  /**
+   * 这个任务归哪个产品。省略 = junshi。
+   *
+   * 默认值是**故意**选 junshi 的：以后有人加任务时不写 owner，它不会悄悄跑进爱速拍进程；
+   * 反过来把默认设成 quickreel，漏写就是边界破了而且没人会发现。
+   */
+  owner?: JobOwner;
 }
 
 const jobs: ScheduledJob[] = [];
@@ -105,6 +114,16 @@ export function runJob(name: string): Promise<void> {
   return exposed;
 }
 
+/**
+ * 本进程按档位实际会挂计时器的那些任务。
+ *
+ * 单独抽出来是为了能被断言：startScheduler 在 NODE_ENV=test 下直接 return，
+ * 用例无从验证裁剪结果 —— 而「裁错了」正是这里最可能出的错。
+ */
+export function scheduledJobsForThisProcess(): ScheduledJob[] {
+  return jobs.filter((j) => shouldRunSchedulerJob(j.owner));
+}
+
 export function startScheduler(): void {
   if (started || process.env.NODE_ENV === 'test') return;
   // 显式停机开关。两个用途：
@@ -119,13 +138,25 @@ export function startScheduler(): void {
   }
   started = true;
   setSchedulerMetricsEnabled(true);
+  // 按档位裁剪：quickreel 档只挂爱速拍自己的任务。
+  // **只裁计时器，不裁注册** —— jobs 数组仍是全量，runJob(name) 照旧能直接驱动任意任务
+  // （用例就是这么跑的）。注册时就裁会让「哪些任务存在」取决于模块被谁先 import，
+  // 那种按加载顺序变化的行为比它要解决的问题更难查。
+  const mine = scheduledJobsForThisProcess();
   for (const job of jobs) {
+    setSchedulerJobEnabled(job.name, mine.includes(job));
+  }
+  for (const job of mine) {
     const t = setInterval(() => { void runJob(job.name); }, job.intervalMs);
     // 不阻止进程退出
     (t as { unref?: () => void }).unref?.();
     timers.push(t);
   }
-  console.log(`[scheduler] started · ${jobs.length} jobs: ${jobs.map((j) => `${j.name}@${Math.round(j.intervalMs / 1000)}s`).join(', ')}`);
+  const skipped = jobs.filter((j) => !mine.includes(j));
+  console.log(`[scheduler] started · ${mine.length} jobs: ${mine.map((j) => `${j.name}@${Math.round(j.intervalMs / 1000)}s`).join(', ')}`);
+  if (skipped.length) {
+    console.log(`[scheduler] 本档位不跑 ${skipped.length} 个任务（归属另一侧）: ${skipped.map((j) => j.name).join(', ')}`);
+  }
 }
 
 export function stopScheduler(): void {
@@ -379,7 +410,7 @@ registerJob({ name: 'plan-expiry-reminder', intervalMs: 2 * 3600_000, run: async
 registerJob({ name: 'prescription-followup-scan', intervalMs: 6 * 3600_000, run: async () => { await scanPrescriptionFollowup(); } });
 // 数字分身训练是石榴云端异步任务；用户离开小程序后由服务端继续轮询。
 // 只扫最近 24h 主动点过“训练好通知我”的账号，不启动新训练、不消耗石榴生成点数。
-registerJob({ name: 'avatar-training-notification', intervalMs: 60_000, run: async () => {
+registerJob({ name: 'avatar-training-notification', owner: 'quickreel', intervalMs: 60_000, run: async () => {
   const result = await scanAvatarTrainingNotifications();
   if (result.scanned || result.failed) {
     console.log(`[scheduler] avatar training notifications: sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
@@ -388,7 +419,7 @@ registerJob({ name: 'avatar-training-notification', intervalMs: 60_000, run: asy
 // 出片同样是云端异步任务：用户退出小程序后由服务端继续推进。
 // 这个 job 还兼着一件更要紧的事 —— settleVideoJob 此前只在小程序轮询 GET /video/jobs/:id 时触发，
 // 用户中途退出的话，出片失败的积分永远退不回来。详见 services/video/renderNotification.ts。
-registerJob({ name: 'clip-render-notification', intervalMs: 60_000, run: async () => {
+registerJob({ name: 'clip-render-notification', owner: 'quickreel', intervalMs: 60_000, run: async () => {
   const result = await scanClipRenderNotifications();
   if (result.settled || result.failed) {
     console.log(`[scheduler] clip render: settled=${result.settled} sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
@@ -398,7 +429,7 @@ registerJob({ name: 'account-erasure-sweep', intervalMs: 5 * 60_000, run: async 
   const completed = await scanDataErasureJobs();
   if (completed) console.log(`[scheduler] account erasure completed: ${completed}`);
 } });
-registerJob({ name: 'video-maintenance-sweep', intervalMs: 5 * 60_000, run: runVideoMaintenanceSweep });
+registerJob({ name: 'video-maintenance-sweep', owner: 'quickreel', intervalMs: 5 * 60_000, run: runVideoMaintenanceSweep });
 // LLM 健康兜底扫描：接管熔断与洪水闸都是**定向**告警，只在各自那个已知故障形态下响。
 // 这一条不问错因、只看错量，堵的是「换个形态又 16 小时没人知道」（2026-08-19：23,303 条报错无人发现）。
 // 只读、内部吞异常，留 LLM_HEALTH_SWEEP=false 一键关停。详见 services/llmHealth.ts。

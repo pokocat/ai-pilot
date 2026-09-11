@@ -51,8 +51,35 @@ export function shouldRegister(group: string, profile: ServiceProfile = serviceP
  * 海报 worker 和成果生成 worker 都是军师的东西，爱速拍进程里跑它们只会白占连接、
  * 抢同一张队列表；更糟的是两个进程同时轮询同一队列时，行为取决于抢锁顺序，
  * 出了问题很难说清是哪个进程干的。爱速拍自己的轮询（段级生成、出片通知）在 scheduler 里，
- * 不在这两个 worker 里。
+ * 不在这两个 worker 里 —— 那一头由 shouldRunSchedulerJob 管。
  */
 export function shouldRunJunshiWorkers(profile: ServiceProfile = serviceProfile()): boolean {
   return profile === 'all';
+}
+
+/** 定时任务归谁。默认 junshi：新加的任务不写 owner 就不会漏进爱速拍进程。 */
+export type JobOwner = 'junshi' | 'quickreel';
+
+/**
+ * 这个定时任务要不要在本进程里跑。
+ *
+ * 2026-09-11 补：上面那条 shouldRunJunshiWorkers 只管住了 app.ts 里注册的两个 worker，
+ * **scheduler 从来没问过档位** —— 爱速拍进程一起来就把 16 个任务全挂上了计时器，
+ * 其中 13 个是军师的（对账扫单、套餐到期提醒、账号注销清理…）。
+ *
+ * 那不是数据事故：executeJob 每轮先抢 `pg_try_advisory_xact_lock`，同一任务同一时刻
+ * 全局只有一个实例真的执行，不会重复发通知或重复结算。但它让边界成了假的 ——
+ * serviceProfile.test.ts 断言「军师的 worker 不在爱速拍进程里跑」，测试绿着，
+ * 生产却在反着做；而且每轮谁执行取决于抢锁先后，出了问题说不清是哪个进程干的。
+ *
+ * 反过来不对称是**故意**的：`all` 档照旧跑全部任务，包括爱速拍那三个。
+ * 因为 nginx 那边也是这么兜的（upstream 里 4000 是 4010 的 backup）—— 爱速拍进程挂了，
+ * 军师进程既接得住它的请求，也接得住它的轮询（出片结算、超时退款都在这里面，
+ * 停掉就是用户的钻石退不回来）。少数派档位收窄，兜底档位保持全量。
+ */
+export function shouldRunSchedulerJob(
+  owner: JobOwner = 'junshi',
+  profile: ServiceProfile = serviceProfile(),
+): boolean {
+  return profile === 'all' || owner === 'quickreel';
 }
