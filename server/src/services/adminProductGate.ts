@@ -57,12 +57,50 @@ const SHARED = [
 /** 爱速拍专属。路由内部还会再查一次（有的要 editor），这里是兜底。 */
 const QUICKREEL = ['/admin/video/', '/admin/clip/'];
 
-/** 这条路径归哪个产品；null = 共享面，不拦。 */
+/**
+ * 归一化成可比的路径。
+ *
+ * 每一步都对应一种绕法：
+ *   · 去 query / hash —— `?` 之后的东西不参与路由
+ *   · 解一次百分号编码 —— `/admin/%76ideo/...`。只解一次：解两次等于把 `%2525` 也当成有效编码，
+ *     那是另一类洞（double-decode）。解不开就用原串，不抛。
+ *   · 折叠重复斜杠 —— `//admin/agents` 不能因为多一个斜杠就不像后台路径
+ *   · 去尾斜杠、转小写
+ */
+function normalizePath(raw: string): string {
+  let p = (raw.split(/[?#]/)[0] ?? raw);
+  try { p = decodeURIComponent(p); } catch { /* 非法编码：按原串比，落到默认产品（拦） */ }
+  p = p.replace(/\/{2,}/g, '/').toLowerCase();
+  if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
+  return p;
+}
+
+/**
+ * 前缀匹配要落在**路径段边界**上。
+ *
+ * `startsWith('/admin/users')` 会把 `/admin/usersomething` 也认成共享面。今天没有这样的路由，
+ * 但这一闸的价值就在于「以后新加的路由默认被拦」，靠「今天恰好没有」撑着等于没有闸。
+ */
+function underPrefix(path: string, prefix: string): boolean {
+  const p = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  if (!path.startsWith(p)) return false;
+  const next = path.charAt(p.length);
+  // prefix 本身以 `-` 收尾（`/admin/ai-`）时，后面接什么都算同一族，不要求边界
+  return next === '' || next === '/' || p.endsWith('-');
+}
+
+/** 看着像不像一条后台路由。归一化之后判断。 */
+export function looksLikeAdminPath(path: string): boolean {
+  const p = normalizePath(path);
+  return p === '/admin' || p.startsWith('/admin/');
+}
+
+/** 这条路径归哪个产品；null = 共享面或根本不是后台路由，两者都不拦。 */
 export function productOfAdminPath(path: string): string | null {
-  const p = (path.split('?')[0] ?? path).toLowerCase();
-  if (!p.startsWith('/admin/') && p !== '/admin') return null; // 不是后台路由，不归这一闸管
-  if (QUICKREEL.some((prefix) => p.startsWith(prefix))) return PRODUCT.quickreel;
-  if (SHARED.some((prefix) => p.startsWith(prefix))) return null;
+  const p = normalizePath(path);
+  if (!looksLikeAdminPath(p)) return null; // 不是后台路由，不归这一闸管
+  if (QUICKREEL.some((prefix) => underPrefix(p, prefix))) return PRODUCT.quickreel;
+  if (SHARED.some((prefix) => underPrefix(p, prefix))) return null;
   return DEFAULT_PRODUCT;
 }
 
@@ -75,8 +113,18 @@ export function productOfAdminPath(path: string): string | null {
  */
 export async function enforceAdminProductAccess(req: FastifyRequest, actor: AdminActor): Promise<void> {
   if (isSuperActor(actor)) return; // 超管隐式拥有全部产品，空转
-  const url = (req.raw.url ?? '').replace(/^\/api/, '');
+  const url = (req.raw.url ?? '').replace(/^\/api(?=\/)/, '');
+
+  // **异常路径一律按「要授权」处理，不是放行。**
+  // 这个函数只会被 requireAdmin 调到，而 requireAdmin 只挂在后台路由插件上 ——
+  // 也就是说，走到这里的请求本来就该长成 /admin/...。长得不像，说明要么路径被做了手脚，
+  // 要么以后有人把这个 hook 挂到了别处。两种情况下「看不懂就放行」都是错的方向。
+  if (!looksLikeAdminPath(url)) {
+    await requireProductAccess(actor, DEFAULT_PRODUCT, 'viewer');
+    return;
+  }
+
   const product = productOfAdminPath(url);
-  if (!product) return;
+  if (!product) return; // 共享面
   await requireProductAccess(actor, product, 'viewer');
 }

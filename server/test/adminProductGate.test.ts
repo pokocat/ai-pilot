@@ -65,6 +65,37 @@ test('大小写与查询串不影响判定 —— 别让 ?x= 或大写绕过去'
   assert.equal(productOfAdminPath('/admin/users?q=x'), null);
 });
 
+// 下面几条都是「看着像共享面 / 看着不像后台路径」的绕法。这一闸的价值全在
+// 「以后新加的路由默认被拦」，靠「今天恰好没有那样的路由」撑着等于没有闸。
+test('前缀必须落在路径段边界上 —— /admin/usersomething 不是 /admin/users', () => {
+  assert.equal(productOfAdminPath('/admin/usersomething'), DEFAULT_PRODUCT);
+  assert.equal(productOfAdminPath('/admin/models-secret'), DEFAULT_PRODUCT);
+  assert.equal(productOfAdminPath('/admin/plansx'), DEFAULT_PRODUCT);
+  // 真的共享面照样放行
+  assert.equal(productOfAdminPath('/admin/users'), null);
+  assert.equal(productOfAdminPath('/admin/users/abc/credits'), null);
+  assert.equal(productOfAdminPath('/admin/users/'), null);
+});
+
+test('多余斜杠不能让一条后台路径看起来不像后台路径', () => {
+  assert.equal(productOfAdminPath('//admin/agents'), DEFAULT_PRODUCT);
+  assert.equal(productOfAdminPath('/admin//agents'), DEFAULT_PRODUCT);
+  assert.equal(productOfAdminPath('///admin///video///ops'), PRODUCT.quickreel);
+});
+
+test('百分号编码不能绕过判定', () => {
+  assert.equal(productOfAdminPath('/%61dmin/agents'), DEFAULT_PRODUCT, 'admin 被编码了');
+  assert.equal(productOfAdminPath('/admin/%76ideo/ops'), PRODUCT.quickreel, 'video 被编码了');
+  // 非法编码不抛，按原串比，落到默认产品（拦），不是放行
+  assert.equal(productOfAdminPath('/admin/%zz'), DEFAULT_PRODUCT);
+});
+
+test('/admin/ai- 这种带连字符的族前缀照常整族命中', () => {
+  for (const p of ['/admin/ai-endpoints', '/admin/ai-routes/x', '/admin/ai-v2', '/admin/ai-dialects']) {
+    assert.equal(productOfAdminPath(p), null, `${p} 是平台基建`);
+  }
+});
+
 /* ── 真打路由 ── */
 
 test('只被授予爱速拍的运营，打不了军师的面', async () => {
@@ -109,6 +140,23 @@ test('超管隐式拥有全部产品，这一闸对他空转', async () => {
 // 今天全平台只有一个超管、没有任何 AdminProductAccess 行，所以这一闸上线零成本。
 // 但「一个授权都没有的 operator」这个状态迟早会出现（新建账号还没发授权），
 // 那时他应该看得见共享面、看不见任何产品面 —— 而不是整个后台白屏。
+// 这个函数只会被 requireAdmin 调到，而 requireAdmin 只挂在后台路由插件上 ——
+// 走到这里的请求本来就该长成 /admin/...。长得不像说明路径被做了手脚，
+// 或者以后有人把 hook 挂到了别处。两种情况「看不懂就放行」都是错的方向。
+test('异常路径按「要授权」处理，不是放行', async () => {
+  const { enforceAdminProductAccess, looksLikeAdminPath } = await import('../src/services/adminProductGate.js');
+  assert.equal(looksLikeAdminPath('/notadmin/x'), false);
+
+  const op = await operator({ product: PRODUCT.quickreel, role: 'viewer' });
+  const acc = await prisma.adminAccount.findUnique({ where: { id: op.id } });
+  const actor = { kind: 'account' as const, id: op.id, role: acc!.role, username: acc!.username };
+  // 一个不像后台路径的 url：有爱速拍授权但没有军师授权 → 按默认产品（军师）拦
+  await assert.rejects(
+    () => enforceAdminProductAccess({ raw: { url: '/notadmin/whatever' } } as never, actor),
+    /权限/,
+  );
+});
+
 test('一个授权都没有的运营：共享面还在，产品面全关', async () => {
   const op = await operator();
   assert.equal((await api('GET', '/api/admin/users', { adminToken: op.token })).status, 200, '共享面不该被关掉');
