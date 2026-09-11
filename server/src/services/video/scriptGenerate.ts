@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type { ClipProject, ClipSegment, ClipShot } from '../../../../shared/contracts';
 import { structuredMetered } from '../../llm/gateway.js';
+import { PRODUCT } from '../products.js';
 import { defaultClipShots } from './scriptChat.js';
 
 /** 一句话上限（与端上输入框一致）。 */
@@ -145,6 +146,9 @@ export async function generateClipScriptAll(project: ClipProject, mode: ScriptAl
     maxTokens: 2_400,
     // 这是用户正盯着等的生成，不是后台抽取——不许落到 aux 小模型（见 gateway.ts allowAux 注释）。
     allowAux: false,
+    // 成本归属：AI 写稿是爱速拍烧的钱。不标的话它会以 kind='aux' 落进「非用户用量消耗」，
+    // 和军师的嵌入 / 重排 / 探活混成一桶，独立运营就答不出「爱速拍的 AI 成本是多少」。
+    usageMeta: { productCode: PRODUCT.quickreel },
   });
   const data = outcome.data as { segments: { no: number; text: string }[] } | null;
   if (!data) {
@@ -211,6 +215,7 @@ export async function rewriteClipSegment(project: ClipProject, no: number | null
     maxTokens: 900,
     // 用户正盯着编辑框等这一句，不许落到 aux 小模型（见 gateway.ts allowAux 注释）。
     allowAux: false,
+    usageMeta: { productCode: PRODUCT.quickreel },
   });
   const data = outcome.data as { text: string } | null;
   const text = clean(data?.text, 180);

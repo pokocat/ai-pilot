@@ -1236,6 +1236,15 @@ model TokenUsage {
   totalTokens  Int      @default(0) // = input + output，便于 SUM
   costMicros   Int      @default(0) // 估算成本，单位 1e-6 元（微元），整数防浮点漂移
   creditCost   Int      @default(0) // 本次扣的点；P1 恒为 0，P2 接按 token 扣费时填实际
+  /// 这次调用算在哪个产品头上（services/products.ts 的 PRODUCT），与 CreditLedger.productCode 同一套。
+  ///
+  /// 独立运营要能回答「爱速拍的 AI 成本是多少」。在这一列之前答不了：爱速拍的 AI 写稿走
+  /// structuredMetered，不带 usageMeta，落库时 kind='aux'、userId 为空，和军师的嵌入 / 重排 /
+  /// 探活混在同一个「非用户用量消耗」桶里，分不出来。
+  ///
+  /// 可空只为历史行。新写入由调用方显式给；给不出的（平台级基建调用，如嵌入、探活）留空，
+  /// 那本来就不属于任何单一产品，硬塞一个值是编造。
+  productCode  String?
   createdAt    DateTime @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
@@ -1244,6 +1253,8 @@ model TokenUsage {
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])
   @@index([model, createdAt])
+  // 分产品的成本看板（运营后台按产品视角切 Token 成本）。没有它就得全表扫。
+  @@index([productCode, createdAt])
   @@map("token_usage")
 }
 

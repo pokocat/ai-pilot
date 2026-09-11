@@ -56,6 +56,17 @@ export interface ProductLedgerSlice {
   spent: number;
   /** 流水条数，用来判断这个产品有没有在动。 */
   entries: number;
+  /**
+   * 这个产品真花掉的 AI 成本（微元，1e-6 元）。
+   *
+   * 与上面三个数不是一回事：granted / spent 是**钻石**（我们自己的内部计价单位），
+   * 这一个是**人民币**（付给模型供应商的真钱）。独立运营的毛利要靠这两者一起看 ——
+   * 卖出多少钻石、烧掉多少真钱。
+   *
+   * 只统计显式标了归属的调用。平台级基建（嵌入 / 重排 / 探活）不属于任何单一产品，
+   * 落在 `unattributed` 里，不摊到各产品头上 —— 摊法有很多种，选任何一种都是编的。
+   */
+  costMicros: number;
 }
 
 /**
@@ -88,7 +99,7 @@ export async function productLedgerSlices(
   // 是「每条语句各取一次快照」，同一个事务里的三条语句照样会看见不同的数据，
   // 包起来只是看着安全。RepeatableRead 才是在事务的第一条语句取一次快照、后续复用。
   // 用交互式事务而不是数组式：数组式在 groupBy 的可选 where 字段上类型对不齐。
-  const { positive, negative, counts } = await prisma.$transaction(async (tx) => ({
+  const { positive, negative, counts, cost } = await prisma.$transaction(async (tx) => ({
     positive: await tx.creditLedger.groupBy({
       by: ['productCode'], where: { ...window, delta: { gt: 0 } }, _sum: { delta: true },
     }),
@@ -98,16 +109,27 @@ export async function productLedgerSlices(
     counts: await tx.creditLedger.groupBy({
       by: ['productCode'], where: window, _count: { _all: true },
     }),
+    // AI 成本来自另一张表（token_usage），同样进这个快照 —— 否则「钻石卖出」和「真钱成本」
+    // 会取自两个时刻，毛利在刷新之间来回跳。
+    cost: await tx.tokenUsage.groupBy({
+      by: ['productCode'], where: window, _sum: { costMicros: true },
+    }),
   }), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   const key = (code: string | null) => code ?? 'unattributed';
   const granted = new Map(positive.map((r) => [key(r.productCode), r._sum.delta ?? 0]));
   const spent = new Map(negative.map((r) => [key(r.productCode), Math.abs(r._sum.delta ?? 0)]));
-  return counts
-    .map((r) => ({
-      productCode: key(r.productCode),
-      granted: granted.get(key(r.productCode)) ?? 0,
-      spent: spent.get(key(r.productCode)) ?? 0,
-      entries: r._count._all,
+  const costMicros = new Map(cost.map((r) => [key(r.productCode), r._sum.costMicros ?? 0]));
+  // 行集是两张表的**并集**：一个产品可能这段时间只烧了 AI 成本（写稿）而没有任何钻石流水
+  // （用户还没点生成），只按 credit_ledger 取行会让它整行消失，成本跟着隐身。
+  const codes = new Set([...counts.map((r) => key(r.productCode)), ...costMicros.keys()]);
+  const entries = new Map(counts.map((r) => [key(r.productCode), r._count._all]));
+  return [...codes]
+    .map((code) => ({
+      productCode: code,
+      granted: granted.get(code) ?? 0,
+      spent: spent.get(code) ?? 0,
+      entries: entries.get(code) ?? 0,
+      costMicros: costMicros.get(code) ?? 0,
     }))
     .sort((a, b) => a.productCode.localeCompare(b.productCode));
 }

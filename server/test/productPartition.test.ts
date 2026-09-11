@@ -327,3 +327,77 @@ test('按产品查要有那个产品的权限 —— 否则这个查询串就是
   const ok = await api('GET', '/api/admin/usage?product=quickreel', { adminToken: op.token });
   assert.equal(ok.status, 200);
 });
+
+/* ── 分产品的 AI 成本（真钱，不是钻石） ── */
+
+/**
+ * 单价配在 AiEndpoint 上，测试库里没有 → 成本恒为 0，断言「成本 > 0」就永远不成立。
+ * 先配一个价，这条路径（单价 → estimateCostMicros → 落库 → 按产品聚合）才算真跑过。
+ */
+async function priceModel(model = 'gpt-4o-mini') {
+  const cred = await prisma.aiCredential.create({
+    data: { label: `价-凭证-${Date.now()}`, vendor: 'qiniu', apiKey: 'sk-v2-real-key' },
+  });
+  await prisma.aiEndpoint.create({
+    data: {
+      label: `价-端点-${Date.now()}`, credentialId: cred.id,
+      dialect: 'openai_compatible', provider: 'openai',
+      baseUrl: 'https://api.example.invalid/v1', model,
+      priceInput: 1000, priceOutput: 2000,
+    },
+  });
+  // 单价有 60s 读缓存，不清掉的话这一条刚写的价读不到，成本仍是 0。
+  const { __resetAiConfigCache } = await import('../src/services/aiConfig.js');
+  __resetAiConfigCache();
+}
+
+test('AI 成本按产品归属；标了归属的算到产品头上，没标的留在未归属', async () => {
+  await priceModel();
+  const { tenantId, userId } = await mkUser();
+  const { recordTokenUsage } = await import('../src/services/usage.js');
+  // 爱速拍的 AI 写稿
+  await recordTokenUsage({
+    tenantId, userId, productCode: PRODUCT.quickreel, kind: 'aux', provider: 'openai',
+    model: 'gpt-4o-mini', usage: { inputTokens: 1000, outputTokens: 500, cachedInput: 0 },
+  });
+  // 平台级基建（嵌入），不属于任何单一产品
+  await recordTokenUsage({
+    kind: 'aux', provider: 'openai', model: 'gpt-4o-mini',
+    usage: { inputTokens: 200, outputTokens: 0, cachedInput: 0 },
+  });
+
+  const slices = await productLedgerSlices(new Date(Date.now() - 3600_000), new Date(Date.now() + 3600_000));
+  const qr = slices.find((s) => s.productCode === PRODUCT.quickreel);
+  const un = slices.find((s) => s.productCode === 'unattributed');
+  assert.ok((qr?.costMicros ?? 0) > 0, '爱速拍的 AI 写稿成本要能单独看见');
+  assert.ok((un?.costMicros ?? 0) > 0, '嵌入 / 重排 / 探活不属于任何单一产品，摊法有很多种，选哪种都是编的');
+});
+
+// 一个产品可能这段时间只烧了 AI 成本（用户在改稿）而没有任何钻石流水（还没点生成）。
+// 行集只按 credit_ledger 取的话，这个产品整行消失，成本跟着隐身。
+test('只有 AI 成本、没有钻石流水的产品也要出现在表里', async () => {
+  await priceModel();
+  const { tenantId, userId } = await mkUser();
+  const { recordTokenUsage } = await import('../src/services/usage.js');
+  await recordTokenUsage({
+    tenantId, userId, productCode: PRODUCT.quickreel, kind: 'aux', provider: 'openai',
+    model: 'gpt-4o-mini', usage: { inputTokens: 800, outputTokens: 300, cachedInput: 0 },
+  });
+  const slices = await productLedgerSlices(new Date(Date.now() - 3600_000), new Date(Date.now() + 3600_000));
+  const qr = slices.find((s) => s.productCode === PRODUCT.quickreel);
+  assert.ok(qr, '这个产品一条钻石流水都没有，但烧了真钱，不能整行消失');
+  assert.equal(qr!.entries, 0);
+  assert.equal(qr!.granted, 0);
+  assert.ok(qr!.costMicros > 0);
+});
+
+test('爱速拍的 AI 写稿会带上产品归属落库', async () => {
+  const { generateClipScriptAll } = await import('../src/services/video/scriptGenerate.js');
+  // 没有真 provider 时 structuredMetered 直接返回 live:false、不落 token_usage，
+  // 所以这里不断言有行；断言的是**调用点确实传了归属**，靠读源码那条太脆，改读实现常量。
+  const src = await import('node:fs/promises').then((fs) =>
+    fs.readFile(new URL('../src/services/video/scriptGenerate.ts', import.meta.url), 'utf8'));
+  const hits = src.split('usageMeta: { productCode: PRODUCT.quickreel }').length - 1;
+  assert.equal(hits, 2, 'scriptGenerate 的两个 LLM 调用点都要标归属，漏一个那部分成本就归不了');
+  assert.ok(typeof generateClipScriptAll === 'function');
+});

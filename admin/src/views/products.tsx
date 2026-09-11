@@ -10,7 +10,7 @@ import { useCallback, useState } from 'react';
 import { api, type AdminAccountItem } from '../api';
 import { PageHead, ViewState, EmptyState } from '../components';
 import { useResource } from '../useResource';
-import { fmtTime } from '../format';
+import { fmtTime, fmtCny } from '../format';
 // 产品码 → 中文名与 nav 共用一份：左栏的视角选择器和这一屏的表头必须叫同一个名字，
 // 两处各维护一张表迟早会对不上。
 import { productLabel as label } from '../nav';
@@ -49,6 +49,10 @@ export function ProductsView({ toast, isSuper }: { toast: (m: string) => void; i
                   <span>消耗（钻石）</span>
                 </div>
                 <div>
+                  <b>{fmtCny(view.slices.reduce((s, r) => s + r.costMicros, 0))}</b>
+                  <span>AI 成本（真钱）</span>
+                </div>
+                <div>
                   <b>{view.slices.reduce((s, r) => s + r.entries, 0).toLocaleString()}</b>
                   <span>流水条数</span>
                 </div>
@@ -66,16 +70,24 @@ export function ProductsView({ toast, isSuper }: { toast: (m: string) => void; i
                     <div className="usage-num">{row.spent.toLocaleString()}</div>
                   </div>
                   <div className="usage-meta">
-                    卖出 {row.granted.toLocaleString()} · 消耗 {row.spent.toLocaleString()} · {row.entries.toLocaleString()} 条流水
-                    {row.productCode === 'unattributed' && ' · 本列上线前的旧流水，无从追认归属'}
+                    卖出 {row.granted.toLocaleString()} 钻 · 消耗 {row.spent.toLocaleString()} 钻 ·
+                    {' '}AI 成本 {fmtCny(row.costMicros)} · {row.entries.toLocaleString()} 条流水
+                    {row.productCode === 'unattributed'
+                      && ' · 本列上线前的旧流水 + 不属于任何单一产品的平台基建（嵌入 / 重排 / 探活）'}
                   </div>
                 </div>
               ))}
 
-              {/* 这两个词容易被理解反，所以写在表下面，而不是靠列名硬扛 */}
+              {/* 这几个词容易被理解反，所以写在表下面，而不是靠列名硬扛 */}
               <div className="usage-meta">
                 钱包是一个：用户在军师充的钻石，在爱速拍也花得动。「卖出」= 这批钻石从哪个产品的充值入口卖出去的；
                 「消耗」= 这批钻石花在哪个产品上。所以军师打通爱速拍出片不需要跨钱包转账，收入和消耗各归各的，两边的账都对得上。
+                <br />
+                <b>「AI 成本」和前两个不是同一种单位</b> —— 前两个是钻石（我们自己的计价单位），
+                它是人民币（付给模型供应商的真钱）。独立运营的毛利要两者一起看：卖出多少钻石、烧掉多少真钱。
+                平台基建（嵌入 / 重排 / 探活）不属于任何单一产品，落在「未归属」里，不摊到各产品头上 ——
+                摊法有很多种，选哪种都是编的。
+                <br />
                 窗口 {fmtTime(view.from)} 起{view.to ? `，到 ${fmtTime(view.to)}` : '至今'}。
               </div>
             </>

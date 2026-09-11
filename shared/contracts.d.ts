@@ -3062,6 +3062,14 @@ export interface AdminProductLedgerSlice {
   granted: number;
   spent: number;
   entries: number;
+  /**
+   * 这个产品真花掉的 AI 成本，微元（1e-6 元）。
+   *
+   * 与 granted/spent 不是同一种单位：那两个是**钻石**（内部计价），这个是**人民币**（付给
+   * 模型供应商的真钱）。独立运营的毛利要两者一起看。平台级基建（嵌入 / 重排 / 探活）
+   * 不属于任何单一产品，落在 unattributed，不摊到各产品头上。
+   */
+  costMicros: number;
 }
 
 export interface AdminProductLedgerView {

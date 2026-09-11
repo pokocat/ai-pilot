@@ -15,6 +15,11 @@ export interface UsageMeta {
   userId?: string | null;
   sessionId?: string | null;
   agentKey?: string | null;
+  /**
+   * 这次调用算在哪个产品头上。给不出就别给 —— 平台级基建调用（嵌入 / 重排 / 探活）
+   * 本来就不属于任何单一产品，硬塞一个值是编造成本归属。
+   */
+  productCode?: string | null;
   ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
   // 运营沙盒试跑：仍记诊断 trace，且**按 kind='sandbox' 照实写 token_usage**（provider 真的收了这笔钱）。
   // 只是不挂 userId/sessionId、creditCost 恒 0，用户用量口径本就只聚合 chat/deliverable，自然过滤。
@@ -57,6 +62,7 @@ export async function recordTokenUsage(
       data: {
         tenantId: args.tenantId ?? null,
         userId: args.userId ?? null,
+        productCode: args.productCode ?? null,
         sessionId: args.sessionId ?? null,
         agentKey: args.agentKey ?? null,
         kind: args.kind,
