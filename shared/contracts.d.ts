@@ -3764,6 +3764,23 @@ export interface ClipGenerationPricing {
 }
 
 /** 供应商对账的一类行数（明细不透传到后台 —— 后台只需要知道有几条、要不要去处理）。 */
+/** 两边都有 —— 正常。 */
+export interface ClipVendorMatched {
+  engineRef: string; vendorTitle: string; localId: string;
+  ownerUserId: string; localName: string; engineStatus: string;
+}
+/** 石榴有、我方无。**只有这两个字段** —— 本地压根没这条记录，所以没有本地名字、也没有封面。 */
+export interface ClipVendorOrphan { engineRef: string; vendorTitle: string }
+/** 我方有、石榴无 —— 上游被删了本地没同步。 */
+export interface ClipVendorDangling {
+  localId: string; ownerUserId: string; localName: string;
+  engineRef: string; engineStatus: string; updatedAt: string;
+}
+/** reason: training=还没拿到 engineRef（训练中/失败）；mock=mock 时代残留。 */
+export interface ClipVendorUnmatchable {
+  localId: string; ownerUserId: string; localName: string;
+  engineRef: string; engineStatus: string; reason: string;
+}
 export interface ClipVendorReconcile {
   /** 非空 = 这一类没查成。绝不能把查失败显示成「0 条，一切正常」。 */
   error?: string | null;
@@ -3771,12 +3788,21 @@ export interface ClipVendorReconcile {
   vendorCount?: number | null;
   /** 我方库里的对象数。 */
   localCount: number;
-  matchedCount: number;
-  /** 供应商有、我们没有。每个月照样按它收钱。 */
-  orphanCount: number;
+  /**
+   * ⚠️ 以下四项服务端给的是**明细数组**，不是计数。
+   *
+   * 这里曾经写成 `matchedCount` / `orphanCount` 之类的数字字段 —— 那几个字段从来不存在。
+   * 前端拿到 undefined，界面上出现「NaN 条对不上」和空白的「匹配  条」。
+   * 类型是契约，写错了 TS 不报错（服务端是 Java，不参与这份 .d.ts 的校验），
+   * 只能对着真实回包核。真源：ClipVendorDtos.ReconcileDto。
+   */
+  matched: ClipVendorMatched[];
+  /** 供应商有、我们没有。白占槽位，照样按它收钱，可安全清理。 */
+  orphan: ClipVendorOrphan[];
   /** 我们有、供应商没有。用户点进去会失败。 */
-  danglingCount: number;
-  unmatchableCount: number;
+  dangling: ClipVendorDangling[];
+  /** 不参与对账的本地行，单列只为解释「为什么本地行数对不上」。 */
+  unmatchable: ClipVendorUnmatchable[];
 }
 
 /**
