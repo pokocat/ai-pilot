@@ -91,6 +91,15 @@ test('每一屏都至少属于一个视角 —— 不会有谁都看不见的孤
   }
 });
 
+// 撤掉的四屏（clipops / vendor / templates / clone）留下一批已分享的 hash 链接。
+// App.tsx 的兜底是 findSection 返回 undefined → invalid → 跳回概览；
+// 这里盯住 findSection 这一半：它必须返回 undefined，而不是抛或返回一个半成品。
+test('已撤掉那四屏的 hash 链接查不到分区（App 据此兜回概览，不白屏）', () => {
+  for (const k of ['clipops', 'vendor', 'templates', 'clone']) {
+    assert.equal(findSection(k), undefined, `#/${k} 还能查到分区，撤得不干净`);
+  }
+});
+
 // 爱速拍的四屏运营面（出片对账 / 供应商 / 模板货架 / 爱速拍定价）2026-09-11 撤出了这个后台 ——
 // 它要单独做自己的控制台。所以现在爱速拍视角下**一个专属屏都没有**，只剩共享面。
 // 这不是坏事，但要写明白：否则下次有人看见「爱速拍视角好空」会以为是过滤写错了。
