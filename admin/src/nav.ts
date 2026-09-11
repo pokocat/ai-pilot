@@ -149,7 +149,7 @@ export const NAV_SECTIONS: NavSection[] = [
   // 当初不单开一项的理由是「配置组已 8 项，顶到 DESIGN.md 的拆组上限」——
   // 挪到商品组之后这条不再是问题（配置仍 8 项，商品 4 项）。加了产品视角后规则也要重述：
   // 要守的是**每个视角下**一组不超 8 项，不是所有视角叠加后的总数（见 nav.test.ts）。
-  { key: 'clone', products: ['quickreel'], label: '克隆定价', hint: '数字人形象与声音的训练单价（钻石）', icon: 'crown', group: 'catalog', aliases: ['克隆', '克隆定价', '数字人', '形象', '声音', '音色', '训练价格', '钻石单价', '爱速拍', 'clone', 'pricing', 'avatar', 'voice'] },
+  { key: 'clone', products: ['quickreel'], label: '爱速拍定价', hint: '生成六档（只读）+ 数字人与声音的训练单价', icon: 'crown', group: 'catalog', aliases: ['克隆', '克隆定价', '定价', '单价', '数字人', '形象', '声音', '音色', '训练价格', '钻石单价', '出片价', '合成', '配音', '爱速拍', 'clone', 'pricing', 'avatar', 'voice'] },
   { key: 'eco', products: ['junshi'], label: '生态工具', hint: '可开方的外部工具注册表', icon: 'spark', group: 'catalog', aliases: ['生态', '外部工具', 'eco', '开方'] },
 
   // —— 配置（平台级可写项） ——

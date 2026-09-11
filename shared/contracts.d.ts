@@ -3725,3 +3725,24 @@ export interface ClipAdminTemplate {
   segmentCount: number;
   creditHint?: number | null;
 }
+
+/**
+ * 爱速拍的六档生成单价（钻石）。**只读** —— 配在 AIStar 的 Spring 配置里，后台改不了。
+ *
+ * 键名与小程序 config.js 的 PRICING 一字对齐：改名端上不报错，只会静默算出 NaN。
+ * 端上与服务端算出的报价必须逐分钱一致，不一致就是每次生成都 409。
+ */
+export interface ClipGenerationPricing {
+  /** 数字人出镜，每秒。 */
+  creditPerAvatarSecond: number;
+  /** 文生图，每张。 */
+  creditPerImage: number;
+  /** 文生视频，每秒。 */
+  creditPerT2vSecond: number;
+  /** 图生视频，每秒。 */
+  creditPerI2vSecond: number;
+  /** 合成整片，每次。 */
+  creditPerAssemble: number;
+  /** 配音，每千字（全片一次取整，不按镜摊 —— 按镜摊十个短镜头能把同样字数收成十倍）。 */
+  creditPerKChar: number;
+}

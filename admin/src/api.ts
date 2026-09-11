@@ -307,11 +307,12 @@ import type { AdminImpersonateResult } from '../../shared/contracts';
 import type {
   AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
   AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
+  ClipGenerationPricing,
 } from '../../shared/contracts';
 // —— 爱速拍 · 出片对账台 / 模板货架 ——
 export type {
   AdminClipOpsView, AdminClipHoldListView, AdminClipHoldItem, AdminClipReconcileResult,
-  AdminClipHoldStatusSlice, ClipAdminTemplate,
+  AdminClipHoldStatusSlice, ClipAdminTemplate, ClipGenerationPricing,
 } from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
@@ -651,6 +652,8 @@ export const api = {
   // 模板就是爱速拍的首页，上下架是最高频的运营动作。只做看和上下架：
   // 创建与整体编辑是内容创作（scriptSkeleton / timeline），不在后台做半吊子表单。
   clipTemplates: () => req<ClipAdminTemplate[]>('/admin/video/templates'),
+  // 六档生成单价：**只读**，配在 AIStar 的 Spring 配置里，后台改不了（见契约注释）。
+  clipGenerationPricing: () => req<ClipGenerationPricing>('/admin/video/generation-pricing'),
   // 仅 owner/master（与改价同级：直接改变小程序首页看得到什么）。
   setClipTemplateStatus: (id: string, status: 'published' | 'draft') =>
     req<ClipAdminTemplate>(`/admin/video/templates/${encodeURIComponent(id)}/status`, 'PUT', { status }),

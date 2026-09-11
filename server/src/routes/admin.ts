@@ -49,7 +49,7 @@ import {
 import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
 import {
   CLIP_OPS_PRODUCT, UNANCHORED_STATUSES, clipOpsSummary, holdStatusLabel, listClipHolds, normalizeHoldStatus,
-  listClipTemplates, setClipTemplateStatus,
+  listClipTemplates, setClipTemplateStatus, clipGenerationPricing,
 } from '../services/video/opsConsole.js';
 // 手工对单复用定时任务那条判定路径，不另写一套 —— 两套规则迟早分叉。
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
@@ -100,7 +100,7 @@ import type {
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
-  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
+  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate, ClipGenerationPricing,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -1698,6 +1698,18 @@ export async function adminRoutes(app: FastifyInstance) {
       });
       return row;
     });
+
+  /**
+   * 六档生成单价（只读）。配在 AIStar 的 Spring 配置里，后台改不了 —— 见
+   * services/video/opsConsole.ts 的 clipGenerationPricing。至少让运营看得见：
+   * 连单价是多少都不知道，就没法判断「这个价对不对」。
+   */
+  app.get('/admin/video/generation-pricing', async (req, reply): Promise<ClipGenerationPricing | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    try { return await clipGenerationPricing(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
 
   app.get('/admin/video/clone-pricing', async (req, reply): Promise<AdminClonePricing | undefined> => {
     // 爱速拍的面：非超管要被授予 quickreel 才看得到

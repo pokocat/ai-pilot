@@ -12,6 +12,7 @@
 // 修复动作复用定时任务那条路径，不另写一套判定。
 import type {
   AdminClipOpsView, AdminClipHoldItem, AdminClipHoldListView, ClipAdminTemplate,
+  ClipGenerationPricing,
 } from '../../../../shared/contracts';
 import { prisma } from '../../db.js';
 import { aidramaJson, type VideoGatewayIdentity } from './aidramaGateway.js';
@@ -174,4 +175,22 @@ export async function setClipTemplateStatus(id: string, status: 'published' | 'd
     `/api/service/clip/admin/templates/${encodeURIComponent(id)}/status`, ADMIN_SENTINEL,
     { method: 'PUT', body: { status }, timeoutCapMs: 15_000 },
   );
+}
+
+
+/**
+ * 爱速拍的六档生成单价（只读）。
+ *
+ * 这六个数**配在 AIStar 的 Spring 配置里**（ClipProperties → application.yml / 环境变量），
+ * 不是数据库，所以后台改不了 —— 改它要改目标机上的配置再重启 AIStar。
+ *
+ * 本仓的定价铁律是「会影响真实用户的对外数据归运营后台，代码不许当真相源」
+ * （见 services/video/pricing.ts 顶部）。这六档今天不满足那条规矩，这是一笔明账。
+ * 把它做成可改需要在 AIStar 侧加表 + 迁移 + 覆盖优先级 + 缓存失效，还要保证端上与服务端
+ * 算出的报价仍然逐分钱一致（不一致就是每次生成都 409），值得单独一轮来做。
+ *
+ * 在那之前，至少让运营**看得见**：不知道单价是多少，连「这个价对不对」都没法判断。
+ */
+export async function clipGenerationPricing(): Promise<ClipGenerationPricing> {
+  return aidramaJson<ClipGenerationPricing>('/api/me/clip/pricing', ADMIN_SENTINEL, { timeoutCapMs: 10_000 });
 }

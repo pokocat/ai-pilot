@@ -267,6 +267,45 @@ function cloneOrderWarnings(d: CloneDraft): string[] {
 }
 
 /**
+ * 六档生成单价（只读）。
+ *
+ * 放在克隆定价这一屏上：运营心里的问题是「爱速拍怎么收费」，那是六档生成 + 四档克隆
+ * 一共十个数，分两屏只会让人以为看全了。可改的和不可改的摆在一起，但**必须写明哪些改不了
+ * 以及为什么** —— 不写的话，运营会一直找那个不存在的编辑按钮。
+ *
+ * 这六个数配在 AIStar 的 Spring 配置里，不是数据库。本仓的定价铁律是「对外定价数据归运营
+ * 后台，代码不许当真相源」（见 services/video/pricing.ts），这六档今天不满足，是一笔明账。
+ */
+function GenerationPricingNote() {
+  const res = useResource(api.clipGenerationPricing, []);
+  const p = res.data;
+  return (
+    <div className="pad">
+      <div className="sec-h">
+        <span className="t">生成单价（只读）</span>
+        <span className="s">配在出片服务的配置里，不在数据库 —— 这一屏改不了，改它要改配置并重启出片服务</span>
+      </div>
+      {res.error && !p && <div className="ai-note">读不到当前生成单价：{res.error}。下面的克隆定价不受影响。</div>}
+      {p && (
+        <div className="usage-summary">
+          <div><b>{p.creditPerAvatarSecond}</b><span>数字人 / 秒</span></div>
+          <div><b>{p.creditPerKChar}</b><span>配音 / 千字</span></div>
+          <div><b>{p.creditPerImage}</b><span>文生图 / 张</span></div>
+          <div><b>{p.creditPerT2vSecond}</b><span>文生视频 / 秒</span></div>
+          <div><b>{p.creditPerI2vSecond}</b><span>图生视频 / 秒</span></div>
+          <div><b>{p.creditPerAssemble}</b><span>合成整片 / 次</span></div>
+        </div>
+      )}
+      <div className="usage-meta">
+        端上与服务端必须按同一组数算出同一个报价，差一分钱就是每次生成都 409 ——
+        这也是它现在只能跟着配置走、不能在后台随手改的原因之一。
+        要把它挪进后台，得在出片服务侧加表 + 迁移 + 覆盖优先级 + 缓存失效，值得单独一轮来做。
+      </div>
+    </div>
+  );
+}
+
+/**
  * 爱速拍 · 克隆定价。
  *
  * 2026-09-11 从「配置 · 功能开关」页尾搬出来独立成屏。原来它接在军师的合规降级开关、
@@ -324,6 +363,7 @@ export function ClonePricingView({ toast, isSuper }: { toast: (m: string) => voi
   return (
     <>
       <PageHead k="clone" res={res} badge={res.data ? (res.data.configured ? '已核定' : '兜底价') : undefined} />
+      <GenerationPricingNote />
       <ViewState res={res} skeleton="rows">
         {(p: AdminClonePricing) => !draft ? null : (
           <div className="pad">
