@@ -13,7 +13,7 @@ import {
   api, type AdminClipHoldItem, type AdminClipOpsView, type AdminClipHoldListView,
   type ClipAdminTemplate, type ClipVendorOverview, type ClipVendorReconcile,
 } from '../api';
-import { PageHead, ViewState, EmptyState, ErrorState, Skeleton, Pager, ConfirmDialog, type ConfirmSpec } from '../components';
+import { PageHead, ViewState, EmptyState, ErrorState, Skeleton, Pager, ConfirmDialog, Switch, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
 
@@ -193,6 +193,7 @@ export function ClipOpsView({ toast, isSuper }: { toast: (m: string) => void; is
 export function ClipTemplatesView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const res = useResource(useCallback(() => api.clipTemplates(), []), []);
   const [busy, setBusy] = useState('');
+  const [saveOpen, setSaveOpen] = useState(false);
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
 
   const toggle = (t: ClipAdminTemplate) => {
@@ -230,10 +231,19 @@ export function ClipTemplatesView({ toast, isSuper }: { toast: (m: string) => vo
       />
       <div className="pad">
         <div className="usage-meta">
-          模板是爱速拍的首页货架，用户进来第一屏就是挑它。这里只管**看和上下架** ——
-          文案骨架、时间线、片尾这些是内容创作产物，不做成表单：一个字段没填对就可能把配好的
-          分镜清掉。新建模板与整体编辑走内容侧导入。
+          模板是爱速拍的首页货架，用户进来第一屏就是挑它。
+          <b>建模板的方式是「把自己做好的草稿存下来」，不是填表</b> ——
+          在小程序里把片子做顺，回这儿一键沉淀，服务端会把你自己的数字人、声音和上传素材剥干净。
+          逐字段的整体编辑仍走内容侧。
         </div>
+        {isSuper && (
+          <div className="filter-bar">
+            <button type="button" className="mini-btn primary" onClick={() => setSaveOpen((v) => !v)}>
+              {saveOpen ? '收起' : '把一条草稿存成模板'}
+            </button>
+          </div>
+        )}
+        {isSuper && saveOpen && <SaveAsTemplateForm toast={toast} onDone={() => { setSaveOpen(false); res.reload(); }} />}
         {/* 读失败绝不能长成「货架是空的」—— 那会让人以为模板被清了，跑去重新导一遍 */}
         <ViewState res={res}>
           {(list: ClipAdminTemplate[]) => (
@@ -372,5 +382,93 @@ export function ClipVendorView() {
         </ViewState>
       </div>
     </>
+  );
+}
+
+
+/**
+ * 把一条草稿存成模板。
+ *
+ * 为什么要填一个账号 id：后台账号和 C 端账号是两套体系，后台不知道「你」在小程序里是谁。
+ * 而上游只让存**自己的**草稿（属主校验在出片服务侧），所以这里必须显式指明属主。
+ * 填自己的那个 C 端账号即可 —— 在「用户」那一屏能查到 id。
+ *
+ * 表单只收「这套模板叫什么、给谁看」这几件事。内容（分段、时长、画面提示）来自那条草稿，
+ * 不在这里编辑：做成表单的话，一个字段没填对就可能把配好的分镜清掉。
+ */
+function SaveAsTemplateForm({ toast, onDone }: { toast: (m: string) => void; onDone: () => void }) {
+  const [f, setF] = useState({
+    userId: '', projectId: '', name: '', industry: '', themeKey: '', description: '', keepText: true,
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (p: Partial<typeof f>) => setF((v) => ({ ...v, ...p }));
+  const ready = f.userId.trim() && f.projectId.trim() && f.name.trim()
+    && f.industry.trim() && f.themeKey.trim() && f.description.trim();
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const row = await api.clipTemplateFromProject({
+        userId: f.userId.trim(), projectId: f.projectId.trim(), name: f.name.trim(),
+        industry: f.industry.trim(), themeKey: f.themeKey.trim(), description: f.description.trim(),
+        keepText: f.keepText,
+      });
+      // 存完是草稿，不是上架。说清楚下一步，否则运营会以为已经推给用户了。
+      toast(`已存成模板「${row.name}」· 还是未上架，确认没问题再点上架`);
+      onDone();
+    } catch (e) {
+      toast((e as Error)?.message || '存不成，请稍后重试');
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="crd new-agent">
+      <div className="ai-field">
+        <div className="ai-fl">草稿属主的账号 id</div>
+        <input className="ai-input" value={f.userId} onChange={(e) => set({ userId: e.target.value })}
+          placeholder="在「用户」那一屏查你自己的 id" />
+        <div className="ai-note">后台账号和小程序账号是两套，所以要指明这条草稿是谁的。只能存自己的草稿。</div>
+      </div>
+      <div className="ai-field">
+        <div className="ai-fl">草稿 id</div>
+        <input className="ai-input" value={f.projectId} onChange={(e) => set({ projectId: e.target.value })}
+          placeholder="cp_xxxx" />
+      </div>
+      <div className="ai-field">
+        <div className="ai-fl">模板名</div>
+        <input className="ai-input" value={f.name} onChange={(e) => set({ name: e.target.value })}
+          placeholder="门店一天" />
+      </div>
+      <div className="ai-field">
+        <div className="ai-fl">行业</div>
+        <input className="ai-input" value={f.industry} onChange={(e) => set({ industry: e.target.value })}
+          placeholder="本地生活" />
+      </div>
+      <div className="ai-field">
+        <div className="ai-fl">主题标识</div>
+        <input className="ai-input" value={f.themeKey} onChange={(e) => set({ themeKey: e.target.value })}
+          placeholder="daily" />
+      </div>
+      <div className="ai-field">
+        <div className="ai-fl">一句话说明</div>
+        <input className="ai-input" value={f.description} onChange={(e) => set({ description: e.target.value })}
+          placeholder="适合门店老板讲今天发生了什么" />
+      </div>
+      <div className="ai-field">
+        <Switch checked={f.keepText} onChange={(v) => set({ keepText: v })} label="保留示范文案" />
+        <div className="ai-note">
+          保留：用户拿到模板时每段都带你写好的示范文案，改着用。
+          关掉：只留骨架（角色、时长、画面提示），正文清空，用户从头写。
+        </div>
+      </div>
+      <div className="ai-note">
+        你的数字人、声音、自己上传的素材都不会跟着走 —— 由出片服务在存的时候剥掉。
+        预置素材（平台自有的片尾、空镜）会留着。
+      </div>
+      <div className="ai-actions">
+        <button className="mini-btn primary" disabled={!ready || busy} onClick={save}>存成模板（未上架）</button>
+      </div>
+    </div>
   );
 }

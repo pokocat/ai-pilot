@@ -12,7 +12,7 @@
 // 修复动作复用定时任务那条路径，不另写一套判定。
 import type {
   AdminClipOpsView, AdminClipHoldItem, AdminClipHoldListView, ClipAdminTemplate,
-  ClipGenerationPricing, ClipVendorOverview,
+  ClipGenerationPricing, ClipGenerationPricingUpdate, ClipVendorOverview, ClipTemplateFromProject,
 } from '../../../../shared/contracts';
 import { prisma } from '../../db.js';
 import { aidramaJson, type VideoGatewayIdentity } from './aidramaGateway.js';
@@ -192,7 +192,41 @@ export async function setClipTemplateStatus(id: string, status: 'published' | 'd
  * 在那之前，至少让运营**看得见**：不知道单价是多少，连「这个价对不对」都没法判断。
  */
 export async function clipGenerationPricing(): Promise<ClipGenerationPricing> {
-  return aidramaJson<ClipGenerationPricing>('/api/me/clip/pricing', ADMIN_SENTINEL, { timeoutCapMs: 10_000 });
+  return aidramaJson<ClipGenerationPricing>('/api/service/clip/admin/pricing', ADMIN_SENTINEL, { timeoutCapMs: 10_000 });
+}
+
+/**
+ * 整组核定六档。**六个一起给**，不接受只改其中几个。
+ *
+ * 只改一档会把另外五档「没人核定过的配置兜底值」一并升格成「运营配过的价」——
+ * 从此后台显示「已核定」，而那五个数从来没有人看过。与克隆定价同一条规矩。
+ *
+ * 改价生效有约 30 秒（上游的读缓存）。端上手里可能还攥着改价前的价目表，提交时按新价
+ * 核对 → 409「报价已过期」。这是有意的：宁可让用户重看一眼，也不按另一个数扣钱。
+ */
+export async function saveClipGenerationPricing(
+  input: ClipGenerationPricingUpdate & { operator?: string },
+): Promise<ClipGenerationPricing> {
+  return aidramaJson<ClipGenerationPricing>(
+    '/api/service/clip/admin/pricing', ADMIN_SENTINEL,
+    { method: 'PUT', body: input, timeoutCapMs: 15_000 },
+  );
+}
+
+/**
+ * 把一条草稿存成模板。
+ *
+ * `ownerId` 是**当前运营自己的用户 id**，不是那个哨兵值 —— 上游只让存自己的草稿。
+ * 所以这里不走 ADMIN_SENTINEL。
+ */
+export async function publishClipTemplateFromProject(
+  ownerId: string, tenantId: string, input: ClipTemplateFromProject,
+): Promise<ClipAdminTemplate> {
+  return aidramaJson<ClipAdminTemplate>(
+    '/api/service/clip/admin/templates/from-project',
+    { userId: ownerId, tenantId },
+    { method: 'POST', body: input, timeoutCapMs: 20_000 },
+  );
 }
 
 

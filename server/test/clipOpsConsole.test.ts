@@ -347,3 +347,78 @@ test('供应商对账要爱速拍权限；上游挂了如实报错，不伪装�
   const r = await api('GET', '/api/admin/video/vendor');
   assert.ok(r.status >= 500, `期望 5xx，实际 ${r.status}`);
 });
+
+/* ── 六档单价可改（真源在出片服务的 clip_pricing） ── */
+
+test('改六档要超管 + 爱速拍 editor', async () => {
+  const op = await operator();
+  await prisma.adminProductAccess.create({
+    data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'editor' },
+  });
+  const body = {
+    creditPerAvatarSecond: 1, creditPerImage: 2, creditPerT2vSecond: 1,
+    creditPerI2vSecond: 1, creditPerAssemble: 0, creditPerKChar: 5,
+  };
+  // 产品 editor 也不够 —— 改价与套餐改价、海报改价同级
+  assert.equal((await api('PUT', '/api/admin/video/generation-pricing', { adminToken: op.token, body })).status, 403);
+});
+
+test('六档必须一起给 —— 少一个就 422，不让它悄悄升格成「配过的价」', async () => {
+  const full = {
+    creditPerAvatarSecond: 1, creditPerImage: 2, creditPerT2vSecond: 1,
+    creditPerI2vSecond: 1, creditPerAssemble: 0, creditPerKChar: 5,
+  };
+  for (const drop of Object.keys(full)) {
+    const body: Record<string, number> = { ...full };
+    delete body[drop];
+    const r = await api('PUT', '/api/admin/video/generation-pricing', { body });
+    assert.equal(r.status, 422, `少了 ${drop} 应该被拒`);
+    assert.equal((r.body as { code?: string }).code, 'CLIP_PRICING_INVALID');
+  }
+});
+
+test('负数和小数都拒掉 —— 多打一个小数点不该变成一个能用的价', async () => {
+  const base = {
+    creditPerAvatarSecond: 1, creditPerImage: 2, creditPerT2vSecond: 1,
+    creditPerI2vSecond: 1, creditPerAssemble: 0, creditPerKChar: 5,
+  };
+  for (const bad of [-1, 1.5, Number.NaN]) {
+    const r = await api('PUT', '/api/admin/video/generation-pricing', { body: { ...base, creditPerImage: bad } });
+    assert.equal(r.status, 422, `${bad} 应该被拒`);
+  }
+});
+
+test('0 是合法价（这一档免费），不能当成「没填」', async () => {
+  const body = {
+    creditPerAvatarSecond: 0, creditPerImage: 0, creditPerT2vSecond: 0,
+    creditPerI2vSecond: 0, creditPerAssemble: 0, creditPerKChar: 0,
+  };
+  const r = await api('PUT', '/api/admin/video/generation-pricing', { body });
+  // 测试环境没有真上游 → 502。要的是**没被 422 挡在参数校验这一层**：
+  // 全 0 若被当成缺参，运营就永远配不出免费档。
+  assert.notEqual(r.status, 422, '全 0 被当成没填了');
+});
+
+/* ── 草稿存成模板 ── */
+
+test('存模板要超管；缺字段 422；账号不存在 404', async () => {
+  const op = await operator();
+  await prisma.adminProductAccess.create({
+    data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'editor' },
+  });
+  const ok = { userId: 'x', projectId: 'cp1', name: 'n', industry: 'i', themeKey: 'k', description: 'd' };
+  assert.equal((await api('POST', '/api/admin/video/templates/from-project', { adminToken: op.token, body: ok })).status, 403);
+
+  for (const drop of ['projectId', 'name', 'industry', 'themeKey', 'description']) {
+    const body: Record<string, string> = { ...ok };
+    delete body[drop];
+    const r = await api('POST', '/api/admin/video/templates/from-project', { body });
+    assert.equal(r.status, 422, `少了 ${drop} 应该被拒`);
+  }
+  // 不指明属主就不知道该读谁的草稿 —— 后台账号和 C 端账号是两套体系
+  const noOwner = { ...ok } as Record<string, string>; delete noOwner.userId;
+  assert.equal((await api('POST', '/api/admin/video/templates/from-project', { body: noOwner })).status, 422);
+
+  const r404 = await api('POST', '/api/admin/video/templates/from-project', { body: ok });
+  assert.equal(r404.status, 404, '账号不存在该 404，不该把一个不存在的 id 发给上游');
+});

@@ -3727,12 +3727,17 @@ export interface ClipAdminTemplate {
 }
 
 /**
- * 爱速拍的六档生成单价（钻石）。**只读** —— 配在 AIStar 的 Spring 配置里，后台改不了。
+ * 爱速拍的六档生成单价（钻石）。
+ *
+ * 2026-09-11 起可以在后台改：真源是出片服务的 clip_pricing 单行表，那张表空着就回落
+ * application.yml 的兜底值（configured=false）。
  *
  * 键名与小程序 config.js 的 PRICING 一字对齐：改名端上不报错，只会静默算出 NaN。
  * 端上与服务端算出的报价必须逐分钱一致，不一致就是每次生成都 409。
  */
 export interface ClipGenerationPricing {
+  /** 运营核定过没有。false = 现在用的是出片服务配置里的兜底值，页面必须显式写明。 */
+  configured?: boolean;
   /** 数字人出镜，每秒。 */
   creditPerAvatarSecond: number;
   /** 文生图，每张。 */
@@ -3784,4 +3789,33 @@ export interface ClipVendorOverview {
   };
   avatars: ClipVendorReconcile;
   voices: ClipVendorReconcile;
+}
+
+/** 六档单价的核定入参。**六个都要给** —— 只改一档会把另外五档的兜底值一并升格成「配过的价」。 */
+export interface ClipGenerationPricingUpdate {
+  creditPerAvatarSecond: number;
+  creditPerImage: number;
+  creditPerT2vSecond: number;
+  creditPerI2vSecond: number;
+  creditPerAssemble: number;
+  creditPerKChar: number;
+}
+
+/**
+ * 把一条自己的草稿存成模板。
+ *
+ * 服务端会剥掉运营自己的数字人 / 声音 / 上传素材（见 AIStar 的
+ * ClipTemplateService.publishFromProject），这里不需要也不应该在前端先剥一遍 ——
+ * 剥干净与否是安全属性，只能由服务端保证。
+ */
+export interface ClipTemplateFromProject {
+  projectId: string;
+  name: string;
+  industry: string;
+  themeKey: string;
+  description: string;
+  /** 传了就是改版那一条，不传新建。 */
+  templateId?: string;
+  /** 缺省 true：运营写的示范文案本身就是模板的价值。false = 只留骨架，正文清空。 */
+  keepText?: boolean;
 }

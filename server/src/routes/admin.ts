@@ -50,6 +50,7 @@ import { clonePricing, clonePricingView, updateClonePricing } from '../services/
 import {
   CLIP_OPS_PRODUCT, UNANCHORED_STATUSES, clipOpsSummary, holdStatusLabel, listClipHolds, normalizeHoldStatus,
   listClipTemplates, setClipTemplateStatus, clipGenerationPricing, clipVendorOverview,
+  saveClipGenerationPricing, publishClipTemplateFromProject,
 } from '../services/video/opsConsole.js';
 // 手工对单复用定时任务那条判定路径，不另写一套 —— 两套规则迟早分叉。
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
@@ -101,7 +102,7 @@ import type {
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
   AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate, ClipGenerationPricing,
-  ClipVendorOverview,
+  ClipVendorOverview, ClipGenerationPricingUpdate, ClipTemplateFromProject,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -1735,6 +1736,101 @@ export async function adminRoutes(app: FastifyInstance) {
     try { return await clipGenerationPricing(); }
     catch (e) { sendErr(reply, e, 502); return undefined; }
   });
+
+  /**
+   * 整组核定六档生成单价。
+   *
+   * 两道闸叠加，与克隆定价同一形制：改价是营收动作（requireSuper），
+   * 外加产品维度（requireProductAccess editor）。落审计 —— 改价必须能倒查是谁改的。
+   */
+  app.put<{ Body: ClipGenerationPricingUpdate }>(
+    '/admin/video/generation-pricing', async (req, reply): Promise<ClipGenerationPricing | undefined> => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+
+      const b = req.body ?? ({} as ClipGenerationPricingUpdate);
+      const KEYS = [
+        'creditPerAvatarSecond', 'creditPerImage', 'creditPerT2vSecond',
+        'creditPerI2vSecond', 'creditPerAssemble', 'creditPerKChar',
+      ] as const;
+      // 六个都要给。少给一个就落到上游的「整组核定」语义里，把没人看过的兜底值升格成
+      // 「运营配过的价」—— 在这里先挡一道，报错话术比上游的更贴运营的语境。
+      const missing = KEYS.filter((k) => !Number.isInteger(b[k]) || (b[k] as number) < 0);
+      if (missing.length) {
+        reply.code(422).send({
+          error: `这六档要一起核定，每档都得是 0 或正整数（缺 / 不合法：${missing.join('、')}）`,
+          code: 'CLIP_PRICING_INVALID',
+        });
+        return undefined;
+      }
+      // 逐字段取，不用 Object.fromEntries 拼 —— 那样拼出来的是 index signature，
+      // 类型上与契约不重合，真漏一个字段编译器也不会说话。
+      const next: ClipGenerationPricingUpdate = {
+        creditPerAvatarSecond: b.creditPerAvatarSecond,
+        creditPerImage: b.creditPerImage,
+        creditPerT2vSecond: b.creditPerT2vSecond,
+        creditPerI2vSecond: b.creditPerI2vSecond,
+        creditPerAssemble: b.creditPerAssemble,
+        creditPerKChar: b.creditPerKChar,
+      };
+      let row: ClipGenerationPricing;
+      try {
+        row = await saveClipGenerationPricing({ ...next, operator: actorAccountId(actor) ?? 'master' });
+      } catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        action: 'admin.clip.generation-pricing',
+        payload: { ...next, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
+    });
+
+  /**
+   * 把一条**自己的**草稿存成模板。
+   *
+   * 属主用的是当前运营绑定的那个 C 端用户（`userId` 由调用方给）—— 上游只让存自己的草稿。
+   * 后台账号和 C 端账号是两套体系，所以这个 id 必须显式传，不能从 actor 推。
+   */
+  app.post<{ Body: ClipTemplateFromProject & { userId?: string; tenantId?: string } }>(
+    '/admin/video/templates/from-project', async (req, reply): Promise<ClipAdminTemplate | undefined> => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+
+      const b = req.body ?? ({} as ClipTemplateFromProject & { userId?: string });
+      const userId = String(b.userId ?? '').trim();
+      const required = { projectId: b.projectId, name: b.name, industry: b.industry, themeKey: b.themeKey, description: b.description };
+      const blank = Object.entries(required).filter(([, v]) => !String(v ?? '').trim()).map(([k]) => k);
+      if (!userId || blank.length) {
+        reply.code(422).send({
+          error: !userId ? '要指明这条草稿属于哪个账号' : `还缺：${blank.join('、')}`,
+          code: 'CLIP_TEMPLATE_INVALID',
+        });
+        return undefined;
+      }
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, tenantId: true } });
+      if (!user) { reply.code(404).send({ error: '账号不存在', code: 'ADMIN_USER_NOT_FOUND' }); return undefined; }
+
+      let row: ClipAdminTemplate;
+      try {
+        row = await publishClipTemplateFromProject(user.id, user.tenantId, {
+          projectId: String(b.projectId).trim(),
+          name: String(b.name).trim(),
+          industry: String(b.industry).trim(),
+          themeKey: String(b.themeKey).trim(),
+          description: String(b.description).trim(),
+          ...(b.templateId ? { templateId: String(b.templateId).trim() } : {}),
+          ...(b.keepText === false ? { keepText: false } : {}),
+        });
+      } catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        tenantId: user.tenantId, userId: user.id, action: 'admin.clip.template.from-project',
+        payload: { templateId: row.id, projectId: b.projectId, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
+    });
 
   app.get('/admin/video/clone-pricing', async (req, reply): Promise<AdminClonePricing | undefined> => {
     // 爱速拍的面：非超管要被授予 quickreel 才看得到
