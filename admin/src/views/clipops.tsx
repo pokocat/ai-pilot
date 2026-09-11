@@ -11,7 +11,7 @@
 import { useCallback, useState } from 'react';
 import {
   api, type AdminClipHoldItem, type AdminClipOpsView, type AdminClipHoldListView,
-  type ClipAdminTemplate,
+  type ClipAdminTemplate, type ClipVendorOverview, type ClipVendorReconcile,
 } from '../api';
 import { PageHead, ViewState, EmptyState, ErrorState, Skeleton, Pager, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
@@ -274,6 +274,103 @@ export function ClipTemplatesView({ toast, isSuper }: { toast: (m: string) => vo
         </ViewState>
       </div>
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
+    </>
+  );
+}
+
+
+/** 一类对象（数字人 / 声音）的对账小结。 */
+function VendorReconcileRow({ label, r }: { label: string; r: ClipVendorReconcile }) {
+  // 孤儿和悬挂是两种反向的错配，后果完全不同，不能合成一个「异常数」。
+  const bad = r.orphanCount + r.danglingCount + r.unmatchableCount;
+  return (
+    <div className="usage-row">
+      <div className="usage-h">
+        <div className="usage-name">{label}<span>{r.error ? '对不上账' : bad > 0 ? `${bad} 条要处理` : '一致'}</span></div>
+        <div className="usage-num">{r.vendorCount ?? '—'} / {r.localCount}</div>
+      </div>
+      <div className="usage-meta">
+        {r.error
+          ? `没查成：${r.error}`
+          : <>
+              供应商 {r.vendorCount ?? '—'} · 我方 {r.localCount} · 对上 {r.matchedCount}
+              {r.orphanCount > 0 && ` · 孤儿 ${r.orphanCount}（供应商有、我们没有，照样收钱）`}
+              {r.danglingCount > 0 && ` · 悬挂 ${r.danglingCount}（我们有、供应商没有，用户点进去会失败）`}
+              {r.unmatchableCount > 0 && ` · 对不上 ${r.unmatchableCount}`}
+            </>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 爱速拍 · 供应商对账（石榴）。
+ *
+ * 独立运营要能回答两件事：
+ *   · **槽位还剩几个** —— 用完了用户就练不了新数字人，而且是在他点下去之后才失败。
+ *     这是少数「不看就一定会被用户先发现」的指标。
+ *   · **两边对不对得上** —— 孤儿（供应商有、我们没有）每个月照样按它收钱；
+ *     悬挂（我们有、供应商没有）用户点进去会失败。两种反向错配，后果不同，不合并成一个数。
+ *
+ * **只读，不提供清理按钮。** 清孤儿要连本地记录与素材一起处理，误删就是把用户练好的数字人
+ * 弄没了 —— 那不是一个按钮能收口的事（AIStar 侧的同名接口上也是这么写的）。
+ * 实时打上游，慢，所以不放进任何轮询，也不做自动刷新。
+ */
+export function ClipVendorView() {
+  const res = useResource(useCallback(() => api.clipVendor(), []), []);
+  return (
+    <>
+      <PageHead
+        k="vendor"
+        res={res}
+        badge={res.data ? (res.data.mock ? 'mock 网关' : '实时') : undefined}
+      />
+      <div className="pad">
+        {/* 走 mock 时必须显著标注，否则运营会把假额度当真账读，以为槽位还很充裕 */}
+        {res.data?.mock && (
+          <div className="ai-note">
+            <b>当前走的是本地 mock 网关，下面的额度是编的。</b>
+            生产环境不会是这个状态；如果你在生产看到它，说明石榴的凭证没配上。
+          </div>
+        )}
+        <ViewState res={res} skeleton="stats">
+          {(v: ClipVendorOverview) => (
+            <>
+              {v.quota.error ? (
+                <div className="ai-note">额度没查成：{v.quota.error}</div>
+              ) : (
+                <div className="usage-summary">
+                  <div>
+                    <b>{v.quota.availableAvatar ?? '—'}</b>
+                    <span>数字人槽位{v.quota.avatarSlotsExhausted ? ' · 已用完' : ''}</span>
+                  </div>
+                  <div>
+                    <b>{v.quota.availableSpeaker ?? '—'}</b>
+                    <span>声音槽位{v.quota.speakerSlotsExhausted ? ' · 已用完' : ''}</span>
+                  </div>
+                  <div><b>{v.quota.validPoint?.toLocaleString() ?? '—'}</b><span>剩余算力点</span></div>
+                  <div><b>{v.quota.validToTime ? fmtTime(v.quota.validToTime) : '—'}</b><span>有效期至</span></div>
+                </div>
+              )}
+              {(v.quota.avatarSlotsExhausted || v.quota.speakerSlotsExhausted) && (
+                <div className="ai-note">
+                  <b>槽位已用完。</b>用户再点「训练数字人 / 新建声音」会在提交后失败 ——
+                  这是少数不看就一定会被用户先发现的问题，尽快找供应商扩容。
+                </div>
+              )}
+              <div className="sec-h">
+                <span className="t">与我方库对账</span>
+                <span className="s">右边是「供应商 / 我方」的对象数 · 只读，清理要连本地记录和素材一起处理，不在这里做</span>
+              </div>
+              <VendorReconcileRow label="数字人" r={v.avatars} />
+              <VendorReconcileRow label="声音" r={v.voices} />
+              <div className="usage-meta">
+                实时查询，不是缓存快照（{fmtTime(v.checkedAt)}）。这一屏慢是正常的 —— 要打上游再和本地库逐条比对。
+              </div>
+            </>
+          )}
+        </ViewState>
+      </div>
     </>
   );
 }

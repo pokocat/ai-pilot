@@ -337,3 +337,13 @@ test('succeeded 正常结算仍然结得掉', async () => {
   const after = await prisma.videoCreditHold.findFirst({ where: { upstreamJobId: 'job-ok' } });
   assert.equal(after?.status, 'settled');
 });
+
+test('供应商对账要爱速拍权限；上游挂了如实报错，不伪装成「额度充足」', async () => {
+  const op = await operator();
+  assert.equal((await api('GET', '/api/admin/video/vendor', { adminToken: op.token })).status, 403);
+
+  // 测试环境没有真上游 —— 这里要的就是「如实 5xx」。额度这种数字一旦被伪装成 0 或空，
+  // 运营看到「槽位 0」会去找供应商扩容，而真实情况可能是我们自己没连上。
+  const r = await api('GET', '/api/admin/video/vendor');
+  assert.ok(r.status >= 500, `期望 5xx，实际 ${r.status}`);
+});

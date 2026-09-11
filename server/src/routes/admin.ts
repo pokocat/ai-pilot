@@ -49,7 +49,7 @@ import {
 import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
 import {
   CLIP_OPS_PRODUCT, UNANCHORED_STATUSES, clipOpsSummary, holdStatusLabel, listClipHolds, normalizeHoldStatus,
-  listClipTemplates, setClipTemplateStatus, clipGenerationPricing,
+  listClipTemplates, setClipTemplateStatus, clipGenerationPricing, clipVendorOverview,
 } from '../services/video/opsConsole.js';
 // 手工对单复用定时任务那条判定路径，不另写一套 —— 两套规则迟早分叉。
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
@@ -101,6 +101,7 @@ import type {
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
   AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate, ClipGenerationPricing,
+  ClipVendorOverview,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -1714,6 +1715,20 @@ export async function adminRoutes(app: FastifyInstance) {
    * services/video/opsConsole.ts 的 clipGenerationPricing。至少让运营看得见：
    * 连单价是多少都不知道，就没法判断「这个价对不对」。
    */
+  /**
+   * 供应商（石榴）总览：额度快照 + 与我方 DB 的对账。**只读，实时打上游。**
+   *
+   * 独立运营要能回答两件事：数字人 / 声音的槽位还剩几个（用完了用户就练不了新形象，
+   * 而且是在用户点下去之后才失败），以及两边有没有对不上的对象（孤儿 = 供应商那边有、
+   * 我们这边没有，每个月照样按它收钱）。
+   */
+  app.get('/admin/video/vendor', async (req, reply): Promise<ClipVendorOverview | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    try { return await clipVendorOverview(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
+
   app.get('/admin/video/generation-pricing', async (req, reply): Promise<ClipGenerationPricing | undefined> => {
     try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
     catch (e) { sendErr(reply, e, 403); return undefined; }

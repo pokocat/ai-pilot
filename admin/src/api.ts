@@ -307,12 +307,13 @@ import type { AdminImpersonateResult } from '../../shared/contracts';
 import type {
   AdminProductsView, AdminProductLedgerView, AdminAccountProductsView,
   AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate,
-  ClipGenerationPricing,
+  ClipGenerationPricing, ClipVendorOverview,
 } from '../../shared/contracts';
 // —— 爱速拍 · 出片对账台 / 模板货架 ——
 export type {
   AdminClipOpsView, AdminClipHoldListView, AdminClipHoldItem, AdminClipReconcileResult,
-  AdminClipHoldStatusSlice, ClipAdminTemplate, ClipGenerationPricing,
+  AdminClipHoldStatusSlice, ClipAdminTemplate, ClipGenerationPricing, ClipVendorOverview,
+  ClipVendorReconcile,
 } from '../../shared/contracts';
 
 /** 邀请增长三视图共用的查询串拼装（空值不进 URL，避免 `?tenantId=` 这种空筛选参数）。 */
@@ -654,6 +655,8 @@ export const api = {
   clipTemplates: () => req<ClipAdminTemplate[]>('/admin/video/templates'),
   // 六档生成单价：**只读**，配在 AIStar 的 Spring 配置里，后台改不了（见契约注释）。
   clipGenerationPricing: () => req<ClipGenerationPricing>('/admin/video/generation-pricing'),
+  // 供应商（石榴）额度 + 对账。实时打上游、还要和本地库比对，慢 —— 别放进任何轮询里。
+  clipVendor: () => req<ClipVendorOverview>('/admin/video/vendor'),
   // 仅 owner/master（与改价同级：直接改变小程序首页看得到什么）。
   setClipTemplateStatus: (id: string, status: 'published' | 'draft') =>
     req<ClipAdminTemplate>(`/admin/video/templates/${encodeURIComponent(id)}/status`, 'PUT', { status }),

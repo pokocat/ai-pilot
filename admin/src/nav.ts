@@ -25,12 +25,12 @@
 // （代理与佣金是业务对象，不是平台参数），故另立一组，并把只读的「邀请增长」一并搬进来——
 // 运营查邀请的动线本来就该收在一处。搬完「经营」回到 4 项，「增长」4 项，两组都在 8 项以内。
 
-/** 33 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 34 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'sessions' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence'
-  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops' | 'templates';
+  | 'referral' | 'invites' | 'chain' | 'distribution' | 'products' | 'clone' | 'clipops' | 'templates' | 'vendor';
 
 /** 与服务端 services/products.ts 的 PRODUCT 同一套取值。 */
 export type ProductCode = 'junshi' | 'quickreel';
@@ -104,6 +104,9 @@ export const NAV_SECTIONS: NavSection[] = [
   // 爱速拍的钱在哪卡住了。与同组「订单」同形制：主体是只读的账，外加一个落审计的修复动作，
   // 所以归「经营」而不是「配置」。放在「产品」前面 —— 值班时先看有没有钱悬着，再看分产品的账。
   { key: 'clipops', products: ['quickreel'], label: '出片对账', hint: '悬挂的钻石 · 卡住的出片单 · 向上游查单', icon: 'doc', group: 'revenue', aliases: ['出片', '对账', '卡单', '悬挂', '退款', '结算', 'hold', 'clip', '爱速拍', '视频', '任务'] },
+  // 供应商侧的账。与「出片对账」是一对：那个看我们欠用户的，这个看供应商欠我们的
+  // （孤儿每月照样收钱）和还能用多少（槽位用完用户就练不了新形象）。同归「经营」。
+  { key: 'vendor', products: ['quickreel'], label: '供应商', hint: '石榴额度与槽位 · 与我方库对账（只读）', icon: 'trend', group: 'revenue', aliases: ['供应商', '石榴', '额度', '槽位', '对账', '孤儿', '悬挂', 'vendor', 'quota'] },
   // 多产品：后台是一个、按产品分区。这一屏是那条分区键（productCode）的落地面 ——
   // 分产品的账 + 谁能管哪个产品。归「经营」而不是「商品」：它回答「哪个产品在挣钱」，
   // 不是「卖什么」；爱速拍自己的可写面（克隆定价）在「配置 · 功能开关」里。
