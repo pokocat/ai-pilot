@@ -17,7 +17,12 @@ export function TemplatesView({ toast, isSuper, onAuthLost }: {
   const [spec, setSpec] = useState<ConfirmSpec | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
 
+  // 契约里 status 是开放字符串。原来「非 published 一律当草稿」会在上游哪天返回
+  // archived / 审核态时，把一个已归档的模板直接推上首页。只认这两个已知值。
+  const known = (st: string) => st === 'published' || st === 'draft';
+
   const toggle = (t: ClipAdminTemplate) => {
+    if (!known(t.status)) return;
     const next = t.status === 'published' ? 'draft' : 'published';
     setSpec({
       title: next === 'published' ? '上架这套模板' : '下架这套模板',
@@ -53,8 +58,8 @@ export function TemplatesView({ toast, isSuper, onAuthLost }: {
               <div key={t.id} className="row">
                 <div className="row-h">
                   <span className="row-t">{t.name}</span>
-                  <span className={`tag ${t.status === 'published' ? 'ok' : ''}`}>
-                    {t.status === 'published' ? '已上架' : '草稿'}
+                  <span className={`tag ${t.status === 'published' ? 'ok' : known(t.status) ? '' : 'warn'}`}>
+                    {t.status === 'published' ? '已上架' : t.status === 'draft' ? '草稿' : `未知状态：${t.status}`}
                   </span>
                   {t.ownerScope === 'official' && <span className="tag brand">官方</span>}
                 </div>
@@ -64,13 +69,16 @@ export function TemplatesView({ toast, isSuper, onAuthLost }: {
                   <br />
                   {t.description}
                 </div>
-                {isSuper && (
+                {isSuper && (known(t.status) ? (
                   <div className="row-act">
                     <button type="button" className="btn" onClick={() => toggle(t)}>
                       {t.status === 'published' ? '下架' : '上架'}
                     </button>
                   </div>
-                )}
+                ) : (
+                  // 不认识的状态不给写按钮：猜错方向就是把归档内容推给全平台
+                  <div className="row-m">这个状态这边还不认识，先别动它 —— 去出片服务那边确认它是什么意思。</div>
+                ))}
               </div>
             ))}
           </div>

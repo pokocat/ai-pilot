@@ -36,7 +36,25 @@ export class Unauthorized extends Error {
   constructor() { super('登录已过期，请重新登录'); }
 }
 
+/** 403：账号没问题，是没有这个产品的授权。和 401 是两回事，不能混着处理。 */
+export class Forbidden extends Error {
+  constructor(msg: string) { super(msg); }
+}
+
+/**
+ * 令牌失效的全局出口。
+ *
+ * **不能指望每个调用点自己 catch Unauthorized。** 读请求走 useResource 有统一出口，
+ * 写请求（查单、上下架、改价）是在确认弹层里直接调的，没有那条链路 ——
+ * 令牌过期后点「保存」，原来的行为是把 token 悄悄删掉、界面照常显示，
+ * 要等下一次读请求才把人踢回登录页。中间这段时间里他做的每一个动作都在白点。
+ */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) { onUnauthorized = fn; }
+
 async function call<T>(path: string, method = 'GET', body?: unknown, auth = true): Promise<T> {
+  // 未登录的调用（只有登录接口）不参与全局 401 跳转
+  const auth401Silent = !auth;
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (auth) {
@@ -54,7 +72,13 @@ async function call<T>(path: string, method = 'GET', body?: unknown, auth = true
     // 前者多半是本机断网或服务没起，后者是业务拒绝。
     throw new Error('连不上服务端');
   }
-  if (res.status === 401) { clearToken(); throw new Unauthorized(); }
+  if (res.status === 401) {
+    clearToken();
+    // 登录接口自己的 401 是「密码不对」，不是「登录过期」，不该触发全局跳转
+    if (auth401Silent) throw new Unauthorized();
+    onUnauthorized?.();
+    throw new Unauthorized();
+  }
 
   const text = await res.text();
   let data: unknown = null;
@@ -63,7 +87,9 @@ async function call<T>(path: string, method = 'GET', body?: unknown, auth = true
   if (!res.ok) {
     const d = data as { error?: string; message?: string; code?: string } | null;
     // 服务端的中文 error 优先；没有就退到状态码，别抛一个空字符串让界面显示一片空白
-    throw new Error(d?.error || d?.message || `请求失败（HTTP ${res.status}）`);
+    const msg = d?.error || d?.message || `请求失败（HTTP ${res.status}）`;
+    if (res.status === 403) throw new Forbidden(msg);
+    throw new Error(msg);
   }
   return data as T;
 }

@@ -31,16 +31,21 @@ export function useResource<T>(fn: () => Promise<T>, deps: unknown[], onAuthLost
 
   useEffect(() => {
     const my = ++runId.current;
+    let cancelled = false;
     setLoading(true);
+    setError(''); // 新一轮开始就清掉上一轮的错，否则旧错会压在新结果上面
     fn().then(
-      (v) => { if (my === runId.current) { setData(v); setError(''); setLoading(false); } },
+      (v) => { if (!cancelled && my === runId.current) { setData(v); setError(''); setLoading(false); } },
       (e: unknown) => {
-        if (my !== runId.current) return;
+        if (cancelled || my !== runId.current) return;
+        // 即便要跳走也要复位 loading：onAuthLost 是可选的，没传就会永久停在骨架屏
+        setLoading(false);
         if (e instanceof Unauthorized) { onAuthLost?.(); return; }
         setError(e instanceof Error ? e.message : '读取失败');
-        setLoading(false); // data 保持原样，见上方说明
+        // data 保持原样，见上方说明
       },
     );
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 
@@ -83,7 +88,14 @@ export function View<T>({ res, skeleton = 3, children }: {
     <>
       {/* 有旧数据时读失败不清屏，但要显式说「下面是旧的」，不能让人以为刚刷出来的就是现状 */}
       {res.error && <div style={{ marginBottom: 8 }}><ErrorBox msg={res.error} onRetry={res.reload} stale /></div>}
-      {children(res.data)}
+      {/* 换了筛选条件 / 翻了页时，下面暂时还是上一组结果。不加这个提示的话，
+          屏幕上是「全部」的那几行，人却以为已经是「受理不明」的了。 */}
+      <div style={{ opacity: res.loading ? 0.45 : 1, transition: 'opacity .12s' }} aria-busy={res.loading}>
+        {res.loading && (
+          <div className="note" style={{ marginBottom: 8 }} role="status">正在按新条件读取，下面暂时还是上一组结果…</div>
+        )}
+        {children(res.data)}
+      </div>
     </>
   );
 }

@@ -62,11 +62,12 @@ export function OpsView({ toast, isSuper, onAuthLost }: {
     confirmText: '查单',
     onConfirm: async () => {
       const r = await api.reconcile(h.id);
-      toast(
-        r.outcome === 'accepted' ? `上游认了：${r.statusLabel}${r.upstreamJobId ? ` · 任务 ${r.upstreamJobId}` : ''}`
-          : r.outcome === 'rejected' ? `上游拒绝，已退款 ${h.credits} 钻`
-            : `还是问不清，这一单原样留着（${r.message || '下一轮再试'}）`,
-      );
+      // **用服务端的 message，不要在前端重新编一套话。**
+      // 三种结局各自还有分支：accepted 可能「回填成功」也可能「查单期间已被别的路径收口」；
+      // rejected 可能真退了钱，也可能 refunded=false（这单已是终态，没有重复退）。
+      // 前端原来无条件说「已退款 N 钻」—— 那在 refunded=false 时是**假账**，
+      // 运营会照着它记账、回复用户。服务端按每种结局写好了话，照搬就行。
+      toast(r.message || `已处理：${r.statusLabel}`);
       ops.reload(); list.reload();
     },
   });

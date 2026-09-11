@@ -11,7 +11,7 @@
 // 谁进得来：服务端要 quickreel 授权（services/adminProductGate.ts），
 // 授权在军师后台「经营 · 产品」里发。超管隐式拥有全部产品。
 import { useCallback, useEffect, useState } from 'react';
-import { auth, clearToken, getToken, Unauthorized, type AdminMe } from './api';
+import { api, auth, clearToken, Forbidden, getToken, setUnauthorizedHandler, Unauthorized, type AdminMe } from './api';
 import { Login } from './components';
 import { OpsView } from './views/ops';
 import { TemplatesView } from './views/templates';
@@ -38,6 +38,7 @@ export default function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
   const [me, setMe] = useState<AdminMe | null>(null);
   const [denied, setDenied] = useState('');
+  const [failed, setFailed] = useState('');
   const [tab, setTab] = useState<Tab>(readTab);
   const [toast, setToast] = useState('');
 
@@ -49,31 +50,69 @@ export default function App() {
 
   const go = (k: Tab) => { window.location.hash = `#/${k}`; setTab(k); };
 
-  const onAuthLost = useCallback(() => { clearToken(); setAuthed(false); setMe(null); }, []);
+  const onAuthLost = useCallback(() => { clearToken(); setAuthed(false); setMe(null); setDenied(''); }, []);
+
+  // 令牌失效的**唯一**出口。写请求（查单 / 上下架 / 改价）是在确认弹层里直接调的，
+  // 没有 useResource 那条链路 —— 不挂全局钩子的话，令牌过期后点「保存」只会把 token
+  // 悄悄删掉、界面照常显示，运营会接着白点好几下才发现。
+  useEffect(() => {
+    setUnauthorizedHandler(onAuthLost);
+    return () => setUnauthorizedHandler(null);
+  }, [onAuthLost]);
 
   const say = useCallback((m: string) => {
     setToast(m);
     window.setTimeout(() => setToast((cur) => (cur === m ? '' : cur)), 4000);
   }, []);
 
-  // 登录后先拿一次 me：既确认令牌还有效，也决定哪些动作显示得出来。
+  // 登录后先拿一次 me（确认令牌有效 + 决定写操作显不显示），再探一次真正受 quickreel 闸
+  // 保护的接口来判准入。
+  //
+  // **不能只靠 auth.me()**：`/admin/auth` 在 adminProductGate 的 SHARED 白名单里
+  // （账号中心是共享面，按产品切开会变成「改不了自己的密码」），所以没有 quickreel 授权的人
+  // me() 也是 200 —— 原来的 denied 分支因此是死代码，那种人会进到四屏、每屏各弹一个 403。
+  // 反过来，me() 的网络错/5xx 会掉进 denied，被解释成「你没有授权、再登也一样」，
+  // 于是服务挂了运营却去找超管要权限。两个方向都错，所以改成探一条真闸接口，
+  // 且只有**确认的 403** 才算没授权。
   useEffect(() => {
     if (!authed) return;
     let alive = true;
-    auth.me().then(
-      (v) => { if (alive) { setMe(v); setDenied(''); } },
-      (e: unknown) => {
+    (async () => {
+      try {
+        const v = await auth.me();
         if (!alive) return;
-        if (e instanceof Unauthorized) { onAuthLost(); return; }
-        // 401 之外的失败（比如没有 quickreel 授权时的 403）要说清楚是哪一种，
-        // 不能把人踢回登录页 —— 他账号没问题，是没被授权，再登一次也一样。
-        setDenied(e instanceof Error ? e.message : '进不来');
-      },
-    );
+        setMe(v);
+        // 最轻的一条受闸读接口。超管隐式拥有全部产品，这里必然通过。
+        await api.ops(7);
+        if (alive) setDenied('');
+      } catch (e) {
+        if (!alive) return;
+        if (e instanceof Unauthorized) return;      // 全局钩子已经把人送回登录页
+        if (e instanceof Forbidden) { setDenied(e.message); return; }
+        // 网络错 / 5xx：是服务的问题，不是授权的问题，文案必须分开
+        setFailed(e instanceof Error ? e.message : '读不到');
+      }
+    })();
     return () => { alive = false; };
   }, [authed, onAuthLost]);
 
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
+
+  // 服务读不到 ≠ 没授权。混成一个文案的话，服务挂了运营会去找超管要权限。
+  if (failed) {
+    return (
+      <div className="login">
+        <div className="login-card">
+          <h1>读不到</h1>
+          <p className="sub">{failed}</p>
+          <div className="note" style={{ marginBottom: 14 }}>
+            这不是权限问题 —— 多半是服务端或它上游（出片服务）这会儿不通。稍等再试；一直这样就去看服务状态。
+          </div>
+          <button type="button" className="btn lg" onClick={() => { setFailed(''); window.location.reload(); }}>重试</button>
+        </div>
+      </div>
+    );
+  }
 
   if (denied) {
     return (
