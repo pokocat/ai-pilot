@@ -2493,9 +2493,20 @@ export interface AdminAccountItem {
   id: string; username: string; role: string; // owner | operator
   disabled: boolean; lastLoginAt: string | null; createdAt: string;
   agentKeys: string[]; // 该 operator 负责的 agent（owner 隐式全部，返回空数组）
+  /** 绑定的小程序账号 id；null = 没绑，用不了「把自己的草稿存成模板」。 */
+  linkedUserId?: string | null;
 }
 export interface CreateAdminAccountRequest { username: string; password: string; role?: string; agentKeys?: string[] }
-export interface UpdateAdminAccountRequest { disabled?: boolean; role?: string; password?: string; agentKeys?: string[] }
+export interface UpdateAdminAccountRequest {
+  disabled?: boolean; role?: string; password?: string; agentKeys?: string[];
+  /**
+   * 这个后台账号在小程序里对应的用户 id。空串 = 解绑。
+   *
+   * 只有「把自己的草稿存成模板」用它 —— 那个动作要知道「我」在小程序里是谁，
+   * 而这件事不能让请求体来说（说了就等于任何超管都能把别人的草稿发成全平台模板）。
+   */
+  linkedUserId?: string;
+}
 /** 当前登录者（GET /admin/auth/me）：前端按角色显隐账户管理、按范围过滤 agent */
 export interface AdminMe { kind: 'master' | 'account' | 'legacyUser'; username: string | null; role: string; isSuper: boolean }
 
@@ -3809,6 +3820,7 @@ export interface ClipGenerationPricingUpdate {
  * 剥干净与否是安全属性，只能由服务端保证。
  */
 export interface ClipTemplateFromProject {
+  /** 草稿 id。属主不在这里传 —— 服务端只认当前后台账号绑定的那个小程序账号。 */
   projectId: string;
   name: string;
   industry: string;

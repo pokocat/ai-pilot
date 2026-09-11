@@ -401,12 +401,12 @@ test('0 是合法价（这一档免费），不能当成「没填」', async () 
 
 /* ── 草稿存成模板 ── */
 
-test('存模板要超管；缺字段 422；账号不存在 404', async () => {
+test('存模板要超管；缺字段 422', async () => {
   const op = await operator();
   await prisma.adminProductAccess.create({
     data: { productCode: PRODUCT.quickreel, accountId: op.id, role: 'editor' },
   });
-  const ok = { userId: 'x', projectId: 'cp1', name: 'n', industry: 'i', themeKey: 'k', description: 'd' };
+  const ok = { projectId: 'cp1', name: 'n', industry: 'i', themeKey: 'k', description: 'd' };
   assert.equal((await api('POST', '/api/admin/video/templates/from-project', { adminToken: op.token, body: ok })).status, 403);
 
   for (const drop of ['projectId', 'name', 'industry', 'themeKey', 'description']) {
@@ -415,10 +415,67 @@ test('存模板要超管；缺字段 422；账号不存在 404', async () => {
     const r = await api('POST', '/api/admin/video/templates/from-project', { body });
     assert.equal(r.status, 422, `少了 ${drop} 应该被拒`);
   }
-  // 不指明属主就不知道该读谁的草稿 —— 后台账号和 C 端账号是两套体系
-  const noOwner = { ...ok } as Record<string, string>; delete noOwner.userId;
-  assert.equal((await api('POST', '/api/admin/video/templates/from-project', { body: noOwner })).status, 422);
+});
 
-  const r404 = await api('POST', '/api/admin/video/templates/from-project', { body: ok });
-  assert.equal(r404.status, 404, '账号不存在该 404，不该把一个不存在的 id 发给上游');
+/**
+ * 属主只认账号上绑的那一个。
+ *
+ * 原来是信请求体里的 userId（codex 2026-09-11 审出）：超管填任意受害者的 userId +
+ * projectId，上游的属主校验会以**受害者**的身份通过 —— 别人的私有草稿被复制成了
+ * 全平台模板。上游那句「只能存自己的草稿」得由这一侧把「自己」定死才成立。
+ */
+test('请求体里塞 userId 没有用 —— 属主只认账号绑定', async () => {
+  const victim = await mkUser('受害者');
+  const body = {
+    projectId: 'cp_victim', name: 'n', industry: 'i', themeKey: 'k', description: 'd',
+    // 老写法：想指定别人的账号
+    userId: victim.userId, tenantId: victim.tenantId,
+  };
+  const r = await api('POST', '/api/admin/video/templates/from-project', { body });
+  // master token 没有对应的后台账号行，所以绑不了 —— 一律 409，绝不按 body 里那个 id 去读草稿
+  assert.equal(r.status, 409);
+  assert.equal((r.body as { code?: string }).code, 'ADMIN_ACCOUNT_NOT_LINKED');
+});
+
+test('主令牌没有对应的小程序账号，提示改用后台账号 —— 不是一句「失败」', async () => {
+  // master token 根本没有 AdminAccount 行，绑不了。这时的话术要指出下一步怎么办，
+  // 而不是丢一个「存不成」让人自己猜。
+  const r = await api('POST', '/api/admin/video/templates/from-project', {
+    body: { projectId: 'cp1', name: 'n', industry: 'i', themeKey: 'k', description: 'd' },
+  });
+  assert.equal(r.status, 409);
+  assert.equal((r.body as { code?: string }).code, 'ADMIN_ACCOUNT_NOT_LINKED');
+  assert.match(String((r.body as { error?: string }).error), /后台账号登录/);
+});
+
+test('绑了之后就不再是 409，走到真正的业务路径上去', async () => {
+  const u = await mkUser('运营本人');
+  // 用超管身份给 master 之外的一个后台账号绑上，然后以该账号（超管角色）调用
+  const acc = await createOperator(`link_${Date.now()}`, 'pw-123456', 'owner');
+  const token = await createSession(acc.id);
+  await api('PATCH', `/api/admin/accounts/${acc.id}`, { body: { linkedUserId: u.userId } });
+
+  const r = await api('POST', '/api/admin/video/templates/from-project', {
+    adminToken: token,
+    body: { projectId: 'cp1', name: 'n', industry: 'i', themeKey: 'k', description: 'd' },
+  });
+  // 测试环境没有真上游 → 502。要的是**不再卡在 409 绑定这一关**。
+  assert.notEqual(r.status, 409, '绑了还说没绑');
+  assert.notEqual(r.status, 403, '超管角色不该被权限挡住');
+});
+
+test('绑定要校验那个小程序账号真的存在，解绑用空串', async () => {
+  const op = await operator();
+  const bad = await api('PATCH', `/api/admin/accounts/${op.id}`, { body: { linkedUserId: 'nope_no_such_user' } });
+  assert.equal(bad.status, 404, '绑一个不存在的账号该 404，不该默默存下去');
+
+  const u = await mkUser('运营本人');
+  const okRes = await api('PATCH', `/api/admin/accounts/${op.id}`, { body: { linkedUserId: u.userId } });
+  assert.equal(okRes.status, 200);
+  assert.equal(
+    (await prisma.adminAccount.findUnique({ where: { id: op.id } }))?.linkedUserId, u.userId);
+
+  await api('PATCH', `/api/admin/accounts/${op.id}`, { body: { linkedUserId: '' } });
+  assert.equal(
+    (await prisma.adminAccount.findUnique({ where: { id: op.id } }))?.linkedUserId, null, '空串 = 解绑');
 });

@@ -710,6 +710,18 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
   const [editKeys, setEditKeys] = useState<string[]>([]);
   const res = useResource(api.accounts, []);
   const list = res.data ?? [];
+
+  /** 绑 / 解绑这个后台账号对应的小程序账号。空串 = 解绑。 */
+  const linkUser = async (a: AdminAccountItem, raw: string) => {
+    try {
+      await api.updateAccount(a.id, { linkedUserId: raw.trim() });
+      toast(raw.trim() ? `已把「${a.username}」绑到该小程序账号` : `已解绑「${a.username}」`);
+      res.reload();
+    } catch (e) {
+      toast((e as Error)?.message || '绑定失败');
+      res.reload(); // 失败要把输入框还原成库里的值，别让它显示一个没存上的 id
+    }
+  };
   const load = async () => res.reload();
   useEffect(() => { api.agents().then((a) => setAgents(a.map((x) => ({ key: x.key, name: x.name })))).catch(() => { /* agent 列表失败只影响授权勾选 */ }); }, []);
   const toggleKey = (keys: string[], k: string) => keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k];
@@ -777,11 +789,29 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
                 <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button><button className="ai-btn primary" onClick={() => saveKeys(a)}><Icon name="check" size={14} /> 保存</button></div>
               </div>
             ) : (
-              <div className="crd-actions" style={{ marginTop: 8 }}>
-                <button className="mini-btn" onClick={() => { setEditId(a.id); setEditKeys(a.agentKeys); }}>分配 agent</button>
-                <button className="mini-btn" onClick={() => resetPw(a)}>重置密码</button>
-                <button className={`mini-btn ${a.disabled ? 'primary' : 'danger'}`} onClick={() => toggleDisabled(a)}>{a.disabled ? '启用' : '停用'}</button>
-              </div>
+              <>
+                <div className="ai-field">
+                  <div className="ai-fl">绑定的小程序账号</div>
+                  <div className="filter-bar">
+                    <input
+                      className="ai-input"
+                      defaultValue={a.linkedUserId ?? ''}
+                      placeholder="小程序里的用户 id（留空 = 不绑）"
+                      onBlur={(e) => { if ((e.target.value.trim() || null) !== (a.linkedUserId ?? null)) linkUser(a, e.target.value); }}
+                    />
+                  </div>
+                  <div className="ai-note">
+                    只有「爱速拍 · 模板货架 → 把一条草稿存成模板」用它 —— 那个动作要知道这个后台账号
+                    在小程序里是谁。**不绑就用不了那个功能**，其余一概不受影响。
+                    绑定之后，只能把这个账号自己的草稿存成模板（属主由服务端认这一列，不看请求体）。
+                  </div>
+                </div>
+                <div className="crd-actions" style={{ marginTop: 8 }}>
+                  <button className="mini-btn" onClick={() => { setEditId(a.id); setEditKeys(a.agentKeys); }}>分配 agent</button>
+                  <button className="mini-btn" onClick={() => resetPw(a)}>重置密码</button>
+                  <button className={`mini-btn ${a.disabled ? 'primary' : 'danger'}`} onClick={() => toggleDisabled(a)}>{a.disabled ? '启用' : '停用'}</button>
+                </div>
+              </>
             ))}
           </div>
         ))}

@@ -273,6 +273,16 @@ model AdminAccount {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   lastLoginAt    DateTime?
+  /// 这个后台账号在小程序 / C 端对应的那个用户。
+  ///
+  /// 后台账号和 C 端账号本来是两套体系（一个是运营的登录，一个是产品里的用户）。
+  /// 「把自己的草稿存成模板」这个动作需要知道「我」在小程序里是谁 —— 原来是让前端把
+  /// userId 填在请求体里，服务端只校验那个用户存在（codex 2026-09-11 审出）：
+  /// 超管填任意受害者的 userId + projectId，上游的属主校验会以**受害者**的身份通过，
+  /// 于是别人的私有草稿被复制成了全平台模板。绑在账号上之后，那个动作只认这一列。
+  ///
+  /// 可空：绝大多数后台账号不需要绑；不绑就用不了「存成模板」，别的功能一律不受影响。
+  linkedUserId   String?
   sessions       AdminSession[]
   collaborations AgentCollaborator[]
   productAccess  AdminProductAccess[]

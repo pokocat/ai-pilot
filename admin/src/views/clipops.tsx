@@ -398,18 +398,18 @@ export function ClipVendorView() {
  */
 function SaveAsTemplateForm({ toast, onDone }: { toast: (m: string) => void; onDone: () => void }) {
   const [f, setF] = useState({
-    userId: '', projectId: '', name: '', industry: '', themeKey: '', description: '', keepText: true,
+    projectId: '', name: '', industry: '', themeKey: '', description: '', keepText: true,
   });
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<typeof f>) => setF((v) => ({ ...v, ...p }));
-  const ready = f.userId.trim() && f.projectId.trim() && f.name.trim()
+  const ready = f.projectId.trim() && f.name.trim()
     && f.industry.trim() && f.themeKey.trim() && f.description.trim();
 
   const save = async () => {
     setBusy(true);
     try {
       const row = await api.clipTemplateFromProject({
-        userId: f.userId.trim(), projectId: f.projectId.trim(), name: f.name.trim(),
+        projectId: f.projectId.trim(), name: f.name.trim(),
         industry: f.industry.trim(), themeKey: f.themeKey.trim(), description: f.description.trim(),
         keepText: f.keepText,
       });
@@ -424,11 +424,9 @@ function SaveAsTemplateForm({ toast, onDone }: { toast: (m: string) => void; onD
 
   return (
     <div className="crd new-agent">
-      <div className="ai-field">
-        <div className="ai-fl">草稿属主的账号 id</div>
-        <input className="ai-input" value={f.userId} onChange={(e) => set({ userId: e.target.value })}
-          placeholder="在「用户」那一屏查你自己的 id" />
-        <div className="ai-note">后台账号和小程序账号是两套，所以要指明这条草稿是谁的。只能存自己的草稿。</div>
+      <div className="ai-note">
+        只能存**你自己**的草稿 —— 属主取的是你这个后台账号在「配置 · 运营账户」里绑定的那个
+        小程序账号，不由这个表单指定。没绑的话这里会提示你去绑。
       </div>
       <div className="ai-field">
         <div className="ai-fl">草稿 id</div>

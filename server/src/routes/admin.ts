@@ -1757,10 +1757,19 @@ export async function adminRoutes(app: FastifyInstance) {
       ] as const;
       // 六个都要给。少给一个就落到上游的「整组核定」语义里，把没人看过的兜底值升格成
       // 「运营配过的价」—— 在这里先挡一道，报错话术比上游的更贴运营的语境。
-      const missing = KEYS.filter((k) => !Number.isInteger(b[k]) || (b[k] as number) < 0);
-      if (missing.length) {
+      //
+      // **上限必须在这里就卡死。** 只查 isInteger 和非负是不够的（codex 2026-09-11 审出）：
+      // 传 4294967296 能过这一关，到了 Java 侧 `Number.intValue()` 截断成 0 ——
+      // 一个「太大了」的输入静默变成「这一档免费」。用 isSafeInteger + 上限双重挡住：
+      // 前者排掉超出 double 精度的数（再大的数连相等比较都不可靠），后者对齐上游的 MAX。
+      const MAX_PRICE = 1_000_000;
+      const bad = KEYS.filter((k) => {
+        const v = b[k];
+        return !Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > MAX_PRICE;
+      });
+      if (bad.length) {
         reply.code(422).send({
-          error: `这六档要一起核定，每档都得是 0 或正整数（缺 / 不合法：${missing.join('、')}）`,
+          error: `这六档要一起核定，每档都得是 0 到 ${MAX_PRICE} 之间的整数（缺 / 不合法：${bad.join('、')}）`,
           code: 'CLIP_PRICING_INVALID',
         });
         return undefined;
@@ -1789,29 +1798,43 @@ export async function adminRoutes(app: FastifyInstance) {
   /**
    * 把一条**自己的**草稿存成模板。
    *
-   * 属主用的是当前运营绑定的那个 C 端用户（`userId` 由调用方给）—— 上游只让存自己的草稿。
-   * 后台账号和 C 端账号是两套体系，所以这个 id 必须显式传，不能从 actor 推。
+   * 属主取的是**当前后台账号上绑的那个小程序账号**（AdminAccount.linkedUserId），
+   * 不接受请求体传 —— 上游那句「只能存自己的草稿」得由这一侧把「自己」定死才成立。
    */
-  app.post<{ Body: ClipTemplateFromProject & { userId?: string; tenantId?: string } }>(
+  app.post<{ Body: ClipTemplateFromProject }>(
     '/admin/video/templates/from-project', async (req, reply): Promise<ClipAdminTemplate | undefined> => {
       const actor = actorOf(req);
       try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
       try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
       catch (e) { sendErr(reply, e, 403); return undefined; }
 
-      const b = req.body ?? ({} as ClipTemplateFromProject & { userId?: string });
-      const userId = String(b.userId ?? '').trim();
+      const b = req.body ?? ({} as ClipTemplateFromProject);
       const required = { projectId: b.projectId, name: b.name, industry: b.industry, themeKey: b.themeKey, description: b.description };
       const blank = Object.entries(required).filter(([, v]) => !String(v ?? '').trim()).map(([k]) => k);
-      if (!userId || blank.length) {
-        reply.code(422).send({
-          error: !userId ? '要指明这条草稿属于哪个账号' : `还缺：${blank.join('、')}`,
-          code: 'CLIP_TEMPLATE_INVALID',
+      if (blank.length) {
+        reply.code(422).send({ error: `还缺：${blank.join('、')}`, code: 'CLIP_TEMPLATE_INVALID' });
+        return undefined;
+      }
+
+      // **属主只认账号上绑的那一个，不接受请求体里传进来的 userId。**
+      // 原来是信 body（codex 2026-09-11 审出）：超管填任意受害者的 userId + projectId，
+      // 上游的属主校验会以**受害者**的身份通过 —— 别人的私有草稿就被复制成了全平台模板。
+      // 上游那句「只能存自己的草稿」得由这一侧把「自己」定死才成立。
+      const accountId = actorAccountId(actor);
+      const linked = accountId
+        ? (await prisma.adminAccount.findUnique({ where: { id: accountId }, select: { linkedUserId: true } }))?.linkedUserId
+        : null;
+      if (!linked) {
+        reply.code(409).send({
+          error: accountId
+            ? '这个后台账号还没绑定小程序账号。到「配置 · 运营账户」里绑定之后，才能把自己的草稿存成模板'
+            : '主令牌没有对应的小程序账号，改用后台账号登录再操作',
+          code: 'ADMIN_ACCOUNT_NOT_LINKED',
         });
         return undefined;
       }
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, tenantId: true } });
-      if (!user) { reply.code(404).send({ error: '账号不存在', code: 'ADMIN_USER_NOT_FOUND' }); return undefined; }
+      const user = await prisma.user.findUnique({ where: { id: linked }, select: { id: true, tenantId: true } });
+      if (!user) { reply.code(404).send({ error: '绑定的小程序账号已不存在，请重新绑定', code: 'ADMIN_USER_NOT_FOUND' }); return undefined; }
 
       let row: ClipAdminTemplate;
       try {
@@ -2629,6 +2652,16 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.disabled === 'boolean') row = await setAccountDisabled(req.params.id, b.disabled);
       if (typeof b.password === 'string' && b.password) await resetAccountPassword(req.params.id, b.password);
       if (Array.isArray(b.agentKeys) && row.role !== 'owner') await syncCollaborators(req.params.id, b.agentKeys);
+      // 绑定 / 解绑这个后台账号在小程序里对应的那个用户。空串 = 解绑。
+      // 「把自己的草稿存成模板」只认这一列（见 schema 里 linkedUserId 的注释）。
+      if (typeof b.linkedUserId === 'string') {
+        const v = b.linkedUserId.trim();
+        if (v) {
+          const u = await prisma.user.findUnique({ where: { id: v }, select: { id: true } });
+          if (!u) return reply.code(404).send({ error: '要绑定的账号不存在', code: 'ADMIN_USER_NOT_FOUND' });
+        }
+        await prisma.adminAccount.update({ where: { id: req.params.id }, data: { linkedUserId: v || null } });
+      }
       await recordAudit({ action: 'admin.account.update', payload: { id: req.params.id, username: row.username, by: actorName(actor) } });
       const keyMap = await collaboratorKeysByAccount();
       return { ...row, agentKeys: row.role === 'owner' ? [] : keyMap.get(row.id) ?? [] };

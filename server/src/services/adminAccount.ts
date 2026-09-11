@@ -77,6 +77,8 @@ export interface AdminAccountRow {
   disabled: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** 绑定的小程序账号；null = 没绑。只有「把自己的草稿存成模板」用它。 */
+  linkedUserId?: string | null;
 }
 
 const ROLES = new Set(['owner', 'operator']);
@@ -132,7 +134,10 @@ export async function resetAccountPassword(id: string, newPassword: string): Pro
   await prisma.adminSession.deleteMany({ where: { accountId: id } });
 }
 
-function toRow(a: { id: string; username: string; role: string; disabledAt: Date | null; lastLoginAt: Date | null; createdAt: Date }): AdminAccountRow {
+function toRow(a: {
+  id: string; username: string; role: string; disabledAt: Date | null;
+  lastLoginAt: Date | null; createdAt: Date; linkedUserId?: string | null;
+}): AdminAccountRow {
   return {
     id: a.id,
     username: a.username,
@@ -140,6 +145,7 @@ function toRow(a: { id: string; username: string; role: string; disabledAt: Date
     disabled: !!a.disabledAt,
     lastLoginAt: a.lastLoginAt ? a.lastLoginAt.toISOString() : null,
     createdAt: a.createdAt.toISOString(),
+    linkedUserId: a.linkedUserId ?? null,
   };
 }
 

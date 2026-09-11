@@ -660,7 +660,8 @@ export const api = {
   saveClipGenerationPricing: (body: ClipGenerationPricingUpdate) =>
     req<ClipGenerationPricing>('/admin/video/generation-pricing', 'PUT', body),
   // 把一条草稿存成模板。userId = 那条草稿属主的 C 端账号（后台账号和 C 端账号是两套体系）。
-  clipTemplateFromProject: (body: ClipTemplateFromProject & { userId: string }) =>
+  // 属主不在这儿传 —— 服务端只认当前后台账号绑定的那个小程序账号（见契约注释）。
+  clipTemplateFromProject: (body: ClipTemplateFromProject) =>
     req<ClipAdminTemplate>('/admin/video/templates/from-project', 'POST', body),
   // 供应商（石榴）额度 + 对账。实时打上游、还要和本地库比对，慢 —— 别放进任何轮询里。
   clipVendor: () => req<ClipVendorOverview>('/admin/video/vendor'),

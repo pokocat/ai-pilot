@@ -40,6 +40,30 @@ test('共享面不归任何产品 —— 钱包是一个、账号中心是一个
   }
 });
 
+// /admin/users 整族标共享是过宽的：同一前缀下还挂着这个用户的智能体记忆、知识库切片、
+// 对话上下文、能力模块 —— 那些是军师的内容，只被授予爱速拍的运营不该能翻。
+test('共享前缀下面的军师专属子路径要被拦住', () => {
+  for (const p of [
+    '/admin/users/u1/agents', '/admin/users/u1/agents/strat',
+    '/admin/users/u1/context',
+    '/admin/users/u1/knowledge/k1', '/admin/users/u1/knowledge/upload',
+    '/admin/users/u1/memories/m1',
+    '/admin/users/u1/modules', '/admin/users/u1/modules/poster',
+  ]) {
+    assert.equal(productOfAdminPath(p), PRODUCT.junshi, `${p} 是军师的内容，不该跟着 /admin/users 一起放开`);
+  }
+});
+
+test('用户身上真正属于平台的那些，仍然共享', () => {
+  for (const p of [
+    '/admin/users', '/admin/users/u1',
+    '/admin/users/u1/credits', '/admin/users/u1/plan', '/admin/users/u1/plan-extend',
+    '/admin/users/u1/usage', '/admin/users/u1/token-quota', '/admin/users/u1/token-quota/restore-plan',
+  ]) {
+    assert.equal(productOfAdminPath(p), null, `${p} 是账号与钱包事实，切开另一边就查不了账`);
+  }
+});
+
 test('爱速拍专属前缀归 quickreel', () => {
   for (const p of ['/admin/video/ops', '/admin/video/holds/x/reconcile', '/admin/video/templates']) {
     assert.equal(productOfAdminPath(p), PRODUCT.quickreel, p);
@@ -103,6 +127,24 @@ test('只被授予爱速拍的运营，打不了军师的面', async () => {
   for (const p of ['/api/admin/agents', '/api/admin/sayings', '/api/admin/benchmarks']) {
     const r = await api('GET', p, { adminToken: op.token });
     assert.equal(r.status, 403, `${p} 没拦住 —— 前端看不见不等于访问控制`);
+  }
+});
+
+test('爱速拍运营查得了用户和余额，翻不了这个用户在军师里的记忆与知识库', async () => {
+  const op = await operator({ product: PRODUCT.quickreel, role: 'viewer' });
+  assert.equal((await api('GET', '/api/admin/users', { adminToken: op.token })).status, 200, '查人是共享面');
+  // 方法要用对：路由不匹配时 Fastify 在 preHandler 之前就 404 了，闸根本没跑，
+  // 那样断言出来的 403/404 证明不了任何事。
+  const cases: Array<['GET' | 'POST' | 'DELETE', string]> = [
+    ['GET', '/api/admin/users/u1/context'],
+    ['POST', '/api/admin/users/u1/agents'],
+    ['POST', '/api/admin/users/u1/modules'],
+    ['GET', '/api/admin/users/u1/knowledge/k1'],
+    ['DELETE', '/api/admin/users/u1/memories/m1'],
+  ];
+  for (const [m, p] of cases) {
+    const r = await api(m, p, { adminToken: op.token, body: m === 'POST' ? {} : undefined });
+    assert.equal(r.status, 403, `${m} ${p} 是军师的内容，爱速拍运营不该碰得到`);
   }
 });
 

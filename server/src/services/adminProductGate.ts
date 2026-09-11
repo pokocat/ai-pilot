@@ -58,6 +58,32 @@ const SHARED = [
 const QUICKREEL = ['/admin/video/', '/admin/clip/'];
 
 /**
+ * 挂在共享前缀**下面**、但其实是某个产品专属的路径。比 SHARED 先判。
+ *
+ * `/admin/users` 整族标共享是过宽的（codex 2026-09-11 审出）：用户列表、余额、套餐、
+ * token 额度确实是平台面 —— 但同一前缀下还挂着这个用户的**智能体记忆、知识库切片、
+ * 对话上下文、能力模块**，那些是军师的内容。只被授予爱速拍的运营不该能翻一个用户
+ * 在军师里说过什么、传过什么文档。
+ *
+ * `*` 匹配一个路径段（用户 id）。
+ */
+const PRODUCT_SUBPATHS: Array<{ pattern: string; product: string }> = [
+  { pattern: '/admin/users/*/agents', product: PRODUCT.junshi },
+  { pattern: '/admin/users/*/context', product: PRODUCT.junshi },
+  { pattern: '/admin/users/*/knowledge', product: PRODUCT.junshi },
+  { pattern: '/admin/users/*/memories', product: PRODUCT.junshi },
+  { pattern: '/admin/users/*/modules', product: PRODUCT.junshi },
+];
+
+/** 段级通配匹配：`*` 吃一个段，模式短于路径时按前缀算（`/x/*​/y` 命中 `/x/1/y/z`）。 */
+function matchesPattern(path: string, pattern: string): boolean {
+  const ps = pattern.split('/').filter(Boolean);
+  const xs = path.split('/').filter(Boolean);
+  if (xs.length < ps.length) return false;
+  return ps.every((seg, i) => seg === '*' || seg === xs[i]);
+}
+
+/**
  * 归一化成可比的路径。
  *
  * 每一步都对应一种绕法：
@@ -100,6 +126,9 @@ export function productOfAdminPath(path: string): string | null {
   const p = normalizePath(path);
   if (!looksLikeAdminPath(p)) return null; // 不是后台路由，不归这一闸管
   if (QUICKREEL.some((prefix) => underPrefix(p, prefix))) return PRODUCT.quickreel;
+  // 先判「共享前缀下的产品专属子路径」，再判共享 —— 顺序反了就等于没有这张表
+  const sub = PRODUCT_SUBPATHS.find((r) => matchesPattern(p, r.pattern));
+  if (sub) return sub.product;
   if (SHARED.some((prefix) => underPrefix(p, prefix))) return null;
   return DEFAULT_PRODUCT;
 }
