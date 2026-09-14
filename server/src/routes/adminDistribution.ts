@@ -851,10 +851,15 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
       const before = await prisma.commissionSettlement.findUnique({ where: { id: req.params.id } });
       if (!before) fail('结算单不存在', 404, 'SETTLEMENT_NOT_FOUND');
       if (before!.status !== 'draft') fail(`只有草稿可核准（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
-      const after = await prisma.commissionSettlement.update({
-        where: { id: before!.id },
+      // 上面的状态判定与下面的写入之间是 check-then-act：并发的 paid/void（或另一个 approve）
+      // 可能在这中间把状态改掉。用带原状态条件的 updateMany 原子占位——命中 1 行才算成功，
+      // 否则说明状态已被改走，返回 409 而不是把一张已 paid/void 的单无条件翻回 approved。
+      const claim = await prisma.commissionSettlement.updateMany({
+        where: { id: before!.id, status: 'draft' },
         data: { status: 'approved', approvedBy: actorName(actor), approvedAt: now() },
       });
+      if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+      const after = await prisma.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
       await recordAudit({
         action: 'admin.distribution.settlement.approve',
         payload: { by: actorName(actor), before: { id: before!.id, status: before!.status }, after: { status: after.status, entryCount: after.entryCount, totalAmount: after.totalAmount } },
@@ -882,14 +887,19 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         if (before!.status !== 'approved') fail(`只有已核准的单可标记打款（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
+          // 先带原状态条件占位（approved→paid，命中 1 行才继续），再在同事务里推流水成 settled。
+          // 否则并发的 void 可能已把这张单作废、把成员流水解绑放回待结池，而这里仍按 approved 的旧读
+          // 无条件写成 paid —— 那些流水会被下一次 generate 重新纳入、第二次结算并线下二次打款。
+          const claim = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: 'approved' },
+            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
+          });
+          if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
           await tx.commissionEntry.updateMany({
             where: { settlementId: before!.id, status: 'confirmed' },
             data: { status: 'settled' },
           });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
-            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
-          });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.paid',
@@ -927,11 +937,16 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         }
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
-          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
+          // 先带原状态条件占位（draft/approved→void，命中 1 行才继续）再解绑流水。否则并发的 paid
+          // 可能已把这张单推成 paid、把成员流水结成 settled，而这里仍按旧读无条件解绑——会把已打款的
+          // 流水 settlementId 抹回 null 放进待结池、下次重复结算。命中 0 行即状态已变，返回 409。
+          const claim = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: { in: ['draft', 'approved'] } },
             data: { status: 'void', note: `${before!.note ? `${before!.note}\n` : ''}[作废 ${at.toISOString()} by ${actorName(actor)}] ${reason}` },
           });
+          if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.void',
