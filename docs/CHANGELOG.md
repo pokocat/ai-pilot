@@ -6,6 +6,15 @@
 
 ## 变更日志
 
+### 2026-09-17 · 例行 QA 巡检：出片/克隆预扣结算的 check-then-act 竞态 + httpTool 重定向 SSRF · 影响面：`videoCreditHold` / `videoCloneHold` 账面一致性、运营自建 HTTP 工具出站安全
+
+承接 #50 分支、不新开 PR（开工前查过三仓开着的 routine PR：本仓 #50；AIStarEcosystem #101/#102；shequn-gongju 无）。两处确定缺陷：
+
+- **出片 / 克隆预扣结算与并发退款的 check-then-act 竞态**（`server/src/services/video/credits.ts#settleVideoJob`、`cloneCredits.ts#settleCloneHold`）：`settleVideoJob` 先**无锁**读 hold，再在 `succeeded` 分支**无条件** `update` 成 `settled`；而 `refundVideoHold` 是取 `pg_advisory_xact_lock` 后退款并落 `refunded`。「取消/删除刚退完款」撞上「并发一次 succeeded 查询」时，succeeded 那条拿着过期的旧状态把行反写成 `settled` —— 钱已退回用户账上、账面却记 settled，之后 `refundVideoHold` 又因 settled 早退，`videoCreditHold` 与 `CreditLedger` 永久对不上、用户白拿退款。`settleCloneHold` 同一形态。修法：结算改条件 `updateMany`（`where status notIn ['refunded','settled']`，命中 0 行即不覆盖）+ 回读真实状态返回，与同文件 `markVideoSubmissionUnknown` 的既有范式一致，杜绝迁出终态。
+- **httpTool 重定向绕过 SSRF 白名单**（`server/src/llm/tools/httpTool.ts`）：`assertSafeUrl` 只校验初始 URL，而 `fetch` 用默认 `redirect:'follow'`；被运营配进来的（或已被攻陷的）第三方端点回一个 `302 Location: http://169.254.169.254/…` 就会被跟随、响应体喂回模型，注入的 `X-Tenant-Id/X-User-Id/X-Agent-Key` 也随之重放。改 `redirect:'error'`，与本仓 `routes/video.ts` 出站代理同一处置（跟随即抛、落 catch）。DNS-rebinding TOCTOU（assertSafeUrl 解析后 fetch 再解析）是同类残留、与既有 video 代理同级，未在本轮扩大改动。
+
+验证：`npx tsc -p tsconfig.json --noEmit` 全绿。DB 依赖的集成测试（`test/*.test.ts` 需本地 Postgres `junshi_test`）本环境无 Postgres 服务未跑；两处修法均为最小条件写 / 出站选项，且沿用同文件既有范式。
+
 ### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
