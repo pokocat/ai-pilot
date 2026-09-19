@@ -13,7 +13,10 @@ export async function memoryRoutes(app: FastifyInstance) {
     async (req): Promise<MemoryCandidate[]> => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       const q = (req.query.q ?? '').trim();
-      const take = Math.min(50, Math.max(1, Number(req.query.limit ?? 30)));
+      // Number('abc')=NaN，且 Math.min/max 不会把 NaN 夹回来，take:NaN 会让 Prisma 抛 → 500。
+      // 先判有限再夹取，非数字 limit 回落默认 30。
+      const limitRaw = Number(req.query.limit ?? 30);
+      const take = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, Math.floor(limitRaw))) : 30;
       const rows = await prisma.memory.findMany({
         where: {
           tenantId: user.tenantId,

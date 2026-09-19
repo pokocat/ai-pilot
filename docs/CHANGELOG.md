@@ -6,6 +6,27 @@
 
 ## 变更日志
 
+### 2026-09-19 · 例行 QA 巡检：数值查询参数未校验 → `NaN` 传进 Prisma 崩 500 + profile 字面量 null body 空引用 · 影响面：`/api/memories`、`/api/graph/*`、`/api/reports/:id/version|diff`、`/admin/projects|reports`、`PUT /api/profile` 的健壮性
+
+承接 #50 分支、不新开 PR（开工前查过三仓开着的 routine PR：本仓 #49/#50；AIStarEcosystem #101/#102/#106；shequn-gongju 无）。子代理对 server 做对抗式复核：money/佣金/预扣、IDOR 归属、支付回调、推荐环检测面历轮已很干净，本轮落一类确定缺陷——`Number('abc')=NaN`，而 `Math.min/max` 不夹 `NaN`、`?? 默认` 只兜 `null/undefined`，`NaN` 一路传进 Prisma 的 `take` / Int `where` 会抛 `PrismaClientValidationError` → 未处理 500。这些路由没有 Fastify 运行时 schema，值全程未校验。
+
+- **`GET /api/memories?limit=<非数字>` → 500**（`server/src/routes/memories.ts`）：`take = Math.min(50, Math.max(1, Number(limit)))` 得 `NaN`。改先判 `Number.isFinite` 再夹取，非数字回落默认 30。
+- **`GET /api/graph/entities|relations?limit=<非数字>` → 500**（`server/src/services/knowledgeGraph.ts` 的 `listEntities` / `queryRelations`）：`take` 收 `NaN`。**在服务层收敛校验**（一处保护所有调用方，含路由与其它内部调用），非有限值回落默认。
+- **`GET /api/reports/:id/version?v=<非数字>` 与 `/diff?to=|from=<非数字>` → 500**（`server/src/routes/reports.ts`）：`version: NaN` 落 Prisma Int `where`。改为存在但非整数即回 `400 BAD_VERSION`；缺省取最新版本 / 有效版本号行为不变。
+- **`GET /admin/projects|reports?limit=<非数字>` → 500**（`server/src/routes/admin.ts`，仅运营可达，Low）：同 `Number.isFinite` 夹取。
+- **`PUT /api/profile` 收到字面量 `null` body → 500**（`server/src/routes/profile.ts`）：内容解析器把空 body 归一成 `{}`、但字面量 `null` 原样穿过，旧代码 `req.body.industry`（未用可选链）即 `null.industry` → `TypeError`。改 `const body = req.body ?? {}`。
+
+验证：`npm run build`（tsc）全绿；新增回归 `server/test/queryParamGuards.test.ts`（5 例，本地 PostgreSQL 16 起 `junshi_test` 跑通），**git 回退实证**：暂存源码修复只留测试 → 5/5 全 fail；恢复修复 → 5/5 全 pass；`reportV2` + `community` + `knowledgeGraph` + `reportsDiff` 既有套件无回归（78 例全绿）。
+
+### 2026-09-17 · 例行 QA 巡检：出片/克隆预扣结算的 check-then-act 竞态 + httpTool 重定向 SSRF · 影响面：`videoCreditHold` / `videoCloneHold` 账面一致性、运营自建 HTTP 工具出站安全
+
+承接 #50 分支、不新开 PR（开工前查过三仓开着的 routine PR：本仓 #50；AIStarEcosystem #101/#102；shequn-gongju 无）。两处确定缺陷：
+
+- **出片 / 克隆预扣结算与并发退款的 check-then-act 竞态**（`server/src/services/video/credits.ts#settleVideoJob`、`cloneCredits.ts#settleCloneHold`）：`settleVideoJob` 先**无锁**读 hold，再在 `succeeded` 分支**无条件** `update` 成 `settled`；而 `refundVideoHold` 是取 `pg_advisory_xact_lock` 后退款并落 `refunded`。「取消/删除刚退完款」撞上「并发一次 succeeded 查询」时，succeeded 那条拿着过期的旧状态把行反写成 `settled` —— 钱已退回用户账上、账面却记 settled，之后 `refundVideoHold` 又因 settled 早退，`videoCreditHold` 与 `CreditLedger` 永久对不上、用户白拿退款。`settleCloneHold` 同一形态。修法：结算改条件 `updateMany`（`where status notIn ['refunded','settled']`，命中 0 行即不覆盖）+ 回读真实状态返回，与同文件 `markVideoSubmissionUnknown` 的既有范式一致，杜绝迁出终态。
+- **httpTool 重定向绕过 SSRF 白名单**（`server/src/llm/tools/httpTool.ts`）：`assertSafeUrl` 只校验初始 URL，而 `fetch` 用默认 `redirect:'follow'`；被运营配进来的（或已被攻陷的）第三方端点回一个 `302 Location: http://169.254.169.254/…` 就会被跟随、响应体喂回模型，注入的 `X-Tenant-Id/X-User-Id/X-Agent-Key` 也随之重放。改 `redirect:'error'`，与本仓 `routes/video.ts` 出站代理同一处置（跟随即抛、落 catch）。DNS-rebinding TOCTOU（assertSafeUrl 解析后 fetch 再解析）是同类残留、与既有 video 代理同级，未在本轮扩大改动。
+
+验证：`npx tsc -p tsconfig.json --noEmit` 全绿。DB 依赖的集成测试（`test/*.test.ts` 需本地 Postgres `junshi_test`）本环境无 Postgres 服务未跑；两处修法均为最小条件写 / 出站选项，且沿用同文件既有范式。
+
 ### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。

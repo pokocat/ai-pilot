@@ -159,7 +159,15 @@ export async function refundCloneHold(holdId: string, lastTrainStatus = 'failed'
 export async function settleCloneHold(holdId: string, lastTrainStatus = 'ready'): Promise<VideoCloneHold | null> {
   const hold = await prisma.videoCloneHold.findUnique({ where: { id: holdId } });
   if (!hold || hold.status === 'refunded' || hold.status === 'settled') return hold;
-  return prisma.videoCloneHold.update({ where: { id: holdId }, data: { status: 'settled', lastTrainStatus } });
+  // 与 settleVideoJob 同一个坑：上面是无锁读，hold.status 可能已被并发的 refundCloneHold
+  // （取锁、退款、落 refunded）改掉。照旧读无条件写 settled 会把「已退款却记 settled」固化，
+  // 之后 refundCloneHold 又因 settled 早退，账面与 CreditLedger 永久不一致。改条件写：
+  // 只在仍非终态时结算，命中 0 行就不覆盖；再回读真实状态返回。
+  await prisma.videoCloneHold.updateMany({
+    where: { id: holdId, status: { notIn: ['refunded', 'settled'] } },
+    data: { status: 'settled', lastTrainStatus },
+  });
+  return prisma.videoCloneHold.findUnique({ where: { id: holdId } });
 }
 
 /** 训练状态 → 该笔 hold 的归宿。training / 未知一律「继续等」，不猜。 */

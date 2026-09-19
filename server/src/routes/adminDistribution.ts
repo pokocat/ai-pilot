@@ -788,8 +788,17 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         for (const t of targets) {
           const made = await prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:settle:${t.id}`}))`;
+            // 纳入口径 = 「已成熟(confirmed) + 还没挂在别的单上(settlementId=null) + 计提于本期结束前」。
+            // **不按 createdAt 的下界 `start` 过滤**：流水的成熟(confirmed)晚于计提(createdAt，
+            // 支付时刻)——冻结期默认 7 天、可配 0–90，且没有 confirmedAt 列可依。若按 createdAt∈[start,end)
+            // 圈定，则「在本期结束前若干天内计提、要到下期才成熟」的流水会被永久漏结：它计提所在的那一期
+            // 生成结算单时它还 pending 被正确排除，等它成熟后，任何按期(createdAt 窗口)生成的后续单又都
+            // 圈不到它（createdAt < 下一期的 start）。改为只卡上界 `lt: end`——按「结到本期末为止、凡是欠着
+            // 的都结」的语义（与本端点注释「欠人家的钱照结」及运营弹窗「只纳入可结算且未挂单的流水」一致），
+            // 迟熟的上期流水会被下一张单兜住；settlementId=null + updateMany 同条件 + 行级 advisory lock
+            // 保证每条流水只会被挂进一张单，不会重复结算。
             const rows = await tx.commissionEntry.findMany({
-              where: { distributorId: t.id, status: 'confirmed', settlementId: null, createdAt: { gte: start, lt: end } },
+              where: { distributorId: t.id, status: 'confirmed', settlementId: null, createdAt: { lt: end } },
               select: { id: true },
             });
             if (rows.length === 0) return null;
@@ -842,10 +851,15 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
       const before = await prisma.commissionSettlement.findUnique({ where: { id: req.params.id } });
       if (!before) fail('结算单不存在', 404, 'SETTLEMENT_NOT_FOUND');
       if (before!.status !== 'draft') fail(`只有草稿可核准（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
-      const after = await prisma.commissionSettlement.update({
-        where: { id: before!.id },
+      // 上面的状态判定与下面的写入之间是 check-then-act：并发的 paid/void（或另一个 approve）
+      // 可能在这中间把状态改掉。用带原状态条件的 updateMany 原子占位——命中 1 行才算成功，
+      // 否则说明状态已被改走，返回 409 而不是把一张已 paid/void 的单无条件翻回 approved。
+      const claim = await prisma.commissionSettlement.updateMany({
+        where: { id: before!.id, status: 'draft' },
         data: { status: 'approved', approvedBy: actorName(actor), approvedAt: now() },
       });
+      if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+      const after = await prisma.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
       await recordAudit({
         action: 'admin.distribution.settlement.approve',
         payload: { by: actorName(actor), before: { id: before!.id, status: before!.status }, after: { status: after.status, entryCount: after.entryCount, totalAmount: after.totalAmount } },
@@ -873,14 +887,19 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         if (before!.status !== 'approved') fail(`只有已核准的单可标记打款（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
+          // 先带原状态条件占位（approved→paid，命中 1 行才继续），再在同事务里推流水成 settled。
+          // 否则并发的 void 可能已把这张单作废、把成员流水解绑放回待结池，而这里仍按 approved 的旧读
+          // 无条件写成 paid —— 那些流水会被下一次 generate 重新纳入、第二次结算并线下二次打款。
+          const claim = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: 'approved' },
+            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
+          });
+          if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
           await tx.commissionEntry.updateMany({
             where: { settlementId: before!.id, status: 'confirmed' },
             data: { status: 'settled' },
           });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
-            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
-          });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.paid',
@@ -918,11 +937,16 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         }
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
-          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
+          // 先带原状态条件占位（draft/approved→void，命中 1 行才继续）再解绑流水。否则并发的 paid
+          // 可能已把这张单推成 paid、把成员流水结成 settled，而这里仍按旧读无条件解绑——会把已打款的
+          // 流水 settlementId 抹回 null 放进待结池、下次重复结算。命中 0 行即状态已变，返回 409。
+          const claim = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: { in: ['draft', 'approved'] } },
             data: { status: 'void', note: `${before!.note ? `${before!.note}\n` : ''}[作废 ${at.toISOString()} by ${actorName(actor)}] ${reason}` },
           });
+          if (claim.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.void',

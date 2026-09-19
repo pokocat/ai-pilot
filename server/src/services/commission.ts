@@ -353,20 +353,30 @@ export async function reverseForOrder(order: CommissionOrder): Promise<Commissio
   const touchedSettlements = new Set<string>();
   await prisma.$transaction(async (tx) => {
     for (const row of rows) {
-      if (row.status === 'pending' || row.status === 'confirmed') {
+      // 注意：`rows` 是在事务外读的快照，`row.status` 可能已过期——并发的 settlements/:id/paid
+      // 会把 confirmed 推成 settled（钱打出去了）。若按旧状态直接分支，会走进 pending/confirmed 冲销
+      // 分支，而带 status 条件的 updateMany 命中 0 行、既没冲销也没落 clawback → 已付出的佣金永远
+      // 追不回来（退了款、代理却白拿佣金）。因此改为「按写入结果驱动」而不是按读到的旧状态驱动：
+      // 先尝试以 pending/confirmed 语义原子冲销，命中才算；没命中再按当前真实状态决定是否落 clawback。
+      const reversed = await tx.commissionEntry.updateMany({
+        where: { id: row.id, status: { in: ['pending', 'confirmed'] } },
+        data: { status: 'reversed', reversedAt: at, settlementId: null },
+      });
+      if (reversed.count === 1) {
+        // 成功冲销一条 pending/confirmed 流水。若它挂在一张未打款的单上，需重算那张单的净额/条数。
         if (row.settlementId) {
           const st = await tx.commissionSettlement.findUnique({
             where: { id: row.settlementId }, select: { id: true, status: true },
           });
-          // 已打款（paid）的单不该出现 pending/confirmed 的成员行；万一出现，也不去动那张单，
-          // 只把这行冲销掉并留给对账——绝不静默改写一张已付款的凭证。
           if (st && (st.status === 'draft' || st.status === 'approved')) touchedSettlements.add(st.id);
         }
-        await tx.commissionEntry.updateMany({
-          where: { id: row.id, status: row.status },
-          data: { status: 'reversed', reversedAt: at, settlementId: null },
-        });
-      } else if (row.status === 'settled') {
+        continue;
+      }
+      // 没能以 pending/confirmed 冲销：读当前真实状态再定夺。settled（钱已打）→ 落 clawback 净额抵扣；
+      // reversed（已冲销过）→ 幂等空操作。clawback 由唯一键 (outTradeNo,beneficiary,level,'clawback')
+      // + skipDuplicates 防重复。
+      const cur = await tx.commissionEntry.findUnique({ where: { id: row.id }, select: { status: true } });
+      if (cur?.status === 'settled') {
         await tx.commissionEntry.createMany({
           data: [{
             tenantId: row.tenantId,
@@ -389,7 +399,6 @@ export async function reverseForOrder(order: CommissionOrder): Promise<Commissio
           skipDuplicates: true,
         });
       }
-      // reversed：已经冲销过，什么都不做（幂等）。
     }
     for (const id of touchedSettlements) await recomputeSettlement(tx, id);
   });

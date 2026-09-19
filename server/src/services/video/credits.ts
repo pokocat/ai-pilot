@@ -60,8 +60,17 @@ export async function settleVideoJob(upstreamJobId: string, status: string) {
     return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
   }
   if (status === 'failed' || status === 'cancelled') return refundVideoHold(hold.id, status);
-  if (status === 'succeeded' && hold.status !== 'settled') {
-    return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { status: 'settled', lastJobStatus: status } });
+  if (status === 'succeeded') {
+    // 上面那次 findUnique 是**无锁**读，hold.status 可能已过期：并发的 refundVideoHold
+    // （取锁、退款、落 refunded）可能刚在读之后把这行退掉。若照旧读无条件写 settled，就把一行
+    // 「钱已退回、账面却记 settled」的坏数据固化下来 —— 之后 refundVideoHold 又会因 settled 早退，
+    // hold 与 CreditLedger 永久对不上、用户白拿退款。改条件写：只在仍非终态时才结算，
+    // 命中 0 行说明已被并发退款/结算占掉，不覆盖。再回读当前真实状态返回（settled 或 refunded）。
+    await prisma.videoCreditHold.updateMany({
+      where: { id: hold.id, status: { notIn: ['refunded', 'settled'] } },
+      data: { status: 'settled', lastJobStatus: status },
+    });
+    return prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
   }
   return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
 }

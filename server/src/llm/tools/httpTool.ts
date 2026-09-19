@@ -90,7 +90,12 @@ export function makeHttpTool(def: HttpToolDef): Tool {
           body = JSON.stringify(args ?? {});
         }
 
-        const res = await fetch(url, { method, headers, body, signal: ctrl.signal });
+        // redirect:'error' —— assertSafeUrl 只校验了初始 URL，而 fetch 默认 redirect:'follow'。
+        // 一个被运营配进来的（或已被攻陷的）第三方端点只要回一个 302 Location: http://169.254.169.254/…
+        // （或任意内网地址），follow 就会去请求它、把响应体喂回模型，还会把上面注入的
+        // X-Tenant-Id / X-User-Id / X-Agent-Key 一起重放过去 —— SSRF 白名单形同虚设。
+        // 与本仓 routes/video.ts 的出站代理同一处置：拒绝跟随重定向（跟随即抛，落到下面 catch）。
+        const res = await fetch(url, { method, headers, body, redirect: 'error', signal: ctrl.signal });
         const text = (await res.text().catch(() => '')) || '';
         // 不把原始错误体返回给 LLM，避免泄露上游服务内部信息。
         if (!res.ok) return `（工具调用失败 HTTP ${res.status}，请稍后重试）`;
