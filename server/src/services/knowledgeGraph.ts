@@ -103,7 +103,12 @@ export async function queryRelations(
   opts: { entity?: string; predicate?: string; asOf?: Date; projectId?: string | null; limit?: number } = {},
 ): Promise<RelationView[]> {
   const asOf = opts.asOf;
-  const take = Math.min(200, Math.max(1, opts.limit ?? 100));
+  // opts.limit 常来自路由的 Number(req.query.limit ?? 100)——非数字字符串会得 NaN，而 `?? 100`
+  // 只兜 null/undefined 兜不住 NaN，NaN 一路传进 Prisma 的 take 会抛 PrismaClientValidationError
+  // → 500。在此收敛校验（保护所有调用方），非有限值回落默认 100。
+  const take = Number.isFinite(opts.limit)
+    ? Math.min(200, Math.max(1, Math.floor(opts.limit as number)))
+    : 100;
 
   let entityIds: string[] | undefined;
   if (opts.entity?.trim()) {
@@ -143,6 +148,9 @@ export async function queryRelations(
 
 /** 实体列表（运营/调试用）。 */
 export async function listEntities(tenantId: string, projectId?: string | null, limit = 100) {
+  // limit 常来自路由的 Number(req.query.limit ?? 100)：非数字 → NaN，默认参数只兜 undefined
+  // 兜不住 NaN，NaN 传进 take 会让 Prisma 抛 → 500。非有限值回落默认 100。
+  const take = Number.isFinite(limit) ? Math.min(500, Math.max(1, Math.floor(limit))) : 100;
   const rows = await prisma.graphEntity.findMany({
     where: {
       tenantId,
@@ -154,7 +162,7 @@ export async function listEntities(tenantId: string, projectId?: string | null, 
         ],
       } : {}),
     },
-    orderBy: { createdAt: 'desc' }, take: Math.min(500, limit),
+    orderBy: { createdAt: 'desc' }, take,
   });
   return rows.map((e) => ({ id: e.id, name: e.name, type: e.type, projectId: projectId ?? e.projectId, createdAt: e.createdAt.toISOString() }));
 }

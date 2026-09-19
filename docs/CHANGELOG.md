@@ -6,6 +6,18 @@
 
 ## 变更日志
 
+### 2026-09-19 · 例行 QA 巡检：数值查询参数未校验 → `NaN` 传进 Prisma 崩 500 + profile 字面量 null body 空引用 · 影响面：`/api/memories`、`/api/graph/*`、`/api/reports/:id/version|diff`、`/admin/projects|reports`、`PUT /api/profile` 的健壮性
+
+承接 #50 分支、不新开 PR（开工前查过三仓开着的 routine PR：本仓 #49/#50；AIStarEcosystem #101/#102/#106；shequn-gongju 无）。子代理对 server 做对抗式复核：money/佣金/预扣、IDOR 归属、支付回调、推荐环检测面历轮已很干净，本轮落一类确定缺陷——`Number('abc')=NaN`，而 `Math.min/max` 不夹 `NaN`、`?? 默认` 只兜 `null/undefined`，`NaN` 一路传进 Prisma 的 `take` / Int `where` 会抛 `PrismaClientValidationError` → 未处理 500。这些路由没有 Fastify 运行时 schema，值全程未校验。
+
+- **`GET /api/memories?limit=<非数字>` → 500**（`server/src/routes/memories.ts`）：`take = Math.min(50, Math.max(1, Number(limit)))` 得 `NaN`。改先判 `Number.isFinite` 再夹取，非数字回落默认 30。
+- **`GET /api/graph/entities|relations?limit=<非数字>` → 500**（`server/src/services/knowledgeGraph.ts` 的 `listEntities` / `queryRelations`）：`take` 收 `NaN`。**在服务层收敛校验**（一处保护所有调用方，含路由与其它内部调用），非有限值回落默认。
+- **`GET /api/reports/:id/version?v=<非数字>` 与 `/diff?to=|from=<非数字>` → 500**（`server/src/routes/reports.ts`）：`version: NaN` 落 Prisma Int `where`。改为存在但非整数即回 `400 BAD_VERSION`；缺省取最新版本 / 有效版本号行为不变。
+- **`GET /admin/projects|reports?limit=<非数字>` → 500**（`server/src/routes/admin.ts`，仅运营可达，Low）：同 `Number.isFinite` 夹取。
+- **`PUT /api/profile` 收到字面量 `null` body → 500**（`server/src/routes/profile.ts`）：内容解析器把空 body 归一成 `{}`、但字面量 `null` 原样穿过，旧代码 `req.body.industry`（未用可选链）即 `null.industry` → `TypeError`。改 `const body = req.body ?? {}`。
+
+验证：`npm run build`（tsc）全绿；新增回归 `server/test/queryParamGuards.test.ts`（5 例，本地 PostgreSQL 16 起 `junshi_test` 跑通），**git 回退实证**：暂存源码修复只留测试 → 5/5 全 fail；恢复修复 → 5/5 全 pass；`reportV2` + `community` + `knowledgeGraph` + `reportsDiff` 既有套件无回归（78 例全绿）。
+
 ### 2026-09-17 · 例行 QA 巡检：出片/克隆预扣结算的 check-then-act 竞态 + httpTool 重定向 SSRF · 影响面：`videoCreditHold` / `videoCloneHold` 账面一致性、运营自建 HTTP 工具出站安全
 
 承接 #50 分支、不新开 PR（开工前查过三仓开着的 routine PR：本仓 #50；AIStarEcosystem #101/#102；shequn-gongju 无）。两处确定缺陷：

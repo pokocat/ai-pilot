@@ -29,11 +29,14 @@ export async function profileRoutes(app: FastifyInstance) {
     async (req) => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       const existing = await prisma.profile.findFirst({ where: { tenantId: user.tenantId } });
+      // 内容解析器会把空 body 归一成 {}，但字面量 `null`（JSON.parse('null')）会原样穿过来；
+      // 直接 req.body.industry 就是 null.industry → TypeError → 500。先兜成 {}（其余路由用 req.body?.x）。
+      const body = req.body ?? {};
       const data = {
-        industry: req.body.industry,
-        stage: req.body.stage,
-        pain: req.body.pain,
-        extraJson: req.body.extra ?? undefined,
+        industry: body.industry,
+        stage: body.stage,
+        pain: body.pain,
+        extraJson: body.extra ?? undefined,
       };
       const p = existing
         ? await prisma.profile.update({ where: { id: existing.id }, data })

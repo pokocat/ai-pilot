@@ -49,9 +49,15 @@ export async function reportRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const d = await prisma.reportDoc.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
     if (!d) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
-    const ver = req.query.v
-      ? await prisma.reportVersion.findFirst({ where: { reportId: d.id, version: Number(req.query.v) } })
-      : await prisma.reportVersion.findFirst({ where: { reportId: d.id }, orderBy: { version: 'desc' } });
+    // v 存在但非整数时，Number(v)=NaN 塞进 Prisma 的 Int where 会抛 → 500；显式回 400。
+    let ver;
+    if (req.query.v) {
+      const vNum = Number(req.query.v);
+      if (!Number.isInteger(vNum)) return reply.code(400).send({ error: '版本号非法', code: 'BAD_VERSION' });
+      ver = await prisma.reportVersion.findFirst({ where: { reportId: d.id, version: vNum } });
+    } else {
+      ver = await prisma.reportVersion.findFirst({ where: { reportId: d.id }, orderBy: { version: 'desc' } });
+    }
     if (!ver) return reply.code(404).send({ error: '这个方案版本不存在', code: 'VERSION_NOT_FOUND' });
     const out: ReportVersionContent = {
       reportId: d.id, version: ver.version, title: ver.title,
@@ -65,8 +71,11 @@ export async function reportRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const d = await prisma.reportDoc.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
     if (!d) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
+    // to/from 若传了非数字 → NaN 塞进 getReportDiff → Prisma Int where 抛 → 500；显式回 400。
     const to = Number(req.query.to ?? d.currentVersion);
+    if (!Number.isInteger(to)) return reply.code(400).send({ error: '版本号非法', code: 'BAD_VERSION' });
     const from = Number(req.query.from ?? Math.max(1, to - 1));
+    if (!Number.isInteger(from)) return reply.code(400).send({ error: '版本号非法', code: 'BAD_VERSION' });
     const diff = await getReportDiff(user.tenantId, d.id, from, to);
     if (!diff) return reply.code(404).send({ error: '要对比的方案版本不存在', code: 'VERSION_NOT_FOUND' });
     return diff;

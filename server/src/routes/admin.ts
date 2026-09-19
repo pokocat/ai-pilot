@@ -569,7 +569,8 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // —— 只读看板：项目 / 报告（跨租户运营视图，纯读不改；知识库看板见 /admin/knowledge）——
   app.get<{ Querystring: { limit?: string } }>('/admin/projects', async (req): Promise<AdminProjectItem[]> => {
-    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const limitRaw = Number(req.query.limit ?? 100);
+    const take = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 100;
     const rows = await prisma.project.findMany({
       orderBy: { updatedAt: 'desc' }, take,
       include: { tenant: { select: { name: true } }, _count: { select: { sessions: true, reports: true, knowledge: true } } },
@@ -582,7 +583,8 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Querystring: { limit?: string } }>('/admin/reports', async (req): Promise<AdminReportItem[]> => {
-    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const limitRaw = Number(req.query.limit ?? 100);
+    const take = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.floor(limitRaw))) : 100;
     const rows = await prisma.reportDoc.findMany({
       orderBy: { updatedAt: 'desc' }, take,
       include: { tenant: { select: { name: true } }, agent: { select: { name: true } } },
