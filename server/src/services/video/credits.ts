@@ -53,16 +53,24 @@ export async function markVideoSubmissionUnknown(holdId: string, message?: strin
 export async function settleVideoJob(upstreamJobId: string, status: string) {
   const hold = await prisma.videoCreditHold.findUnique({ where: { upstreamJobId } });
   if (!hold) return null;
-  // refunded 是终点：钱已经退回用户账上了。以前这里只挡了 settled，于是
-  // 「取消/删除刚退完款」撞上「并发的一次 succeeded 查询」会把它反写成 settled ——
-  // 账面成了已结算，可退款流水已经发生。任何状态都不许从 refunded 迁出去。
-  if (hold.status === 'refunded') {
-    return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
-  }
   if (status === 'failed' || status === 'cancelled') return refundVideoHold(hold.id, status);
-  if (status === 'succeeded' && hold.status !== 'settled') {
-    return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { status: 'settled', lastJobStatus: status } });
+  if (status === 'succeeded') {
+    // 迁到 settled 必须用 DB 现值做条件写，不能信任上面那条无锁快照读 hold.status。
+    // 「取消/删除刚退完款(refunded)」若与并发的一次 succeeded 结算撞上：旧代码按快照里的
+    // 'submitted' 判定、再无条件 update 成 settled，会把已提交的 refunded 反写掉——
+    // 账面成了已结算而退款流水已经发生（用户既留住退款又拿到成片）。带 status 守卫的
+    // updateMany 命中 0 行，就说明这行已是 refunded/settled，退回去只补 lastJobStatus、不改 status。
+    const res = await prisma.videoCreditHold.updateMany({
+      where: { id: hold.id, status: { notIn: ['refunded', 'settled'] } },
+      data: { status: 'settled', lastJobStatus: status },
+    });
+    if (res.count === 0) {
+      return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
+    }
+    return prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
   }
+  // 其余状态（queued / running / 快照是 refunded 等）：只反映 lastJobStatus，不迁 status。
+  // refunded / settled 是终点，这里即便快照不是它，也只写 lastJobStatus、不会把终态改走。
   return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
 }
 

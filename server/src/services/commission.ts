@@ -344,14 +344,22 @@ export async function accrueForOrder(order: CommissionOrder): Promise<Commission
  * 已 reversed 的行不在 where 里，重复处理是空操作。
  */
 export async function reverseForOrder(order: CommissionOrder): Promise<CommissionOutboxResult> {
-  const rows = await prisma.commissionEntry.findMany({
-    where: { outTradeNo: order.outTradeNo, kind: 'accrual' },
-  });
-  if (rows.length === 0) return 'no_distributor';
-
   const at = now();
   const touchedSettlements = new Set<string>();
+  let matched = 0;
   await prisma.$transaction(async (tx) => {
+    // 先在事务内对这笔订单的全部 accrual 行加行锁再重读，别在事务外读一份快照就照它写。
+    // confirmMatured（pending→confirmed，30min job）与结算打款（confirmed→settled）都会并发改这些行，
+    // 且不与本函数共享任何锁。旧代码在事务外读状态、再按旧状态选分支并用 `status: 旧值` 守卫写：
+    //  · 读到 confirmed 时并发打款成了 settled → 走 pending/confirmed 分支、updateMany 命中 0 行 →
+    //    既没冲销又没落 clawback，退款订单里已打款的佣金再也追不回（少扣/多付）。
+    //  · 读到 pending 时并发成熟成了 confirmed → 同样 0 行，既不冲销也不追回。
+    // FOR UPDATE 锁住行后，并发的 updateMany 会阻塞并在拿到锁后按新状态(reversed)重判；反之若它们先
+    // 提交，这里 FOR UPDATE 读到的就是它们写完的最新状态，分支据现值选，杜绝丢冲销/漏追回。
+    const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM commission_entry WHERE "outTradeNo" = ${order.outTradeNo} AND kind = 'accrual' FOR UPDATE`;
+    matched = locked.length;
+    if (locked.length === 0) return;
+    const rows = await tx.commissionEntry.findMany({ where: { id: { in: locked.map((r) => r.id) } } });
     for (const row of rows) {
       if (row.status === 'pending' || row.status === 'confirmed') {
         if (row.settlementId) {
@@ -363,7 +371,7 @@ export async function reverseForOrder(order: CommissionOrder): Promise<Commissio
           if (st && (st.status === 'draft' || st.status === 'approved')) touchedSettlements.add(st.id);
         }
         await tx.commissionEntry.updateMany({
-          where: { id: row.id, status: row.status },
+          where: { id: row.id, status: { in: ['pending', 'confirmed'] } },
           data: { status: 'reversed', reversedAt: at, settlementId: null },
         });
       } else if (row.status === 'settled') {
@@ -393,7 +401,7 @@ export async function reverseForOrder(order: CommissionOrder): Promise<Commissio
     }
     for (const id of touchedSettlements) await recomputeSettlement(tx, id);
   });
-  return 'reversed';
+  return matched === 0 ? 'no_distributor' : 'reversed';
 }
 
 /**
