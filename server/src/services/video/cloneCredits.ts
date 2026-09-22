@@ -157,9 +157,15 @@ export async function refundCloneHold(holdId: string, lastTrainStatus = 'failed'
 }
 
 export async function settleCloneHold(holdId: string, lastTrainStatus = 'ready'): Promise<VideoCloneHold | null> {
-  const hold = await prisma.videoCloneHold.findUnique({ where: { id: holdId } });
-  if (!hold || hold.status === 'refunded' || hold.status === 'settled') return hold;
-  return prisma.videoCloneHold.update({ where: { id: holdId }, data: { status: 'settled', lastTrainStatus } });
+  // 迁到 settled 用 DB 现值做条件写，不能信任无锁快照读：并发的 refundCloneHold（取消/失败退回，
+  // 它自己带 advisory lock + 事务内重读）若在读与写之间把这行提交成 refunded，旧代码会据快照里的
+  // 'submitted' 无条件反写成 settled——退款流水已发生却记成已结算（凭空送钱）。带 status 守卫的
+  // updateMany 命中 0 行即说明已 refunded/settled，读回现值原样返回、不覆盖。
+  await prisma.videoCloneHold.updateMany({
+    where: { id: holdId, status: { notIn: ['refunded', 'settled'] } },
+    data: { status: 'settled', lastTrainStatus },
+  });
+  return prisma.videoCloneHold.findUnique({ where: { id: holdId } });
 }
 
 /** 训练状态 → 该笔 hold 的归宿。training / 未知一律「继续等」，不猜。 */
