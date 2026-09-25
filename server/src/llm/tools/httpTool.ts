@@ -90,7 +90,10 @@ export function makeHttpTool(def: HttpToolDef): Tool {
           body = JSON.stringify(args ?? {});
         }
 
-        const res = await fetch(url, { method, headers, body, signal: ctrl.signal });
+        // redirect: 'error' —— assertSafeUrl 只校验了初始 URL 的解析地址，默认的 follow 会让上游用
+        // 302 Location 把请求转到内网/云元数据（100.100.100.200、169.254.169.254），响应体又会喂回
+        // 模型，等于绕过整个 SSRF 闸。与 aidramaGateway 一致：任何跳转直接判失败。
+        const res = await fetch(url, { method, headers, body, redirect: 'error', signal: ctrl.signal });
         const text = (await res.text().catch(() => '')) || '';
         // 不把原始错误体返回给 LLM，避免泄露上游服务内部信息。
         if (!res.ok) return `（工具调用失败 HTTP ${res.status}，请稍后重试）`;

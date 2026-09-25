@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-09-25 · 修复自建 HTTP 工具 SSRF 重定向绕过 · 影响面：`server/src/llm/tools/httpTool.ts`（运营自建技能的 HTTP 工具调用）
+
+`assertSafeUrl` 只在发请求前校验初始 URL 的解析地址，而 `fetch` 用的是默认的 `redirect: 'follow'`。上游可用一个 `302 Location: http://100.100.100.200/...`（阿里云元数据）或 `169.254.169.254` 把请求转进内网/云元数据，响应体（截断 4000 字）又会被喂回模型 —— 等于整个 SSRF 闸被跳转绕过（DNS rebinding 亦然）。改为 `redirect: 'error'`，与 `aidramaGateway` 一致：任何跳转直接判失败。例行 QA 巡检发现。
+
 ### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
