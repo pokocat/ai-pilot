@@ -331,6 +331,27 @@ export async function bindReferral(args: BindArgs): Promise<{ outcome: ReferralO
     }
     throw err;
   }
+
+  // 物化路径只存 3 层，且建边时只写**新行自己**的 lv1/lv2/lv3。注册链路这样够用——
+  // 全新号没有下线。但人工补绑（source='manual'）允许给「尚无推荐人、却可能已有下线」的
+  // 老用户建边（inviteCode 注册即发，用户有没有上线与他能不能拉下线互相独立）。这时
+  // userId 的下线记的祖先里，userId 那一档要整体下移一格，否则下线买单时 accrueForOrder
+  // 回溯的是**过时**的 lv1/lv2/lv3，新上线（referrer）永远不在链上——该拿的二/三级佣金
+  // 静默漏结，团队人数与层级统计也少算 referrer 这一支。注册链路走到这里 updateMany 命中 0 行，
+  // 无副作用，故无需按 source 分叉。
+  // - 直接下线（lv1 = userId）：lv2 应变成新上线 referrer、lv3 变成新上线的上一级 up.lv1
+  // - 二级下线（lv2 = userId）：lv3 应变成新上线 referrer
+  // - 三级下线（lv3 = userId）：新上线落到第 4 层、超出 3 级物化窗口，保持不变
+  // 两条 where 互斥（除非成环，已由 wouldFormCycle 挡在建边前），先后顺序无关。
+  await db.referral.updateMany({
+    where: { lv1: userId },
+    data: { lv2: referrer.id, lv3: up?.lv1 ?? null },
+  });
+  await db.referral.updateMany({
+    where: { lv2: userId },
+    data: { lv3: referrer.id },
+  });
+
   return trace('bound', referrer.id);
 }
 

@@ -237,6 +237,42 @@ test('物化路径平移：三级链上第三代的 lv1/lv2/lv3 依次是父、�
   assert.equal(edgeD.lv3, a, '第四代的 lv3 应是曾祖（物化只到三级，再往上不记）');
 });
 
+test('人工补绑：给已有下线的老用户补一个上线，下线的物化路径必须整体下移一格（否则新上线漏结佣金）', async () => {
+  // R 自己也有上线 P，用来验证下移时 lv3 取的是「新上线的上一级」而不是 null。
+  const p = await register();
+  const r = await register({ inviteCode: await inviteCodeOf(p) });
+
+  // A 注册时不带码 → 无上线，但 inviteCode 照发，A 照样能拉起自己的下线 B、C。
+  const a = await register();
+  const b = await register({ inviteCode: await inviteCodeOf(a) });
+  const c = await register({ inviteCode: await inviteCodeOf(b) });
+
+  // 补绑前：B{lv1:A}，C{lv1:B, lv2:A}，A 无边。
+  assert.equal(await prisma.referral.count({ where: { userId: a } }), 0, '前置：A 补绑前无上线');
+
+  const tenantA = (await prisma.user.findUniqueOrThrow({ where: { id: a } })).tenantId;
+  const outcome = await bindOnRegister({ db: prisma, userId: a, tenantId: tenantA, inviteCode: await inviteCodeOf(r), source: 'manual' });
+  assert.equal(outcome, 'bound', '人工补绑应放行并建边');
+
+  // A 自己的边：lv1=R、lv2=R 的上一级 P、lv3 空。
+  const edgeA = await prisma.referral.findUniqueOrThrow({ where: { userId: a } });
+  assert.equal(edgeA.lv1, r);
+  assert.equal(edgeA.lv2, p);
+  assert.equal(edgeA.lv3, null);
+
+  // 直接下线 B：lv1 仍是 A，但 lv2 应下移成新上线 R、lv3 成 R 的上一级 P。
+  const edgeB = await prisma.referral.findUniqueOrThrow({ where: { userId: b } });
+  assert.equal(edgeB.lv1, a, 'B 的直接上线不变');
+  assert.equal(edgeB.lv2, r, 'B 的 lv2 必须下移成 A 的新上线 R（此前是 null，导致 R 拿不到二级佣金）');
+  assert.equal(edgeB.lv3, p, 'B 的 lv3 必须是 R 的上一级 P');
+
+  // 二级下线 C：lv1/lv2 不变，lv3 应下移成新上线 R。
+  const edgeC = await prisma.referral.findUniqueOrThrow({ where: { userId: c } });
+  assert.equal(edgeC.lv1, b, 'C 的直接上线不变');
+  assert.equal(edgeC.lv2, a, 'C 的 lv2 不变');
+  assert.equal(edgeC.lv3, r, 'C 的 lv3 必须下移成 A 的新上线 R（此前是 null，导致 R 拿不到三级佣金）');
+});
+
 test('深环拒绝：A→B→C→D 链上，A 拿 D 的码绑定必须被拒（物化只存三级，判环必须递归上溯）', async () => {
   const a = await register();
   const b = await register({ inviteCode: await inviteCodeOf(a) });
