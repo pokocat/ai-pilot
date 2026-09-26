@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-09-26 · 修复：人工补绑上线时未下移下线的物化路径（新上线漏结二/三级佣金） · 影响面：`server` 分销佣金归因，`bindReferral`（`bindOnRegister` / `bindManually` 共用）
+
+例行 QA 巡检发现。`Referral` 用三级物化路径（`lv1/lv2/lv3`），`bindReferral` 建边时只写**新行自己**的路径、从不回溯更新 `userId` 已有的下线。注册链路安全（新号没有下线），但人工补绑（`POST /admin/invites/manual-bind`，`source='manual'`）允许给「尚无推荐人、却可能已有下线」的老用户建边（`inviteCode` 注册即发，有无上线与能否拉下线互相独立）。补绑后 `userId` 的下线仍记着过时的祖先，`accrueForOrder` 回溯不到新上线 → 新上线（若为 `active` 代理）**静默漏结二/三级佣金**，团队人数 / 层级统计也少算该支。
+
+**修复**：`bindReferral` 建边成功后，在同事务内把 `userId` 的下线路径整体下移一格 —— `lv1=userId` 的直接下线 `lv2←referrer、lv3←referrer 的上一级`；`lv2=userId` 的二级下线 `lv3←referrer`；`lv3=userId` 的三级下线超出物化窗口不变。注册链路命中 0 行、无副作用，故不按 `source` 分叉。两条 `where` 互斥（成环已由 `wouldFormCycle` 挡在建边前），先后无关。
+
+**验证**：`npx tsc --noEmit` 全绿；新增回归 `referral.test.ts`「人工补绑：给已有下线的老用户补一个上线，下线的物化路径必须整体下移一格」（构造 R→P 的上线链验证 `lv3` 取的是 R 的上一级 P）。本轮沙箱禁止改数据库认证配置，Postgres 集成测试未在本地跑，由 PR 的 `Server Integration` CI 执行。
+
 ### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
