@@ -6,7 +6,13 @@
 
 ## 变更日志
 
-### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
+### 2026-09-27 · 修复自建 HTTP 工具 SSRF：`isPrivateIp` 认不出十六进制 IPv4-mapped IPv6 · 影响面：`server/src/llm/tools/httpTool.ts`（运营自建 HTTP 技能的目标地址校验）
+
+例行 QA 巡检发现：`assertSafeUrl` 依赖的 `isPrivateIp` 只用 `ip.replace(/^::ffff:/i,'')` 处理**点分**的 IPv4-mapped 形式（`::ffff:127.0.0.1`），认不出等价的**十六进制**写法 `::ffff:7f00:1`（= 127.0.0.1）、`::ffff:a9fe:a9fe`（= 169.254.169.254 云元数据）——这类地址被 `isIP()` 判为合法 IPv6、却过不了「点分四段」判定，于是当成公网放行，`fetch` 直连环回 / 元数据端点（SSRF）。这是与 #52（重定向绕过）**不同的入站主机校验向量**，#52 的修法不覆盖它。
+
+修复：把 IPv6 判定改为**数值化**——`ipv6ToBigInt` 把任意文本写法（压缩 `::` / 完整展开 / 内嵌点分 IPv4 / 带 zone id）统一解析成 128-bit BigInt，再按段判 `::`/`::1`/`fc00::/7`/`fe80::/10`，并从 `::ffff:0:0/96`（IPv4-mapped）、`64:ff9b::/96`（NAT64）、`::/96`（IPv4-compatible，已弃用）三种前缀里抽出内嵌 IPv4 复用 `isPrivateV4` 判定；解析失败一律 fail-closed 拒绝。已用 24 组用例（含上述绕过样本 + 正常公网 v4/v6）验证。
+
+> 仍留的两项（本轮不改，见下）：`assertSafeUrl` 与 `fetch` 各自独立解析 DNS，存在 DNS-rebinding TOCTOU（需把校验过的 IP pin 进连接，改动面较大）；mock/sandbox 订单仍会走 `accrueForOrder` 记真实佣金（仅非生产可触发）。已记入 §13 TODO 待评估。
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
 
