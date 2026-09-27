@@ -19,12 +19,8 @@ export interface HttpToolDef {
   argsLocation: string; // body | query
 }
 
-function isPrivateIp(ip: string): boolean {
-  if (ip === '::1' || /^f[cd]/i.test(ip) || /^fe80/i.test(ip)) return true; // IPv6 loopback/ULA/link-local
-  const v4 = ip.replace(/^::ffff:/i, '');
-  const p = v4.split('.').map(Number);
-  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return false;
-  const [a, b] = p;
+function isPrivateV4(a: number, b: number, c: number, d: number): boolean {
+  if ([a, b, c, d].some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true; // 解析异常 → 拒（fail-closed）
   if (a === 0 || a === 127) return true;            // 0.0.0.0/8, loopback
   if (a === 10) return true;                         // 10/8
   if (a === 192 && b === 168) return true;           // 192.168/16
@@ -32,6 +28,66 @@ function isPrivateIp(ip: string): boolean {
   if (a === 169 && b === 254) return true;           // link-local + 169.254.169.254 metadata
   if (a === 100 && b === 100) return true;           // aliyun metadata 100.100.100.200
   return false;
+}
+
+/**
+ * 把任意文本形式的 IPv6（压缩 `::` / 完整展开 / 内嵌 IPv4）解析成 128-bit BigInt；
+ * 无法解析返回 null。用数值判定能覆盖同一地址的所有写法 —— 之前的实现只认
+ * 点分的 `::ffff:127.0.0.1`，认不出等价的十六进制 `::ffff:7f00:1`（= 127.0.0.1）
+ * 或 `::ffff:a9fe:a9fe`（= 169.254.169.254 云元数据），这类写法会被当成公网放行（SSRF）。
+ */
+function ipv6ToBigInt(ip: string): bigint | null {
+  let s = ip.toLowerCase().split('%')[0]; // 去掉 zone id（如 fe80::1%eth0）
+  const dotted = s.match(/^(.*:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) {
+    const q = dotted[2].split('.').map(Number);
+    if (q.some((n) => Number.isNaN(n) || n > 255)) return null;
+    const hi = ((q[0] << 8) | q[1]).toString(16);
+    const lo = ((q[2] << 8) | q[3]).toString(16);
+    s = dotted[1] + hi + ':' + lo; // 把尾部点分 IPv4 折成两段十六进制
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : null;
+  let groups: string[];
+  if (tail === null) {
+    if (head.length !== 8) return null;
+    groups = head;
+  } else {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    groups = [...head, ...Array(fill).fill('0'), ...tail];
+  }
+  let n = 0n;
+  for (const g of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    n = (n << 16n) | BigInt(parseInt(g, 16));
+  }
+  return n;
+}
+
+function isPrivateIp(ip: string): boolean {
+  const kind = isIP(ip);
+  if (kind === 4) {
+    const [a, b, c, d] = ip.split('.').map(Number);
+    return isPrivateV4(a, b, c, d);
+  }
+  if (kind === 6) {
+    const n = ipv6ToBigInt(ip);
+    if (n === null) return true;               // 解析不了 → 拒（fail-closed）
+    if (n === 0n || n === 1n) return true;     // :: 未指定 / ::1 环回
+    if (((n >> 120n) & 0xfen) === 0xfcn) return true; // fc00::/7 ULA
+    if ((n >> 118n) === 0x3fan) return true;   // fe80::/10 link-local
+    const hi96 = n >> 32n;
+    let v4: number | null = null;
+    if (hi96 === 0xffffn) v4 = Number(n & 0xffffffffn);            // ::ffff:0:0/96 IPv4-mapped
+    else if (hi96 === (0x64ff9bn << 64n)) v4 = Number(n & 0xffffffffn); // 64:ff9b::/96 NAT64（前缀在高位）
+    else if (hi96 === 0n) v4 = Number(n & 0xffffffffn);            // ::/96 IPv4-compatible（已弃用，一并拦）
+    if (v4 !== null) return isPrivateV4((v4 >>> 24) & 0xff, (v4 >>> 16) & 0xff, (v4 >>> 8) & 0xff, v4 & 0xff);
+    return false;
+  }
+  return false; // 非 IP 字面（调用点已 isIP 过滤，理论上不会到这里）
 }
 
 /** 校验目标 URL：仅 http/https；未放开时拒私网（含 DNS 解析后的地址）。 */
