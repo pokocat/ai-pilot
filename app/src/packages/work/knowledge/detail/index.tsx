@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro, { useRouter, usePullDownRefresh } from '@tarojs/taro';
+import Taro, { useRouter, usePullDownRefresh, useDidShow, useDidHide } from '@tarojs/taro';
 import Icon from '../../../../components/Icon';
 import SafeHeader from '../../../../components/SafeHeader';
 import AsyncState from '../../../../components/AsyncState';
@@ -54,13 +54,17 @@ export default function KnowledgeDetailPage() {
       .catch((e) => { s.handleApiError(e); setDetail(null); setFailed(true); });
   }, [id, s, clearPoll]);
 
-  useEffect(() => {
+  // 用 useDidShow 承接首屏与「前进后返回」两种进入（Taro/weapp 下 navigateTo 前进时本页只是隐藏、不卸载）。
+  // 此前仅在 useEffect 卸载时 clearPoll，前进到下一页时退避轮询会在后台继续拉接口、对隐藏页 setState；
+  // 补 useDidHide → 隐藏即停轮询，返回时 useDidShow 重新拉起（与列表页同一套模式）。
+  useDidShow(() => {
     if (!id) { setFailed(true); return; }
     setFailed(false);
     pollAttempt.current = 0; setPollHint(false);
     load();
-    return () => clearPoll();
-  }, [id, load, clearPoll]);
+  });
+  useDidHide(() => { clearPoll(); });
+  useEffect(() => () => clearPoll(), [clearPoll]);
 
   usePullDownRefresh(() => { pollAttempt.current = 0; setPollHint(false); load(); Taro.stopPullDownRefresh(); });
 
