@@ -164,7 +164,17 @@ export async function verifySmsCode(phone: string, code: string, scene = 'login'
   });
   if (!row) return false;
   if (row.expiresAt.getTime() < Date.now()) return false;
-  if (row.attempts >= env.smsMaxAttempts) return false;
+
+  // 先原子占用一次尝试额度，再比对。此前是「读 row → 判 attempts>=max → 比对 → 错了才自增」，
+  // 三步没有串行化（issueSmsCode 有 advisory 锁，这里没有）：N 个并发猜测会全部读到
+  // attempts=0、全部通过次数闸、全部走到比对，每码 max 次上限被击穿 —— 配合换 IP 可做
+  // 分布式暴力破解（6 位码在 TTL 内被并行穷举）。改为条件自增占坑（attempts<max 且未消费），
+  // 占不到坑（次数耗尽或已被并发消费）直接失败，把每码比对次数硬限制在 max 次以内。
+  const claimed = await prisma.smsCode.updateMany({
+    where: { id: row.id, consumedAt: null, attempts: { lt: env.smsMaxAttempts } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (claimed.count !== 1) return false;
 
   if (row.codeHash === hashCode(phone, code)) {
     const consumed = await prisma.smsCode.updateMany({
@@ -173,9 +183,5 @@ export async function verifySmsCode(phone: string, code: string, scene = 'login'
     });
     return consumed.count === 1;
   }
-  await prisma.smsCode.updateMany({
-    where: { id: row.id, consumedAt: null, attempts: { lt: env.smsMaxAttempts } },
-    data: { attempts: { increment: 1 } },
-  });
   return false;
 }

@@ -60,8 +60,20 @@ export async function settleVideoJob(upstreamJobId: string, status: string) {
     return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
   }
   if (status === 'failed' || status === 'cancelled') return refundVideoHold(hold.id, status);
-  if (status === 'succeeded' && hold.status !== 'settled') {
-    return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { status: 'settled', lastJobStatus: status } });
+  if (status === 'succeeded') {
+    // 条件自占，而非无条件 update：上面的 refunded 判据读的是本函数开头的快照，
+    // 并发的一次退款（取消/删除刚退完款、置 refunded）会漏过它，随后这条无守卫的
+    // update 把 refunded 反写成 settled —— 账面已结算但退款流水已发生。用行级条件
+    // 更新把「仅当当前不是终态才迁 settled」做成原子：退款先提交则命中 0 行、不反写。
+    const claimed = await prisma.videoCreditHold.updateMany({
+      where: { id: hold.id, status: { notIn: ['refunded', 'settled'] } },
+      data: { status: 'settled', lastJobStatus: status },
+    });
+    if (claimed.count === 0) {
+      // 已是终态（refunded/settled）：只记录上游最新状态，绝不改 status。
+      await prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
+    }
+    return prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
   }
   return prisma.videoCreditHold.update({ where: { id: hold.id }, data: { lastJobStatus: status } });
 }
