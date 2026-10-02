@@ -3,7 +3,7 @@
 // member 校验 assertPlanActive（过期 403）。所有查询按 tenantId+userId 行级隔离。计费一律复用 credits/tokenQuota，不自造。
 import type { Prisma, UserModule } from '@prisma/client';
 import { prisma } from '../db.js';
-import { chargeCredits } from './credits.js';
+import { chargeCreditsOnce } from './credits.js';
 import { assertPlanActive } from './tokenQuota.js';
 import { activeCasefile, todayStr } from './casefile.js';
 import { MODULES, MODULE_INDEX, getModule, type ModuleCatalogItem } from '../data/modules.js';
@@ -171,7 +171,13 @@ export async function enable(args: { tenantId: string; userId: string; moduleKey
       const rows = await loadRows(tenantId, userId);
       if (!computeEnabled(m, rows)) {
         const cost = m.price?.credits ?? 0;
-        await chargeCredits(tenantId, userId, cost, `启用能力 · ${m.label}`); // 不足抛 InsufficientCreditsError(402)
+        // 幂等扣费：check-then-charge 之间无锁，双击 / 客户端重试会让两个并发请求都读到「未启用」，
+        // 各走一次 chargeCredits → 用户被扣两次费（enableRow 幂等所以能力只启用一次，钱白扣）。
+        // credits 档一次购买永久启用（无停用路径），故用「同用户同能力」稳定幂等键：第二次扣费命中
+        // 已有流水直接返回、不重复落账（对齐 generationJobs 的 chargeCreditsOnce 用法）。
+        await prisma.$transaction((tx) =>
+          chargeCreditsOnce(tenantId, userId, cost, `启用能力 · ${m.label}`, `module:${userId}:${m.key}:enable`, tx),
+        ); // 不足抛 InsufficientCreditsError(402)
         await enableRow(tenantId, userId, m.key, 'purchase');
       }
       break;

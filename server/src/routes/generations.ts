@@ -134,7 +134,10 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(out.statusCode).send(out.body);
     }
     setupGenerationSSE(reply);
-    await pipeGenerationSSE(reply, req.params.id, { after: Number(req.query.after ?? -1) || -1 });
+    // after 是「我已拿到的快照版本号」游标，0 是合法值。原来 `Number(after ?? -1) || -1`
+    // 会把 0 经 `0 || -1` 吞成 -1，导致 after=0 的重连被当成「从头来」重放一次快照 0。
+    const afterRaw = Number(req.query.after);
+    await pipeGenerationSSE(reply, req.params.id, { after: Number.isFinite(afterRaw) ? afterRaw : -1 });
     if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.end();
   });
 
