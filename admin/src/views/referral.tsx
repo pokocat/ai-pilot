@@ -27,7 +27,7 @@ import { useResource, type Resource } from '../useResource';
 import { fmtTime } from '../format';
 // 归因结果 / 来源 / 短 id / 人物标签的人话表已抽到 growth/labels.ts —— 「增长」组四页共用一份。
 // 复制一份的后果是两屏对同一个 outcome 说不同的话，运营会当成两件事。本文件只改了 import。
-import { outcomeText, personText, sourceText } from '../growth/labels';
+import { beijingDay, outcomeText, personText, sourceText } from '../growth/labels';
 
 type Tab = 'schema' | 'tree' | 'risk' | 'funnel';
 
@@ -507,7 +507,7 @@ function TreeTab({ data }: { data: AdminReferralTree }) {
                 `直邀 ${r.node.directCount}`,
                 r.node.status === 'activated' ? '已开通' : '仅注册',
                 r.node.source ? sourceText(r.node.source) : null,
-                r.node.boundAt ? r.node.boundAt.slice(0, 10) : null,
+                r.node.boundAt ? beijingDay(r.node.boundAt) : null,
                 beyond ? '下级超出三级视野' : null,
               ].filter(Boolean).join(' · ');
               return (

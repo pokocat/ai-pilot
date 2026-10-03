@@ -6,6 +6,7 @@ import { api, uploadUserKnowledge, type ServiceAssignmentView, type AdminUserIte
 import { PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, useDialogFocus, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { KV, sum, fmtTime, creditText, sourceLabel, fmtTokens, fmtCny, fmtYuan, fmtSize, planStatusText } from '../format';
+import { beijingDay } from '../growth/labels';
 
 /* 客服拿到的线索只有「姓名」或「手机号」，旧版这一屏却是：一次性渲染全部用户、无搜索、
    无筛选、无排序——找人只能靠浏览器 Ctrl+F 在长列表里翻。现在给出搜索 + 三个真实值班
@@ -312,7 +313,7 @@ export function UserDetailPanel({ userId, isOwner, onClose, onOpenChain, toast }
                   <div className="mb">
                     <div className="mt">{m.agentKey}<span className="tag off">{m.kind}</span></div>
                     <div className="mm">{m.text}</div>
-                    <div className="mm">权重 {m.weight.toFixed(1)} · {m.source} · {m.createdAt.slice(0, 10)}</div>
+                    <div className="mm">权重 {m.weight.toFixed(1)} · {m.source} · {beijingDay(m.createdAt)}</div>
                   </div>
                   <button className="mini-btn danger" disabled={busy === 'm' + m.id} onClick={() => delMem(m.id, m.text, m.agentKey)}>删除</button>
                 </div>
