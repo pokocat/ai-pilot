@@ -5,6 +5,7 @@
 // 触达注意：微信订阅消息是一次性授权，发送额度来自用户在打卡/复盘动线里的每次授权（前端埋点），
 // 定时任务只负责「找出该提醒谁」并登记候选，发送走后续订阅消息通道。
 import { prisma } from '../db.js';
+import { pollIdentityOutbox } from './identityOutbox.js';
 import { recordAudit } from './audit.js';
 import { now, dateKey, hourOf, dayStart } from './clock.js';
 import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
@@ -474,3 +475,5 @@ registerJob({ name: 'commission-mature', intervalMs: 30 * 60_000, run: async () 
   const confirmed = await confirmMatured();
   if (confirmed) console.log(`[scheduler] commission matured: confirmed=${confirmed}`);
 } });
+
+registerJob({ name: 'identity-outbox', owner: 'quickreel', intervalMs: 30_000, run: pollIdentityOutbox });

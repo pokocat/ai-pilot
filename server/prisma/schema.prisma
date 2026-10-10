@@ -229,6 +229,7 @@ model User {
   /// 唯一键同时是「并发首登只建一行」的兜底（插入冲突后按它回读赢家）。
   /// 老的 x-user-id / HS256 链路完全不读它，ID_ISSUER 未配时它恒为 null。
   identityUid     String?   @unique
+  identityTokenVersion Int @default(0) // identity lifecycle revokes previously issued local sessions
   name            String
   avatarUrl       String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
   role            String    @default("owner") // owner | member | admin
@@ -2522,4 +2523,20 @@ model VideoStoragePack {
   @@unique([userId, clientRequestId])
   @@index([userId, createdAt])
   @@map("video_storage_pack")
+}
+
+/// Persistent identity lifecycle/tombstone. Never grants business rights.
+model IdentitySubject {
+  uid String @id
+  status String @default("ACTIVE")
+  localSubjectId String?
+  lastEventId BigInt @default(0)
+  @@map("identity_subject")
+}
+
+/// Per-product committed event cursor; acknowledgment must succeed before advance.
+model IdentityOutboxCursor {
+  product String @id
+  after BigInt @default(0)
+  @@map("identity_outbox_cursor")
 }

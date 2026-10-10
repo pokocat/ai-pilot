@@ -3857,3 +3857,6 @@ export interface ClipTemplateFromProject {
   /** 缺省 true：运营写的示范文案本身就是模板的价值。false = 只留骨架，正文清空。 */
   keepText?: boolean;
 }
+
+// Unified identity lifecycle metadata (UID tombstones, event cursor, token version)
+// stays internal to the server; public LoginResult/User contracts are unchanged.

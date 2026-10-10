@@ -1,7 +1,8 @@
 import { prisma } from '../db.js';
 import { isAiTestMode } from '../env.js';
 import { decryptSecretSafe } from './secretBox.js';
-import { verifyUserToken } from './userToken.js';
+import { verifyUserToken, identityVersionOfVerifiedUserToken } from './userToken.js';
+import { requireLocalIdentityActive } from './identityState.js';
 import { resolveIndustryPack } from '../data/industryPacks.js';
 import { recallMemoryDetails } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
@@ -79,7 +80,8 @@ export async function resolveUser(token?: string) {
   const id = verifyUserToken(token); // JWT→sub / 历史 token→userId 原样（见 userToken.ts）
   if (!id) throw unauthorized();
   const u = await prisma.user.findUnique({ where: { id }, include: { tenant: true } });
-  if (!u || u.deletedAt) throw unauthorized();
+  if (!u || u.deletedAt || u.identityTokenVersion !== identityVersionOfVerifiedUserToken(token)) throw unauthorized();
+  await requireLocalIdentityActive(u.identityUid);
   return u;
 }
 

@@ -8,7 +8,7 @@
 
 - [ ] **爱速拍脚本 AI 的真实产出质量没有验过（2026-09-05，WP-A3）**：`script/generate` / `script/ai-rewrite` / `script/chat` 三条现在全在军师自己的 LLM 网关上，但测试环境 `isAiTestMode()` 恒不接真实 provider，自动化只能锁**入参闸、机审闸、失败形态（产出不可用必须显式报错且不写回上游项目）与开关分流**。以下四件必须用真实 provider 跑一遍才能算完：① `scope:'segment'` 改出来的那一句是否守住了 role / 字数目标、是否和上下段像同一个人说话；② `scope:'all'` 空指令的「润色全篇」会不会把事实改掉或把信息量削平；③ 模型偶发只回部分段时 `byNo.size !== rows.length` 的 502 是否过于频繁（真发生就要加一轮定向重试，而不是放松校验）；④ 单句改写的 `maxTokens: 900` 对长句 + 纠错轮是否够。**不要用「测试全绿」当体验验收**。
 - [ ] **`scope:'segment'` 改写按 `no` 定位段落，端上未保存的新增段会退化成无骨架兜底（2026-09-05，WP-A3）**：端上传的 `text` 是编辑框里的当前文案（可能还没 `saveProject`），`no` 只用来取骨架约束。若 `no` 在上游项目里找不到（典型是端上刚加了一段还没保存），服务层不报错，改按 `role='avatar'`、无 hint、目标字数取原文长度兜底——**宁可少一点上下文，也不因为一次序号对不上把用户的改写请求打回**。真要精确，得让端上在改写前先落一次盘，或把 role/hint 随请求一起上送（要改契约）。
-- [ ] **未拉统一账号中心 outbox（合并 / 注销事件）**：`GET /api/products/{product}/outbox`（aibuzz-id README §9.3，pull + 自持游标）这一路**没做**。当前口径是「账号中心的合并 / 注销通过令牌失效自然体现」——refresh 作废后端上必须重登，军师这边的 `User.identityUid` 不会被主动改写。后果：账号在账号中心被合并到另一个 uid 之后，军师本地仍留着旧 uid 那一行（下次带新 uid 的令牌进来会按手机号命中同一个本地账号并因 `identityUid` 已占用而 409 `IDENTITY_CONFLICT`）；注销事件也不会主动清理本地档案。补的时候要一起做：outbox 游标持久化、`USER_MERGED` 时把本地 `identityUid` repoint 到存活方并重报产品链接（§9.2 的 409 分支）、`USER_CLOSED` 接到既有的 `services/accountDeletion.ts`。前置条件是机密客户端（`ID_SERVER_CLIENT_ID`/`ID_SERVER_CLIENT_SECRET`）已配。
+- [ ] **未拉统一账号中心 outbox（合并 / 注销 / 换绑事件）**：`GET /api/products/{product}/outbox`（aibuzz-id README §9.3，pull + 自持游标）这一路**没做**。当前口径是「账号中心的合并 / 注销通过令牌失效自然体现」——refresh 作废后端上必须重登，军师这边的 `User.identityUid` 不会被主动改写。后果：账号在账号中心被合并到另一个 uid 之后，军师本地仍留着旧 uid 那一行（下次带新 uid 的令牌进来会按手机号命中同一个本地账号并因 `identityUid` 已占用而 409 `IDENTITY_CONFLICT`）；注销事件也不会主动清理本地档案。补的时候要一起做：outbox 游标持久化、`USER_MERGED` 时把本地 `identityUid` repoint 到存活方并重报产品链接（§9.2 的 409 分支）、`USER_CLOSED` 接到既有的 `services/accountDeletion.ts`。前置条件是机密客户端（`ID_SERVER_CLIENT_ID`/`ID_SERVER_CLIENT_SECRET`）已配。
 - [ ] **爱速拍新用户的初始钻石没有来源**：套餐闸这一半已于 2026-09-05 收口（`aud` 含 `quickreel-api` 的账号中心令牌写 `/api/video/**` 免 `PLAN_WRITE_GATE`，见 §6），但**钻石余额闸没动**——账号中心首登的新账号钻石为 0，任何要扣钻石的动作仍会 `INSUFFICIENT_CREDITS`。「爱速拍新用户怎么拿到钻石（赠送？首充？随套餐？）」是产品定价决定，**代码里刻意不给默认赠送**。测试期可以用 `TEST_DEFAULT_PLAN_NAME` 顺带发钻石（生产恒空，见 `env.ts`）。运营拍板后再决定是加发放路径还是改闸。
 - [ ] **邀请体系的后续四件事（2026-08-18 全站分享 + 关系链落地时明确延后）**：
   ① **奖励机制**——本期只记关系不发奖，`services/referral.ts` 已留运营配置栏位（`referral.rewardInviter` / `rewardInvitee` / `rewardOnPaid` / `dailyCap` / `ladder`）与幂等 key 形状注释锚（`referral:{referrerId}:{newUserId}:{stage}`）；开闸时发放走 `credits.ts` 的 `appendCreditDelta`（已支持 idempotencyKey），并用邀请人行锁串行化「同一码多个新号同时进线」的发奖判定。**阶梯奖励只许虚拟权益形态，现金 ¥/人 是微信审核红线。**
@@ -110,3 +110,13 @@
   8. **目标阶梯**：3-5 年/年度/季度/本周目标无结构化存储，执行页目标阶梯为引导态；可并入案卷模型（goals）。
   9. **社群/分班**：注册分班、服务老师、班级二维码、入群任务需运营后台 + 后端支持；`packages/work/community` 为待分配引导态。
   10. **搜索**：对话页搜索现为客户端过滤军师/会话；设计口径「搜索军师、案卷、报告或资料」需服务端跨域搜索接口（可复用 `knowledgeSearch` + reports/sessions 模糊查询聚合）。
+
+- **统一认证 SOP 复核（2026-10-10，本地修复未发布）**：既有 UID 的资料刷新、userinfo 主体/类型/验证优先级、旧 token 缓存回写、后台 300 账号截断已修复并完成全量测试。生产只读客户端登记核验发现 `mini-quickreel` 已登记，未登记 `quickreel-server` / `junshi-server` 机器客户端；因此 outbox/处理回执、换绑时旧号码立即失效和中心注销会话失效仍未完成，不能把 refresh 最终过期视为完整 SOP 验收。补齐需先确定产品码及机密客户端部署配置，然后实现持久游标、UID 墓碑、事务提交后回执及旧号失效；本次未变更该接入阶段或生产配置。
+
+### 统一身份事件消费（2026-10-10，待发布验收）
+
+BFF 增加持久 `identity_subject` UID 墓碑/事件时钟、`identity_outbox_cursor` 发布序列游标、User.identityTokenVersion。生产启用统一身份时必须配置 `ID_OUTBOX_ENABLED=true`、`ID_PRODUCT_CODE=quickreel`、`ID_SERVER_CLIENT_ID=quickreel-server`、`ID_SERVER_CLIENT_SECRET`；缺失拒绝启动。共享 scheduler 的 quickreel 任务每 30 秒轮询；严格验证事件页/产品/UID，本地事务后回报注销/合并 COMPLETED，回执成功后推进游标。失败留游标，不吞生命周期错误。
+
+注销、合并旧 UID 留墓碑，首登/绑定/资料写入共用 PostgreSQL UID 事务锁和读前事件时钟；旧 UID 不能被令牌重新建档。停用事件按发布 ID 单调，旧解除停用不覆盖新停用。换绑清除旧完整号为内部 `id_unbound_<businessId>`（显示层隐藏），注销复用既有保留期与不可重复的数据清理任务。合并仅改映射、保留业务 ID/租户/角色/钱包，两个业务账号同时存在时不自动搬资产；中心重新回报存活 UID 链接后才确认合并。生命周期递增本地令牌版本，旧版本 JWT 和已删除/停用/合并用户不能通过 resolveUser；内部身份 JWT 在 UID 锁内复核映射与 ACTIVE 后签发。
+
+部署前备份数据库，增量 db push 不跑 seed；配置与中心 machine client 须先齐备。原有手机号/资料和小程序旧刷新竞态修复一并发布，生产验收不能只看构建或客户端注册状态。

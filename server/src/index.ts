@@ -1,3 +1,4 @@
+import { assertIdentityOutboxConfigured } from './services/identityOutbox.js';
 import { env } from './env.js';
 import { prisma } from './db.js';
 import { buildApp } from './app.js';
@@ -5,6 +6,7 @@ import { startScheduler, stopScheduler } from './services/scheduler.js';
 import { assertProductionAuthSafe } from './services/authConfig.js';
 
 assertProductionAuthSafe();
+assertIdentityOutboxConfigured();
 const app = await buildApp({ logger: true });
 
 // 全局错误兜底：未处理 rejection / uncaughtException 后进程状态不可再信任，必须有期限地优雅退出，

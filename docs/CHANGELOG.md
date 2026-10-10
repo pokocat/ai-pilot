@@ -6,6 +6,23 @@
 
 ## 变更日志
 
+### 2026-10-10 · 统一认证资料与后台全量账户检索复核 · 影响面：军师后端、爱速拍 BFF（本地完成，未发布）
+
+- 每次请求按 UID 重读本地映射；已有账号也校验手机号验证状态，并按合法 userinfo 更新手机号、昵称、头像。标准验证字段优先，拒绝主体不一致、脱敏号和号码冲突；只更新资料，保持本地 ID、租户、套餐及授权。
+- userinfo 按令牌摘要合并并发读取，成功最多 5 分钟/令牌到期、失败 15 秒；UID 与旧资料条件更新保护并发修改，旧缓存不能覆盖新令牌已同步的资料。已有号码账号首次绑定 UID 也回报产品链接。
+- 后台保持既有全数组响应，移除最新 300 个账号截断，修复更早用户无法搜索/详情 404；301 个新用户之外的旧用户已回归。
+- Node 24 编译通过；独立 PostgreSQL 测试库全量测试 2190 项，2188 通过、2 项既有跳过、0 失败。新增身份与跨 300 用户门测覆盖号码换绑、主体/验证冲突、scope 与缓存竞态。
+- outbox 与生产机器客户端缺口尚未补齐，不能宣称完整接入通过；详见 §6 分册及 §13 待办。本次未上线、未补写生产用户或充值。
+
+
+### 2026-09-09 · 清理 LLM 网关三处「注释/文档落后于代码」的漂移（不改运行逻辑）· 影响面：仅注释与文档，无行为变化
+
+- `server/src/llm/gateway.ts` `generateAdaptive` 的 docstring 原写「仅全局 openai 与 mock 支持自适应；claude 暂回退为对话」，但同函数体已有 `live === 'claude' → claudeAdaptive` 分支，注释改为「全局 openai / claude / mock 均支持自适应；per-agent runtime 暂回退为对话」。
+- `server/src/llm/providers/openai.ts` 与 `claude.ts` 删除未使用的 `withLlmSlot` import（两处实际都走 `acquireLlmSlot` 与 `withEndpoint` 内部代持；grep 确认两文件除 import 外无引用）。`mock.ts` / `dify.ts` / `llmPool.ts` 仍在用，`llmGate.ts` 的导出不动。
+- `docs/agents/13-todo.md`「OpenAI 兼容协议端点池后续」条目里「非流式 `callChat` 复用同一个 `AbortSignal`、首端点超时后不能安全重试下一端点」已被 `openai.ts` 的「每次端点尝试各建独立 deadline」修掉，条目改记为已修；仍成立的部分（`callChatStream` 未接建流前故障转移、流式首 delta 前转移测试未补齐、Claude 兼容扩展须对目标网关直测）原样保留。
+
+**验证**：`cd server && npx tsc -p tsconfig.json --noEmit` 通过。未跑完整 `npm test`（会清共享测试库），本次无运行逻辑改动。
+
 ### 2026-09-09 · AGENTS.md 瘦身：各章正文原样拆进 `docs/agents/` 分册，入口文件只留规则 + 骨架 + 索引 · 影响面：文档维护流程（§0 落点表）、所有引用「AGENTS.md §N」的代码注释与文档（章节号不变，落点改为分册）
 
 **为什么**：`AGENTS.md` 长到 379 KB / 1048 行，每个新会话都整份加载；§7 前端 81 KB、§8 后端 99 KB、§13 TODO 64 KB 全是按日期追加的约束账本与历史基线（提交 SHA、预发基线、Notion 待补），真正每次都要看的规则被淹在里面。根因是 §0 第 1 条「每次变更都更新本文件」——文件只增不减。
@@ -2710,3 +2727,11 @@ app 83 例全绿；weapp / H5 均 Compiled successfully；H5 面板走查：常�
 ### 2026-08-08 · 修复长问答卡唤起键盘后「其他」输入框滚出视野 · 影响面：原生微信对话问答卡键盘避让
 
 问答卡此前在点「其他」、input 聚焦及键盘高度变化时调用会话级 `toBottom()`；卡片较长或当前题不在末尾时，ScrollView 会滚到整段会话最底部，正在编辑的 input 反而越过键盘上沿并消失。现每个其他回答 input 都有按消息与题号生成的稳定锚点，键盘使可视区缩小时只重定位当前 input；50ms 合并焦点与键盘的连续事件，关闭输入时清理锚点与定时器，不再滚动整张问答卡。
+
+### 统一身份事件消费（2026-10-10，待发布验收）
+
+BFF 增加持久 `identity_subject` UID 墓碑/事件时钟、`identity_outbox_cursor` 发布序列游标、User.identityTokenVersion。生产启用统一身份时必须配置 `ID_OUTBOX_ENABLED=true`、`ID_PRODUCT_CODE=quickreel`、`ID_SERVER_CLIENT_ID=quickreel-server`、`ID_SERVER_CLIENT_SECRET`；缺失拒绝启动。共享 scheduler 的 quickreel 任务每 30 秒轮询；严格验证事件页/产品/UID，本地事务后回报注销/合并 COMPLETED，回执成功后推进游标。失败留游标，不吞生命周期错误。
+
+注销、合并旧 UID 留墓碑，首登/绑定/资料写入共用 PostgreSQL UID 事务锁和读前事件时钟；旧 UID 不能被令牌重新建档。停用事件按发布 ID 单调，旧解除停用不覆盖新停用。换绑清除旧完整号为内部 `id_unbound_<businessId>`（显示层隐藏），注销复用既有保留期与不可重复的数据清理任务。合并仅改映射、保留业务 ID/租户/角色/钱包，两个业务账号同时存在时不自动搬资产；中心重新回报存活 UID 链接后才确认合并。生命周期递增本地令牌版本，旧版本 JWT 和已删除/停用/合并用户不能通过 resolveUser；内部身份 JWT 在 UID 锁内复核映射与 ACTIVE 后签发。
+
+部署前备份数据库，增量 db push 不跑 seed；配置与中心 machine client 须先齐备。原有手机号/资料和小程序旧刷新竞态修复一并发布，生产验收不能只看构建或客户端注册状态。

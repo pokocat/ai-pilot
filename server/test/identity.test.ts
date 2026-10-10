@@ -13,6 +13,7 @@ import { __resetPlanGate } from '../src/services/planGate.js';
 import { api, cleanBusiness, closeApp, getApp, login, seedBaseline, uniquePhone } from './helpers.js';
 
 // 套餐闸用例要打一次 `/api/video/**`；给个假上游地址，由下面的 fetch 打桩接住，绝不出网。
+process.env.ADMIN_TOKEN = 'test-admin-token';
 process.env.AIDRAMA_CLIP_BASE_URL = 'https://aidrama.example.test';
 process.env.AIDRAMA_CLIP_SERVICE_TOKEN = 'test-service-token';
 process.env.AIDRAMA_CLIP_ALLOW_PRIVATE_NET = 'false';
@@ -365,4 +366,93 @@ test('套餐闸：identifyRequest 把 aud 一并带出来（老链路恒为空�
   const token = issueToken(servedKeys[0], { sub: 'uid-aud-out', phone_verified: true, aud: ['quickreel-api', 'junshi-api'] });
   assert.notEqual(await verifyIdentityToken(token), null); // 先把 JWKS 灌进缓存
   assert.deepEqual(identifyRequest(reqOf({ authorization: `Bearer ${token}` }))?.aud, ['quickreel-api', 'junshi-api']);
+});
+
+test('已建档用户換绑同步资料，保持本地 ID、租户和套餐', async () => {
+  const uid = 'uid-profile-refresh';
+  const phone = uniquePhone(), nextPhone = uniquePhone();
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, phone), name: '中心旧名', picture: 'https://example.test/old.png' });
+  const token = issueToken(servedKeys[0], { sub: uid, phone_verified: true });
+  assert.equal((await getMe(token)).status, 200);
+  const before = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, '+86' + nextPhone), name: '中心新名', picture: null });
+  resetIdentityUserCache();
+  assert.equal((await getMe(token)).status, 200);
+  const after = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  assert.equal(after.phone, nextPhone); assert.equal(after.name, '中心新名'); assert.equal(after.avatarUrl, null);
+  assert.equal(after.id, before.id); assert.equal(after.tenantId, before.tenantId); assert.equal(after.planId, before.planId);
+  const list = await api('GET', '/api/admin/users');
+  assert.equal(list.body.find((row: any) => row.id === before.id)?.phone, nextPhone);
+});
+
+test('userinfo 主体不匹配或未验证号码，不能给另一身份建档', async () => {
+  const uid = 'uid-wrong-profile';
+  userinfoByUid.set(uid, phoneUserinfo('somebody-else', uniquePhone()));
+  let result = await getMe(issueToken(servedKeys[0], { sub: uid, phone_verified: true }));
+  assert.equal(result.status, 502); assert.equal(result.body.code, 'IDENTITY_SUB_MISMATCH');
+  assert.equal(await prisma.user.count(), 0);
+  resetIdentityUserCache();
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, uniquePhone()), phone_number_verified: false, phone_verified: true });
+  result = await getMe(issueToken(servedKeys[0], { sub: uid, phone_verified: true }));
+  assert.equal(result.status, 403); assert.equal(await prisma.user.count(), 0);
+});
+
+test('已有 UID 缺 phone scope 保留号码，scope 数组可以读取资料', async () => {
+  const uid = 'uid-scope-shapes';
+  userinfoByUid.set(uid, phoneUserinfo(uid, uniquePhone()));
+  assert.equal((await getMe(issueToken(servedKeys[0], { sub: uid, phone_verified: true }))).status, 200);
+  const before = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  userinfoByUid.set(uid, phoneUserinfo(uid, uniquePhone())); resetIdentityUserCache();
+  assert.equal((await getMe(issueToken(servedKeys[0], { sub: uid, phone_verified: true, scope: 'openid profile' }))).status, 200);
+  assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: before.id } })).phone, before.phone);
+  assert.equal(userinfoCalls, 1);
+  assert.equal((await getMe(issueToken(servedKeys[0], { sub: uid, phone_verified: true, scope: ['openid', 'profile', 'phone'] }))).status, 200);
+  assert.notEqual((await prisma.user.findUniqueOrThrow({ where: { id: before.id } })).phone, before.phone);
+});
+
+test('已有 UID 的资料失败保留副本，换绑冲突不合并账号', async () => {
+  const uid = 'uid-profile-error';
+  userinfoByUid.set(uid, phoneUserinfo(uid, uniquePhone()));
+  const token = issueToken(servedKeys[0], { sub: uid, phone_verified: true });
+  assert.equal((await getMe(token)).status, 200);
+  const before = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, '139****1234'), name: '不可覆盖' }); resetIdentityUserCache();
+  assert.equal((await getMe(token)).status, 502);
+  assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: before.id } })).phone, before.phone);
+  const other = uniquePhone(); await login(other, '另一个人');
+  userinfoByUid.set(uid, phoneUserinfo(uid, other)); resetIdentityUserCache();
+  assert.equal((await getMe(token)).status, 409);
+  assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: before.id } })).phone, before.phone);
+});
+
+test('旧令牌缓存不能把新令牌同步的号码和昵称刷回旧值', async () => {
+  const uid = 'uid-older-token-cache';
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, uniquePhone()), name: '旧名' });
+  const oldToken = issueToken(servedKeys[0], { sub: uid, phone_verified: true, jti: 'old' });
+  assert.equal((await getMe(oldToken)).status, 200);
+  const nextPhone = uniquePhone();
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, nextPhone), name: '新名' });
+  const newToken = issueToken(servedKeys[0], { sub: uid, phone_verified: true, jti: 'new' });
+  assert.equal((await getMe(newToken)).status, 200);
+  assert.equal((await getMe(oldToken)).status, 200);
+  const current = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  assert.equal(current.phone, nextPhone); assert.equal(current.name, '新名');
+  assert.equal(userinfoCalls, 2);
+});
+
+
+test('已有 UID 并发资料读取应用同一结果，全部成功且只取一次 userinfo', async () => {
+  const uid = 'uid-concurrent-profile';
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, uniquePhone()), name: '旧名' });
+  const token = issueToken(servedKeys[0], { sub: uid, phone_verified: true });
+  assert.equal((await getMe(token)).status, 200);
+  const nextPhone = uniquePhone();
+  userinfoByUid.set(uid, { ...phoneUserinfo(uid, nextPhone), name: '并发新名' });
+  resetIdentityUserCache();
+  const beforeCalls = userinfoCalls;
+  const results = await Promise.all(Array.from({ length: 8 }, () => getMe(token)));
+  assert.deepEqual(results.map((row) => row.status), Array(8).fill(200));
+  const current = await prisma.user.findUniqueOrThrow({ where: { identityUid: uid } });
+  assert.equal(current.phone, nextPhone); assert.equal(current.name, '并发新名');
+  assert.equal(userinfoCalls - beforeCalls, 1);
 });

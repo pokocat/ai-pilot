@@ -696,7 +696,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/admin/users/:id/impersonate', async (req, reply): Promise<AdminImpersonateResult | void> => {
     const actor = actorOf(req);
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true } });
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true, identityTokenVersion: true } });
     if (!user) return reply.code(404).send({ error: 'user not found' });
     const by = actorName(actor);
     const IMP_TTL_SEC = 2 * 60 * 60; // 附身 token 有效期 2 小时（够排查，又短到降低泄漏风险）
@@ -704,7 +704,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const ttlSec = enabled ? IMP_TTL_SEC : null; // 明文口径下 token 不过期，如实记 null
     await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.impersonate', payload: { actor: by, ttlSec } });
     if (enabled) {
-      const token = signUserToken(user.id, { ttlSec: IMP_TTL_SEC, extra: { imp: by } });
+      const token = signUserToken(user.id, { ttlSec: IMP_TTL_SEC, extra: { imp: by, iv: user.identityTokenVersion } });
       return { token, expiresAt: new Date(Date.now() + IMP_TTL_SEC * 1000).toISOString() };
     }
     return { token: user.id, expiresAt: null, warning: '未配置 APP_JWT_SECRET，token 为明文 userId 且不会过期' };
@@ -3328,7 +3328,8 @@ async function buildAdminUsers(products?: readonly string[]): Promise<AdminUserI
   const [users, sessions, deliverables, ledgers, tokenAgg, wallets] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 300,
+      // This endpoint returns a complete array; a silent 300-row cap made
+      // older accounts disappear from both client search and account detail.
       include: { tenant: true, plan: true },
     }),
     prisma.session.groupBy({ by: ['userId'], _count: { _all: true }, _max: { updatedAt: true } }),
@@ -3388,7 +3389,7 @@ async function buildAdminUsers(products?: readonly string[]): Promise<AdminUserI
 }
 
 function displayPhone(phone: string): string {
-  if (phone.startsWith('wx_')) return '微信账号';
+  if ((phone.startsWith('wx_') || phone.startsWith('id_unbound_'))) return '微信账号';
   return phone;
 }
 

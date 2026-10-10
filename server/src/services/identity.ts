@@ -219,7 +219,9 @@ function validateClaims(payload: Record<string, unknown>): IdentityClaims | null
     // 账号中心恒带这个 claim；缺失/非 true 一律按「没有可信手机号」处理。
     phoneVerified: payload.phone_verified === true,
     ...(typeof payload.azp === 'string' ? { azp: payload.azp } : {}),
-    ...(typeof payload.scope === 'string' ? { scope: payload.scope } : {}),
+    ...(typeof payload.scope === 'string' ? { scope: payload.scope }
+      : Array.isArray(payload.scope) && payload.scope.every((scope) => typeof scope === 'string')
+        ? { scope: payload.scope.join(' ') } : {}),
   };
 }
 
@@ -282,6 +284,7 @@ export interface IdentityUserinfo {
   phone: string;
   phoneVerified: boolean;
   name: string;
+  picture?: string | null;
 }
 
 /**
@@ -306,14 +309,31 @@ export async function fetchIdentityUserinfo(bearer: string): Promise<IdentityUse
     }
     if (!res.ok) throw new IdentityError('账号服务暂时不可用，请稍后再试', 502, 'IDENTITY_UPSTREAM_FAILED');
     const body = await res.json() as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new IdentityError('账号资料格式异常，请稍后再试', 502, 'IDENTITY_USERINFO_INVALID');
+    }
     const phoneRaw = body.phone_number ?? body.phone;
+    for (const key of ['phone_number_verified', 'phone_verified']) {
+      if (key in body && typeof body[key] !== 'boolean') {
+        throw new IdentityError('账号资料格式异常，请稍后再试', 502, 'IDENTITY_USERINFO_INVALID');
+      }
+    }
+    if (phoneRaw != null && typeof phoneRaw !== 'string'
+      || 'name' in body && typeof body.name !== 'string'
+      || body.picture != null && typeof body.picture !== 'string') {
+      throw new IdentityError('账号资料格式异常，请稍后再试', 502, 'IDENTITY_USERINFO_INVALID');
+    }
+    if (typeof body.picture === 'string' && body.picture !== '' && !/^https:\/\//.test(body.picture)) {
+      throw new IdentityError('账号头像格式异常，请稍后再试', 502, 'IDENTITY_USERINFO_INVALID');
+    }
     return {
       sub: typeof body.sub === 'string' ? body.sub : '',
-      phone: typeof phoneRaw === 'string' ? phoneRaw.trim() : '',
-      phoneVerified: body.phone_number_verified === true || body.phone_verified === true,
+      phone: typeof phoneRaw === 'string' ? phoneRaw.trim().replace(/^\+86/, '') : '',
+      phoneVerified: 'phone_number_verified' in body ? body.phone_number_verified === true : body.phone_verified === true,
       name: [body.name, body.nickname].find((item) => typeof item === 'string' && item.trim())
         ? String([body.name, body.nickname].find((item) => typeof item === 'string' && item.trim())).trim()
         : '',
+      ...('picture' in body ? { picture: body.picture ? String(body.picture) : null } : {}),
     };
   } catch (err) {
     if (err instanceof IdentityError) throw err;
@@ -408,4 +428,25 @@ export async function reportProductLink(opts: { uid: string; localUserId: string
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Fixed-issuer product machine calls; never expose a service token to user clients. */
+export async function identityMachineRequest(method: 'GET' | 'PUT', product: string, path: string, body?: object): Promise<unknown> {
+  if (!/^[a-z][a-z0-9-]*$/.test(product) || !(/^(?:outbox(?:[/?]|$)|links\/[A-Za-z0-9%._~-]+$)/.test(path))) throw new IdentityError('身份事件配置无效', 503, 'IDENTITY_CLIENT_NOT_CONFIGURED');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), IDENTITY_HTTP_TIMEOUT_MS);
+  try {
+    const token = await serviceAccessToken();
+    const response = await fetch(`${identityBaseUrl()}/api/products/${product}/${path}`, {
+      method, headers: { accept: 'application/json', authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal, redirect: 'error',
+    });
+    if (!response.ok) {
+      if (response.status === 401) serviceToken = null;
+      throw new IdentityError('身份事件服务暂时不可用', 503, 'IDENTITY_OUTBOX_UNAVAILABLE');
+    }
+    const envelope = await response.json() as { success?: unknown; data?: unknown };
+    if (envelope?.success !== true) throw new IdentityError('身份事件响应无效', 502, 'IDENTITY_OUTBOX_INVALID');
+    return envelope.data;
+  } finally { clearTimeout(timer); }
 }

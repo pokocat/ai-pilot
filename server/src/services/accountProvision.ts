@@ -5,6 +5,7 @@
 // 建号口径只有一份，登录路由与账号中心首登建出来的账号完全同形（同样的租户、同样的测试期套餐、
 // 同样的注册审计与埋点）。
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 import { registrationDefaultPlanName } from '../env.js';
 import { applyPlanPurchase } from './purchase.js';
 import { noteRegistration } from './metrics.js';
@@ -14,6 +15,8 @@ export interface CreateUserWithTenantOpts {
   name: string;
   auditAction: string;
   auditPayload: object;
+  identityUid?: string;
+  beforeCreate?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
 export async function createUserWithTenant(opts: CreateUserWithTenantOpts) {
@@ -33,10 +36,12 @@ export async function createUserWithTenant(opts: CreateUserWithTenantOpts) {
   }
 
   return prisma.$transaction(async (tx) => {
+    await opts.beforeCreate?.(tx);
     const tenant = await tx.tenant.create({ data: { name: '' } });
     const user = await tx.user.create({
       data: {
         tenantId: tenant.id,
+        identityUid: opts.identityUid,
         phone: opts.phone,
         name: opts.name,
         role: 'owner',

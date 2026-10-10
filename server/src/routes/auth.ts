@@ -103,6 +103,7 @@ function attributionOf(req: FastifyRequest, data: { inviteCode?: unknown; referr
 }
 
 type AuthUser = {
+  identityTokenVersion: number;
   id: string;
   tenantId: string;
   phone: string;
@@ -155,13 +156,13 @@ function loginResult(
 ): LoginResult {
   assertAccountActive(user);
   return {
-    token: signUserToken(user.id), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
+    token: signUserToken(user.id, { extra: { iv: user.identityTokenVersion } }), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
     isNew,
     onboarded,
     user: {
       id: user.id,
       name: user.name,
-      phone: user.phone.startsWith('wx_') ? '' : user.phone,
+      phone: user.phone.startsWith('wx_') || user.phone.startsWith('id_unbound_') ? '' : user.phone,
       avatarUrl: user.avatarUrl ?? null,
       benmingColor: user.benmingColor,
       wechatLinked: !!user.wechatOpenId,

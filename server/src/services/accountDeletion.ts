@@ -34,7 +34,7 @@ export const ACCOUNT_DELETION_POLICY = {
   shared: ['Profile', 'GraphEntity', 'GraphRelation'],
   retain: [
     'ClientEvent', 'PaymentOrder', 'SubscriptionContract', 'TokenUsage', 'LlmTrace', 'AuditLog', 'ModerationLog',
-    'Referral', 'ReferralAttribution', 'InviteActivationOutbox',
+    'Referral', 'ReferralAttribution', 'InviteActivationOutbox', 'IdentitySubject', 'IdentityOutboxCursor',
     // 代理分销（2026-09-02）：`Distributor` 是**签约档案**、`CommissionEntry` /
     // `CommissionSettlement` 是**财务账本**——都属「到期后只留法务/财务所需的去标识记录」。
     // 删行不行：一条已打款的结算单背后是真实的对外付款，账不能因为对方注销账号就消失；
@@ -240,6 +240,7 @@ async function hardDeleteAccount(userId: string, hash: string): Promise<void> {
       await tx.graphEntity.deleteMany({ where: { tenantId: user.tenantId } });
       await tx.profile.deleteMany({ where: { tenantId: user.tenantId } });
     }
+    await tx.identitySubject.updateMany({ where: { localSubjectId: user.id }, data: { localSubjectId: null } });
     await tx.user.delete({ where: { id: user.id } });
     if (deleteTenant) await tx.tenant.delete({ where: { id: user.tenantId } });
   });
