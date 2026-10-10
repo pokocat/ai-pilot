@@ -111,9 +111,9 @@
   9. **社群/分班**：注册分班、服务老师、班级二维码、入群任务需运营后台 + 后端支持；`packages/work/community` 为待分配引导态。
   10. **搜索**：对话页搜索现为客户端过滤军师/会话；设计口径「搜索军师、案卷、报告或资料」需服务端跨域搜索接口（可复用 `knowledgeSearch` + reports/sessions 模糊查询聚合）。
 
-- **统一认证 SOP 复核（2026-10-10，本地修复未发布）**：既有 UID 的资料刷新、userinfo 主体/类型/验证优先级、旧 token 缓存回写、后台 300 账号截断已修复并完成全量测试。生产只读客户端登记核验发现 `mini-quickreel` 已登记，未登记 `quickreel-server` / `junshi-server` 机器客户端；因此 outbox/处理回执、换绑时旧号码立即失效和中心注销会话失效仍未完成，不能把 refresh 最终过期视为完整 SOP 验收。补齐需先确定产品码及机密客户端部署配置，然后实现持久游标、UID 墓碑、事务提交后回执及旧号失效；本次未变更该接入阶段或生产配置。
+- **统一认证 SOP 复核（2026-10-10，已部署验收）**：资料同步、后台全量检索及持久 outbox/回执已补齐；生产已登记 quickreel-server，main/quickreel 两实例部署 b9886f49。隔离 UID 旧 JWT 401、游标30、注销/合并回执完成。Node24 全量2195通过、2既有跳过。详见 [发布记录](../IDENTITY_RELEASE_2026-10-10.md)。小程序开发版0.1.1已上传，正式发布/真机待用户操作；中心即时 denylist 仍属独立能力。
 
-### 统一身份事件消费（2026-10-10，待发布验收）
+### 统一身份事件消费（2026-10-10，已发布验收）
 
 BFF 增加持久 `identity_subject` UID 墓碑/事件时钟、`identity_outbox_cursor` 发布序列游标、User.identityTokenVersion。生产启用统一身份时必须配置 `ID_OUTBOX_ENABLED=true`、`ID_PRODUCT_CODE=quickreel`、`ID_SERVER_CLIENT_ID=quickreel-server`、`ID_SERVER_CLIENT_SECRET`；缺失拒绝启动。共享 scheduler 的 quickreel 任务每 30 秒轮询；严格验证事件页/产品/UID，本地事务后回报注销/合并 COMPLETED，回执成功后推进游标。失败留游标，不吞生命周期错误。
 
