@@ -15,14 +15,6 @@
 - outbox 与生产机器客户端缺口尚未补齐，不能宣称完整接入通过；详见 §6 分册及 §13 待办。本次未上线、未补写生产用户或充值。
 
 
-### 2026-09-09 · 清理 LLM 网关三处「注释/文档落后于代码」的漂移（不改运行逻辑）· 影响面：仅注释与文档，无行为变化
-
-- `server/src/llm/gateway.ts` `generateAdaptive` 的 docstring 原写「仅全局 openai 与 mock 支持自适应；claude 暂回退为对话」，但同函数体已有 `live === 'claude' → claudeAdaptive` 分支，注释改为「全局 openai / claude / mock 均支持自适应；per-agent runtime 暂回退为对话」。
-- `server/src/llm/providers/openai.ts` 与 `claude.ts` 删除未使用的 `withLlmSlot` import（两处实际都走 `acquireLlmSlot` 与 `withEndpoint` 内部代持；grep 确认两文件除 import 外无引用）。`mock.ts` / `dify.ts` / `llmPool.ts` 仍在用，`llmGate.ts` 的导出不动。
-- `docs/agents/13-todo.md`「OpenAI 兼容协议端点池后续」条目里「非流式 `callChat` 复用同一个 `AbortSignal`、首端点超时后不能安全重试下一端点」已被 `openai.ts` 的「每次端点尝试各建独立 deadline」修掉，条目改记为已修；仍成立的部分（`callChatStream` 未接建流前故障转移、流式首 delta 前转移测试未补齐、Claude 兼容扩展须对目标网关直测）原样保留。
-
-**验证**：`cd server && npx tsc -p tsconfig.json --noEmit` 通过。未跑完整 `npm test`（会清共享测试库），本次无运行逻辑改动。
-
 ### 2026-09-09 · AGENTS.md 瘦身：各章正文原样拆进 `docs/agents/` 分册，入口文件只留规则 + 骨架 + 索引 · 影响面：文档维护流程（§0 落点表）、所有引用「AGENTS.md §N」的代码注释与文档（章节号不变，落点改为分册）
 
 **为什么**：`AGENTS.md` 长到 379 KB / 1048 行，每个新会话都整份加载；§7 前端 81 KB、§8 后端 99 KB、§13 TODO 64 KB 全是按日期追加的约束账本与历史基线（提交 SHA、预发基线、Notion 待补），真正每次都要看的规则被淹在里面。根因是 §0 第 1 条「每次变更都更新本文件」——文件只增不减。
