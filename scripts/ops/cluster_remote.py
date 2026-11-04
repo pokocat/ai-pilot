@@ -178,6 +178,8 @@ def build(config, payload):
     logs.mkdir(parents=True, mode=0o700)
     values = {'PATH': str(pathlib.Path(node).parent) + ':' + os.environ.get('PATH', '')}
     run_log(['npm', 'ci', '--include=dev'], server, values, logs / 'server-install.log')
+    run_log([node, '--env-file=.env.test', 'node_modules/prisma/build/index.js', 'generate'], server,
+            dict(values, NODE_ENV='test'), logs / 'prisma-generate.log')
     run_log(['npm', 'run', 'build'], server, values, logs / 'server-build.log')
     supplied = payload.get('validation_receipt')
     if supplied:
