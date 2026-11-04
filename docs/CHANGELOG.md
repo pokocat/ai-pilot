@@ -9,7 +9,7 @@
 ### 2026-11-04 · PostgreSQL / Tair / ALB / SLS 集群迁移 · 影响面：军师 API、爱速拍 BFF
 
 - 正式库迁到 PostgreSQL 18 UTF8；冻结源库后，100 张表行数及双内容指纹一致。旧库保留只读，后续以新 RDS 为唯一正式库。
-- API 与 BFF 在两台 ECS 独立运行，ALB 按请求分流；定时任务仅一个专用进程。Tair 提供共享限流及 LLM 缓存，SLS 采集应用与 ALB 日志。
+- API 与 BFF 在两台 ECS 独立运行，当前 ALB 为 A 主用、B 常驻备用，频繁发布时逐台更新并切换流量，起量后再开启双机分流；定时任务仅一个专用进程。Tair 提供共享限流及 LLM 缓存，SLS 采集应用与 ALB 日志。
 - 配置 REDIS_URL 时套餐写权限从数据库读取，避免另一进程付款、撤销或到期后仍命中 30 秒本地缓存；新增开通/到期/撤销及配置切换回归。同步修正 Quickreel scheduler 测试漏列 identity-outbox 的旧断言。
 - 发布与恢复约束见 [集群部署](CLUSTER_DEPLOYMENT.md)；旧单机脚本遇迁移标记必须拒绝发布。此次不改前端及支付、模型、运营配置，不迁 ClassVibe。
 

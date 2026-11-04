@@ -1,6 +1,6 @@
 # 军师集群部署
 
-正式请求入口为 wxapi.aibuzz.cn / copilot.aibuzz.cn，经 ALB 转至两台 ECS 的 Nginx :80；API :4000 与爱速拍 BFF :4010 仅内网使用。新机器位于杭州，与既购 RDS / Tair / ALB 同 VPC。
+正式请求入口为 wxapi.aibuzz.cn / copilot.aibuzz.cn，经 ALB 转至 ECS 的 Nginx :80；当前 A 主用（权重 100）、B 常驻备用（权重 0），后续起量再开启双机分流；API :4000 与爱速拍 BFF :4010 仅内网使用。新机器位于杭州，与既购 RDS / Tair / ALB 同 VPC。
 
 | 用途 | 配置 |
 | --- | --- |
@@ -22,7 +22,7 @@ API 进程 SCHEDULER_ENABLED=false；仅 A 的 junshi-scheduler 启用定时任�
 2. 保留每节点两份独立发布目录：/opt/junshi/releases/<SHA>/server 与 /opt/junshi-quickreel/releases/<SHA>/server。固定 Node24 位于 /opt/junshi/runtime。构建在未启用的新目录进行，不能覆盖正运行的 dist/node_modules。
 3. ALB 将 B 权重置 0 并确认停止新流量，等待连接排空（配置 180 秒；确认无进行中的生成/视频任务）。如仍有长任务，继续保留旧进程直到完成。每次仅更新一个节点，单个后端进程用 systemctl restart；配置仍从 /etc/junshi 的 EnvironmentFile 注入。
 4. 更新该节点 unit 的 WorkingDirectory/ExecStart 到已验证的新 SHA；daemon-reload 后逐个重启 junshi-api、junshi-quickreel。验证两个本地 /api/health、实际进程 DB/Redis/服务 profile、ALB backend=b 受保护 metrics 及日志。绝不改运行期 DB URL 去旧库。
-5. B 健康后将 A 权重降 0、B 升 100；等待 A 排空，按同样流程更新 A。完成后 A/B 各权重 100、ALB 均 healthy。定时任务若有代码变更，停旧单实例后再启动唯一新实例，防止重复调度。
+5. B 健康后将 A 权重降 0、B 升 100；等待 A 排空，按同样流程更新 A。完成后恢复 A=100、B=0；B 的两个业务进程保持运行，方便下次滚动发布。ALB 的 B=Unused 是权重 0 的预期状态，不能等同进程不健康；通过 backend=b 的独立探针和 metrics 验证备用服务。起量时确认两边健康后，才将 A/B 都设为 100。定时任务若有代码变更，停旧单实例后再启动唯一新实例，防止重复调度。
 6. 各独立安装根写 .deploy-version（完整 SHA），.deploy-history 追加 UTC、SHA、验收结果；验证两个 ALB VIP、域名、API/BFF、管理员页面、Prometheus 两个节点 UP 和 SLS 实际入库。发布不得凭 systemd active 判为成功。
 
 旧 scripts/deploy-prod.sh 是历史单机流程；检测到 /opt/junshi/.migrated-to 必须拒绝执行。预发仍留在旧机器，不随正式服务迁移；不得擅自停止旧机器 PostgreSQL 或其他应用。
