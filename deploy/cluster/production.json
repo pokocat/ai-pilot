@@ -1,0 +1,29 @@
+{
+  "cluster_id": "aibuzz-production",
+  "region": "cn-hangzhou",
+  "load_balancer_id": "alb-8lqfxfyvfyitbs3s6r",
+  "server_group_id": "sgp-rit8llexfk1rpjnqk8",
+  "primary": "a",
+  "ssh_user": "root",
+  "ssh_key": "/Users/donis/Documents/各种秘钥/aliyun/slsf.pem",
+  "node_binary": "/opt/junshi/runtime/node-v24.14.1-linux-x64/bin/node",
+  "runtime_root": "/opt/aibuzz-deploy",
+  "log_directory": "/var/log/junshi",
+  "node_identity_file": "/etc/aibuzz-deploy/node.json",
+  "test_environment": "/etc/junshi/release-test.env",
+  "test_database": "junshi_migration_test",
+  "database": {"host": "pgm-bp1gp4819mbs30z3.pg.rds.aliyuncs.com", "name": "junshi_prod", "user": "junshi_app"},
+  "redis": {"host": "r-bp182e1w8fk05cnbvr.redis.rds.aliyuncs.com", "database": "10"},
+  "drain_seconds": 180,
+  "drain_timeout_seconds": 1800,
+  "verify_ips": ["118.178.32.245", "121.40.171.94"],
+  "nodes": {
+    "a": {"host": "101.37.189.227", "private_ip": "10.20.1.215", "instance_id": "i-bp1dkkgmjbcpa21a5yi0"},
+    "b": {"host": "121.199.172.157", "private_ip": "10.20.2.195", "instance_id": "i-bp1as9b78f1fjmzlnvct"}
+  },
+  "components": {
+    "junshi": {"unit": "junshi-api", "root": "/opt/junshi", "environment": "/etc/junshi/junshi-prod.env", "port": 4000, "profile": "all", "host": "wxapi.aibuzz.cn"},
+    "quickreel": {"unit": "junshi-quickreel", "root": "/opt/junshi-quickreel", "environment": "/etc/junshi/junshi-quickreel-prod.env", "port": 4010, "profile": "quickreel", "host": "copilot.aibuzz.cn"}
+  },
+  "scheduler": {"unit": "junshi-scheduler", "primary": "a", "environment": "/etc/junshi/junshi-scheduler.env"}
+}

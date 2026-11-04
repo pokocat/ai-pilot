@@ -225,7 +225,7 @@ cd app && npm run release:weapp -- --version <版本号> --desc "<说明>"
 
 **服务端部署**（主文档 `docs/DEPLOYMENT.md`，发布前先读 **`docs/RELEASE_SOP.md`**）
 ```bash
-cat docs/CLUSTER_DEPLOYMENT.md             # 正式集群：固定归档、逐节点排空与发布；独立测试库验收
+bash scripts/deploy-prod.sh               # 正式新集群：备用验收、切流、排空、原主更新；全链路 devq
 bash scripts/deploy-preprod.sh             # 预发：/opt/junshi-preprod · :4001 · https://wxapi.aibuzz.cn/api_preprod
 ```
 - 正式服务经 ALB 接入两台 ECS，当前 A 主用、B 常驻备用，统一使用 RDS PostgreSQL 与 Tair；发布和恢复以 `docs/CLUSTER_DEPLOYMENT.md` 为准。固定 `git archive` 归档，不跑生产 seed；逐节点排空、健康验收，不能覆盖运行中的 dist。旧主机仅保留预发、其他应用与入口兼容，迁移标记禁止旧进程复活。

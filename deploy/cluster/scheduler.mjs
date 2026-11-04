@@ -4,10 +4,21 @@ const { prisma } = await load('db');
 const { assertProductionAuthSafe } = await load('services/authConfig');
 const { assertIdentityOutboxConfigured } = await load('services/identityOutbox');
 const { startScheduler, drainScheduler, scheduledJobsForThisProcess } = await load('services/scheduler');
+// This module registers its sweep at import time; it must also exist in a dedicated scheduler.
+await load('services/creative/worker');
 assertProductionAuthSafe();
 assertIdentityOutboxConfigured();
 if (process.env.SCHEDULER_ENABLED !== 'true' || process.env.SERVICE_PROFILE !== 'all') {
   throw new Error('Dedicated scheduler needs explicit activation and all profile');
+}
+const jobs = scheduledJobsForThisProcess().map(job => job.name);
+for (const name of ['creative-job-sweep', 'identity-outbox', 'pay-reconcile-sweep']) {
+  if (!jobs.includes(name)) throw new Error(`Incomplete dedicated scheduler registry: ${name}`);
+}
+if (process.argv.includes('--check')) {
+  console.log(JSON.stringify({ scheduler_registry_valid: true, jobs }));
+  await prisma.$disconnect();
+  process.exit(0);
 }
 startScheduler();
 console.log(JSON.stringify({ service: 'junshi-scheduler', event: 'started', jobs: scheduledJobsForThisProcess().map(j => j.name) }));

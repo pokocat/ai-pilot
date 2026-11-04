@@ -1,3 +1,5 @@
+> 当前正式发布使用 `bash scripts/deploy-prod.sh` 的新集群主备滚动流程，具体命令见 [CLUSTER_DEPLOYMENT.md](CLUSTER_DEPLOYMENT.md)，跨服务迁移见 [MIGRATION_SOP.md](MIGRATION_SOP.md)。下文保留的单机操作只作历史参考，不作为默认生产入口。
+
 # 军师 · 上线核查 SOP（预发 → 生产）
 
 > **这份文件的来历**：2026-08-17 一次「预发全绿、切到生产就露」的连环故障复盘。
