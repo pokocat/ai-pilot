@@ -107,15 +107,21 @@ class Cluster:
         script = 'import sys\nsys.argv=["cluster_remote.py"]\n' + self.helper
         # Code and payload travel over stdin; production credentials never leave the host.
         request = 'import io,sys\nsys.stdin=io.StringIO(' + repr(json.dumps(data)) + ')\n' + script
-        result = subprocess.run(['ssh', *self.transport, self.address(node), 'python3 -'], input=request,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        try:
-            output = json.loads(result.stdout.strip().splitlines()[-1])
-        except Exception:
-            raise RuntimeError('Remote operation did not return a valid result: ' + node + '/' + action)
-        if result.returncode or not output['ok']:
-            raise RuntimeError(node + '/' + action + ': ' + output.get('error', 'SSH failed'))
-        return output['result']
+        attempts = 3 if action in ['inspect', 'verify', 'drain', 'static'] else 1
+        for attempt in range(attempts):
+            result = subprocess.run(['ssh', *self.transport, self.address(node), 'python3 -'], input=request,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                output = json.loads(result.stdout.strip().splitlines()[-1])
+            except Exception:
+                if attempt + 1 < attempts:
+                    time.sleep(2)
+                    continue
+                raise RuntimeError('Remote operation returned no valid result: ' + node + '/' + action +
+                                   '; exit=' + str(result.returncode) + '; inspect SSH and the release journal')
+            if result.returncode or not output['ok']:
+                raise RuntimeError(node + '/' + action + ': ' + output.get('error', 'SSH failed'))
+            return output['result']
 
     def acquire_lock(self):
         node = self.config['primary']

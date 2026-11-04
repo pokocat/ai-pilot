@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Scoped remote operations. Python 3.6 compatible for Alibaba Cloud Linux 3."""
 import datetime
+import fcntl
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -152,6 +153,17 @@ def safe_extract(archive, destination):
 
 
 def build(config, payload):
+    # Survives a lost controller SSH session: do not overlap another node-local build/test.
+    root = pathlib.Path(config['runtime_root'])
+    with (root / 'build.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('Another build is still running on this node; inspect the previous release first')
+        return build_locked(config, payload)
+
+
+def build_locked(config, payload):
     root = pathlib.Path(config['runtime_root'])
     directory = root / 'builds' / payload['deployment_id']
     directory.mkdir(parents=True)

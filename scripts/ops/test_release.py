@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -148,6 +149,28 @@ class RollingTests(unittest.TestCase):
 
 
 class GuardTests(unittest.TestCase):
+    def test_transient_ssh_failure_retries_only_read_operations(self):
+        cluster = deploy.Cluster.__new__(deploy.Cluster)
+        cluster.config = CONFIG
+        cluster.selected, cluster.assets = ['junshi'], {'admin': False}
+        cluster.deployment_id, cluster.transport, cluster.helper = 'test', [], ''
+        failed = subprocess.CompletedProcess([], 255, '', 'temporary connection failure')
+        succeeded = subprocess.CompletedProcess([], 0, json.dumps({'ok': True, 'result': {'healthy': True}}), '')
+        with patch.object(deploy.subprocess, 'run', side_effect=[failed, succeeded]) as run, patch.object(deploy.time, 'sleep'):
+            self.assertEqual(cluster.remote('b', 'inspect'), {'healthy': True})
+            self.assertEqual(run.call_count, 2)
+        with patch.object(deploy.subprocess, 'run', return_value=failed) as run:
+            with self.assertRaises(RuntimeError):
+                cluster.remote('b', 'activate')
+            self.assertEqual(run.call_count, 1, 'lost mutation responses must not replay a restart')
+
+    def test_an_orphaned_remote_build_blocks_a_second_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(remote.fcntl, 'flock', side_effect=BlockingIOError), patch.object(remote, 'build_locked') as build:
+                with self.assertRaisesRegex(RuntimeError, 'still running'):
+                    remote.build({'runtime_root': directory}, {})
+                build.assert_not_called()
+
     def test_frontend_asset_fallback_to_html_is_a_release_failure(self):
         with patch.object(remote.pathlib.Path, 'read_bytes', return_value=b'<script src="/admin/assets/main.js"></script>'), \
                 patch.object(remote, 'local_http', side_effect=[(200, 'text/html', b'<script src="/admin/assets/main.js"></script>'),
