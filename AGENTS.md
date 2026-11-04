@@ -225,11 +225,11 @@ cd app && npm run release:weapp -- --version <版本号> --desc "<说明>"
 
 **服务端部署**（主文档 `docs/DEPLOYMENT.md`，发布前先读 **`docs/RELEASE_SOP.md`**）
 ```bash
-bash scripts/deploy-prod.sh                # 默认 server + admin；DEPLOY_H5=1 同时发 H5；SKIP_DB_PUSH=1 仅限已核对无 schema 变更的热修
+cat docs/CLUSTER_DEPLOYMENT.md             # 正式集群：固定归档、逐节点排空与发布；独立测试库验收
 bash scripts/deploy-preprod.sh             # 预发：/opt/junshi-preprod · :4001 · https://wxapi.aibuzz.cn/api_preprod
 ```
-- 生产 `ecs-user@8.136.36.175`（key `/Users/donis/dev/aliyun/aiartist.pem`），`/opt/junshi` 是 `git archive` 包式部署，**不要远端 `git pull`**；例行升级不跑 `db:seed`；`server/.env` 不入包。阻断标准：构建失败、`junshi-api` 非 active、`/api/health` 非 200、域名 `/admin/` 非 200。
-- **预发与生产同宿主机**：构建曾伴随宿主机内存耗尽（2026-08-15），脚本有 `MemAvailable<3GiB` 拒绝 + cgroup 限制 + 原子 release 切换；部署前后探生产健康。预发真连 AI，支付强制 mock 不许动。
+- 正式服务经 ALB 分流到两台 ECS，统一使用 RDS PostgreSQL 与 Tair；发布和恢复以 `docs/CLUSTER_DEPLOYMENT.md` 为准。固定 `git archive` 归档，不跑生产 seed；逐节点排空、健康验收，不能覆盖运行中的 dist。旧主机仅保留预发、其他应用与入口兼容，迁移标记禁止旧进程复活。
+- **预发保留旧主机**：不得套用正式 RDS 或生产支付配置。预发真连 AI，支付强制 mock 不许动；旧单机发布脚本不能用于新集群。
 - 快出片后端边界：军师 BFF 管 JWT/租户/脚本 AI/审核/积分/通知；AIStar Clip 管模板/素材/数字人/任务/总装；生产跨机私网回源，预发回源同机 `127.0.0.1:8081`。详见 `docs/DEPLOYMENT.md` §8.1。
 
 ---
