@@ -1,0 +1,224 @@
+/* 爱速拍 · 运营台
+ *
+ * 色系取自小程序的设计令牌（app/packages/video/styles/tokens.scss）：
+ * 暖橙 #E4622B「攒一束光」+ 辅深灰蓝 #35607F + 暖纸底。
+ * **刻意不像军师后台**（那套是墨绿/命令金 + 羊皮纸）—— 两个产品各自一套控制台，
+ * 一眼要能看出自己在哪一个里面，这是把它独立出来的意义之一。
+ *
+ * 密度上比小程序紧：这是运营台，一屏要能看下一堆单子，不是 C 端的叙事页。
+ */
+
+:root {
+  --canvas: #ECE9E3;
+  --bg: #F7F6F2;
+  --surface: #FFFFFF;
+  --sunken: #EFEEE9;
+
+  /* 五级文字，对 --bg 与 --surface 都 ≥ 4.5:1（沿用小程序那次可读性修正后的值） */
+  --ink: #191A1C;
+  --ink-2: #494B4F;
+  --ink-3: #686A6F;
+  --muted: #6B6D72;
+
+  --line: rgba(25, 26, 28, 0.12);
+  --line-soft: rgba(25, 26, 28, 0.07);
+
+  --brand: #E4622B;          /* 主色。动作、选中、强调 */
+  --brand-deep: #B8471A;     /* 白字按钮用这支：亮橙上放白字对比不够 */
+  --brand-soft: #FBEDE6;     /* 浅底：选中态、标签 */
+  --slate: #35607F;          /* 辅色。只用于「另一类信息」，不与主色抢 */
+
+  --ok: #2D7A52;
+  --warn: #9A6419;
+  --danger: #9C4A38;
+
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 13px;
+  --shadow: 0 1px 2px rgba(25, 26, 28, .04), 0 2px 8px rgba(25, 26, 28, .04);
+
+  --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  --mono: SFMono-Regular, "JetBrains Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 13px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 外壳 ───────────────────────────────────────────────── */
+
+.shell { min-height: 100%; display: flex; flex-direction: column; background: var(--bg); }
+
+.top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 7px; margin-right: auto; }
+.brand b { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.brand span { font: 600 10px/1 var(--mono); color: var(--muted); letter-spacing: .08em; }
+.who { font-size: 12px; color: var(--muted); }
+
+/* 分区条。四屏而已，不做侧栏 —— 侧栏在四项时只是把内容挤窄 */
+.tabs {
+  position: sticky; top: 45px; z-index: 19;
+  display: flex; gap: 2px; padding: 0 10px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: none; appearance: none; border: 0; background: none; cursor: pointer;
+  padding: 10px 12px 9px; font: 600 13px/1.2 var(--sans); color: var(--ink-3);
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.tab:hover { color: var(--ink); }
+.tab.on { color: var(--brand-deep); border-bottom-color: var(--brand); }
+
+.main { flex: 1; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 14px 16px 40px; }
+
+/* ── 页头 ───────────────────────────────────────────────── */
+
+.head { display: flex; align-items: baseline; gap: 9px; margin: 4px 0 12px; }
+.head h1 { margin: 0; font-size: 17px; font-weight: 600; }
+.head .sub { font-size: 12px; color: var(--muted); }
+.head .spacer { margin-left: auto; }
+
+/* ── 统计格 ─────────────────────────────────────────────── */
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-lg);
+  padding: 11px 13px; box-shadow: var(--shadow);
+}
+.stat b { display: block; font-size: 21px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat span { display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+.stat.alert b { color: var(--danger); }
+.stat.good b { color: var(--ok); }
+
+/* ── 行 ─────────────────────────────────────────────────── */
+
+.rows { display: flex; flex-direction: column; gap: 7px; }
+.row {
+  background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-lg);
+  padding: 11px 13px; box-shadow: var(--shadow);
+}
+.row-h { display: flex; align-items: baseline; gap: 8px; }
+.row-t { font-size: 13.5px; font-weight: 600; }
+.row-n { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+.row-m { margin-top: 5px; font-size: 11.5px; color: var(--muted); line-height: 1.55; word-break: break-all; }
+.row-act { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+
+/* ── 控件 ───────────────────────────────────────────────── */
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 11px; }
+.chip {
+  appearance: none; cursor: pointer; padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  font: 500 12px/1.3 var(--sans); color: var(--ink-2);
+}
+.chip:hover { border-color: var(--brand); }
+.chip.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
+
+.btn {
+  appearance: none; cursor: pointer; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--surface);
+  padding: 6px 12px; font: 600 12px/1.4 var(--sans); color: var(--ink-2);
+}
+.btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-deep); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.primary { background: var(--brand-deep); border-color: var(--brand-deep); color: #fff; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+.btn.danger { background: rgba(156, 74, 56, .08); border-color: rgba(156, 74, 56, .25); color: var(--danger); }
+.btn.lg { padding: 10px 16px; font-size: 13px; width: 100%; }
+
+label.f { display: block; margin-bottom: 10px; }
+label.f .k { display: block; font-size: 11.5px; font-weight: 500; color: var(--ink-3); margin-bottom: 4px; }
+label.f .hint { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+input.i, textarea.i, select.i {
+  width: 100%; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 9px 11px; font: 400 13px/1.5 var(--sans);
+}
+input.i:focus, textarea.i:focus, select.i:focus { outline: 0; border-color: var(--brand); }
+textarea.i { min-height: 66px; resize: vertical; }
+
+.tag {
+  display: inline-block; padding: 2px 6px; border-radius: 5px;
+  font: 600 10.5px/1.5 var(--mono); background: var(--sunken); color: var(--ink-3);
+}
+.tag.brand { background: var(--brand-soft); color: var(--brand-deep); }
+.tag.ok { background: rgba(45, 122, 82, .12); color: var(--ok); }
+.tag.warn { background: rgba(154, 100, 25, .12); color: var(--warn); }
+.tag.danger { background: rgba(156, 74, 56, .12); color: var(--danger); }
+.tag.slate { background: rgba(53, 96, 127, .12); color: var(--slate); }
+
+/* ── 三态 ───────────────────────────────────────────────── */
+
+.note {
+  background: var(--sunken); border-radius: var(--r-md);
+  padding: 10px 12px; font-size: 11.5px; color: var(--ink-3); line-height: 1.65;
+}
+.note b { color: var(--ink-2); }
+.empty { text-align: center; padding: 34px 16px; color: var(--muted); font-size: 12.5px; }
+
+/* 读失败**必须**长得和「没有数据」不一样。上游是另一台机器，
+   它挂了要说「读不到」，不能显示成「一条都没有」—— 后者会让运营以为业务没跑。 */
+.err {
+  background: rgba(156, 74, 56, .06); border: 1px solid rgba(156, 74, 56, .2);
+  border-radius: var(--r-md); padding: 12px 13px; color: var(--danger); font-size: 12.5px;
+}
+.err .msg { word-break: break-all; }
+.err button { margin-top: 8px; }
+
+.skel { display: flex; flex-direction: column; gap: 7px; }
+.skel i {
+  display: block; height: 58px; border-radius: var(--r-lg);
+  background: linear-gradient(90deg, var(--sunken) 25%, #F5F4F0 37%, var(--sunken) 63%);
+  background-size: 400% 100%; animation: sk 1.3s ease infinite;
+}
+@keyframes sk { 0% { background-position: 100% 50% } 100% { background-position: 0 50% } }
+
+/* ── 登录 ───────────────────────────────────────────────── */
+
+.login { min-height: 100%; display: grid; place-items: center; padding: 20px; background: var(--canvas); }
+.login-card {
+  width: 100%; max-width: 330px; background: var(--surface);
+  border: 1px solid var(--line-soft); border-radius: var(--r-lg); padding: 22px 20px;
+  box-shadow: 0 2px 6px rgba(25, 26, 28, .05), 0 12px 30px rgba(25, 26, 28, .07);
+}
+.login-card h1 { margin: 0 0 3px; font-size: 18px; font-weight: 600; }
+.login-card .sub { margin: 0 0 18px; font-size: 12px; color: var(--muted); }
+
+/* ── toast ──────────────────────────────────────────────── */
+
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--ink); color: #fff; border-radius: var(--r-md);
+  padding: 10px 15px; font-size: 12.5px; line-height: 1.55;
+  box-shadow: 0 8px 24px rgba(25, 26, 28, .22);
+}
+
+/* ── 弹层 ───────────────────────────────────────────────── */
+
+.mask {
+  position: fixed; inset: 0; z-index: 50; background: rgba(25, 26, 28, .34);
+  display: grid; place-items: center; padding: 18px;
+}
+.dlg {
+  width: 100%; max-width: 400px; max-height: 86vh; overflow: auto;
+  background: var(--surface); border-radius: var(--r-lg); padding: 18px;
+  box-shadow: 0 12px 40px rgba(25, 26, 28, .24);
+}
+.dlg h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.dlg .sub { margin: 0 0 14px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.dlg-act { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }

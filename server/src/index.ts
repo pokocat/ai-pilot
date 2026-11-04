@@ -1,3 +1,4 @@
+import { assertIdentityOutboxConfigured } from './services/identityOutbox.js';
 import { env } from './env.js';
 import { prisma } from './db.js';
 import { buildApp } from './app.js';
@@ -5,7 +6,20 @@ import { startScheduler, stopScheduler } from './services/scheduler.js';
 import { assertProductionAuthSafe } from './services/authConfig.js';
 
 assertProductionAuthSafe();
+assertIdentityOutboxConfigured();
 const app = await buildApp({ logger: true });
+
+// 发布时先停止后台领单，再观察在途/持久任务排空；HTTP 连接继续保留到正式停机。
+process.on('SIGUSR2', () => {
+  void Promise.all([import('./services/generationWorker.js'), import('./services/creative/worker.js')])
+    .then(([generation, creative]) => {
+      generation.stopGenerationWorker();
+      creative.stopCreativeWorker();
+      stopScheduler();
+      app.log.info({ releaseDrain: true }, '[release] background workers draining');
+    })
+    .catch(error => app.log.error({ err: error }, '[release] cannot stop background claims'));
+});
 
 // 全局错误兜底：未处理 rejection / uncaughtException 后进程状态不可再信任，必须有期限地优雅退出，
 // 由 systemd Restart=always 拉起干净实例。注册 handler 后 Node 不会再默认退出，不能只写日志。

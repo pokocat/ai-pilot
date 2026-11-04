@@ -542,6 +542,8 @@ export type SchedulerJobResult = 'success' | 'failed' | 'lease_skipped' | 'overl
 
 interface SchedulerJobMetricState {
   intervalSeconds: number;
+  /** 本进程是否真的给这个任务挂了计时器。见 setSchedulerJobEnabled。 */
+  enabled: boolean;
   healthAnchorSeconds: number;
   lastSuccessSeconds: number;
   lastFailureSeconds: number;
@@ -567,6 +569,7 @@ export function registerSchedulerJobMetric(job: string, intervalMs: number): voi
   }
   schedulerJobs.set(job, {
     intervalSeconds: Math.max(1, intervalMs / 1000),
+    enabled: true,
     healthAnchorSeconds: Date.now() / 1000,
     lastSuccessSeconds: 0,
     lastFailureSeconds: 0,
@@ -578,6 +581,19 @@ export function registerSchedulerJobMetric(job: string, intervalMs: number): voi
 /** SCHEDULER_ENABLED=false 的纯 API 实例不参与任务停跑告警。 */
 export function setSchedulerMetricsEnabled(enabled: boolean): void {
   schedulerMetricsEnabled = enabled ? 1 : 0;
+}
+
+/**
+ * 单个任务在本进程是否启用（SERVICE_PROFILE 收窄时用）。
+ *
+ * 上面那个开关是进程级的，按档位裁剪任务后不够用了：爱速拍进程不跑军师那 13 个任务，
+ * 若仍按 enabled=1 导出，它们的 health_anchor 会从进程启动那刻起永远不动。
+ * JunshiSchedulerJobStalled 取的是 `max by (job)`，军师实例的新鲜值会盖住它，
+ * 所以今天不会误报 —— 但那是碰巧，不是设计。按任务如实导出，别让告警靠巧合成立。
+ */
+export function setSchedulerJobEnabled(job: string, enabled: boolean): void {
+  const state = schedulerJobs.get(job);
+  if (state) state.enabled = enabled;
 }
 
 export function noteSchedulerJobStarted(job: string): void {
@@ -844,7 +860,7 @@ export async function renderMetrics(): Promise<string> {
   for (const [job, state] of schedulerJobs) {
     const labels = { job };
     schedulerInterval.samples.push(fmt('junshi_scheduler_job_interval_seconds', state.intervalSeconds, labels));
-    schedulerEnabled.samples.push(fmt('junshi_scheduler_job_enabled', schedulerMetricsEnabled, labels));
+    schedulerEnabled.samples.push(fmt('junshi_scheduler_job_enabled', state.enabled ? schedulerMetricsEnabled : 0, labels));
     schedulerAnchor.samples.push(fmt('junshi_scheduler_job_health_anchor_timestamp_seconds', state.healthAnchorSeconds, labels));
     schedulerSuccess.samples.push(fmt('junshi_scheduler_job_last_success_timestamp_seconds', state.lastSuccessSeconds, labels));
     schedulerFailure.samples.push(fmt('junshi_scheduler_job_last_failure_timestamp_seconds', state.lastFailureSeconds, labels));
@@ -985,6 +1001,7 @@ export function __resetMetrics(): void {
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset(); creativeCritiques.reset();
   schedulerJobRuns.reset();
   for (const state of schedulerJobs.values()) {
+    state.enabled = true; // 回到注册时的默认，否则上一个用例裁剪过的档位会漏进下一个
     state.healthAnchorSeconds = Date.now() / 1000;
     state.lastSuccessSeconds = 0;
     state.lastFailureSeconds = 0;

@@ -2055,6 +2055,8 @@ export interface AdminUsageSummary {
   creditEvents: number;
 }
 export interface AdminUsageView {
+  /** 当前按哪个产品切的；null = 全部合计。注意 summary 里的余额两项从不跟着切（钱包只有一个）。 */
+  productCode?: string | null;
   summary: AdminUsageSummary;
   users: AdminUserItem[];
 }
@@ -2491,9 +2493,20 @@ export interface AdminAccountItem {
   id: string; username: string; role: string; // owner | operator
   disabled: boolean; lastLoginAt: string | null; createdAt: string;
   agentKeys: string[]; // 该 operator 负责的 agent（owner 隐式全部，返回空数组）
+  /** 绑定的小程序账号 id；null = 没绑，用不了「把自己的草稿存成模板」。 */
+  linkedUserId?: string | null;
 }
 export interface CreateAdminAccountRequest { username: string; password: string; role?: string; agentKeys?: string[] }
-export interface UpdateAdminAccountRequest { disabled?: boolean; role?: string; password?: string; agentKeys?: string[] }
+export interface UpdateAdminAccountRequest {
+  disabled?: boolean; role?: string; password?: string; agentKeys?: string[];
+  /**
+   * 这个后台账号在小程序里对应的用户 id。空串 = 解绑。
+   *
+   * 只有「把自己的草稿存成模板」用它 —— 那个动作要知道「我」在小程序里是谁，
+   * 而这件事不能让请求体来说（说了就等于任何超管都能把别人的草稿发成全平台模板）。
+   */
+  linkedUserId?: string;
+}
 /** 当前登录者（GET /admin/auth/me）：前端按角色显隐账户管理、按范围过滤 agent */
 export interface AdminMe { kind: 'master' | 'account' | 'legacyUser'; username: string | null; role: string; isSuper: boolean }
 
@@ -2886,6 +2899,82 @@ export interface ClipRenderResult { jobId: string; projectId: string; status: st
 export interface ClipJobView {
   id: string; status: 'queued' | 'generating' | 'assembling' | 'succeeded' | 'failed' | 'cancelled';
   stage?: string; progress?: number; workId?: string | null; errorMessage?: string | null;
+  /** 段级出片状态（上游 `segmentJobsJson` 的投影）。上游没给就没有这个字段，端上退回整体进度。 */
+  segments?: ClipJobSegmentStatus[];
+}
+/** 出片任务里单段的状态（爱速拍「出片中」页逐段展示）。 */
+export interface ClipJobSegmentStatus {
+  /**
+   * **镜头号**，对应 `ClipShot`（上游 `ClipShotPlan.materialize` 的切分），**不是** `ClipSegment.no`。
+   * 多句共用一个画面时两者不同：端上要按 `ClipProject.shots[{startNo,endNo}]` 映射回原句。
+   */
+  no: number;
+  role: ClipSegmentRole;
+  status: 'queued' | 'generating' | 'done' | 'failed';
+  errorCode?: string | null;
+}
+/** 配音（TTS）预览时间线里的一段。`startSec` 由前面各段 `durationSec` 累加而来。 */
+export interface ClipTtsPreviewSegment {
+  /**
+   * **镜头号**，对应 `ClipShot`（与出片 worker 的 TTS 阶段同一套切分），**不是** `ClipSegment.no`。
+   * 多句共用一个画面时两者不同：端上要按 `ClipProject.shots[{startNo,endNo}]` 映射回原句。
+   */
+  no: number;
+  /**
+   * 短期签名音频地址。**空串 = 还没有音频**：未合成完的段与结尾固定段上游给 null，
+   * BFF 统一补成空串（上游全局 non_null 会把 null 字段整个删掉，端上不该拿到 undefined）。
+   */
+  audioUrl: string;
+  /** 已合成段是真实时长；未合成段是按字数的估算，结尾固定段取模板配置时长。 */
+  durationSec: number;
+  startSec: number;
+}
+/**
+ * 配音预览时间线（`POST|GET /api/video/projects/:id/tts-preview`）。
+ * `timelineHash` = 对 segments 文案 + voiceId 的哈希：文案一变就换，旧结果作废。
+ * `status:"generating"` 时也给全量 `segments`（未合成段 `audioUrl` 空串）。
+ * `GET` 没有结果或结果对应旧一版文案 → 404 `CLIP_TTS_PREVIEW_NOT_FOUND`，端上重新 `POST`。
+ */
+export interface ClipTtsPreview {
+  status: 'generating' | 'ready' | 'failed';
+  timelineHash: string;
+  voiceId: string | null;
+  totalDurationSec: number;
+  segments: ClipTtsPreviewSegment[];
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  /**
+   * 本次调用要扣的钻石。**必填、恒 ≥ 0**，BFF 始终透传（上游缺失按 0 补）。
+   * 约定 `credits > 0` 才表示调用方需要先 hold 钻石；当前 WP-D 口径是不扣，恒为 0。
+   */
+  credits: number;
+}
+/**
+ * 已备好的单段素材（方案 `docs/VIDEO_STANDALONE_MINIAPP_PLAN_2026-08-19.md` §3.5 / §11）。
+ * `sourceHash` 一样就不必重出，是分层预览复用的判据。
+ */
+export interface PreparedClip {
+  segmentNo: number;
+  role: ClipSegmentRole;
+  sourceHash: string;
+  mediaUrl: string;
+  durationSec: number;
+  generatedAt: string;
+}
+/** 分层预览产物：device=端上拼、proxy=低码率代理片、final=成片（同上，§11 timelineHash 分层）。 */
+export interface PreviewRender {
+  projectId: string;
+  timelineHash: string;
+  tier: 'device' | 'proxy' | 'final';
+  mediaUrl?: string;
+  readyAt?: string;
+}
+/** 一句话提取主体/目标/受众（`POST /api/video/intake/extract`）。拿不准给空串，不编造。 */
+export interface ClipIntakeExtract {
+  subject: string;
+  goal: string;
+  audience: string;
+  salutation: string;
 }
 /** 素材库存储占用（GET /video/assets/storage）。预置素材由平台提供，不计入用户配额。 */
 export interface ClipAssetStorage { usedBytes: number; limitBytes: number; count: number; }
@@ -2951,6 +3040,68 @@ export interface ClipClonePricing {
  * `configured=false` 在后台的含义比端上更重：它表示这四个数字还是 pricing.ts 里
  * `TODO(定价待运营核定)` 的兜底价，没有任何商务结论背书。后台必须把这件事显式写在页面上。
  */
+/* ── 多产品：后台分区与分产品的账 ──────────────────────────────────────
+ *
+ * 后台是**一个**、按产品分区。不给每个小程序各配一个后台：产品专属的面很少
+ * （爱速拍只有模板、单价、供应商对账），而共享的那些 —— AI 端点与路由、账号与角色、
+ * 审计、SKU、钱包流水 —— 复制 N 份的代价远大于收益，其中角色管理最不该分叉。
+ *
+ * 分区键 productCode 与统一账号中心 aibuzz-id 的 product_code 同一命名空间：
+ * 「令牌来自哪个产品」和「这笔钱花在哪个产品」用同一把尺子，对账不必再做一层映射。
+ */
+export interface AdminProductsView {
+  /** 平台已知的全部产品码。 */
+  all: string[];
+  /** 当前操作者看得见的那些。超管 = 全部。 */
+  accessible: string[];
+  /** 超管隐式拥有全部产品，前端据此不显示「申请授权」这类入口。 */
+  superActor: boolean;
+}
+
+/**
+ * 一个产品在某段时间里的账。
+ *
+ * 钱包是一个，归属记在流水行上，靠 delta 正负分开两种归属：
+ *   granted  卖出 —— 这批钻石是从哪个产品的充值入口卖出去的（收入归属）
+ *   spent    消耗 —— 这批钻石是花在哪个产品上的（消耗归属）
+ * 「军师打通爱速拍出片」因此不需要跨钱包转账：同一个钱包付钱，那行流水记 quickreel，
+ * 收入仍算在当初卖出这批钻石的产品头上。两笔各归各的，账是通的。
+ */
+export interface AdminProductLedgerSlice {
+  /** 产品码；`unattributed` = 本列上线之前的历史流水，无从追认，不摊进任何产品。 */
+  productCode: string;
+  granted: number;
+  spent: number;
+  entries: number;
+  /**
+   * 这个产品真花掉的 AI 成本，微元（1e-6 元）。
+   *
+   * 与 granted/spent 不是同一种单位：那两个是**钻石**（内部计价），这个是**人民币**（付给
+   * 模型供应商的真钱）。独立运营的毛利要两者一起看。平台级基建（嵌入 / 重排 / 探活）
+   * 不属于任何单一产品，落在 unattributed，不摊到各产品头上。
+   */
+  costMicros: number;
+}
+
+export interface AdminProductLedgerView {
+  from: string;
+  /** null = 没有上界（查到此刻）。服务端刻意不用「此刻」兜底：createdAt 由数据库写入，
+   *  应用时钟慢一点就会把刚落的几笔挡在窗口外，报表看起来像少了钱。 */
+  to: string | null;
+  slices: AdminProductLedgerSlice[];
+}
+
+export interface AdminAccountProductGrant {
+  productCode: string;
+  role: 'viewer' | 'editor';
+  createdAt: string;
+}
+
+export interface AdminAccountProductsView {
+  accountId: string;
+  grants: AdminAccountProductGrant[];
+}
+
 export type AdminClonePricing = ClipClonePricing;
 /**
  * 后台写入形状（PUT /admin/video/clone-pricing，仅 owner/master）。
@@ -3488,3 +3639,224 @@ export interface AdminDistributorDetail {
   recentCommissions: AdminCommissionEntry[];
   settlements: AdminSettlement[];
 }
+
+/* ─────────── 爱速拍 · 出片对账台 ───────────
+ * VideoCreditHold 是唯一一张记着「钱扣了、片子还没交付」的表。这组类型是它在运营后台的投影。
+ */
+
+export interface AdminClipHoldStatusSlice {
+  status: string;
+  /** 中文态名。服务端给，避免前端各写一份对照表然后和日志里的叫法对不上。 */
+  label: string;
+  count: number;
+  credits: number;
+}
+
+export interface AdminClipOpsView {
+  from: string;
+  to: string;
+  byStatus: AdminClipHoldStatusSlice[];
+  /**
+   * 悬挂：已从余额扣走、既没交付也没退回。
+   * **不按时间窗口算** —— 卡了 40 天的单照样是今天悬着的钱，按窗口算会把最该看见的那些藏起来。
+   */
+  openCount: number;
+  openCredits: number;
+  /** 悬挂里最危险的一档：连上游 jobId 都没拿到。只能按 clientRequestId 查单，不许按超时猜失败。 */
+  unanchoredCount: number;
+  unanchoredCredits: number;
+  settledCount: number;
+  settledCredits: number;
+  refundedCount: number;
+  refundedCredits: number;
+  /** 分母只含已收口的单（settled+refunded）。窗口内一单都没收口 = null，前端显示「—」。 */
+  successRate: number | null;
+  /** 最老的一笔悬挂单的建单时间。null = 当前没有悬挂。 */
+  oldestOpenAt: string | null;
+}
+
+export interface AdminClipHoldItem {
+  id: string;
+  userId: string;
+  userName: string | null;
+  projectId: string;
+  clientRequestId: string;
+  upstreamJobId: string | null;
+  credits: number;
+  status: string;
+  statusLabel: string;
+  lastJobStatus: string | null;
+  /** null = 本列上线之前建的单，没有归属，不追认。 */
+  productCode: string | null;
+  chargedAt: string;
+  refundedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** 能不能手工查单补交。由服务端按状态判定，前端不猜。 */
+  reconcilable: boolean;
+}
+
+export interface AdminClipHoldListView {
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+  items: AdminClipHoldItem[];
+}
+
+export interface AdminClipReconcileResult {
+  /** accepted=上游其实收了（已回填锚点）；rejected=上游明确拒绝（已退款）；unknown=问不清，原样保留。 */
+  outcome: 'accepted' | 'rejected' | 'unknown';
+  status: string;
+  statusLabel: string;
+  upstreamJobId: string | null;
+  /** 本次是否真的退了钱。unknown 恒为 false —— 问不清绝不退款，退了就是白送一次出片。 */
+  refunded: boolean;
+  message: string;
+}
+
+/**
+ * 模板货架的一行（AIStar 的 TemplateDto 子集）。
+ *
+ * 只取运营判断「上不上架」真正要看的字段。整份 TemplateDto 还带 scriptSkeleton / timeline /
+ * tailClips 这些内容创作产物，后台既不展示也不编辑，透传过来只会让契约跟着上游的内容结构漂。
+ */
+export interface ClipAdminTemplate {
+  id: string;
+  name: string;
+  industry: string;
+  themeKey: string;
+  description: string;
+  /** published = 小程序里看得到；draft = 只有运营看得到。 */
+  status: string;
+  ownerScope: string;
+  previewCoverUrl?: string | null;
+  previewVideoUrl?: string | null;
+  estDurationSec: number;
+  segmentCount: number;
+  creditHint?: number | null;
+}
+
+/**
+ * 爱速拍的六档生成单价（钻石）。
+ *
+ * 2026-09-11 起可以在后台改：真源是出片服务的 clip_pricing 单行表，那张表空着就回落
+ * application.yml 的兜底值（configured=false）。
+ *
+ * 键名与小程序 config.js 的 PRICING 一字对齐：改名端上不报错，只会静默算出 NaN。
+ * 端上与服务端算出的报价必须逐分钱一致，不一致就是每次生成都 409。
+ */
+export interface ClipGenerationPricing {
+  /** 运营核定过没有。false = 现在用的是出片服务配置里的兜底值，页面必须显式写明。 */
+  configured?: boolean;
+  /** 数字人出镜，每秒。 */
+  creditPerAvatarSecond: number;
+  /** 文生图，每张。 */
+  creditPerImage: number;
+  /** 文生视频，每秒。 */
+  creditPerT2vSecond: number;
+  /** 图生视频，每秒。 */
+  creditPerI2vSecond: number;
+  /** 合成整片，每次。 */
+  creditPerAssemble: number;
+  /** 配音，每千字（全片一次取整，不按镜摊 —— 按镜摊十个短镜头能把同样字数收成十倍）。 */
+  creditPerKChar: number;
+}
+
+/** 供应商对账的一类行数（明细不透传到后台 —— 后台只需要知道有几条、要不要去处理）。 */
+/** 两边都有 —— 正常。 */
+export interface ClipVendorMatched {
+  engineRef: string; vendorTitle: string; localId: string;
+  ownerUserId: string; localName: string; engineStatus: string;
+}
+/** 石榴有、我方无。**只有这两个字段** —— 本地压根没这条记录，所以没有本地名字、也没有封面。 */
+export interface ClipVendorOrphan { engineRef: string; vendorTitle: string }
+/** 我方有、石榴无 —— 上游被删了本地没同步。 */
+export interface ClipVendorDangling {
+  localId: string; ownerUserId: string; localName: string;
+  engineRef: string; engineStatus: string; updatedAt: string;
+}
+/** reason: training=还没拿到 engineRef（训练中/失败）；mock=mock 时代残留。 */
+export interface ClipVendorUnmatchable {
+  localId: string; ownerUserId: string; localName: string;
+  engineRef: string; engineStatus: string; reason: string;
+}
+export interface ClipVendorReconcile {
+  /** 非空 = 这一类没查成。绝不能把查失败显示成「0 条，一切正常」。 */
+  error?: string | null;
+  /** 供应商侧的对象数；null = 没查到。 */
+  vendorCount?: number | null;
+  /** 我方库里的对象数。 */
+  localCount: number;
+  /**
+   * ⚠️ 以下四项服务端给的是**明细数组**，不是计数。
+   *
+   * 这里曾经写成 `matchedCount` / `orphanCount` 之类的数字字段 —— 那几个字段从来不存在。
+   * 前端拿到 undefined，界面上出现「NaN 条对不上」和空白的「匹配  条」。
+   * 类型是契约，写错了 TS 不报错（服务端是 Java，不参与这份 .d.ts 的校验），
+   * 只能对着真实回包核。真源：ClipVendorDtos.ReconcileDto。
+   */
+  matched: ClipVendorMatched[];
+  /** 供应商有、我们没有。白占槽位，照样按它收钱，可安全清理。 */
+  orphan: ClipVendorOrphan[];
+  /** 我们有、供应商没有。用户点进去会失败。 */
+  dangling: ClipVendorDangling[];
+  /** 不参与对账的本地行，单列只为解释「为什么本地行数对不上」。 */
+  unmatchable: ClipVendorUnmatchable[];
+}
+
+/**
+ * 供应商（石榴）总览。**只读，实时打上游。**
+ *
+ * `mock=true` 时页面必须显著标注：走的是本地假网关，额度是编的 ——
+ * 不标的话运营会把假额度当真账读，然后以为槽位还很充裕。
+ */
+export interface ClipVendorOverview {
+  mock: boolean;
+  checkedAt: string;
+  quota: {
+    error?: string | null;
+    /** 还能练几个数字人 / 几条声音。用完了用户就练不了新的。 */
+    availableAvatar?: number | null;
+    availableSpeaker?: number | null;
+    validPoint?: number | null;
+    validToTime?: string | null;
+    avatarSlotsExhausted: boolean;
+    speakerSlotsExhausted: boolean;
+  };
+  avatars: ClipVendorReconcile;
+  voices: ClipVendorReconcile;
+}
+
+/** 六档单价的核定入参。**六个都要给** —— 只改一档会把另外五档的兜底值一并升格成「配过的价」。 */
+export interface ClipGenerationPricingUpdate {
+  creditPerAvatarSecond: number;
+  creditPerImage: number;
+  creditPerT2vSecond: number;
+  creditPerI2vSecond: number;
+  creditPerAssemble: number;
+  creditPerKChar: number;
+}
+
+/**
+ * 把一条自己的草稿存成模板。
+ *
+ * 服务端会剥掉运营自己的数字人 / 声音 / 上传素材（见 AIStar 的
+ * ClipTemplateService.publishFromProject），这里不需要也不应该在前端先剥一遍 ——
+ * 剥干净与否是安全属性，只能由服务端保证。
+ */
+export interface ClipTemplateFromProject {
+  /** 草稿 id。属主不在这里传 —— 服务端只认当前后台账号绑定的那个小程序账号。 */
+  projectId: string;
+  name: string;
+  industry: string;
+  themeKey: string;
+  description: string;
+  /** 传了就是改版那一条，不传新建。 */
+  templateId?: string;
+  /** 缺省 true：运营写的示范文案本身就是模板的价值。false = 只留骨架，正文清空。 */
+  keepText?: boolean;
+}
+
+// Unified identity lifecycle metadata (UID tombstones, event cursor, token version)
+// stays internal to the server; public LoginResult/User contracts are unchanged.

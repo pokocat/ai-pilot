@@ -75,9 +75,19 @@ describe('克隆定价 · 运营后台配置', () => {
 
   const FOUR = { voiceCreate: 300, voiceRetrain: 80, avatarVideo: 260, avatarImage: 120 };
 
-  /** 普通运营（role=operator）的会话 token —— 用于验证 requireSuper 拒绝。 */
+  /**
+   * 普通运营（role=operator）的会话 token —— 用于验证 requireSuper 拒绝。
+   *
+   * **要先发爱速拍的授权**：2026-09-11 起后台路由前面还有一道产品闸
+   * （services/adminProductGate.ts）。不发授权的话，请求会先被产品闸挡在门外，
+   * 这组用例就验不到它真正要验的那一层（改价要超管）—— 两个 403 长得一样，
+   * 但「你没有这个产品」和「这个操作要超管」是两回事。
+   */
   async function operatorToken(): Promise<string> {
     const acc = await createOperator(`op_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, 'pw-123456', 'operator');
+    await prisma.adminProductAccess.create({
+      data: { productCode: 'quickreel', accountId: acc.id, role: 'editor' },
+    });
     return createSession(acc.id);
   }
 

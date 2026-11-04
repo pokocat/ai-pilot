@@ -144,7 +144,8 @@ async function main() {
     data: { tenantId: tenant.id, industry: 'SaaS / 软件', stage: 'A 轮前后', pain: '增长乏力' },
   });
   await prisma.creditLedger.create({
-    data: { tenantId: tenant.id, userId: user.id, delta: 68, reason: '决策版 · 月度充值', balance: 68 },
+    // 归属跟着写：新环境 seed 出来的这笔要算军师的收入，不能落进 unattributed。
+    data: { tenantId: tenant.id, userId: user.id, delta: 68, reason: '决策版 · 月度充值', balance: 68, productCode: 'junshi' },
   });
   // 演示：决策版月度 token 额度（100 万 token/月，periodKey 留空→首次访问惰性重置为当月）
   await prisma.tokenWallet.create({

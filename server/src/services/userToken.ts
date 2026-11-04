@@ -97,3 +97,12 @@ export function verifyUserToken(token?: string): string {
   if (jwtRequired()) return ''; // 强制 JWT：老 token 失效
   return t;
 }
+
+/** Only call after verifyUserToken accepted this token. Old sessions default to version zero. */
+export function identityVersionOfVerifiedUserToken(token?: string): number {
+  if (!token || !looksLikeJwt(token)) return 0;
+  try {
+    const payload = JSON.parse(fromB64url(token.split('.')[1]).toString('utf8'));
+    return Number.isSafeInteger(payload.iv) && payload.iv >= 0 ? payload.iv : 0;
+  } catch { return -1; }
+}

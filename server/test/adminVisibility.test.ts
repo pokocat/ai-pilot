@@ -104,3 +104,17 @@ test('审计默认排除历史 /api/metrics 抓取，显式开启时仍可查看
   const withMetrics = await api('GET', '/api/admin/audit-logs?includeMetrics=true');
   assert.ok((withMetrics.body as Array<{ id: string }>).some((it) => it.id === metric.id));
 });
+
+test('用户列表和详情包含最近 300 个之外的老账号', async () => {
+  const owner = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const old = await prisma.user.create({ data: { tenantId: owner.tenantId, phone: uniquePhone(), name: '分页外旧账号', createdAt: new Date('2020-01-01T00:00:00Z') } });
+  await prisma.user.createMany({ data: Array.from({ length: 301 }, (_, index) => ({ tenantId: owner.tenantId, phone: uniquePhone(), name: `覆盖账号${index}` })) });
+  try {
+    const list = await api('GET', '/api/admin/users'); assert.equal(list.status, 200);
+    assert.equal(list.body.find((row: any) => row.id === old.id)?.phone, old.phone);
+    const detail = await api('GET', `/api/admin/users/${old.id}`); assert.equal(detail.status, 200); assert.equal(detail.body.user.id, old.id);
+  } finally {
+    await prisma.user.deleteMany({ where: { name: { startsWith: '覆盖账号' } } });
+    await prisma.user.delete({ where: { id: old.id } });
+  }
+});

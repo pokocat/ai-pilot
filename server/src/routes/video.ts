@@ -14,11 +14,16 @@ import {
 import { videoSubmissionProbe } from '../services/video/maintenance.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent, assertVideoUploadedContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
+import {
+  BRIEF_MAX_CHARS, REWRITE_MAX_CHARS, generateClipScriptAll, generateClipScriptFromBrief,
+  rewriteClipSegment, videoScriptEngine,
+} from '../services/video/scriptGenerate.js';
+import { extractClipIntake, INTAKE_MAX_CHARS } from '../services/video/intake.js';
 import { clonePricing, clonePricingView } from '../services/video/pricing.js';
 import { buyStoragePack, purchasedPackCount, purchasedStorageBytes, storagePlan } from '../services/video/storagePlan.js';
 import type {
-  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
-  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
+  ClipAsset, ClipAssetStorage, ClipAvatarView, ClipCaptureRequirements, ClipCloneUploadRequest, ClipCloneUploadStatus, ClipCloneUploadTicket, ClipConsentResult, ClipEstimate, ClipIntakeExtract, ClipJobView, ClipProject,
+  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipTtsPreview, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 import { assertSafeUrl } from '../llm/tools/httpTool.js';
 
@@ -41,6 +46,30 @@ function identityOf(user: { id: string; tenantId: string }): Identity {
 
 function assertId(id: string) {
   if (!validId(id)) throw Object.assign(new Error('资源标识非法'), { statusCode: 400, code: 'CLIP_ID_INVALID' });
+}
+
+/** 上游对「这一版文案还没有预览结果」的错误码（WP-D 口径）；端上收到它就重新 POST 触发。 */
+const TTS_PREVIEW_NOT_FOUND = 'CLIP_TTS_PREVIEW_NOT_FOUND';
+
+/**
+ * 把上游的配音预览响应补成契约形状。上游序列化是全局 non_null（null 字段直接不出现），
+ * 端上却按 `null` 判断——不补齐就会拿到 `undefined`，`errorCode === null` 之类的判断全部失真。
+ * 除这几个字段外原样透传（上游新增字段不需要改 BFF）。
+ */
+function normalizeTtsPreview(view: ClipTtsPreview): ClipTtsPreview {
+  const row = (view ?? {}) as ClipTtsPreview & Record<string, unknown>;
+  return {
+    ...row,
+    segments: (Array.isArray(row.segments) ? row.segments : []).map((seg) => ({
+      ...seg,
+      // 未合成段 / 结尾固定段上游给 null；契约里是 string，空串等价「还没有音频」。
+      audioUrl: typeof seg?.audioUrl === 'string' ? seg.audioUrl : '',
+    })),
+    errorCode: typeof row.errorCode === 'string' && row.errorCode ? row.errorCode : null,
+    errorMessage: typeof row.errorMessage === 'string' && row.errorMessage ? row.errorMessage : null,
+    // 恒透传：约定 `credits > 0` 才表示端上要先 hold 钻石；上游不给就是不扣（0）。
+    credits: typeof row.credits === 'number' && Number.isFinite(row.credits) ? row.credits : 0,
+  };
 }
 
 function directCloneInput(body: unknown): ClipCloneUploadRequest {
@@ -72,13 +101,23 @@ function publicUploadStatus(status: UpstreamCloneUploadStatus): ClipCloneUploadS
   return safe;
 }
 
+/**
+ * `script/ai-rewrite` 的入参闸。
+ * · `scope:'segment'`：`text` 是要改的那一句原文，必填；`no` 是段号（缺省 null，由服务层兜底）。
+ * · `scope:'all'`：`text` 是**改写指令**，可空——空则按「润色全篇」处理。
+ * 两个 scope 的 `text` 都收 `REWRITE_MAX_CHARS` 字，与上游旧口径一致，不无声收紧端上输入。
+ */
 function rewriteBody(body: unknown) {
   const row = body && typeof body === 'object' ? body as Record<string, unknown> : {};
   const scope = row.scope === 'all' ? 'all' : row.scope === 'segment' ? 'segment' : '';
   if (!scope) throw Object.assign(new Error('改写范围非法'), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
   const text = typeof row.text === 'string' ? row.text.trim() : null;
   if (scope === 'segment' && !text) throw Object.assign(new Error('单句文案不能为空'), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
-  return { scope, no: typeof row.no === 'number' ? row.no : null, text };
+  if (text && text.length > REWRITE_MAX_CHARS) {
+    throw Object.assign(new Error(`改写内容最多 ${REWRITE_MAX_CHARS} 字`), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
+  }
+  const no = typeof row.no === 'number' && Number.isSafeInteger(row.no) && row.no > 0 ? row.no : null;
+  return { scope, no, text };
 }
 
 /** 采集类型。avatarImage = 用照片训数字人（与 AIStar 侧 kind 同名），白名单与视频那两类完全不同。 */
@@ -270,18 +309,171 @@ export async function videoRoutes(app: FastifyInstance) {
     catch (e) { return sendErr(reply, e, 422); }
   });
 
-  app.post<{ Params: { id: string }; Body: unknown }>('/video/projects/:id/script/ai-rewrite', async (req, reply) => {
-    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    try {
-      assertId(req.params.id);
-      const body = rewriteBody(req.body);
-      if (body.text) await assertVideoProjectContent({ segments: [{ role: 'broll', text: body.text }] }, identityOf(user));
-      const result = await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/script/ai-rewrite`, identityOf(user), { method: 'POST', body });
-      await assertVideoRewriteOutput(result, identityOf(user));
-      return result;
-    } catch (e) { return sendErr(reply, e, 422); }
-  });
+  /**
+   * 文案 AI 改写（WP-A3：**收回军师自己的 LLM 网关**）。
+   *
+   * 为什么不再透传上游：aidrama 的 `ClipScriptService.rewrite` 第一行就是「非 mock 网关 → 503
+   * `CLIP_SCRIPT_ENGINE_NOT_CONFIGURED`」，clip 域没接 LLM，生产环境点一次「AI 改写」拿到的是 503。
+   * 现在两个 scope 都在 BFF 实现（`services/video/scriptGenerate.ts`）：
+   * · `segment`：只改这一句，保留该段 role / hint / 字数目标，并带相邻两段做语气参照。
+   *   **不落库**（与历史行为一致：端上把结果放进编辑框，保存交给它自己的防抖）。
+   * · `all`：复用 §1.3 的整稿链路，`text` 当改写指令、空则「润色全篇」；只在模板骨架内写
+   *   （段数 / role 不动），过审后走现有项目更新落库。
+   *
+   * 响应形状与历史一致（端上 video 包的 `api.js` 里 `aiRewrite` 在用）：
+   * segment → `{ scope, no, text }`；all → `{ scope, segments, shots }`。
+   *
+   * `VIDEO_SCRIPT_ENGINE=aidrama` 可退回旧透传，仅供与上游确定性引擎对拍；生产别配（必 503）。
+   */
+  app.post<{ Params: { id: string }; Body: unknown }>('/video/projects/:id/script/ai-rewrite',
+    { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        assertId(req.params.id);
+        const body = rewriteBody(req.body);
+        const identity = identityOf(user);
+        if (body.text) await assertVideoProjectContent({ segments: [{ role: 'broll', text: body.text }] }, identity);
 
+        if (videoScriptEngine() === 'aidrama') {
+          const result = await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/script/ai-rewrite`, identity, { method: 'POST', body });
+          await assertVideoRewriteOutput(result, identity);
+          return result;
+        }
+
+        const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
+        if (body.scope === 'segment') {
+          const rewritten = await rewriteClipSegment(project, body.no, body.text as string);
+          await assertVideoRewriteOutput({ text: rewritten.text }, identity);
+          await recordAudit({
+            tenantId: user.tenantId, userId: user.id, action: 'user.video.script.rewrite',
+            payload: { projectId: req.params.id, scope: 'segment', no: rewritten.no },
+          });
+          return { scope: 'segment', no: rewritten.no, text: rewritten.text };
+        }
+
+        const draft = await generateClipScriptAll(project, body.text
+          ? { kind: 'rewrite', instruction: body.text }
+          : { kind: 'polish' });
+        await assertVideoRewriteOutput({ segments: draft.segments }, identity);
+        await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity, {
+          method: 'PUT', body: { segments: draft.segments, shots: draft.shots, step: 1 },
+        });
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.script.rewrite',
+          payload: { projectId: req.params.id, scope: 'all', instructed: Boolean(body.text), segmentCount: draft.segments.length },
+        });
+        return { scope: 'all', segments: draft.segments, shots: draft.shots };
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 一句话生成全片（契约 §1.3）。**只在模板骨架内写**：段数与 role 沿用项目现有 segments，
+   * 模型只逐段填文案（上游 `script/ai-rewrite` 的 `scope:'all'` 根本不读 `text`，见
+   * services/video/scriptGenerate.ts 头注释）。
+   */
+  app.post<{ Params: { id: string }; Body: { brief?: string } }>('/video/projects/:id/script/generate',
+    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        assertId(req.params.id);
+        const brief = String(req.body?.brief ?? '').trim();
+        if (!brief || brief.length > BRIEF_MAX_CHARS) {
+          throw Object.assign(new Error(`请用 ${BRIEF_MAX_CHARS} 字以内说说你的生意和想说的话`), {
+            statusCode: 422, code: 'CLIP_BRIEF_INVALID',
+          });
+        }
+        const identity = identityOf(user);
+        await assertVideoProjectContent({ segments: [{ role: 'broll', text: brief }] }, identity);
+        const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
+        const draft = await generateClipScriptFromBrief(project, brief);
+        await assertVideoRewriteOutput({ segments: draft.segments }, identity);
+        const saved = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity, {
+          method: 'PUT', body: { segments: draft.segments, shots: draft.shots, step: 1 },
+        });
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.script.generate',
+          payload: { projectId: req.params.id, briefChars: brief.length, segmentCount: draft.segments.length },
+        });
+        return saved;
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 配音（TTS）预览时间线透传（契约 §1.5 + WP-D 实现口径）。POST 触发生成（上游按文案幂等），GET 轮询。
+   *
+   * **两种 404 必须分流**（WP-A2 第 2 条）：
+   * · 上游明确说「这一版文案还没有预览结果」（404 且 body `code === CLIP_TTS_PREVIEW_NOT_FOUND`）
+   *   → **原样 404 + 原码**。端上据此重新 POST 一次触发生成，这是正常业务流，不是故障。
+   * · 上游根本没有这条路由（404 不带该码、或 405 方法不允许）→ 503 `CLIP_TTS_PREVIEW_UNAVAILABLE`，
+   *   端上退回内部计时器，而不是把「功能没上线」显示成「项目不存在」。
+   *
+   * 成功响应过一道 `normalizeTtsPreview`：上游是全局 non_null 序列化，`errorCode` / `errorMessage`
+   * / `audioUrl` 为 null 时**字段直接不出现**，端上会拿到 undefined。契约里这三个字段是「有值或 null」，
+   * 所以在 BFF 这一层补齐；`credits` 恒透传（缺失按 0，`> 0` 才表示调用方需先 hold）。
+   */
+  for (const method of ['GET', 'POST'] as const) {
+    app.route<{ Params: { id: string }; Body: unknown }>({
+      method,
+      url: '/video/projects/:id/tts-preview',
+      handler: async (req, reply) => {
+        const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+        try {
+          assertId(req.params.id);
+          const view = await aidramaJson<ClipTtsPreview>(
+            `/api/me/clip/projects/${enc(req.params.id)}/tts-preview`, identityOf(user),
+            method === 'POST' ? { method: 'POST', body: (req.body as object) ?? {} } : {},
+          );
+          return normalizeTtsPreview(view);
+        } catch (e) {
+          if (e instanceof VideoGatewayError) {
+            // 「这一版文案还没有预览」——业务语义，原样透传给端上，让它重新 POST。
+            if (e.statusCode === 404 && e.code === TTS_PREVIEW_NOT_FOUND) {
+              return reply.code(404).send({ error: e.message, code: e.code });
+            }
+            // 上游路由不存在 / 方法不允许 —— 功能没上线。
+            if (e.statusCode === 404 || e.statusCode === 405) {
+              return reply.code(503).send({ error: '配音预览还没准备好，请稍后再试', code: 'CLIP_TTS_PREVIEW_UNAVAILABLE' });
+            }
+          }
+          return sendErr(reply, e, 502);
+        }
+      },
+    });
+  }
+
+  /**
+   * 一句话提取主体 / 目标 / 受众 / 称呼（契约 §1.4）。走 BFF 自己的 LLM 网关，不碰上游。
+   * 四个字段拿不准就给空串，**不编造**。
+   */
+  app.post<{ Body: { text?: string; templateId?: string } }>('/video/intake/extract',
+    { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      try {
+        const text = String(req.body?.text ?? '').trim();
+        if (!text || text.length > INTAKE_MAX_CHARS) {
+          throw Object.assign(new Error(`请用 ${INTAKE_MAX_CHARS} 字以内说一句话`), {
+            statusCode: 422, code: 'CLIP_INTAKE_INVALID',
+          });
+        }
+        const templateId = String(req.body?.templateId ?? '').trim();
+        if (templateId) assertId(templateId);
+        const identity = identityOf(user);
+        await assertVideoProjectContent({ segments: [{ role: 'broll', text }] }, identity);
+        const result: ClipIntakeExtract = await extractClipIntake(text, templateId || undefined);
+        await assertVideoRewriteOutput({ text: [result.subject, result.goal, result.audience, result.salutation].filter(Boolean).join('\n') }, identity);
+        return result;
+      } catch (e) { return sendErr(reply, e, 422); }
+    });
+
+  /**
+   * 和 AI 对话写稿：回复一句 + 可选把新稿应用到 segments。
+   *
+   * **本来就在 BFF 自己的 LLM 网关上**（`services/video/scriptChat.ts`），上游 `ClipController`
+   * 压根没有 `script/chat` 这条路由，所以 WP-A3 的「收回 BFF」对它是既成事实，语义不变：
+   * 模型不可用 / 产出不合法时**保留原稿**并如实回一句「原稿没有改动」（`applied:false`），
+   * 而不是抛错——对话框里一次没答上来不该把整页打断。这与 `ai-rewrite`、`script/generate`
+   * 「产出不可用就显式报错」的口径不同，是**有意的**：那两条是一次性动作，用户在等一个结果。
+   */
   app.post<{ Params: { id: string }; Body: { message?: string } }>('/video/projects/:id/script/chat', { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
@@ -314,6 +506,241 @@ export async function videoRoutes(app: FastifyInstance) {
       } catch (e) { return sendErr(reply, e, 422); }
     });
   }
+
+
+  /* ── 分段生成（方案 SEGMENT_CANVAS_PLAN_2026-09-09 §6）────────────────────
+   *
+   * 整片出片是「一单一片」：一次报价、一次预扣、成片才算数。分段生成把这件事拆到**段**上 ——
+   * 每一段单独报价、单独预扣、单独结算，失败只退这一段。用户因此可以只重做不满意的那一段，
+   * 而不是整片返工再付一次全款。
+   *
+   * 钱这一层完全复用整片那套 hold/settle（services/video/credits.ts）：
+   * 幂等键是 `userId + clientRequestId`，端上每次提交都换一个新的 clientRequestId，
+   * 重投同一个则回同一单。**不为分段另起一套账**，两套账迟早对不上。
+   */
+
+  /**
+   * 上游到底有没有建单 —— 这决定了失败之后该退款还是该挂账。
+   *
+   * 4xx 是**上游答复过并且拒绝了**（报价对不上、这段太长、限流…），那一单根本没建起来，
+   * 退款是安全的，也是必须的：不退就等于用户挨了一个报错还被扣着钱，只能等对账扫描来救。
+   * 502 / 503 / 504 和网络异常是**真不知道**：请求可能已经落到上游手里了，这时退款会双花，
+   * 只能标 unknown 交给对账（services/video/maintenance.ts）。
+   * 408 归到「不知道」那一档：上游自己没读完请求，处理到哪一步说不准。
+   */
+  const upstreamRejected = (error: unknown) => {
+    const status = Number((error as { statusCode?: number })?.statusCode) || 0;
+    return status >= 400 && status < 500 && status !== 408;
+  };
+
+  /** 各子类单价。端上只用于价格条实时跳字，扣费一律以生成回执为准。 */
+  app.get('/video/pricing', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return await aidramaJson('/api/me/clip/pricing', identityOf(user)); }
+    catch (e) { return sendErr(reply, e, 502); }
+  });
+
+  /** 把一条片子复制成新草稿。产物不跟着复制，复制出来的稿子要自己重新生成。 */
+  app.post<{ Params: { id: string } }>('/video/projects/:id/duplicate', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      return await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/duplicate`, identityOf(user), { method: 'POST', body: {} });
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+
+  /**
+   * 生成某一段。
+   *
+   * 与整片 render 同一条钱的口径，逐条对应：
+   *   · 报价核对 —— 端上算的价和服务端算的对不上就 409，宁可让用户重看一眼，也不按另一个数扣；
+   *   · 预扣 —— 提交前先把钱扣住（hold），成功结算、失败退回；
+   *   · 幂等 —— 同一个 clientRequestId 重投回同一单，绝不建第二单、扣第二次；
+   *   · 受理不明 —— 请求发出去了但没收到回执时**不退款**，标成 unknown 交给对账扫描
+   *     （services/video/maintenance.ts）。这时退款是危险的：那一单可能已经在上游跑着了。
+   *
+   * 指纹命中（上游发现这一段的输入没变、产物还在）会直接回 succeeded 且 credits=0，
+   * 这时把 hold 原样退回去 —— 没重跑就不该收钱。
+   */
+  app.post<{ Params: { id: string; no: string }; Body: Record<string, unknown> }>(
+    '/video/projects/:id/shots/:no/generate',
+    { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } },
+    async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      let holdId: string | null = null;
+      let submitted = false;
+      try {
+        assertId(req.params.id);
+        const no = Number(req.params.no);
+        if (!Number.isSafeInteger(no) || no < 1 || no > 200) {
+          return reply.code(422).send({ error: '镜头序号非法', code: 'CLIP_SHOT_NO_INVALID' });
+        }
+        const clientRequestId = String(req.body?.clientRequestId ?? '').trim();
+        if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) {
+          return reply.code(422).send({ error: '缺少合法的 clientRequestId', code: 'CLIENT_REQUEST_ID_REQUIRED' });
+        }
+        const expectedCredits = Number(req.body?.expectedCredits);
+        if (!Number.isSafeInteger(expectedCredits) || expectedCredits < 0 || expectedCredits > 1_000_000) {
+          return reply.code(422).send({ error: '缺少合法的确认报价', code: 'CLIP_EXPECTED_CREDITS_REQUIRED' });
+        }
+        const identity = identityOf(user);
+        // 这一段的文案也要过内容审核。整片在 render 那一步过一遍，分段生成绕开了那条路，
+        // 不在这里补就等于开了一个不过审的口子。
+        const text = String(req.body?.text ?? '').trim();
+        const prompt = String(req.body?.prompt ?? '').trim();
+        if (text || prompt) {
+          await assertVideoProjectContent({ segments: [{ role: 'broll', text: [text, prompt].filter(Boolean).join('\n') }] }, identity);
+        }
+
+        const reservation = await reserveVideoCredits({
+          tenantId: user.tenantId, userId: user.id, projectId: req.params.id, clientRequestId, credits: expectedCredits,
+        });
+        holdId = reservation.hold.id;
+        if (reservation.hold.upstreamJobId) {
+          // 这一单已经受理过了：回同一个 jobId，不再打上游，也不再扣一次
+          return {
+            jobId: reservation.hold.upstreamJobId, no, status: reservation.hold.lastJobStatus ?? 'queued',
+            credits: reservation.hold.credits, reused: true,
+          };
+        }
+        if (reservation.hold.status === 'refunded') {
+          throw Object.assign(new Error('这一段的生成请求已经结束，请重新提交'), { statusCode: 409, code: 'CLIP_RENDER_REQUEST_CLOSED' });
+        }
+        if (reservation.reused) {
+          throw Object.assign(new Error('这一段正在提交，请稍后查询或重试'), { statusCode: 409, code: 'CLIP_RENDER_CREATING' });
+        }
+
+        submitted = true;
+        const result = await aidramaJson<{ jobId?: string; status?: string; credits?: number; artifact?: unknown }>(
+          `/api/me/clip/projects/${enc(req.params.id)}/shots/${no}/generate`, identity,
+          { method: 'POST', body: req.body ?? {} },
+        );
+        const jobId = String(result?.jobId ?? '').trim();
+        const status = String(result?.status ?? 'queued');
+
+        // 指纹命中：上游没重跑，产物是现成的。这时收钱是白收，把 hold 退回去。
+        if (!jobId && status === 'succeeded') {
+          await refundVideoHold(reservation.hold.id, 'fingerprint_hit');
+          return { ...result, no, credits: 0, cached: true };
+        }
+        if (!jobId) {
+          await markVideoSubmissionUnknown(reservation.hold.id, '上游没有返回任务号');
+          throw Object.assign(new Error('这一段的生成请求没有拿到任务号，请稍后在卡片上重新检查'), { statusCode: 502, code: 'CLIP_SHOT_JOB_MISSING' });
+        }
+        await attachVideoJob(reservation.hold.id, jobId);
+        if (status !== 'queued') await settleVideoJob(jobId, status);
+        return { ...result, jobId, no, status, credits: reservation.hold.credits };
+      } catch (e) {
+        // 已经把请求发出去了却没走到 attachVideoJob：那一单可能在上游跑着，退款会造成双花。
+        // 标成 unknown 交给对账扫描去认领，这与整片 render 同一条口径。
+        if (holdId && submitted && !upstreamRejected(e)) await markVideoSubmissionUnknown(holdId, e instanceof Error ? e.message : undefined).catch(() => {});
+        else if (holdId) await refundVideoHold(holdId, 'submit_rejected').catch(() => {});
+        return sendErr(reply, e, 422);
+      }
+    });
+
+  /**
+   * 查这一段的生成进度。
+   *
+   * 查到终态就地结算：succeeded 落账，failed / cancelled 退款。**不等端上再调一次**——
+   * 端上可能在拿到终态前就退出了页面，钱不能挂在那儿。
+   * 上游回 `none`（查不到这一单）时原样透传：端上靠它判断「那一单没了」，不是错误。
+   */
+  app.get<{ Params: { id: string; no: string } }>('/video/projects/:id/shots/:no/generation', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const no = Number(req.params.no);
+      if (!Number.isSafeInteger(no) || no < 1 || no > 200) {
+        return reply.code(422).send({ error: '镜头序号非法', code: 'CLIP_SHOT_NO_INVALID' });
+      }
+      const result = await aidramaJson<{ jobId?: string; status?: string }>(
+        `/api/me/clip/projects/${enc(req.params.id)}/shots/${no}/generation`, identityOf(user),
+      );
+      const jobId = String(result?.jobId ?? '').trim();
+      const status = String(result?.status ?? '');
+      if (jobId && ['succeeded', 'failed', 'cancelled'].includes(status)) await settleVideoJob(jobId, status).catch(() => {});
+      return result;
+    } catch (e) { return sendErr(reply, e, 502); }
+  });
+
+  /** 取消这一段的生成。取消不扣钱 —— 退款由 settleVideoJob 在 cancelled 分支上做。 */
+  app.post<{ Params: { id: string; no: string } }>('/video/projects/:id/shots/:no/cancel', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const no = Number(req.params.no);
+      if (!Number.isSafeInteger(no) || no < 1 || no > 200) {
+        return reply.code(422).send({ error: '镜头序号非法', code: 'CLIP_SHOT_NO_INVALID' });
+      }
+      const result = await aidramaJson<{ jobId?: string; status?: string }>(
+        `/api/me/clip/projects/${enc(req.params.id)}/shots/${no}/cancel`, identityOf(user), { method: 'POST', body: {} },
+      );
+      const jobId = String(result?.jobId ?? '').trim();
+      if (jobId) await settleVideoJob(jobId, String(result?.status ?? 'cancelled')).catch(() => {});
+      return result;
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+
+  /**
+   * 合成整片：只把已经生成好的产物接起来，**不重跑任何生成**。
+   *
+   * 与 render 的区别就在这一句：render 会把该生成的都生成一遍并按全片计价，
+   * assemble 只收总装那一档。改了一段重新合成，也只再收这一档。
+   */
+  app.post<{ Params: { id: string }; Body: { clientRequestId?: string; expectedCredits?: number } }>(
+    '/video/projects/:id/assemble',
+    { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } },
+    async (req, reply) => {
+      const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      let holdId: string | null = null;
+      let submitted = false;
+      try {
+        assertId(req.params.id);
+        const clientRequestId = String(req.body?.clientRequestId ?? '').trim();
+        if (!/^[A-Za-z0-9:_-]{8,100}$/.test(clientRequestId)) {
+          return reply.code(422).send({ error: '缺少合法的 clientRequestId', code: 'CLIENT_REQUEST_ID_REQUIRED' });
+        }
+        const expectedCredits = Number(req.body?.expectedCredits);
+        if (!Number.isSafeInteger(expectedCredits) || expectedCredits < 0 || expectedCredits > 1_000_000) {
+          return reply.code(422).send({ error: '缺少合法的确认报价', code: 'CLIP_EXPECTED_CREDITS_REQUIRED' });
+        }
+        const identity = identityOf(user);
+        const reservation = await reserveVideoCredits({
+          tenantId: user.tenantId, userId: user.id, projectId: req.params.id, clientRequestId, credits: expectedCredits,
+        });
+        holdId = reservation.hold.id;
+        if (reservation.hold.upstreamJobId) {
+          return { jobId: reservation.hold.upstreamJobId, projectId: req.params.id, status: reservation.hold.lastJobStatus ?? 'queued', creditsHeld: reservation.hold.credits, reused: true };
+        }
+        if (reservation.hold.status === 'refunded') {
+          throw Object.assign(new Error('该合成请求已经结束，请重新提交'), { statusCode: 409, code: 'CLIP_ASSEMBLE_REQUEST_CLOSED' });
+        }
+        if (reservation.reused) {
+          throw Object.assign(new Error('该合成请求正在创建，请稍后查询或重试'), { statusCode: 409, code: 'CLIP_ASSEMBLE_CREATING' });
+        }
+        submitted = true;
+        const result = await aidramaJson<{ jobId?: string; status?: string }>(
+          `/api/me/clip/projects/${enc(req.params.id)}/assemble`, identity,
+          { method: 'POST', body: { clientRequestId, expectedCredits } },
+        );
+        const jobId = String(result?.jobId ?? '').trim();
+        if (!jobId) {
+          await markVideoSubmissionUnknown(reservation.hold.id, '上游没有返回任务号');
+          throw Object.assign(new Error('合成请求没有拿到任务号，请到「作品」里确认后再重试'), { statusCode: 502, code: 'CLIP_ASSEMBLE_JOB_MISSING' });
+        }
+        await attachVideoJob(reservation.hold.id, jobId);
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.video.assemble',
+          payload: { projectId: req.params.id, jobId, credits: reservation.hold.credits },
+        });
+        return { jobId, projectId: req.params.id, status: String(result?.status ?? 'queued'), creditsHeld: reservation.hold.credits };
+      } catch (e) {
+        if (holdId && submitted && !upstreamRejected(e)) await markVideoSubmissionUnknown(holdId, e instanceof Error ? e.message : undefined).catch(() => {});
+        else if (holdId) await refundVideoHold(holdId, 'submit_rejected').catch(() => {});
+        return sendErr(reply, e, 422);
+      }
+    });
 
   app.post<{ Params: { id: string }; Body: ClipRenderRequest }>('/video/projects/:id/render', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);

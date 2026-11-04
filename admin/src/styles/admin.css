@@ -69,6 +69,15 @@ body {
 .rail-g:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rail-g .n { margin-left: auto; font: 600 9.5px/1 var(--mono); color: var(--ink-3); }
 .rail-g.on .n { color: var(--accent); }
+/* 产品视角（segmented）。只切「看什么」，不是权限开关 —— 见 App.tsx 的 ScopeBar。
+   放在品牌下面、分组上面：它决定下面那列分组长什么样，读起来就是从上往下收窄。 */
+.scope { display: flex; gap: 2px; margin: 0 8px 6px; padding: 2px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 10px; }
+.scope.m { display: none; }
+.scope-i { flex: 1; min-width: 0; padding: 7px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: 500 12px/1 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: background .16s ease-out, color .16s ease-out; }
+.scope-i:hover { color: var(--ink); }
+.scope-i.on { background: var(--surface); color: var(--accent-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(22, 25, 29, .04); }
+.scope-i:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 .rail-foot { padding: 8px; border-top: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 2px; }
 /* 命令面板入口：桌面显式露出快捷键，运营不用猜 */
 .rail-key { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 11px; border: 1px dashed var(--line); border-radius: 10px; background: transparent; color: var(--ink-2); font: 500 12.5px/1 var(--sans); cursor: pointer; }
@@ -418,11 +427,14 @@ select.ai-input { appearance: none; }
 @media (min-width: 960px) {
   .rail { display: flex; flex-direction: column; flex: 0 0 204px; min-width: 0; background: var(--bg); border-right: 1px solid var(--line); }
   .adm-top { display: none; }        /* 品牌与账户入口移进左栏 */
+  .scope.m { display: none; }        /* 桌面端由左栏那条承担 */
   .botnav { display: none; }
   .admin-toast { bottom: 26px; }
 }
 @media (max-width: 959px) {
   .botnav { display: flex; }
+  /* 左栏整条 display:none，视角选择器跟到顶栏下面自成一行 */
+  .scope.m { display: flex; margin: 10px 16px 0; }
   .subnav { padding-inline: 16px; }
   .ph { padding-inline: 16px; }
 }

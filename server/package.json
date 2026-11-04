@@ -34,7 +34,8 @@
     "ai:migrate": "tsx scripts/migrateAiConfig.ts",
     "ai:migrate:apply": "tsx scripts/migrateAiConfig.ts --apply",
     "ai:check-drop": "tsx scripts/checkAiLegacyDrop.ts",
-    "agents:check-drift": "tsx scripts/checkAgentDrift.ts"
+    "agents:check-drift": "tsx scripts/checkAgentDrift.ts",
+    "test:profile": "SERVICE_PROFILE=quickreel node --env-file=.env.test --import ./test/hermeticEnv.mjs --import tsx --test --test-concurrency=1 test/serviceProfile.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

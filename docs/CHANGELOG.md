@@ -6,6 +6,89 @@
 
 ## 变更日志
 
+### 2026-11-04 · ALB 证书续签与主备滚动发布自动化 · 影响面：部署工具、迁移 SOP、定时任务退出
+
+- ALB 证书通过 DNS-01 重新签发，保留既有 14 个 SAN，实际绑定及两个 VIP/域名校验通过，有效期至 2027-02-02；新增可复用的续签和 DNS 挑战清理工具，不保存云账号长期 AK。
+- API 提供仅本机发布流程使用的 SIGUSR2 排空信号，先停止后台领单，保留 HTTP 连接，再由发布工具观察在途请求与持久任务；定时任务提供发布排空：停止周期触发后等待当前执行与已排队任务完成，再退出；独立 scheduler 入口随固定归档发布，避免日常升级截断业务事务。
+- 默认上线入口改为新集群主备滚动流程，迁移 SOP、验证结果与使用方法随工具一并维护。
+- 验证：PG18 后端全量 2200 项（2198 通过、2 既有跳过、0 失败），profile 12/12、admin 108/108；部署/证书安全用例 21 项通过。独立 scheduler 注册表核验包含全部 18 项任务；干净归档显式生成 Prisma client。前端验收核对索引及 JS/CSS，保留 /admin/、/quickreel/ 基础路径。
+
+### 2026-11-04 · PostgreSQL / Tair / ALB / SLS 集群迁移 · 影响面：军师 API、爱速拍 BFF
+
+- 正式库迁到 PostgreSQL 18 UTF8；冻结源库后，100 张表行数及双内容指纹一致。旧库保留只读，后续以新 RDS 为唯一正式库。
+- API 与 BFF 在两台 ECS 独立运行，当前 ALB 为 A 主用、B 常驻备用，频繁发布时逐台更新并切换流量，起量后再开启双机分流；定时任务仅一个专用进程。Tair 提供共享限流及 LLM 缓存，SLS 采集应用与 ALB 日志。
+- 配置 REDIS_URL 时套餐写权限从数据库读取，避免另一进程付款、撤销或到期后仍命中 30 秒本地缓存；新增开通/到期/撤销及配置切换回归。同步修正 Quickreel scheduler 测试漏列 identity-outbox 的旧断言。
+- 最终验收：运行代码 3c407f54；独立 PG18 全量 2199 项（2197 通过、2 既有跳过、0 失败），权限专项 15/15、Quickreel profile 12/12；正式入口 28 项通过，四个监控实例 UP，Tair 跨机读写与 SLS 两类日志入库已验证；迁移后 RDS 手动备份成功。手机真实登录、真实付款与付费生成未执行。
+- 发布与恢复约束见 [集群部署](CLUSTER_DEPLOYMENT.md)；旧单机脚本遇迁移标记必须拒绝发布。此次不改前端及支付、模型、运营配置，不迁 ClassVibe。
+
+### 2026-10-10 · 统一身份事件消费发布验收 · 影响面：军师后端与爱速拍 BFF
+
+- 身份代码 efafbcaa，最终 b9886f49 已部署两个生产实例；机器客户端 quickreel-server 与两实例环境配置启用，仅 quickreel scheduler 消费共享 PG。
+- 持久 UID 墓碑/事件时钟/游标、令牌版本、锁内复查；注销/合并提交后回执，合并先重报存活 UID 链接。已知失败不跳游标，解除停用不恢复旧凭据，不搬业务权益。
+- Node24 全量 2197：2195 通过、2 既有跳过、0 失败；公网 health DB up，旧注销/合并 JWT 401，游标30、回执完成。完整备份与证据见 [发布记录](IDENTITY_RELEASE_2026-10-10.md)。
+- 小程序 abfc3aa 开发版0.1.1已上传；正式发布/真机验收需用户在微信公众平台完成。此前“未发布/缺消费方”的记录为初检历史，已由本次部署取代。
+
+### 2026-10-10 · 统一认证资料与后台全量账户检索复核 · 影响面：军师后端、爱速拍 BFF（本地完成，未发布）
+
+- 每次请求按 UID 重读本地映射；已有账号也校验手机号验证状态，并按合法 userinfo 更新手机号、昵称、头像。标准验证字段优先，拒绝主体不一致、脱敏号和号码冲突；只更新资料，保持本地 ID、租户、套餐及授权。
+- userinfo 按令牌摘要合并并发读取，成功最多 5 分钟/令牌到期、失败 15 秒；UID 与旧资料条件更新保护并发修改，旧缓存不能覆盖新令牌已同步的资料。已有号码账号首次绑定 UID 也回报产品链接。
+- 后台保持既有全数组响应，移除最新 300 个账号截断，修复更早用户无法搜索/详情 404；301 个新用户之外的旧用户已回归。
+- Node 24 编译通过；独立 PostgreSQL 测试库全量测试 2190 项，2188 通过、2 项既有跳过、0 失败。新增身份与跨 300 用户门测覆盖号码换绑、主体/验证冲突、scope 与缓存竞态。
+- outbox 与生产机器客户端缺口尚未补齐，不能宣称完整接入通过；详见 §6 分册及 §13 待办。本次未上线、未补写生产用户或充值。
+
+
+### 2026-09-09 · AGENTS.md 瘦身：各章正文原样拆进 `docs/agents/` 分册，入口文件只留规则 + 骨架 + 索引 · 影响面：文档维护流程（§0 落点表）、所有引用「AGENTS.md §N」的代码注释与文档（章节号不变，落点改为分册）
+
+**为什么**：`AGENTS.md` 长到 379 KB / 1048 行，每个新会话都整份加载；§7 前端 81 KB、§8 后端 99 KB、§13 TODO 64 KB 全是按日期追加的约束账本与历史基线（提交 SHA、预发基线、Notion 待补），真正每次都要看的规则被淹在里面。根因是 §0 第 1 条「每次变更都更新本文件」——文件只增不减。
+
+**改了什么**：
+- `docs/agents/04-run-modes.md`、`05-contracts.md`、`06-account-isolation.md`、`07-frontend.md`、`08-backend.md`、`09-admin.md`、`10-database.md`（含「✦ 企业事务操作系统」）、`11-build-run-verify.md`、`13-todo.md`：原 §4–§11、§13 **逐行原样**搬入（脚本校验每一行都在），章节号与小节号不变，文件头注明维护方式。
+- `AGENTS.md` 重写为 ≤ 40 KB 的入口：§0 改成「落点表」（新约束写分册、日期条写 CHANGELOG、延后项写 13-todo、只有铁律/入口命令/结构/索引才动本文；基线 SHA 与一次性验收记录只进 CHANGELOG），新增三条一直在分册里反复出现但没上升为全局规则的原则（对外数据归运营不归代码、空态 ≠ 读失败、测试全绿 ≠ 体验验收）；§4–§11 各留铁律摘要 + 分册链接；§12 保留全文；附录 A 是「AGENTS.md §N」→ 分册的索引表。
+- `PRODUCT.md` 顶部一句话补上分册位置。
+- **膨胀防线（机器闸门）**：新增 `scripts/check-agents-doc.mjs`（整文件 ≤ 40 KB / 320 行、单节 ≤ 6 KB、单行 ≤ 1400 字、顶层骨架固定、禁止基线/SHA/NRestarts/Notion 待补/TODO 复选框/「**标题（日期）**：」账本形态、附录 A 与 `docs/agents/` 一一对应、分册保留 `## N.` 锚点）；`app/scripts/agents-doc.test.mjs` 把它挂进 `cd app && npm test`（CI frontend-unit 覆盖）；`.claude/settings.json` 加 PostToolUse 钩子，Claude Code 每次写 AGENTS.md 立即校验；根 `npm run check:agents-doc` 可手动跑。**闸门红了不许抬上限。**
+
+**不变的**：所有约束内容一字未删、未改写（要找原文按章节号进分册）；代码注释里的「AGENTS.md §7.2 / §13 / §0 / §8.4」照旧有效。
+
+### 2026-09-05 · 爱速拍脚本 AI 全部收回军师自己的 LLM 网关（WP-A3）· 影响面：`POST /api/video/projects/:id/script/ai-rewrite`（**实现换人，响应形状不变**）、新增 env `VIDEO_SCRIPT_ENGINE`
+
+**背景（为什么必须改）**：`script/ai-rewrite` 一直是透传 aidrama，而上游 `ClipScriptService.rewrite` 的**第一行**就是「非 mock 网关 → 503 `CLIP_SCRIPT_ENGINE_NOT_CONFIGURED`」——clip 域根本没接 LLM，只有确定性占位引擎（`scope:'segment'` 是给原文拼一句固定尾巴，`scope:'all'` 是把指令切成短句轮流塞）。也就是说**生产环境用户点一次「AI 改写」拿到的是 503，不是降级文案**。爱速拍端已把「全篇改写」改走 `script/generate`，剩下的单句改写这次一并收回。
+
+**改了什么**：`services/video/scriptGenerate.ts` 从「只有一句话生成全片」扩成脚本 AI 的统一收口，三种意图共用同一条整稿链路（`brief` 生成 / `rewrite` 按指令改写 / `polish` 无指令润色，后两者的提示词里带各段**原文**，否则模型会把「润色」做成「重写一份没见过的稿」），另加单段改写 `rewriteClipSegment`。路由层两个 scope 的新行为：
+
+- `scope:'segment'`：BFF 网关改这一句，**保留该段 `role`、`hint`、字数目标**，并把相邻两段原文一起给模型做语气参照（单句改写最容易翻车的就是改出来的那句和上下文不像同一个人在说话）。**不落库**——与历史行为一致：结果进端上编辑框，用户可能还要改也可能放弃，落盘交给端上现有的 `saveProject` 防抖。
+- `scope:'all'`：复用 §1.3 的整稿链路，`text` 当改写指令、**空则「润色全篇」**；只在模板骨架内写（段数、role、hint 一律不动），过审后 `PUT` 项目落库。
+- 响应形状**一个字段没改**（端上 `packages/video/api.js` 的 `aiRewrite` 在用）：`segment → { scope, no, text }`，`all → { scope, segments, shots }`。
+- 入参闸补齐：两个 scope 的 `text` 上限 500 字（与上游旧口径一致，不无声收紧端上输入）、`no` 必须是正整数否则按缺省处理。**入参不合法或机审不过时既不读也不写上游项目**。产出不可用一律 502 `CLIP_SCRIPT_AI_INVALID`，绝不返回空壳冒充成功。路由加限流 30 次 / 10 分钟（与 `script/chat` 同档）。
+- `script/chat` **本来就在 BFF**（上游 `ClipController` 压根没有这条路由），本次只补注释说明：它是**对话**，模型不可用时保留原稿 + `applied:false` 如实回一句，与 `ai-rewrite`/`script/generate`「一次性动作就显式报错」的口径**有意不同**。
+
+**新增开关 `VIDEO_SCRIPT_ENGINE=bff|aidrama`**（`server/.env.example` 已登记）：默认且生产必须是 `bff`。配 `aidrama` 只退回旧透传，仅供与上游确定性引擎（`AEP_CLIP_FORCE_MOCK=true`）对拍——**生产配它必拿 503**，注释与测试里都写死了这句警示。
+
+测试：`server/test/videoOneLiner.test.ts` 补五组（未登录 401 / 入参闸五连且不碰上游 / 机审命中禁用词 422 `CLIP_CONTENT_BLOCKED` 且不碰上游 / 默认引擎下三种调用都 502 且既不打上游 `ai-rewrite` 也不写回项目 / `VIDEO_SCRIPT_ENGINE=aidrama` 才透传且上游 503 经网关收成 502 但业务码原样透出）。`cd server && npm test` 2076 项全绿，`npx tsc --noEmit` 干净。**真实产出质量未验**（测试环境 `isAiTestMode()` 恒不接 provider），已记入 AGENTS.md §13。
+
+### 2026-09-05 · 套餐闸放行爱速拍 + 配音预览两种 404 分流 · 影响面：**商业化禁写闸的准入语义**、`/api/video/projects/:id/tts-preview`、全栈契约
+
+同日「军师 BFF 接受统一账号中心令牌」的收口（WP-A2），三处改动。
+
+**① 套餐禁写闸对爱速拍开口（安全语义变化，只对 `quickreel-api` 生效）**：爱速拍按**钻石**计量、不卖军师套餐，而账号中心首登建出来的新账号必然无套餐，照旧走 `PLAN_WRITE_GATE` 会把整条出片链路 403 `PLAN_REQUIRED` 拦死。现在 `aud` 含 `quickreel-api` 的**已验签**账号中心令牌，写 `/api/video/**` 时免这道闸。放行面刻意收到最小，三条**同时**满足才免：① 路径在 `/api/video/**`；② 身份出自已验签的账号中心令牌（`identifyRequest` 的 `aud` 只可能来自验过签的 JWT，端上伪造不了）；③ 该令牌 `aud` 含 `quickreel-api`。**军师自己的令牌行为一个字节不变**——老 `x-user-id`（`aud` 恒为空数组）与 `aud` 只有 `junshi-api` 的账号中心令牌照旧被拦；同一枚爱速拍令牌写军师业务路径（`/api/projects` 等）也照旧 403。免的**只是套餐**这一道：钻石余额 `INSUFFICIENT_CREDITS`、内容审核、限流、各路由自身的 401/403 全部照常。配套地，`identifyRequest` 现在把令牌 `aud` 一并带出来，并把 `identityContext` 的判断挪到 `x-user-id` **之前**（`attachIdentityUser` 成功后会把内部令牌写回 `x-user-id`，先读那个头就会丢掉 `aud`；真·老链路请求永远不会有 `identityContext`，顺序对它没有影响）。**定价上「爱速拍新用户初始钻石怎么来」仍待运营拍板，代码里刻意不给默认赠送**，对应 TODO 已在 AGENTS.md §13 改写。
+
+**② 配音预览的两种 404 必须分流**（对齐 aidrama WP-D 的实现口径）：上游 404 且响应体 `code === 'CLIP_TTS_PREVIEW_NOT_FOUND'` 表示「这一版文案还没有预览结果」，是正常业务流（端上据此重新 `POST` 触发生成），现**原样 404 + 原码**透传；只有上游路由不存在（404 不带该码）或 405 才映射成 503 `CLIP_TTS_PREVIEW_UNAVAILABLE`（功能没上线，端上退回内部计时器）。此前两种 404 一律吞成 503，端上永远不知道该重新触发。另外上游是全局 non_null 序列化，`errorCode` / `errorMessage` / `segments[].audioUrl` 为 null 时字段直接消失，端上会拿到 `undefined` 而不是 `null`；新增 `normalizeTtsPreview` 统一补成 `null` / `null` / `''`，`credits` 缺失补 0 并**恒透传**（约定 `> 0` 才表示调用方需先 hold 钻石），其余字段原样透传。
+
+**③ 契约注释收紧**：`shared/contracts.d.ts` 的 `ClipTtsPreview.segments[].no` 与 `ClipJobView.segments[].no` 明确写成**镜头号**（对应 `ClipShot`，多句共用画面时与 `ClipSegment.no` 不同，端上按 `shots[{startNo,endNo}]` 映射回原句）；`ClipTtsPreview.credits` 由可选改为**必填**（恒 ≥ 0）。
+
+测试：`server/test/identity.test.ts` 补三组套餐闸用例（quickreel 令牌无套餐写 `/api/video/**` 放行、同一令牌写军师路径仍 403、junshi 令牌与老 `x-user-id` 仍 403、老 token 同时带爱速拍令牌也蹭不到放行、`identifyRequest` 的 `aud` 取值）；`server/test/videoOneLiner.test.ts` 补两种 404 分流、405 与 non_null 字段补齐共四组。
+
+### 2026-09-05 · 军师 BFF 接受统一账号中心令牌 + 爱速拍「一句话」与预览四条契约 · 影响面：后端鉴权链路、限流与套餐闸、`/api/video/**`、`User` 表、全栈契约
+
+爱速拍端上已切到统一账号中心 aibuzz-id（`id.aibuzz.cn`）登录，拿的是 RS256 JWT；军师 BFF 此前只认自己 HS256 的 `x-user-id`，于是登录得上、业务请求全 401。本次让 BFF 同时认这两种凭据。
+
+**验签与建档**（`server/src/services/identity.ts` / `identityProvisioning.ts`，口径抄 AIStarEcosystem 已上线的 `com.aistareco.aep.identity.*`）：只用 Node 内置 `crypto`（JWK → `createPublicKey({format:'jwk'})` → `verify`），不引 jose 或任何新依赖。验 `iss` 逐字符等于 `ID_ISSUER`、`exp` 未过（允许 60s 时钟偏差）、`aud` 含 `ID_AUDIENCES` 之一；JWKS 取 `${ID_ISSUER}/oauth2/jwks`，进程内缓存 10 分钟，遇未知 `kid` 立即刷新一次。**`ID_ISSUER` 留空 = 本能力整体关闭，RS256 令牌一律 401**——不存在「没配就放行 / 本地伪造 uid」的降级路径，生产 issuer 非 https 同样按关闭处理。`sub` → 新增的 `User.identityUid`（可选唯一）：命中即用；未命中且令牌 `phone_verified !== true` 直接 403 `PHONE_BINDING_REQUIRED`（军师的账号键是手机号，`User.phone` 是 NOT NULL 唯一键，绝不建无手机号账号）；有手机号则用同一张用户令牌读 `${ID_ISSUER}/userinfo` 取 `phone_number`，按手机号回填 `identityUid`（已被别的 uid 占用 → 409 `IDENTITY_CONFLICT`），没有则走建号路径。并发首登靠唯一键回读赢家，只建一行。
+
+**老链路一个字节不改**：接入点是 `app.ts` 的 `attachIdentityUser` onRequest 钩子——只在「没带 `x-user-id` 且带了 `Authorization: Bearer`」时才动作，把账号中心令牌换成一枚短时内部 `x-user-id` 令牌，之后 200 多处 `resolveUser(req.headers['x-user-id'])` 完全不用改。两个头同时在时以 `x-user-id` 为准；军师小程序行为不变。限流 `keyGenerator` 与商业化禁写闸改为共用 `identifyRequest(req)`（纯计算不查库：老 token→`u:<userId>`（桶键不变），账号中心→`id:<sub>`）。建号实现从 `routes/auth.ts` 抽到 `services/accountProvision.ts`，登录路由与账号中心首登共用同一份，避免建出两种形状的账号。
+
+**爱速拍四条契约**：`POST /video/projects/:id/script/generate` 一句话生成全片——读过上游实现后确认 aidrama `script/ai-rewrite` 的 `scope:'all'` **根本不读 `text`**（只给每段拼一句固定尾巴，且非 mock 网关直接 503），所以按契约备选方案走军师自己的 LLM 网关，**只在模板骨架内填 text，不改段数、不改 role**；`POST /video/intake/extract` 从一句话抽 `subject/goal/audience/salutation`，拿不准给空串、不编造。两条都过现有机审，产出不可用一律显式报错，绝不返回空壳冒充成功。`POST|GET /video/projects/:id/tts-preview` 透传上游配音预览时间线（`credits` 原样透传给端上做扣费提示；上游尚未上线时的 404 换成 503 `CLIP_TTS_PREVIEW_UNAVAILABLE`，不冒充「项目不存在」）；`GET /video/jobs/:id` 的段级 `segments` 随上游透传。`shared/contracts.d.ts` 补 `ClipTtsPreview` / `ClipJobSegmentStatus` / `PreparedClip` / `PreviewRender` / `ClipIntakeExtract`。
+
+新增环境变量：`ID_ISSUER`、`ID_AUDIENCES`（默认 `quickreel-api,junshi-api`），以及可选的机密客户端 `ID_SERVER_CLIENT_ID` / `ID_SERVER_CLIENT_SECRET`（只用于首登后 best-effort 回报产品链接，不配就 WARN 一次跳过）。新增集成测试 `server/test/identity.test.ts`（现生成 RSA 密钥对 + 假 JWKS，覆盖手机号闸、首登建档、并发只建一行、手机号回填与冲突、`aud`/`iss`/签名/过期拒绝、关闭态一律 401、换钥刷新、老 `x-user-id` 不受影响、`identifyRequest` 分桶键）与 `server/test/videoOneLiner.test.ts`（四条新端点的入参闸、失败形态与透传）。未做的账号中心 outbox（合并/注销事件）已记入 AGENTS.md §13 TODO。
+
 ### 2026-09-05 · 桌面双栏落地：左导航条替代底栏，四个主 Tab 分主/副栏 · 影响面：微信 PC / iPad 六个页面（五 tab + 对话分包页）、底栏显隐机制、断点、容器、预览台与守卫测试
 
 接上一条（撤回官方分栏）：单栏铺满窗口之后，桌面上仍是一列手机排版。本轮按 `docs/design/weapp-desktop/` 的蓝图落地方案乙。
@@ -2658,3 +2741,11 @@ app 83 例全绿；weapp / H5 均 Compiled successfully；H5 面板走查：常�
 ### 2026-08-08 · 修复长问答卡唤起键盘后「其他」输入框滚出视野 · 影响面：原生微信对话问答卡键盘避让
 
 问答卡此前在点「其他」、input 聚焦及键盘高度变化时调用会话级 `toBottom()`；卡片较长或当前题不在末尾时，ScrollView 会滚到整段会话最底部，正在编辑的 input 反而越过键盘上沿并消失。现每个其他回答 input 都有按消息与题号生成的稳定锚点，键盘使可视区缩小时只重定位当前 input；50ms 合并焦点与键盘的连续事件，关闭输入时清理锚点与定时器，不再滚动整张问答卡。
+
+### 统一身份事件消费（2026-10-10，待发布验收）
+
+BFF 增加持久 `identity_subject` UID 墓碑/事件时钟、`identity_outbox_cursor` 发布序列游标、User.identityTokenVersion。生产启用统一身份时必须配置 `ID_OUTBOX_ENABLED=true`、`ID_PRODUCT_CODE=quickreel`、`ID_SERVER_CLIENT_ID=quickreel-server`、`ID_SERVER_CLIENT_SECRET`；缺失拒绝启动。共享 scheduler 的 quickreel 任务每 30 秒轮询；严格验证事件页/产品/UID，本地事务后回报注销/合并 COMPLETED，回执成功后推进游标。失败留游标，不吞生命周期错误。
+
+注销、合并旧 UID 留墓碑，首登/绑定/资料写入共用 PostgreSQL UID 事务锁和读前事件时钟；旧 UID 不能被令牌重新建档。停用事件按发布 ID 单调，旧解除停用不覆盖新停用。换绑清除旧完整号为内部 `id_unbound_<businessId>`（显示层隐藏），注销复用既有保留期与不可重复的数据清理任务。合并仅改映射、保留业务 ID/租户/角色/钱包，两个业务账号同时存在时不自动搬资产；中心重新回报存活 UID 链接后才确认合并。生命周期递增本地令牌版本，旧版本 JWT 和已删除/停用/合并用户不能通过 resolveUser；内部身份 JWT 在 UID 锁内复核映射与 ACTIVE 后签发。
+
+部署前备份数据库，增量 db push 不跑 seed；配置与中心 machine client 须先齐备。原有手机号/资料和小程序旧刷新竞态修复一并发布，生产验收不能只看构建或客户端注册状态。

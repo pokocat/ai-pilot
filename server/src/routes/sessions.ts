@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { PRODUCT } from '../services/products.js';
 import { randomUUID } from 'node:crypto';
 import { billableOf } from '../services/usage.js';
 import { Prisma } from '@prisma/client';
@@ -542,7 +543,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           ...(reviewIntent ? { grace: 'review' as const } : {}),
         });
       }
-      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
+      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`, PRODUCT.junshi);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
       const err = e as Error & { statusCode?: number; code?: string };
@@ -802,7 +803,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           ...(reviewIntent ? { grace: 'review' as const } : {}),
         });
       }
-      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
+      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`, PRODUCT.junshi);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
       const err = e as Error & { statusCode?: number; code?: string };

@@ -5,6 +5,7 @@
 // 临界策略：余额>0 放行 → 事后实扣（可透支一次到负）→ 余额≤0 时下次请求 ensureQuota 抛 402。
 
 import { prisma } from '../db.js';
+import { PRODUCT } from './products.js';
 import type { Prisma } from '@prisma/client';
 import { now, dayStart } from './clock.js';
 import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.js';
@@ -160,7 +161,7 @@ async function loadWallet(userId: string): Promise<{ quota: number; balance: num
       // 只要当前已不是激活首周期且没有 marker，也补发当前周期；首周期仅补 marker，避免把购买时已发的一次再发一遍。
       const activationPeriod = periodKeyOf(user.planActivatedAt, user.planActivatedAt ?? at);
       const amount = crossedPeriod || pk !== activationPeriod ? user.plan!.creditsPerMonth : 0;
-      if (amount > 0) await grantCredits(user.tenantId, userId, amount, `${user.plan!.name} · 月度权益恢复`, tx);
+      if (amount > 0) await grantCredits(user.tenantId, userId, amount, `${user.plan!.name} · 月度权益恢复`, PRODUCT.junshi, tx);
       const source = await tx.planEntitlement.findFirst({
         where: { userId, planId: user.plan!.id, status: 'active', startsAt: { lte: at }, OR: [{ expiresAt: null }, { expiresAt: { gt: at } }] },
         orderBy: { startsAt: 'desc' }, select: { sourceOrderId: true },

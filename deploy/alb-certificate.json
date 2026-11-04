@@ -1,0 +1,11 @@
+{
+  "region": "cn-hangzhou",
+  "listener_id": "lsn-qoqhojmgxo37zpxu77",
+  "load_balancer_id": "alb-8lqfxfyvfyitbs3s6r",
+  "dns_zone": "aibuzz.cn",
+  "domains": ["*.aibuzz.cn", "aibuzz.cn", "www.admin.aibuzz.cn", "www.aiavatar.aibuzz.cn", "www.aislides.aibuzz.cn", "www.aistar.aibuzz.cn", "www.api.aibuzz.cn", "www.bossclub.aibuzz.cn", "www.celebrity.aibuzz.cn", "www.drama.aibuzz.cn", "www.id.aibuzz.cn", "www.music.aibuzz.cn", "www.star.aibuzz.cn", "www.wxapi.aibuzz.cn"],
+  "verify_hosts": ["wxapi.aibuzz.cn", "copilot.aibuzz.cn"],
+  "verify_ips": ["118.178.32.245", "121.40.171.94"],
+  "cert_name": "junshi-alb",
+  "renew_before_days": 35
+}

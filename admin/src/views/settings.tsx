@@ -266,6 +266,13 @@ function cloneOrderWarnings(d: CloneDraft): string[] {
   return out;
 }
 
+/**
+ * 短视频克隆定价（数字人形象 / 专属声音的训练单价）。
+ *
+ * 2026-09-11 一度拆成独立分区，同轮又撤回这一页 —— 爱速拍要单独做自己的运营控制台，
+ * 不跟军师挤在一个后台里。在那套控制台落地之前，这四个数还是留在这儿，
+ * 至少改得动；真源是 FeatureFlag 单行（services/video/pricing.ts），与放在哪一屏无关。
+ */
 function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const res = useResource(api.clonePricing, []);
   const [draft, setDraft] = useState<CloneDraft | null>(null);
@@ -385,7 +392,11 @@ function ClonePricingSection({ toast, isSuper }: { toast: (m: string) => void; i
 // （api.ts 的 401/403 已分流，403 不再踢回登录页）。
 // 「短视频克隆定价」是本页第三段：非超管**也渲染**（只读），与告警通知那卡的取舍不同 ——
 // 值班运营需要答得出「训一个数字人扣多少钻」，看不到反而要去问人。
-export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+export function FlagsView({ toast, isSuper, canQuickreel }: {
+  toast: (m: string) => void; isSuper: boolean;
+  /** 有没有爱速拍的 viewer（超管隐式有）。没有就不渲染克隆定价那一段 —— 服务端会 403。 */
+  canQuickreel: boolean;
+}) {
   const [list, setList] = useState<AdminFeatureFlag[]>([]);
   const [busy, setBusy] = useState('');
   const [draft, setDraft] = useState<Record<string, number>>({}); // number 类的编辑中数值
@@ -511,7 +522,9 @@ export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSu
           </div>
         </>
       )}
-      <ClonePricingSection toast={toast} isSuper={isSuper} />
+      {/* 克隆定价是爱速拍的数据。这一屏是共享面（军师视角也会打开），
+          所以要按产品授权决定渲不渲染，不能无条件挂上去让它去撞 403。 */}
+      {canQuickreel && <ClonePricingSection toast={toast} isSuper={isSuper} />}
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );
@@ -576,6 +589,18 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
   const [editKeys, setEditKeys] = useState<string[]>([]);
   const res = useResource(api.accounts, []);
   const list = res.data ?? [];
+
+  /** 绑 / 解绑这个后台账号对应的小程序账号。空串 = 解绑。 */
+  const linkUser = async (a: AdminAccountItem, raw: string) => {
+    try {
+      await api.updateAccount(a.id, { linkedUserId: raw.trim() });
+      toast(raw.trim() ? `已把「${a.username}」绑到该小程序账号` : `已解绑「${a.username}」`);
+      res.reload();
+    } catch (e) {
+      toast((e as Error)?.message || '绑定失败');
+      res.reload(); // 失败要把输入框还原成库里的值，别让它显示一个没存上的 id
+    }
+  };
   const load = async () => res.reload();
   useEffect(() => { api.agents().then((a) => setAgents(a.map((x) => ({ key: x.key, name: x.name })))).catch(() => { /* agent 列表失败只影响授权勾选 */ }); }, []);
   const toggleKey = (keys: string[], k: string) => keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k];
@@ -643,11 +668,31 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
                 <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button><button className="ai-btn primary" onClick={() => saveKeys(a)}><Icon name="check" size={14} /> 保存</button></div>
               </div>
             ) : (
-              <div className="crd-actions" style={{ marginTop: 8 }}>
-                <button className="mini-btn" onClick={() => { setEditId(a.id); setEditKeys(a.agentKeys); }}>分配 agent</button>
-                <button className="mini-btn" onClick={() => resetPw(a)}>重置密码</button>
-                <button className={`mini-btn ${a.disabled ? 'primary' : 'danger'}`} onClick={() => toggleDisabled(a)}>{a.disabled ? '启用' : '停用'}</button>
-              </div>
+              <>
+                <div className="ai-field">
+                  <div className="ai-fl">绑定的小程序账号</div>
+                  <div className="filter-bar">
+                    <input
+                      className="ai-input"
+                      defaultValue={a.linkedUserId ?? ''}
+                      placeholder="小程序里的用户 id（留空 = 不绑）"
+                      onBlur={(e) => { if ((e.target.value.trim() || null) !== (a.linkedUserId ?? null)) linkUser(a, e.target.value); }}
+                    />
+                  </div>
+                  <div className="ai-note">
+                    后台账号和小程序账号是两套体系。有些动作要知道「这个后台账号在小程序里是谁」——
+                    目前是爱速拍那边的「把自己的草稿存成模板」（在它自己的运营控制台里，不在这个后台）。
+                    绑了之后那个动作只认这一列，请求里再传别的账号也没用，
+                    所以不会出现「把别人的草稿存成公开模板」。
+                    <b>不绑只是用不了那类动作，其余一概不受影响。</b>
+                  </div>
+                </div>
+                <div className="crd-actions" style={{ marginTop: 8 }}>
+                  <button className="mini-btn" onClick={() => { setEditId(a.id); setEditKeys(a.agentKeys); }}>分配 agent</button>
+                  <button className="mini-btn" onClick={() => resetPw(a)}>重置密码</button>
+                  <button className={`mini-btn ${a.disabled ? 'primary' : 'danger'}`} onClick={() => toggleDisabled(a)}>{a.disabled ? '启用' : '停用'}</button>
+                </div>
+              </>
             ))}
           </div>
         ))}

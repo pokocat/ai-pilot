@@ -833,7 +833,7 @@ export type AdaptiveResult =
 
 /**
  * 按需产出（skillsConfig.deliverableMode='on-demand'）：模型自行决定本轮出结构化报告还是文本对话。
- * 仅全局 openai 与 mock 支持「自适应」；claude / per-agent runtime 暂回退为对话（避免误出空报告）。
+ * 全局 openai / claude / mock 均支持「自适应」；per-agent runtime 暂回退为对话（避免误出空报告）。
  */
 export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promise<AdaptiveResult> {
   await assertKeyHealthy();

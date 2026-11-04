@@ -40,7 +40,7 @@ function number(value: unknown): number | null {
 
 function displayPhone(phone: string | null): string | null {
   if (!phone) return null;
-  return phone.startsWith('wx_') ? '微信账号' : phone;
+  return (phone.startsWith('wx_') || phone.startsWith('id_unbound_')) ? '微信账号' : phone;
 }
 
 function summary(action: string, payload: Record<string, unknown>): string | null {

@@ -225,6 +225,11 @@ model User {
   phone           String    @unique
   wechatOpenId    String?   @unique
   wechatUnionId   String?   @unique
+  /// 统一账号中心（aibuzz-id）的 uid（令牌 sub）。首次带 RS256 令牌进来时按手机号回填或建档；
+  /// 唯一键同时是「并发首登只建一行」的兜底（插入冲突后按它回读赢家）。
+  /// 老的 x-user-id / HS256 链路完全不读它，ID_ISSUER 未配时它恒为 null。
+  identityUid     String?   @unique
+  identityTokenVersion Int @default(0) // identity lifecycle revokes previously issued local sessions
   name            String
   avatarUrl       String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
   role            String    @default("owner") // owner | member | admin
@@ -269,8 +274,19 @@ model AdminAccount {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   lastLoginAt    DateTime?
+  /// 这个后台账号在小程序 / C 端对应的那个用户。
+  ///
+  /// 后台账号和 C 端账号本来是两套体系（一个是运营的登录，一个是产品里的用户）。
+  /// 「把自己的草稿存成模板」这个动作需要知道「我」在小程序里是谁 —— 原来是让前端把
+  /// userId 填在请求体里，服务端只校验那个用户存在（codex 2026-09-11 审出）：
+  /// 超管填任意受害者的 userId + projectId，上游的属主校验会以**受害者**的身份通过，
+  /// 于是别人的私有草稿被复制成了全平台模板。绑在账号上之后，那个动作只认这一列。
+  ///
+  /// 可空：绝大多数后台账号不需要绑；不绑就用不了「存成模板」，别的功能一律不受影响。
+  linkedUserId   String?
   sessions       AdminSession[]
   collaborations AgentCollaborator[]
+  productAccess  AdminProductAccess[]
 
   @@map("admin_account")
 }
@@ -414,6 +430,31 @@ model AgentVersion {
 }
 
 /// 智能体协作者（多运营）：哪个后台账户能编辑/查看哪个 agent。owner 角色账户隐式拥有全部 agent。
+/// 运营账号对某个产品的授权。
+///
+/// 后台是**一个**，按产品分区，不给每个小程序各配一个后台：产品专属的面很少
+/// （爱速拍只有模板、单价、供应商对账），而共享的那些 —— AI 端点与路由、账号与角色、
+/// 审计、SKU、钱包流水 —— 复制 N 份的代价远大于收益，其中角色管理最不该分叉。
+///
+/// 分区的键就用 `productCode`（services/products.ts），与账号中心的 product_code 同一套。
+/// 超管隐式拥有全部产品；operator 只能看见并操作被授权的那些。
+///
+/// 与 AgentCollaborator 是两个维度：那个管「哪个智能体」，这个管「哪个产品」，
+/// 一个运营可以只被授予爱速拍，而完全看不到军师的智能体与话术。
+model AdminProductAccess {
+  id          String   @id @default(cuid())
+  productCode String
+  accountId   String
+  role        String   @default("editor") // editor 可改 | viewer 只读
+  createdAt   DateTime @default(now())
+
+  account AdminAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([productCode, accountId])
+  @@index([accountId])
+  @@map("admin_product_access")
+}
+
 model AgentCollaborator {
   id        String   @id @default(cuid())
   agentKey  String
@@ -1145,6 +1186,15 @@ model CreditLedger {
   delta          Int // 正充值 / 负消耗
   reason         String
   balance        Int
+  /// 这笔钱花在哪个产品上（services/products.ts 的 PRODUCT）。
+  ///
+  /// 钱包是**一个**：用户在军师充的钻石在爱速拍能花，反过来也一样。要是分钱包，
+  /// 跨产品功能每加一个就得设计一次转账协议，用户还得在两边各充一次。
+  /// 「独立运营」独立的是定价、SKU、入口和**账**，不是钱包 —— 账靠这一列切。
+  ///
+  /// 可空只为了历史流水：本列上线之前的行没有归属，不许硬塞一个值假装它有。
+  /// 新写入一律带值，写入口在 credits.ts，那里是必填参数。
+  productCode    String?
   idempotencyKey String?  @unique // 跨 worker/重启的 reserve/refund 唯一键；旧流水为空
   createdAt      DateTime @default(now())
 
@@ -1153,6 +1203,8 @@ model CreditLedger {
 
   // 余额读(getBalance)按 userId + createdAt desc 取最近一行，是每次产出/扣费的热路径；无索引则随流水线性扫。
   @@index([userId, createdAt])
+  // 按产品切账（运营后台的分产品收入 / 成本视图）。没有它就得全表扫。
+  @@index([productCode, createdAt])
   @@map("credit_ledger")
 }
 
@@ -1195,6 +1247,15 @@ model TokenUsage {
   totalTokens  Int      @default(0) // = input + output，便于 SUM
   costMicros   Int      @default(0) // 估算成本，单位 1e-6 元（微元），整数防浮点漂移
   creditCost   Int      @default(0) // 本次扣的点；P1 恒为 0，P2 接按 token 扣费时填实际
+  /// 这次调用算在哪个产品头上（services/products.ts 的 PRODUCT），与 CreditLedger.productCode 同一套。
+  ///
+  /// 独立运营要能回答「爱速拍的 AI 成本是多少」。在这一列之前答不了：爱速拍的 AI 写稿走
+  /// structuredMetered，不带 usageMeta，落库时 kind='aux'、userId 为空，和军师的嵌入 / 重排 /
+  /// 探活混在同一个「非用户用量消耗」桶里，分不出来。
+  ///
+  /// 可空只为历史行。新写入由调用方显式给；给不出的（平台级基建调用，如嵌入、探活）留空，
+  /// 那本来就不属于任何单一产品，硬塞一个值是编造。
+  productCode  String?
   createdAt    DateTime @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
@@ -1203,6 +1264,8 @@ model TokenUsage {
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])
   @@index([model, createdAt])
+  // 分产品的成本看板（运营后台按产品视角切 Token 成本）。没有它就得全表扫。
+  @@index([productCode, createdAt])
   @@map("token_usage")
 }
 
@@ -2389,6 +2452,8 @@ model VideoCreditHold {
   id              String    @id @default(cuid())
   tenantId        String
   userId          String
+  /// 归属产品。与 CreditLedger.productCode 同一套取值，对账时两张表能对上。
+  productCode     String?
   projectId       String
   clientRequestId String
   upstreamJobId   String?   @unique
@@ -2458,4 +2523,20 @@ model VideoStoragePack {
   @@unique([userId, clientRequestId])
   @@index([userId, createdAt])
   @@map("video_storage_pack")
+}
+
+/// Persistent identity lifecycle/tombstone. Never grants business rights.
+model IdentitySubject {
+  uid String @id
+  status String @default("ACTIVE")
+  localSubjectId String?
+  lastEventId BigInt @default(0)
+  @@map("identity_subject")
+}
+
+/// Per-product committed event cursor; acknowledgment must succeed before advance.
+model IdentityOutboxCursor {
+  product String @id
+  after BigInt @default(0)
+  @@map("identity_outbox_cursor")
 }

@@ -1,6 +1,9 @@
 // 运营后台 API（《投产开发指导》§7）：概览看板 / 每日献策 / 智能体（提示词+记忆）/ 问卷 / 套餐。
 // 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
+import {
+  PRODUCT, isProductCode, productCodes, productLedgerSlices,
+} from '../services/products.js';
 import { prisma, utcTimestamp } from '../db.js';
 import { getAiConfig, effectiveProvider, mergedTestConfig } from '../services/aiConfig.js';
 import {
@@ -20,6 +23,7 @@ import { pingModel, pingAgentRuntime, generateDeliverable, chatComplete } from '
 import { buildSandboxContext } from '../services/context.js';
 import {
   requireAdmin, actorOf, isSuperActor, requireAgentAccess, actorAccountId, type AdminActor,
+  requireProductAccess, accessibleProductCodes,
 } from '../services/adminAuth.js';
 import {
   createOperator, listAccounts, setAccountDisabled, setAccountRole, resetAccountPassword,
@@ -43,6 +47,14 @@ import {
   publishDirectionSample,
 } from '../services/creative/directionSamples.js';
 import { clonePricing, clonePricingView, updateClonePricing } from '../services/video/pricing.js';
+import {
+  CLIP_OPS_PRODUCT, UNANCHORED_STATUSES, clipOpsSummary, holdStatusLabel, listClipHolds, normalizeHoldStatus,
+  listClipTemplates, setClipTemplateStatus, clipGenerationPricing, clipVendorOverview,
+  saveClipGenerationPricing, publishClipTemplateFromProject,
+} from '../services/video/opsConsole.js';
+// 手工对单复用定时任务那条判定路径，不另写一套 —— 两套规则迟早分叉。
+import { videoSubmissionProbe } from '../services/video/maintenance.js';
+import { attachVideoJob, markVideoSubmissionUnknown, refundVideoHold, settleVideoJob } from '../services/video/credits.js';
 import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
@@ -89,6 +101,8 @@ import type {
   AdminCreativeDirectionSample, CreateCreativeDirectionSampleRequest,
   AdminCreativeJobAudienceRequest, AdminCreativeJobAudienceResult,
   AdminClonePricing, AdminClonePricingUpdate,
+  AdminClipOpsView, AdminClipHoldListView, AdminClipReconcileResult, ClipAdminTemplate, ClipGenerationPricing,
+  ClipVendorOverview, ClipGenerationPricingUpdate, ClipTemplateFromProject,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -682,7 +696,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/admin/users/:id/impersonate', async (req, reply): Promise<AdminImpersonateResult | void> => {
     const actor = actorOf(req);
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true } });
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true, identityTokenVersion: true } });
     if (!user) return reply.code(404).send({ error: 'user not found' });
     const by = actorName(actor);
     const IMP_TTL_SEC = 2 * 60 * 60; // 附身 token 有效期 2 小时（够排查，又短到降低泄漏风险）
@@ -690,7 +704,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const ttlSec = enabled ? IMP_TTL_SEC : null; // 明文口径下 token 不过期，如实记 null
     await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.impersonate', payload: { actor: by, ttlSec } });
     if (enabled) {
-      const token = signUserToken(user.id, { ttlSec: IMP_TTL_SEC, extra: { imp: by } });
+      const token = signUserToken(user.id, { ttlSec: IMP_TTL_SEC, extra: { imp: by, iv: user.identityTokenVersion } });
       return { token, expiresAt: new Date(Date.now() + IMP_TTL_SEC * 1000).toISOString() };
     }
     return { token: user.id, expiresAt: null, warning: '未配置 APP_JWT_SECRET，token 为明文 userId 且不会过期' };
@@ -892,8 +906,8 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '扣减后余额将为负，已拒绝', code: 'BALANCE_UNDERFLOW' });
     }
     const stored = `admin:${reason}`;
-    if (delta > 0) await grantCredits(user.tenantId, userId, delta, stored);
-    else await chargeCredits(user.tenantId, userId, -delta, stored);
+    if (delta > 0) await grantCredits(user.tenantId, userId, delta, stored, PRODUCT.junshi);
+    else await chargeCredits(user.tenantId, userId, -delta, stored, PRODUCT.junshi);
     const after = await getBalance(userId);
     await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.credits.adjust', payload: { by: actorName(actor), delta, reason: stored, before, after } });
     return { ok: true, balance: after };
@@ -1466,13 +1480,397 @@ export async function adminRoutes(app: FastifyInstance) {
    * GET 用 fresh=true 绕过 60s 读缓存：后台必须读得回自己刚写的值，否则运营会以为没保存上
    * 而重复提交（C 端热路径照旧走缓存，见 GET /video/clone-pricing）。
    */
-  app.get('/admin/video/clone-pricing', async (): Promise<AdminClonePricing> => {
+  /* ── 平台后台：按产品分区 ────────────────────────────────────────────────
+   *
+   * 不给每个小程序各配一个后台。产品专属的面很少（爱速拍只有模板、单价、供应商对账），
+   * 而共享的那些 —— AI 端点与路由、账号与角色、审计、SKU、钱包流水 —— 复制 N 份的代价
+   * 远大于收益，其中角色管理最不该分叉。所以是**一个后台、按产品分区、权限键用 productCode**。
+   */
+
+  /** 当前操作者能看见哪些产品。后台据此渲染分区；超管拿到全集。 */
+  app.get('/admin/products', async (req) => {
+    const actor = actorOf(req);
+    const allowed = await accessibleProductCodes(actor);
+    const all = productCodes();
+    return {
+      all,
+      accessible: allowed === null ? all : all.filter((c) => allowed.has(c)),
+      /** 超管：隐式全部，前端据此不显示「申请授权」这类入口。 */
+      superActor: isSuperActor(actor),
+    };
+  });
+
+  /**
+   * 分产品的钻石账。
+   *
+   * 一个账号一个钱包，归属记在流水行上（credit_ledger.productCode）：
+   * delta>0 记「从哪个产品的充值入口卖出去的」，delta<0 记「花在哪个产品上」。
+   * 「军师打通爱速拍出片」因此不需要跨钱包转账，收入与消耗各归各的，账仍然是通的。
+   *
+   * 归属为空的历史流水单列 `unattributed`，不摊进任何产品 —— 摊了就是编造归属。
+   */
+  app.get<{ Querystring: { from?: string; to?: string } }>('/admin/products/ledger', async (req, reply) => {
+    const actor = actorOf(req);
+    // 不传 to 就没有上界（见 productLedgerSlices 里那段关于库钟的注释）。
+    const to = req.query?.to ? new Date(req.query.to) : undefined;
+    const anchor = to ?? new Date();
+    const from = req.query?.from ? new Date(req.query.from) : new Date(anchor.getTime() - 30 * 24 * 3600 * 1000);
+    if (Number.isNaN(from.getTime()) || (to && Number.isNaN(to.getTime())) || (to && from >= to)) {
+      return reply.code(422).send({ error: '时间区间非法', code: 'ADMIN_RANGE_INVALID' });
+    }
+    // 窗口上限。没有上限的话 `from=1970-01-01` 会让四次聚合扫全表，事务撞上超时后整屏 500。
+    // 与其让它跑到超时再报错，不如在这里说清楚「最多看两年」。
+    const MAX_WINDOW_MS = 730 * 24 * 3600 * 1000;
+    if (anchor.getTime() - from.getTime() > MAX_WINDOW_MS) {
+      return reply.code(422).send({ error: '时间范围最多两年，请缩小区间', code: 'ADMIN_RANGE_TOO_WIDE' });
+    }
+    const slices = await productLedgerSlices(from, to);
+    const allowed = await accessibleProductCodes(actor);
+    // 只给看得见的产品。unattributed 是历史遗留，只有超管该看到 —— 普通运营看到它
+    // 只会以为自己产品的账少了一块。
+    const visible = allowed === null ? slices : slices.filter((row) => allowed.has(row.productCode));
+    return { from: from.toISOString(), to: to ? to.toISOString() : null, slices: visible };
+  });
+
+  /** 某个运营账号被授权了哪些产品。 */
+  app.get<{ Params: { id: string } }>('/admin/accounts/:id/products', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const rows = await prisma.adminProductAccess.findMany({
+      where: { accountId: req.params.id },
+      select: { productCode: true, role: true, createdAt: true },
+      orderBy: { productCode: 'asc' },
+    });
+    return { accountId: req.params.id, grants: rows };
+  });
+
+  /**
+   * 授予 / 调整 / 收回一个运营账号对某产品的权限。
+   * `role: null` = 收回。只有超管能改，且每次都留审计 —— 权限变更是最需要能倒查的一类操作。
+   */
+  app.put<{ Params: { id: string }; Body: { productCode?: string; role?: 'viewer' | 'editor' | null } }>(
+    '/admin/accounts/:id/products', async (req, reply) => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const productCode = String(req.body?.productCode ?? '');
+      if (!isProductCode(productCode)) {
+        return reply.code(422).send({ error: '未知的产品码', code: 'ADMIN_PRODUCT_UNKNOWN' });
+      }
+      const account = await prisma.adminAccount.findUnique({ where: { id: req.params.id }, select: { id: true } });
+      if (!account) return reply.code(404).send({ error: '运营账号不存在', code: 'ADMIN_ACCOUNT_NOT_FOUND' });
+      const role = req.body?.role ?? null;
+      if (role !== null && role !== 'viewer' && role !== 'editor') {
+        return reply.code(422).send({ error: 'role 只能是 viewer / editor / null', code: 'ADMIN_ROLE_INVALID' });
+      }
+      if (role === null) {
+        await prisma.adminProductAccess.deleteMany({ where: { accountId: req.params.id, productCode } });
+      } else {
+        await prisma.adminProductAccess.upsert({
+          where: { productCode_accountId: { productCode, accountId: req.params.id } },
+          create: { productCode, accountId: req.params.id, role },
+          update: { role },
+        });
+      }
+      await recordAudit({
+        tenantId: null, userId: null, action: 'admin.product.access',
+        payload: { accountId: req.params.id, productCode, role, by: actorAccountId(actor) ?? 'master' },
+      });
+      return { ok: true, productCode, role };
+    });
+
+  /* ─────────── 爱速拍 · 出片对账台 ───────────
+   * VideoCreditHold 是唯一一张记着「用户的钻石已经扣了、片子还没交付」的表，
+   * 在这之前运营后台一行都读不到它。定时任务（video-maintenance-sweep /
+   * clip-render-notification）已经在兜底，但兜底失败时没人看得见 —— 这几条路由是那双眼睛。
+   */
+
+  app.get<{ Querystring: { days?: string; from?: string; to?: string } }>(
+    '/admin/video/ops', async (req, reply): Promise<AdminClipOpsView | undefined> => {
+      try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+      const range = parseAdminRange(req.query, 30);
+      return clipOpsSummary(range.from, range.toExclusive);
+    });
+
+  app.get<{ Querystring: { status?: string; days?: string; from?: string; to?: string; page?: string; pageSize?: string } }>(
+    '/admin/video/holds', async (req, reply): Promise<AdminClipHoldListView | undefined> => {
+      try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+      const range = parseAdminRange(req.query, 30);
+      return listClipHolds({
+        // 非法状态当「不筛」而不是报错：这是个筛选器，不是业务参数，
+        // 前端换个词、链接被手改过，都不该让页面变成一个错误。
+        status: normalizeHoldStatus(req.query.status),
+        from: range.from,
+        toExclusive: range.toExclusive,
+        page: Number(req.query.page) || 1,
+        pageSize: Number(req.query.pageSize) || 30,
+      });
+    });
+
+  /**
+   * 手工对单：按 clientRequestId 向上游查单，能补交就补交，明确被拒才退款。
+   *
+   * 判定完全复用 videoSubmissionProbe + 定时任务那条路径，这里不另写一套规则 ——
+   * 两套判定迟早会分叉，而分叉的结果是「定时任务说该退、手工说不该退」这种最难查的账。
+   *
+   * 三条硬规矩：
+   *   · 只处理还没拿到上游锚点的单。已经有 jobId 的由 clip-render-notification 推进，
+   *     手工插一脚只会和它抢同一行。
+   *   · 问不清（网络错、上游 5xx）**绝不退款** —— 上游可能已经在跑了，退了就是白送一次出片。
+   *   · refunded 是终点，不许被写回 settled（refundVideoHold / settleVideoJob 自己守着）。
+   */
+  app.post<{ Params: { id: string } }>(
+    '/admin/video/holds/:id/reconcile', async (req, reply): Promise<AdminClipReconcileResult | undefined> => {
+      const actor = actorOf(req);
+      // 两道闸叠加，同 clone-pricing：动钱的操作保持超管门槛，产品维度是额外一道。
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+
+      const hold = await prisma.videoCreditHold.findUnique({ where: { id: req.params.id } });
+      if (!hold) { reply.code(404).send({ error: '这单不存在', code: 'CLIP_HOLD_NOT_FOUND' }); return undefined; }
+      if (hold.upstreamJobId || !(UNANCHORED_STATUSES as readonly string[]).includes(hold.status)) {
+        reply.code(409).send({
+          error: `这单是「${holdStatusLabel(hold.status)}」，不需要也不能手工查单：拿到上游任务号之后由出片完成扫描推进`,
+          code: 'CLIP_HOLD_NOT_RECONCILABLE',
+        });
+        return undefined;
+      }
+
+      const probe = await videoSubmissionProbe(hold).catch(() => ({ outcome: 'unknown' as const }));
+      let refunded = false;
+      let message = '';
+      if (probe.outcome === 'accepted') {
+        // attachVideoJob 是条件更新：这单在我们查上游那几秒里可能已经被别的路径退款或结算了。
+        // 回填没落上就别宣称回填成功 —— 运营看到「已回填」却查不到任务号，只会以为后台在骗人。
+        const attached = await attachVideoJob(hold.id, probe.jobId);
+        if (attached && probe.status && probe.status !== 'queued') await settleVideoJob(probe.jobId, probe.status);
+        message = attached
+          ? `上游其实收了（任务 ${probe.jobId}），已回填任务号，后续交给出片完成扫描`
+          : `上游其实收了（任务 ${probe.jobId}），但这单在查单期间已被其它路径收口，未改动它的状态`;
+      } else if (probe.outcome === 'rejected') {
+        const row = await refundVideoHold(hold.id, probe.reason ?? 'submit_rejected').catch(() => null);
+        refunded = row?.status === 'refunded';
+        message = refunded
+          ? `上游明确拒绝（${probe.reason ?? '未给原因'}），${hold.credits} 钻石已退回`
+          : '上游明确拒绝，但这单已经是终态，未重复退款';
+      } else {
+        await markVideoSubmissionUnknown(hold.id);
+        message = '上游没给准话（网络错或 5xx）。这单原样保留，不退款 —— 上游可能已经在跑了，退了就是白送一次出片。稍后再试';
+      }
+
+      await recordAudit({
+        tenantId: hold.tenantId, userId: hold.userId, action: 'admin.clip.hold.reconcile',
+        payload: { holdId: hold.id, outcome: probe.outcome, refunded, credits: hold.credits, by: actorAccountId(actor) ?? 'master' },
+      });
+      const after = await prisma.videoCreditHold.findUnique({ where: { id: hold.id } });
+      return {
+        outcome: probe.outcome,
+        status: after?.status ?? hold.status,
+        statusLabel: holdStatusLabel(after?.status ?? hold.status),
+        upstreamJobId: after?.upstreamJobId ?? null,
+        refunded,
+        message,
+      };
+    });
+
+  /* ─────────── 爱速拍 · 模板货架 ───────────
+   * 模板就是爱速拍的首页，内容即产品。这两条代理到 AIStar 的 service token 运营面
+   * （ClipServiceAdminController），只做看和上下架 —— 创建与整体编辑是内容创作，不在后台做。
+   */
+
+  app.get('/admin/video/templates', async (req, reply): Promise<ClipAdminTemplate[] | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    // 上游挂了要如实报 502，不能吞成空数组 —— 「一个模板都没有」和「问不到」在运营眼里
+    // 是完全不同的两件事，前者会让人以为货架被清空了。
+    try { return await listClipTemplates(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
+
+  app.put<{ Params: { id: string }; Body: { status?: string } }>(
+    '/admin/video/templates/:id/status', async (req, reply): Promise<ClipAdminTemplate | undefined> => {
+      const actor = actorOf(req);
+      // 上下架直接改变小程序首页看得到什么，是对外动作，与改价同级：超管 + 产品 editor 两道叠加。
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+      const status = req.body?.status;
+      if (status !== 'published' && status !== 'draft') {
+        reply.code(422).send({ error: '状态只能是 published 或 draft', code: 'CLIP_TEMPLATE_STATUS_INVALID' });
+        return undefined;
+      }
+      let row: ClipAdminTemplate;
+      try { row = await setClipTemplateStatus(req.params.id, status); }
+      catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        action: 'admin.clip.template.status',
+        payload: { templateId: req.params.id, status, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
+    });
+
+  /**
+   * 六档生成单价（只读）。配在 AIStar 的 Spring 配置里，后台改不了 —— 见
+   * services/video/opsConsole.ts 的 clipGenerationPricing。至少让运营看得见：
+   * 连单价是多少都不知道，就没法判断「这个价对不对」。
+   */
+  /**
+   * 供应商（石榴）总览：额度快照 + 与我方 DB 的对账。**只读，实时打上游。**
+   *
+   * 独立运营要能回答两件事：数字人 / 声音的槽位还剩几个（用完了用户就练不了新形象，
+   * 而且是在用户点下去之后才失败），以及两边有没有对不上的对象（孤儿 = 供应商那边有、
+   * 我们这边没有，每个月照样按它收钱）。
+   */
+  app.get('/admin/video/vendor', async (req, reply): Promise<ClipVendorOverview | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    try { return await clipVendorOverview(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
+
+  app.get('/admin/video/generation-pricing', async (req, reply): Promise<ClipGenerationPricing | undefined> => {
+    try { await requireProductAccess(actorOf(req), CLIP_OPS_PRODUCT, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
+    try { return await clipGenerationPricing(); }
+    catch (e) { sendErr(reply, e, 502); return undefined; }
+  });
+
+  /**
+   * 整组核定六档生成单价。
+   *
+   * 两道闸叠加，与克隆定价同一形制：改价是营收动作（requireSuper），
+   * 外加产品维度（requireProductAccess editor）。落审计 —— 改价必须能倒查是谁改的。
+   */
+  app.put<{ Body: ClipGenerationPricingUpdate }>(
+    '/admin/video/generation-pricing', async (req, reply): Promise<ClipGenerationPricing | undefined> => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+
+      const b = req.body ?? ({} as ClipGenerationPricingUpdate);
+      const KEYS = [
+        'creditPerAvatarSecond', 'creditPerImage', 'creditPerT2vSecond',
+        'creditPerI2vSecond', 'creditPerAssemble', 'creditPerKChar',
+      ] as const;
+      // 六个都要给。少给一个就落到上游的「整组核定」语义里，把没人看过的兜底值升格成
+      // 「运营配过的价」—— 在这里先挡一道，报错话术比上游的更贴运营的语境。
+      //
+      // **上限必须在这里就卡死。** 只查 isInteger 和非负是不够的（codex 2026-09-11 审出）：
+      // 传 4294967296 能过这一关，到了 Java 侧 `Number.intValue()` 截断成 0 ——
+      // 一个「太大了」的输入静默变成「这一档免费」。用 isSafeInteger + 上限双重挡住：
+      // 前者排掉超出 double 精度的数（再大的数连相等比较都不可靠），后者对齐上游的 MAX。
+      const MAX_PRICE = 1_000_000;
+      const bad = KEYS.filter((k) => {
+        const v = b[k];
+        return !Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > MAX_PRICE;
+      });
+      if (bad.length) {
+        reply.code(422).send({
+          error: `这六档要一起核定，每档都得是 0 到 ${MAX_PRICE} 之间的整数（缺 / 不合法：${bad.join('、')}）`,
+          code: 'CLIP_PRICING_INVALID',
+        });
+        return undefined;
+      }
+      // 逐字段取，不用 Object.fromEntries 拼 —— 那样拼出来的是 index signature，
+      // 类型上与契约不重合，真漏一个字段编译器也不会说话。
+      const next: ClipGenerationPricingUpdate = {
+        creditPerAvatarSecond: b.creditPerAvatarSecond,
+        creditPerImage: b.creditPerImage,
+        creditPerT2vSecond: b.creditPerT2vSecond,
+        creditPerI2vSecond: b.creditPerI2vSecond,
+        creditPerAssemble: b.creditPerAssemble,
+        creditPerKChar: b.creditPerKChar,
+      };
+      let row: ClipGenerationPricing;
+      try {
+        row = await saveClipGenerationPricing({ ...next, operator: actorAccountId(actor) ?? 'master' });
+      } catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        action: 'admin.clip.generation-pricing',
+        payload: { ...next, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
+    });
+
+  /**
+   * 把一条**自己的**草稿存成模板。
+   *
+   * 属主取的是**当前后台账号上绑的那个小程序账号**（AdminAccount.linkedUserId），
+   * 不接受请求体传 —— 上游那句「只能存自己的草稿」得由这一侧把「自己」定死才成立。
+   */
+  app.post<{ Body: ClipTemplateFromProject }>(
+    '/admin/video/templates/from-project', async (req, reply): Promise<ClipAdminTemplate | undefined> => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { sendErr(reply, e, 403); return undefined; }
+      try { await requireProductAccess(actor, CLIP_OPS_PRODUCT, 'editor'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+
+      const b = req.body ?? ({} as ClipTemplateFromProject);
+      const required = { projectId: b.projectId, name: b.name, industry: b.industry, themeKey: b.themeKey, description: b.description };
+      const blank = Object.entries(required).filter(([, v]) => !String(v ?? '').trim()).map(([k]) => k);
+      if (blank.length) {
+        reply.code(422).send({ error: `还缺：${blank.join('、')}`, code: 'CLIP_TEMPLATE_INVALID' });
+        return undefined;
+      }
+
+      // **属主只认账号上绑的那一个，不接受请求体里传进来的 userId。**
+      // 原来是信 body（codex 2026-09-11 审出）：超管填任意受害者的 userId + projectId，
+      // 上游的属主校验会以**受害者**的身份通过 —— 别人的私有草稿就被复制成了全平台模板。
+      // 上游那句「只能存自己的草稿」得由这一侧把「自己」定死才成立。
+      const accountId = actorAccountId(actor);
+      const linked = accountId
+        ? (await prisma.adminAccount.findUnique({ where: { id: accountId }, select: { linkedUserId: true } }))?.linkedUserId
+        : null;
+      if (!linked) {
+        reply.code(409).send({
+          error: accountId
+            ? '这个后台账号还没绑定小程序账号。到「配置 · 运营账户」里绑定之后，才能把自己的草稿存成模板'
+            : '主令牌没有对应的小程序账号，改用后台账号登录再操作',
+          code: 'ADMIN_ACCOUNT_NOT_LINKED',
+        });
+        return undefined;
+      }
+      const user = await prisma.user.findUnique({ where: { id: linked }, select: { id: true, tenantId: true } });
+      if (!user) { reply.code(404).send({ error: '绑定的小程序账号已不存在，请重新绑定', code: 'ADMIN_USER_NOT_FOUND' }); return undefined; }
+
+      let row: ClipAdminTemplate;
+      try {
+        row = await publishClipTemplateFromProject(user.id, user.tenantId, {
+          projectId: String(b.projectId).trim(),
+          name: String(b.name).trim(),
+          industry: String(b.industry).trim(),
+          themeKey: String(b.themeKey).trim(),
+          description: String(b.description).trim(),
+          ...(b.templateId ? { templateId: String(b.templateId).trim() } : {}),
+          ...(b.keepText === false ? { keepText: false } : {}),
+        });
+      } catch (e) { sendErr(reply, e, 502); return undefined; }
+      await recordAudit({
+        tenantId: user.tenantId, userId: user.id, action: 'admin.clip.template.from-project',
+        payload: { templateId: row.id, projectId: b.projectId, by: actorAccountId(actor) ?? 'master' },
+      });
+      return row;
+    });
+
+  app.get('/admin/video/clone-pricing', async (req, reply): Promise<AdminClonePricing | undefined> => {
+    // 爱速拍的面：非超管要被授予 quickreel 才看得到
+    try { await requireProductAccess(actorOf(req), PRODUCT.quickreel, 'viewer'); }
+    catch (e) { sendErr(reply, e, 403); return undefined; }
     return clonePricingView(await clonePricing({ fresh: true }));
   });
 
   app.put<{ Body: AdminClonePricingUpdate }>('/admin/video/clone-pricing', async (req, reply) => {
     const actor = actorOf(req);
+    // 两道闸叠加，不是替换：
+    //   · requireSuper —— 既有政策，改价是营收动作，与套餐改价、海报改价同级（videoClonePricing 用例写明了）。
+    //     加产品分区不该顺手把营收管控放松掉，那是两件事。
+    //   · requireProductAccess —— 新加的产品维度。超管隐式拥有全部产品，所以这一道对他是空转；
+    //     它挡的是「以后把改价下放给产品运营」时，别忘了他还得先被授予这个产品。
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    try { await requireProductAccess(actor, PRODUCT.quickreel, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
     const before = clonePricingView(await clonePricing({ fresh: true }));
     try {
       const after = clonePricingView(await updateClonePricing(req.body ?? {}));
@@ -1576,14 +1974,39 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— 消耗管理：按用户汇总算力赠送、消耗与余额 ——
-  app.get('/admin/usage', async (): Promise<AdminUsageView> => {
-    const users = await buildAdminUsers();
+  /**
+   * 钻石消耗。`?product=` 把「发放 / 消耗」切到某个产品；不传 = 全部合计（原行为）。
+   *
+   * 余额相关的两个数（currentBalanceTotal / unlimitedUsers）**不跟着切**：钱包只有一个，
+   * 没有「爱速拍的余额」这回事。切了就是造一个不存在的负债数出来。
+   */
+  app.get<{ Querystring: { product?: string } }>('/admin/usage', async (req, reply): Promise<AdminUsageView | undefined> => {
+    const actor = actorOf(req);
+    const raw = String(req.query?.product ?? '').trim();
+    if (raw && !isProductCode(raw)) {
+      reply.code(422).send({ error: '未知的产品码', code: 'ADMIN_PRODUCT_UNKNOWN' });
+      return undefined;
+    }
+    // 想按产品看，就得有那个产品的权限。
+    if (raw) {
+      try { await requireProductAccess(actor, raw, 'viewer'); }
+      catch (e) { sendErr(reply, e, 403); return undefined; }
+    }
+    // **不传 product 不等于放行全量。** 原来只在传了 product 时才查权限，于是一个
+    // 没有任何产品授权的 operator 只要不带这个参数（或带 `?product=%20`，trim 后为空），
+    // 就能拿到全平台的用户名单与汇总 —— 这个查询串成了绕过分区的后门
+    // （codex 2026-09-11 审出）。现在：超管照旧看全量；非超管一律收窄到自己被授予的产品，
+    // 一个都没有就是空视图，而不是全量。
+    const allowed = await accessibleProductCodes(actor);
+    const scope = raw ? [raw] : (allowed === null ? undefined : [...allowed]);
+    const users = await buildAdminUsers(scope);
     const activeSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [reportCount, creditEvents] = await Promise.all([
       prisma.deliverable.count(),
-      prisma.creditLedger.count(),
+      prisma.creditLedger.count(scope ? { where: { productCode: { in: scope } } } : undefined),
     ]);
     return {
+      productCode: raw || null,
       summary: {
         registeredUsers: users.length,
         activeUsers: users.filter((u) => u.lastSessionAt && new Date(u.lastSessionAt) >= activeSince).length,
@@ -2229,6 +2652,16 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.disabled === 'boolean') row = await setAccountDisabled(req.params.id, b.disabled);
       if (typeof b.password === 'string' && b.password) await resetAccountPassword(req.params.id, b.password);
       if (Array.isArray(b.agentKeys) && row.role !== 'owner') await syncCollaborators(req.params.id, b.agentKeys);
+      // 绑定 / 解绑这个后台账号在小程序里对应的那个用户。空串 = 解绑。
+      // 「把自己的草稿存成模板」只认这一列（见 schema 里 linkedUserId 的注释）。
+      if (typeof b.linkedUserId === 'string') {
+        const v = b.linkedUserId.trim();
+        if (v) {
+          const u = await prisma.user.findUnique({ where: { id: v }, select: { id: true } });
+          if (!u) return reply.code(404).send({ error: '要绑定的账号不存在', code: 'ADMIN_USER_NOT_FOUND' });
+        }
+        await prisma.adminAccount.update({ where: { id: req.params.id }, data: { linkedUserId: v || null } });
+      }
       await recordAudit({ action: 'admin.account.update', payload: { id: req.params.id, username: row.username, by: actorName(actor) } });
       const keyMap = await collaboratorKeysByAccount();
       return { ...row, agentKeys: row.role === 'owner' ? [] : keyMap.get(row.id) ?? [] };
@@ -2875,17 +3308,36 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 }
 
-async function buildAdminUsers(): Promise<AdminUserItem[]> {
+/**
+ * @param products 只统计这些产品的钻石收支，并且**只返回在这些产品下有过流水的用户**。
+ *                 省略 = 全部产品合计、全部用户（原行为，逐字节一致）。
+ *
+ * ⚠️ 只影响 `totalGranted` / `totalSpent`。**`creditBalance` 永远是全局余额** ——
+ * 钱包只有一个，「爱速拍的余额」这个东西不存在；按产品切出来的那个数既不等于用户能花的钱，
+ * 也不等于任何一笔真实负债。谁要是把它当余额显示，运营就会拿一个不存在的数去跟用户对账。
+ *
+ * 用户名单也跟着收窄，不只是数字：只被授予爱速拍的运营，不该在这一屏看见一堆只用过军师的人
+ * 的姓名、手机号、会话数和成果数（codex 2026-09-11 审出）。
+ */
+async function buildAdminUsers(products?: readonly string[]): Promise<AdminUserItem[]> {
+  // `undefined` = 不收窄（全量）；**空数组 = 收窄到「什么都没有」**，不是全量。
+  // 这两者必须分开：一个没有任何产品授权的运营拿到的就是空数组，
+  // 若在这里当成「没传过滤条件」，刚堵上的后门就原样又开了一遍。
+  const scope = products ? new Set(products) : null;
   const since30 = new Date(now().getTime() - 30 * 864e5);
   const [users, sessions, deliverables, ledgers, tokenAgg, wallets] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 300,
+      // This endpoint returns a complete array; a silent 300-row cap made
+      // older accounts disappear from both client search and account detail.
       include: { tenant: true, plan: true },
     }),
     prisma.session.groupBy({ by: ['userId'], _count: { _all: true }, _max: { updatedAt: true } }),
     prisma.deliverable.groupBy({ by: ['userId'], _count: { _all: true } }),
-    prisma.creditLedger.findMany({ orderBy: { createdAt: 'asc' } }),
+    // 排序必须与权威余额读取（services/credits.ts 的 balanceIn，[createdAt desc, id desc]）
+    // 镜像一致。只按 createdAt 排的话，同一毫秒落的两行谁在后面由数据库决定 ——
+    // 这一屏显示的余额会和用户真实余额对不上，而且时对时不对（codex 2026-09-11 审出）。
+    prisma.creditLedger.findMany({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
     // 近 30 天 token 用量：一次 groupBy（[userId,createdAt] 索引），避免 per-user N+1。
     prisma.tokenUsage.groupBy({ by: ['userId'], where: { userId: { not: null }, createdAt: { gte: since30 } }, _sum: { totalTokens: true } }),
     // 月度额度剩余：一次 findMany 取齐所有钱包（不触发 per-user 惰性重置，列表展示用原值）。
@@ -2896,14 +3348,21 @@ async function buildAdminUsers(): Promise<AdminUserItem[]> {
   const tokenMap = new Map(tokenAgg.map((t) => [t.userId as string, t._sum.totalTokens ?? 0]));
   const walletMap = new Map(wallets.map((w) => [w.userId, w.quota < 0 ? -1 : w.balance])); // -1=不限量
   const creditMap = new Map<string, { balance: number; granted: number; spent: number }>();
+  // 收窄视角时，谁在这些产品下有过流水。用于把用户名单也一起收窄。
+  const seen = new Set<string>();
   for (const l of ledgers) {
     const s = creditMap.get(l.userId) ?? { balance: 0, granted: 0, spent: 0 };
+    // 余额是**全量**流水的最后一行，不受产品过滤影响 —— 钱包只有一个。
+    // 这一行必须在 continue 之前：按产品过滤时若跳过了该用户最新的那笔，
+    // 余额就会停在更早的一行，显示成一个历史上存在过、现在早已不是的数。
     s.balance = l.balance;
+    creditMap.set(l.userId, s);
+    if (scope && !scope.has(l.productCode ?? '')) continue;
+    seen.add(l.userId);
     if (l.delta > 0) s.granted += l.delta;
     if (l.delta < 0) s.spent += Math.abs(l.delta);
-    creditMap.set(l.userId, s);
   }
-  return users.map((u) => {
+  return users.filter((u) => !scope || seen.has(u.id)).map((u) => {
     const sess = sessionMap.get(u.id);
     const credit = creditMap.get(u.id) ?? { balance: 0, granted: 0, spent: 0 };
     return {
@@ -2930,7 +3389,7 @@ async function buildAdminUsers(): Promise<AdminUserItem[]> {
 }
 
 function displayPhone(phone: string): string {
-  if (phone.startsWith('wx_')) return '微信账号';
+  if ((phone.startsWith('wx_') || phone.startsWith('id_unbound_'))) return '微信账号';
   return phone;
 }
 

@@ -78,6 +78,22 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Pr
   const actor = await getAdminActor(req);
   if (actor) {
     (req as unknown as WithActor).adminActor = actor;
+    // 产品闸。挂在这里而不是 admin.ts 的 preHandler 里，是因为 requireAdmin 被四个路由插件
+    // 共用（admin / referral / distribution / invites）—— 后三个是「增长」组，同样是军师的面，
+    // 在这之前一道产品闸都没有。挂在共用入口上，四个插件一次都盖住。
+    //
+    // ⚠️ 这一闸只判「有没有这个产品的 viewer」。写操作各自的 requireSuper /
+    // requireProductAccess('editor') 一条都没动 —— 能不能看和能不能改是两件事，不在一处收口。
+    const { enforceAdminProductAccess } = await import('./adminProductGate.js');
+    try {
+      await enforceAdminProductAccess(req, actor);
+    } catch (e) {
+      const err = e as { statusCode?: number; code?: string; message?: string };
+      return reply.code(err.statusCode ?? 403).send({
+        error: err.message ?? '你没有该产品的操作权限',
+        code: err.code ?? 'ADMIN_PRODUCT_FORBIDDEN',
+      });
+    }
     return;
   }
   // 区分「已登录非管理员 → 403」与「无凭证 → 401」（沿用旧行为）。
@@ -121,6 +137,44 @@ export async function accessibleAgentKeys(actor: AdminActor): Promise<Set<string
   if (actor.kind !== 'account') return new Set();
   const rows = await prisma.agentCollaborator.findMany({ where: { accountId: actor.id }, select: { agentKey: true } });
   return new Set(rows.map((r) => r.agentKey));
+}
+
+export class AdminProductForbiddenError extends Error {
+  statusCode = 403;
+  code = 'ADMIN_PRODUCT_FORBIDDEN';
+  constructor(msg = '你没有该产品的操作权限') { super(msg); }
+}
+
+/**
+ * 按产品授权。超管放行；operator 需要被显式授予这个产品。
+ *
+ * 与 requireAgentAccess 是两个维度：那个管「哪个智能体」，这个管「哪个产品」。
+ * 平台后台是一个、按产品分区，靠的就是这一层 —— 运营 A 能管爱速拍，
+ * 同时完全看不到军师的智能体和话术。
+ */
+export async function requireProductAccess(
+  actor: AdminActor,
+  productCode: string,
+  level: 'viewer' | 'editor',
+): Promise<void> {
+  if (isSuperActor(actor)) return;
+  if (actor.kind !== 'account') throw new AdminProductForbiddenError();
+  const grant = await prisma.adminProductAccess.findUnique({
+    where: { productCode_accountId: { productCode, accountId: actor.id } },
+  });
+  if (!grant) throw new AdminProductForbiddenError();
+  if (level === 'editor' && grant.role !== 'editor') throw new AdminProductForbiddenError('你对该产品仅有只读权限');
+}
+
+/** 操作者可见的产品集合；超管返回 null（= 全部）。后台按它决定显示哪些分区。 */
+export async function accessibleProductCodes(actor: AdminActor): Promise<Set<string> | null> {
+  if (isSuperActor(actor)) return null;
+  if (actor.kind !== 'account') return new Set();
+  const rows = await prisma.adminProductAccess.findMany({
+    where: { accountId: actor.id },
+    select: { productCode: true },
+  });
+  return new Set(rows.map((r) => r.productCode));
 }
 
 /** 当前操作者的 AdminAccount.id（master/legacyUser 无账户行 → null），用于 createdBy 归属。 */

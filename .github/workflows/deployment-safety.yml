@@ -1,0 +1,16 @@
+name: Deployment Safety
+on:
+  pull_request:
+  push:
+    branches: [main, master, 'codex/**']
+jobs:
+  operations:
+    name: 发布与证书安全检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s scripts/ops -p 'test_*.py' -v
+      - run: bash -n scripts/deploy-prod.sh scripts/renew-alb-certificate.sh

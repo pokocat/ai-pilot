@@ -1,3 +1,5 @@
+> 正式服务已迁至新 ECS + RDS + Tair + ALB。当前发布与恢复以 [CLUSTER_DEPLOYMENT.md](CLUSTER_DEPLOYMENT.md) 为准；本文旧单机步骤仅作历史与预发参考。
+
 # 军师 · 部署架构与上线指南（DEPLOYMENT）
 
 > 给"帮我部署到服务器"的 agent 看：照本文件即可把军师跑到一台 Linux 服务器上供测试/试用。
@@ -542,6 +544,25 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - 测试阶段的隔离预发脚本固定写 `CLIP_MEDIA_MODERATION_BYPASS=true`：旁路只接受支持的媒体类型并留审计，用于在阿里云内容安全未开通时先验收产品工程链；`NODE_ENV=production` 会在启动前硬拒绝该开关。AIStar 预发默认 `AEP_CLIP_FORCE_MOCK=true`，实际产出带永久「测试演示」的可播放 MP4 并继续通过 ffmpeg 总装、质量门、缩略图与存储；验证真实石榴时分别关闭这两个测试开关，production/mysql 不允许 force-mock。
 - 军师已提供 `CLIP_MEDIA_MODERATION_PROVIDER=aliyun-green` 的真实图片/视频/语音审核适配器；启用前必须由正确阿里云主账号开通内容安全增强版、给专用 RAM 身份授予 `AliyunYundunGreenWebFullAccess`，并只把该身份的 `ALIYUN_GREEN_ACCESS_KEY_ID/SECRET` 写入 0600 运行时 env。配置不全、权限/欠费、超时或异常返回都会 fail-closed；不得复用文本 `MODERATION_FAIL_OPEN`、其它账号 OSS/SMS 密钥或把 provider 改成伪放行。
 - AIStar 已完成逐段 avatar/b-roll/尾段标准化、H.264/AAC 多段 ffmpeg 总装、字幕、全程 AI 标识和缩略图；但固定正式尾片素材、亮度/响度质量阈值、真实长视频压力验收及四平台真实发布未完成前，仍不得打开生产入口、提交微信审核或宣称完整出片闭环。若后续把大文件改为签名直传/直取，还要在微信后台补齐对应 OSS/CDN 的 `uploadFile / downloadFile` 合法域名。
+
+## 8.9 统一账号中心 aibuzz-id（`id.aibuzz.cn`）接入（2026-09-05）
+
+爱速拍小程序已改为统一账号中心登录，业务请求带 `Authorization: Bearer <RS256 JWT>`；军师 BFF 同时继续接受老的 `x-user-id`。
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `ID_ISSUER` | 否（**留空 = 整体关闭**） | 账号中心 issuer，同时是令牌 `iss` 的逐字符比对值与 JWKS/userinfo 的拼接前缀。留空时账号中心的 RS256 令牌一律 401（**没有「未配置就放行」的降级路径**），老 `x-user-id` 链路不受影响。**生产必须 https**，否则按未配置处理并打 WARN |
+| `ID_AUDIENCES` | 否 | 接受的产品 audience，逗号分隔；留空用默认 `quickreel-api,junshi-api`。令牌 `aud` 含其中之一才放行 |
+| `ID_SERVER_CLIENT_ID` / `ID_SERVER_CLIENT_SECRET` | 否 | 军师自己的机密客户端（`client_credentials`，scope `product.link`），只用于首登后 best-effort 回报 `PUT /api/products/{product}/links/{uid}`。不配就 WARN 一次跳过，登录与建档不受影响 |
+| `VIDEO_SCRIPT_ENGINE` | 否 | 爱速拍脚本 AI（`script/ai-rewrite` / `script/generate`）走哪个引擎：默认 `bff`（军师自己的 LLM 网关）；`aidrama` 只是回退开关 —— aidrama 的脚本引擎在生产网关下一律 503 `CLIP_SCRIPT_ENGINE_NOT_CONFIGURED`，生产不要设它 |
+
+上线注意：
+
+- JWKS 固定取 `${ID_ISSUER}/oauth2/jwks`（进程内缓存 10 分钟，遇未知 `kid` 立即刷新一次），出站需能访问该地址。
+- 端上申请令牌必须带 `scope=openid profile phone offline_access`：军师按手机号建账号，缺 `phone` scope 时 `/userinfo` 给不出 `phone_number`，接口会回 502 `IDENTITY_PHONE_UNAVAILABLE`。
+- 首次登录且令牌 `phone_verified=false` 时返回 403 `PHONE_BINDING_REQUIRED`，端上应引导去账号中心绑手机号（`/api/me/phone/**`）后重试。
+- 数据库需要新增 `app_user.identityUid`（可选唯一）——发布前跑一次 `prisma db push`（或对应迁移），否则带 Bearer 的请求会在建档时报错。
+- 账号中心的合并/注销事件（outbox）**尚未接**，当前依赖令牌失效自然体现；见 `AGENTS.md` §13。
 
 ## 9. 上线前安全/生产硬约束（务必过一遍 · 详见 ROADMAP P2）
 - [x] **用户鉴权代码门禁**：production 强制高强度 `APP_JWT_SECRET`、`APP_JWT_REQUIRED=true`，并要求至少一个配置完整的短信/微信登录通道；缺项启动失败，运行时不接受 `token=userId`，短信通道不能关闭验码。发布前必须先补齐真实凭据再重启，禁止在现有生产缺配置时直接发布造成全量锁号。运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权；细粒度 RBAC、管理员密钥轮换仍是独立待办。

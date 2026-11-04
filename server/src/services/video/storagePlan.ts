@@ -7,6 +7,7 @@
 // ★ 定价同样归运营后台（FeatureFlag `video-storage-pricing`），代码只给保守兜底。
 //   口径与克隆定价（pricing.ts）完全一致：对外定价数据不进代码常量。
 import { prisma } from '../../db.js';
+import { PRODUCT } from '../products.js';
 import { chargeCreditsOnce } from '../credits.js';
 import { featureFlagPayload, setFeatureFlagPayload } from '../featureFlag.js';
 
@@ -126,6 +127,7 @@ export async function buyStoragePack(input: {
     await chargeCreditsOnce(
       input.tenantId, input.userId, plan.packCredits,
       '快出片 · 存储扩容',
+      PRODUCT.quickreel,
       `video-storage:charge:${input.userId}:${input.clientRequestId}`,
       tx,
     );

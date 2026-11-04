@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { ClipProject, ClipScriptMessage, ClipSegment, ClipShot } from '../../../../shared/contracts';
 import { structuredMetered } from '../../llm/gateway.js';
+import { PRODUCT } from '../products.js';
 
 type AiDraft = { reply: string; applied: boolean; segments?: ClipSegment[] };
 
@@ -121,6 +122,8 @@ export async function generateClipScriptTurn(project: ClipProject, message: stri
     maxChars: 12_000,
     // 辅助模型默认 700 token 会把 6-10 段 JSON 拦腰截断；改稿必须给足完整稿预算。
     maxTokens: 2_400,
+    // 成本归属：AI 改稿也是爱速拍烧的钱。见 scriptGenerate 里同一处注释。
+    usageMeta: { productCode: PRODUCT.quickreel },
   });
   if (outcome.live && !outcome.data) {
     throw Object.assign(new Error('AI 改稿结果不完整，原稿没有改动，请再试一次'), {

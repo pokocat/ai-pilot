@@ -194,6 +194,17 @@ server {
         try_files $uri $uri/ /admin/index.html;
     }
 
+    # —— 爱速拍运营台（quickreel-console/dist，子路径；需以 base=/quickreel/ 构建）——
+    # 与 /admin/ 是两个前端、两个 URL：军师后台 30 屏，爱速拍四屏混进去谁也找不着。
+    location = /quickreel {
+        return 301 /quickreel/;          # 同 /admin：避免被 H5 fallback 当成主页
+    }
+
+    location /quickreel/ {
+        alias /var/www/junshi/quickreel/;
+        try_files $uri $uri/ /quickreel/index.html;
+    }
+
     location = /pc {
         return 301 /pc/;                 # 同 /admin：避免被 H5 fallback 当成主页
     }
@@ -251,5 +262,7 @@ server {
 #
 #     location = /admin { return 404; }
 #     location /admin/ { return 404; }
+#     location = /quickreel { return 404; }
+#     location /quickreel/ { return 404; }
 #     location / { return 404; }
 # }

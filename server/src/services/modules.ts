@@ -2,6 +2,7 @@
 // tier 分流启用：free 直启（幂等）；credits 走 credits.ts 扣算力；sku 校验 SKU 已购（未购 402 SKU_REQUIRED）；
 // member 校验 assertPlanActive（过期 403）。所有查询按 tenantId+userId 行级隔离。计费一律复用 credits/tokenQuota，不自造。
 import type { Prisma, UserModule } from '@prisma/client';
+import { PRODUCT } from './products.js';
 import { prisma } from '../db.js';
 import { chargeCredits } from './credits.js';
 import { assertPlanActive } from './tokenQuota.js';
@@ -171,7 +172,7 @@ export async function enable(args: { tenantId: string; userId: string; moduleKey
       const rows = await loadRows(tenantId, userId);
       if (!computeEnabled(m, rows)) {
         const cost = m.price?.credits ?? 0;
-        await chargeCredits(tenantId, userId, cost, `启用能力 · ${m.label}`); // 不足抛 InsufficientCreditsError(402)
+        await chargeCredits(tenantId, userId, cost, `启用能力 · ${m.label}`, PRODUCT.junshi); // 不足抛 InsufficientCreditsError(402)
         await enableRow(tenantId, userId, m.key, 'purchase');
       }
       break;
