@@ -228,7 +228,7 @@ cd app && npm run release:weapp -- --version <版本号> --desc "<说明>"
 cat docs/CLUSTER_DEPLOYMENT.md             # 正式集群：固定归档、逐节点排空与发布；独立测试库验收
 bash scripts/deploy-preprod.sh             # 预发：/opt/junshi-preprod · :4001 · https://wxapi.aibuzz.cn/api_preprod
 ```
-- 正式服务经 ALB 分流到两台 ECS，统一使用 RDS PostgreSQL 与 Tair；发布和恢复以 `docs/CLUSTER_DEPLOYMENT.md` 为准。固定 `git archive` 归档，不跑生产 seed；逐节点排空、健康验收，不能覆盖运行中的 dist。旧主机仅保留预发、其他应用与入口兼容，迁移标记禁止旧进程复活。
+- 正式服务经 ALB 接入两台 ECS，当前 A 主用、B 常驻备用，统一使用 RDS PostgreSQL 与 Tair；发布和恢复以 `docs/CLUSTER_DEPLOYMENT.md` 为准。固定 `git archive` 归档，不跑生产 seed；逐节点排空、健康验收，不能覆盖运行中的 dist。旧主机仅保留预发、其他应用与入口兼容，迁移标记禁止旧进程复活。
 - **预发保留旧主机**：不得套用正式 RDS 或生产支付配置。预发真连 AI，支付强制 mock 不许动；旧单机发布脚本不能用于新集群。
 - 快出片后端边界：军师 BFF 管 JWT/租户/脚本 AI/审核/积分/通知；AIStar Clip 管模板/素材/数字人/任务/总装；生产跨机私网回源，预发回源同机 `127.0.0.1:8081`。详见 `docs/DEPLOYMENT.md` §8.1。
 
