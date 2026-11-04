@@ -208,6 +208,10 @@ def build(config, payload):
         run_log(['npm', 'test'], admin, values, logs / 'admin-tests.log')
         tests['admin'] = test_summary(logs / 'admin-tests.log')
         run_log(['npm', 'run', 'build', '--', '--base=/admin/'], admin, values, logs / 'admin-build.log')
+    if payload['assets'].get('quickreel'):
+        console = directory / 'quickreel-console'
+        run_log(['npm', 'ci', '--include=dev'], console, values, logs / 'quickreel-console-install.log')
+        run_log(['npm', 'run', 'build', '--', '--base=/quickreel/'], console, values, logs / 'quickreel-console-build.log')
     if payload['assets'].get('h5') or payload['assets'].get('pc'):
         app = directory / 'app'
         values.update(TARO_APP_MODE='server', TARO_APP_API='https://' + config['components']['junshi']['host'] + '/api')
@@ -227,7 +231,7 @@ def build(config, payload):
         package.add(str(server), arcname='server')
         package.add(str(directory / 'deploy/cluster/scheduler.mjs'), arcname='ops/scheduler.mjs')
         package.add(str(directory / '.artifact-manifest.json'), arcname='.artifact-manifest.json')
-        for name, source_dir in [('admin', 'admin/dist'), ('h5', 'app/dist-h5')]:
+        for name, source_dir in [('admin', 'admin/dist'), ('quickreel', 'quickreel-console/dist'), ('h5', 'app/dist-h5')]:
             if payload['assets'].get(name):
                 package.add(str(directory / source_dir), arcname='assets/' + name)
     artifact.chmod(0o600)
@@ -411,7 +415,7 @@ def static_check(config, payload):
     for name, enabled in payload['assets'].items():
         if not enabled:
             continue
-        path = '/admin/' if name == 'admin' else '/'
+        path = {'admin': '/admin/', 'quickreel': '/quickreel/', 'h5': '/'}[name]
         status, content_type, body = local_http(host, path)
         expected = (pathlib.Path('/var/www/junshi') / name / 'index.html').read_bytes()
         if status != 200 or 'text/html' not in content_type or body != expected:

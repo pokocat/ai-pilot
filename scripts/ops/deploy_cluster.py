@@ -330,7 +330,8 @@ def main():
     validate_config(config)
     sha = command(['git', 'rev-parse', args.sha + '^{commit}'], cwd=ROOT).strip()
     selected = ['junshi', 'quickreel'] if args.component == 'both' else [args.component]
-    assets = {'admin': args.component != 'quickreel' and not args.skip_admin, 'h5': args.h5}
+    assets = {'admin': args.component != 'quickreel' and not args.skip_admin,
+              'quickreel': args.component != 'quickreel' and not args.skip_admin, 'h5': args.h5}
     if args.component == 'quickreel' and args.h5:
         raise RuntimeError('Quickreel-only releases cannot replace Junshi H5')
     run_dir = ROOT / '.deploy-logs' / ('cluster-' + sha[:8] + '-' + uuid.uuid4().hex[:12])

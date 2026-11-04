@@ -19,7 +19,7 @@
 # 只读查看资源、主备、版本、schema 差异和发布顺序
 bash scripts/deploy-prod.sh --plan
 
-# 默认：军师 API + 运营后台 + 单实例 scheduler
+# 默认：军师 API + 两套运营后台（/admin、/quickreel）+ 单实例 scheduler
 bash scripts/deploy-prod.sh
 
 # 指定已提交版本；只部署该提交，不包含工作区未提交内容
@@ -47,7 +47,7 @@ bash scripts/renew-alb-certificate.sh
 ## 自动执行的发布顺序
 
 1. 锁定完整 SHA，取得远端跨聊天发布锁。检查 ECS 实例与 IP、主后端组、主备权重、生产数据库/Tair/TLS、profile、上一版与 schema。两台同时承流时拒绝，需先按主备配置操作。
-2. 非承流节点在 /opt/aibuzz-deploy/builds/<run> 构建归档；Node24、内存预检、npm ci、server build、独立库全量与 profile 检查。默认也检查并构建 admin；H5 按需。默认不复用验证；`--validation-receipt` 仅供精确匹配 server Git tree、Node 版本及独立库的已完成验证复核。
+2. 非承流节点在 /opt/aibuzz-deploy/builds/<run> 构建归档；Node24、内存预检、npm ci、server build、独立库全量与 profile 检查。默认也检查并构建 admin（108 项单测）和 quickreel-console；分别固定 /admin/、/quickreel/ 基础路径，切流前核对 HTML 与脚本/CSS 资源；H5 按需。默认不复用验证；`--validation-receipt` 仅供精确匹配 server Git tree、Node 版本及独立库的已完成验证复核。
 3. 给两台机器分发相同校验和产物。API 与 BFF 分别进入各自 /opt/<产品>/releases/<完整 SHA>/server；EnvironmentFile 永远从 /etc/junshi 读取，归档不带正式或测试环境文件。静态资源使用新目录切换并保留旧客户端可能继续请求的 hashed chunks。
 4. 待更新实例先收到 SIGUSR2，停止后台领单并保留 HTTP；脚本确认实际 PID 日志回执，等 ALB 排空间隔、HTTP 在途和持久任务完成后才重启。至少三次空闲观察；超时保留旧进程，不强杀、不清状态。Quickreel-only 不停止军师 worker。
 5. 更新备用实例的 systemd drop-in，验证实际 PID 环境、版本路径、两个产品健康与显式 ALB 探针、跨机 Tair 读写，再把正式流量切过去。原主降权后，排空并更新原主。
@@ -60,7 +60,7 @@ bash scripts/renew-alb-certificate.sh
 
 schema/pgvector 文件相对任一节点正在运行版本发生变化时，默认拦截。先按 [迁移 SOP](MIGRATION_SOP.md) 完成兼容结构演进、备份和数据核验，才可 `--schema-reviewed`；该参数会只读比较 RDS 与目标结构，并不执行 DDL。发布工具没有 seed/reset/accept-data-loss，也不把生产配置当本地或测试默认。
 
-军师与爱速拍 BFF 共库，但安装目录和版本独立。默认只发军师与 admin，Quickreel-only 只发爱速拍 BFF；共用 ALB 切流时另一个产品保持同版本可用。若变化涉及公共代码且两边都需要，明确选择 both。运营价目、提示词、商户和身份配置不随代码发布重置。
+军师与爱速拍 BFF 共库，但安装目录和版本独立。默认发军师、两套运营前端及 scheduler；Quickreel-only 只发爱速拍 BFF；共用 ALB 切流时另一个产品保持同版本可用。若变化涉及公共代码且两边都需要，明确选择 both。运营价目、提示词、商户和身份配置不随代码发布重置。
 
 ## 失败恢复与主备接管
 
