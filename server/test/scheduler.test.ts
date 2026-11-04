@@ -3,7 +3,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone, deliverable } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { registerJob, runJob, scanIdleCasefiles, RECALL_IDLE_HOURS } from '../src/services/scheduler.ts';
+import { registerJob, runJob, drainScheduler, scanIdleCasefiles, RECALL_IDLE_HOURS } from '../src/services/scheduler.ts';
 
 before(async () => {
   await getApp();
@@ -13,6 +13,29 @@ before(async () => {
 
 after(async () => {
   await closeApp();
+});
+
+test('发布排空必须等待正在执行和已经排队的任务，异常任务也能完成收尾', async () => {
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const events: string[] = [];
+  registerJob({ name: 'test-deploy-held', intervalMs: 60_000, run: async () => {
+    events.push('running'); await hold; events.push('completed');
+  } });
+  registerJob({ name: 'test-deploy-queued', intervalMs: 60_000, run: async () => {
+    events.push('queued-completed'); throw new Error('isolated-job-failure');
+  } });
+  const running = runJob('test-deploy-held');
+  const queued = runJob('test-deploy-queued');
+  let drained = false;
+  const shutdown = drainScheduler().then(() => { drained = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ['running']);
+  assert.equal(drained, false, '不能在业务事务完成前退出进程');
+  release();
+  await Promise.all([running, queued, shutdown]);
+  assert.deepEqual(events, ['running', 'completed', 'queued-completed']);
+  assert.equal(drained, true);
 });
 
 test('任务注册与隔离执行：run 抛错不外溢，未注册任务报错', async () => {

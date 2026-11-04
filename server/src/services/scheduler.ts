@@ -167,6 +167,12 @@ export function stopScheduler(): void {
   setSchedulerMetricsEnabled(false);
 }
 
+/** 发布专用：停止接收新的周期任务，并等待已排队及正在执行的任务收尾。 */
+export async function drainScheduler(): Promise<void> {
+  stopScheduler();
+  await queueTail;
+}
+
 // ============ 任务：案卷久未推进召回候选 ============
 // 有活跃案卷、但 ≥48h 没有任何动作（打卡/回填/认可都会碰 casefile.updatedAt）→ 登记召回候选。
 // 幂等：同一用户同一天只登记一次（按当天已有 system.recall.candidate 审计去重）。
