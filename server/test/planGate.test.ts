@@ -123,7 +123,14 @@ test('未带 token 的写：401 而非 403（闸不抢路由自己的鉴权语�
   assert.equal(r.status, 401);
 });
 
-test('缓存与 bust：开通套餐后立即可写', async () => {
+test('缓存与 bust：单机开通套餐后立即可写', async (t) => {
+  const savedRedis = process.env.REDIS_URL;
+  delete process.env.REDIS_URL;
+  t.after(() => {
+    if (savedRedis === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = savedRedis;
+    __resetPlanGate();
+  });
   const id = await bareUser();
   assert.equal(await hasActivePlan(id), false);
   const plan = await prisma.plan.findFirstOrThrow({ where: { name: '入门版' } });
@@ -131,6 +138,44 @@ test('缓存与 bust：开通套餐后立即可写', async () => {
   // 30s 缓存内仍是旧值 → bust 后立即翻转
   assert.equal(await hasActivePlan(id), false);
   bustPlanGate(id);
+  assert.equal(await hasActivePlan(id), true);
+});
+
+test('多进程：其他进程开通、到期、撤销套餐后，当前进程立即读到新权限', async (t) => {
+  const savedRedis = process.env.REDIS_URL;
+  process.env.REDIS_URL = 'rediss://cluster-cache.invalid:6379/10';
+  t.after(() => {
+    if (savedRedis === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = savedRedis;
+    __resetPlanGate();
+  });
+  const id = await bareUser();
+  const plan = await prisma.plan.findFirstOrThrow({ where: { name: '入门版' } });
+  assert.equal(await hasActivePlan(id), false);
+  // 直接更新模拟另一个进程处理付款；刻意不调用本进程 bustPlanGate。
+  await prisma.user.update({ where: { id }, data: { planId: plan.id, planExpiresAt: null } });
+  assert.equal(await hasActivePlan(id), true);
+  await prisma.user.update({ where: { id }, data: { planExpiresAt: new Date(Date.now() - 86400_000) } });
+  assert.equal(await hasActivePlan(id), false, '到期不能继续使用本地 active 缓存');
+  await prisma.user.update({ where: { id }, data: { planExpiresAt: null } });
+  assert.equal(await hasActivePlan(id), true);
+  await prisma.user.update({ where: { id }, data: { planId: null } });
+  assert.equal(await hasActivePlan(id), false, '撤销套餐必须立即阻断写权限');
+});
+
+test('切换多进程配置时忽略已经预热的单机权限缓存', async (t) => {
+  const savedRedis = process.env.REDIS_URL;
+  delete process.env.REDIS_URL;
+  t.after(() => {
+    if (savedRedis === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = savedRedis;
+    __resetPlanGate();
+  });
+  const id = await bareUser();
+  assert.equal(await hasActivePlan(id), false);
+  const plan = await prisma.plan.findFirstOrThrow({ where: { name: '入门版' } });
+  await prisma.user.update({ where: { id }, data: { planId: plan.id } });
+  process.env.REDIS_URL = 'rediss://cluster-cache.invalid:6379/10';
   assert.equal(await hasActivePlan(id), true);
 });
 

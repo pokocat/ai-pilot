@@ -146,6 +146,7 @@ test('quickreel 档裁出来的定时任务表：只剩爱速拍那几个', asyn
   assert.deepEqual(names, [
     'avatar-training-notification',   // 数字人训练完成通知
     'clip-render-notification',       // 出片完成通知 + 失败退钻石（漏跑 = 用户的钱退不回来）
+    'identity-outbox',               // 统一账号中心事件：同步停用、注销、合并与令牌撤销
     'video-maintenance-sweep',        // 超时未提交 / 卡住的 hold 兜底退款
-  ], '爱速拍进程只该有这三个任务；多出来的是军师的，少掉的是爱速拍自己的');
+  ], '爱速拍进程只该有这四个任务；多出来的是军师的，少掉的是爱速拍自己的');
 });

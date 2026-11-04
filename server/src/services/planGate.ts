@@ -21,8 +21,8 @@ export class PlanRequiredError extends Error {
 /** 从未开通 → PLAN_REQUIRED（引导开通）；开通过但到期 → PLAN_EXPIRED（引导续费，前端已有只读态 UI）。 */
 export type PlanGateState = 'active' | 'expired' | 'none';
 
-// 30s 短缓存：写请求每次都查一遍 planId 太浪费（P1-6 刚把 context 链的 round-trip 压下去）。
-// 开通套餐的路径必须调 bustPlanGate，否则用户付完款最长 30s 内写操作仍被拦。
+// 单机保留 30s 短缓存；配置 Redis 的多进程部署直接读数据库，避免其他进程
+// 收到付款或撤销后，本进程仍使用旧权限。bustPlanGate 只负责单机缓存失效。
 const TTL = 30_000;
 const cache = new Map<string, { state: PlanGateState; at: number }>();
 
@@ -35,7 +35,8 @@ export function __resetPlanGate(): void {
 }
 
 export async function planGateState(userId: string): Promise<PlanGateState> {
-  const hit = cache.get(userId);
+  const useLocalCache = !process.env.REDIS_URL?.trim();
+  const hit = useLocalCache ? cache.get(userId) : undefined;
   if (hit && Date.now() - hit.at < TTL) return hit.state;
   const u = await prisma.user.findUnique({
     where: { id: userId },
@@ -44,8 +45,10 @@ export async function planGateState(userId: string): Promise<PlanGateState> {
   const state: PlanGateState = !u?.planId ? 'none'
     : isExpired(u.planExpiresAt, now()) ? 'expired'
     : 'active';
-  if (cache.size > 50_000) cache.clear(); // 极端防线：不让脏 token 撑爆内存
-  cache.set(userId, { state, at: Date.now() });
+  if (useLocalCache) {
+    if (cache.size > 50_000) cache.clear(); // 极端防线：不让脏 token 撑爆内存
+    cache.set(userId, { state, at: Date.now() });
+  }
   return state;
 }
 

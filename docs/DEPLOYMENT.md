@@ -1,3 +1,5 @@
+> 正式服务已迁至新 ECS + RDS + Tair + ALB。当前发布与恢复以 [CLUSTER_DEPLOYMENT.md](CLUSTER_DEPLOYMENT.md) 为准；本文旧单机步骤仅作历史与预发参考。
+
 # 军师 · 部署架构与上线指南（DEPLOYMENT）
 
 > 给"帮我部署到服务器"的 agent 看：照本文件即可把军师跑到一台 Linux 服务器上供测试/试用。

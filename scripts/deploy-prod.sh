@@ -86,6 +86,14 @@ die(){ printf "\033[1;31m[deploy] %s\033[0m\n" "$*" >&2; exit 1; }
 
 [ -f "$SSH_KEY" ] || die "SSH key 不存在：$SSH_KEY"
 
+# 迁移后旧入口只保留兼容转发；单机脚本不能复活旧库或绕过 ALB 滚动发布。
+case "$DEPLOY_HOST" in
+  *101.37.189.227|*121.199.172.157) die "新集群请按 docs/CLUSTER_DEPLOYMENT.md 发布" ;;
+esac
+ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" 'test ! -f /opt/junshi/.migrated-to' \
+  || die "目标已迁移或无法核验迁移标记；请按 docs/CLUSTER_DEPLOYMENT.md 发布"
+
+
 # 醒目声明本次到底发的是哪个提交——发错版本的代价太大，不能只靠日志里一行小字。
 printf '\033[1;33m========================================================\033[0m\n'
 # 显式把 REMOTE_ROOT 指回军师目录 + QUICKREEL_ONLY=1，正是上面那段注释要避免的事：
