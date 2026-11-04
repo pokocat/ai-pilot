@@ -207,7 +207,7 @@ def build(config, payload):
         run_log(['npm', 'ci', '--include=dev'], admin, values, logs / 'admin-install.log')
         run_log(['npm', 'test'], admin, values, logs / 'admin-tests.log')
         tests['admin'] = test_summary(logs / 'admin-tests.log')
-        run_log(['npm', 'run', 'build'], admin, values, logs / 'admin-build.log')
+        run_log(['npm', 'run', 'build', '--', '--base=/admin/'], admin, values, logs / 'admin-build.log')
     if payload['assets'].get('h5') or payload['assets'].get('pc'):
         app = directory / 'app'
         values.update(TARO_APP_MODE='server', TARO_APP_API='https://' + config['components']['junshi']['host'] + '/api')
@@ -473,7 +473,7 @@ def activate(config, payload):
             if state['WorkingDirectory'] != str(pathlib.Path(component['root']) / 'releases' / payload['sha'] / 'server'):
                 raise RuntimeError('Loaded process directory mismatch')
         static_acceptance = static_check(config, payload)
-    except Exception:
+    except Exception as error:
         for kind, target, previous in reversed(backups):
             path = pathlib.Path(target)
             if kind == 'unit':
@@ -492,7 +492,7 @@ def activate(config, payload):
         execute(['systemctl', 'daemon-reload'])
         for name in selected:
             execute(['systemctl', 'restart', config['components'][name]['unit']], timeout=90)
-        raise RuntimeError('Activation failed; previous node configuration restored; traffic remains on other node')
+        raise RuntimeError('Activation failed (' + str(error) + '); previous node configuration restored; traffic remains on other node')
     for name in selected:
         root = pathlib.Path(config['components'][name]['root'])
         (root / '.deploy-version').write_text(payload['sha'] + '\n')
