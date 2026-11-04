@@ -133,11 +133,17 @@ def main():
                 'expires_utc': datetime.datetime.fromtimestamp(expires, datetime.timezone.utc).isoformat(), 'verified': False}
     receipt.write_text(json.dumps(metadata, indent=2) + '\n')
     receipt.chmod(0o600)
+    current = cloud('alb', 'GetListenerAttribute', config['region'], ListenerId=config['listener_id'])
+    if [row['CertificateId'] for row in current['Certificates']] != [old_id]:
+        raise RuntimeError('Certificate binding changed during issuance; refusing to overwrite another operator')
     try:
         cloud('alb', 'UpdateListenerAttribute', config['region'], ListenerId=config['listener_id'],
               **{'Certificates.1.CertificateId': new_id})
         wait_for_binding(config, new_id, fingerprint)
     except Exception:
+        current = cloud('alb', 'GetListenerAttribute', config['region'], ListenerId=config['listener_id'])
+        if [row['CertificateId'] for row in current['Certificates']] not in [[new_id], [old_id]]:
+            raise RuntimeError('Certificate binding changed by another operator; manual review required, no rollback overwrite')
         cloud('alb', 'UpdateListenerAttribute', config['region'], ListenerId=config['listener_id'],
               **{'Certificates.1.CertificateId': old_id})
         wait_for_binding(config, old_id, before['fingerprint'])

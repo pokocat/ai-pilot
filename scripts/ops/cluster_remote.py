@@ -2,6 +2,7 @@
 """Scoped remote operations. Python 3.6 compatible for Alibaba Cloud Linux 3."""
 import datetime
 import hashlib
+from html.parser import HTMLParser
 import json
 import os
 import pathlib
@@ -205,6 +206,7 @@ def build(config, payload):
         admin = directory / 'admin'
         run_log(['npm', 'ci', '--include=dev'], admin, values, logs / 'admin-install.log')
         run_log(['npm', 'test'], admin, values, logs / 'admin-tests.log')
+        tests['admin'] = test_summary(logs / 'admin-tests.log')
         run_log(['npm', 'run', 'build'], admin, values, logs / 'admin-build.log')
     if payload['assets'].get('h5') or payload['assets'].get('pc'):
         app = directory / 'app'
@@ -362,7 +364,7 @@ def switch_assets(config, payload, backups):
         directory.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(str(source), str(directory))
         # Old clients may request hashed chunks after a traffic switch.
-        for child in ['assets', 'fonts', 'static']:
+        for child in ['assets', 'fonts', 'static', 'js', 'css', 'img', 'images']:
             old = target / child
             if old.is_dir():
                 for file in old.rglob('*'):
@@ -382,6 +384,53 @@ def switch_assets(config, payload, backups):
         link = target.with_name('.' + name + '-' + payload['deployment_id'])
         link.symlink_to(directory)
         os.replace(str(link), str(target))
+
+
+def local_http(host, path):
+    request = urllib.request.Request('http://127.0.0.1' + path,
+                                     headers={'Host': host, 'X-Forwarded-Proto': 'https'})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.status, response.headers.get('Content-Type', ''), response.read()
+
+
+class AssetReferences(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.urls = []
+
+    def handle_starttag(self, tag, attributes):
+        for key, value in attributes:
+            if value and ((tag == 'script' and key == 'src') or (tag == 'link' and key == 'href')):
+                if urllib.parse.urlsplit(value).path.endswith(('.js', '.css')):
+                    self.urls.append(value)
+
+
+def static_check(config, payload):
+    checks = []
+    host = config['components']['junshi']['host']
+    for name, enabled in payload['assets'].items():
+        if not enabled:
+            continue
+        path = '/admin/' if name == 'admin' else '/'
+        status, content_type, body = local_http(host, path)
+        expected = (pathlib.Path('/var/www/junshi') / name / 'index.html').read_bytes()
+        if status != 200 or 'text/html' not in content_type or body != expected:
+            raise RuntimeError('Published static entry does not match the built release: ' + name)
+        parser = AssetReferences()
+        parser.feed(body.decode())
+        if not parser.urls:
+            raise RuntimeError('Static entry has no JavaScript/CSS references')
+        for reference in parser.urls:
+            url = urllib.parse.urlsplit(urllib.parse.urljoin('https://' + host + path, reference))
+            if url.hostname != host:
+                continue
+            target = url.path + ('?' + url.query if url.query else '')
+            code, kind, unused = local_http(host, target)
+            if code != 200 or 'text/html' in kind:
+                raise RuntimeError('Static JavaScript/CSS missing or routed to SPA HTML: ' + url.path)
+            checks.append({'path': url.path, 'status': code})
+        checks.append({'path': path, 'status': status, 'index_matches_release': True})
+    return checks
 
 
 def activate(config, payload):
@@ -423,6 +472,7 @@ def activate(config, payload):
                     raise RuntimeError('Loaded process configuration mismatch: ' + key)
             if state['WorkingDirectory'] != str(pathlib.Path(component['root']) / 'releases' / payload['sha'] / 'server'):
                 raise RuntimeError('Loaded process directory mismatch')
+        static_acceptance = static_check(config, payload)
     except Exception:
         for kind, target, previous in reversed(backups):
             path = pathlib.Path(target)
@@ -448,7 +498,9 @@ def activate(config, payload):
         (root / '.deploy-version').write_text(payload['sha'] + '\n')
         with (root / '.deploy-history').open('a') as history:
             history.write(datetime.datetime.utcnow().isoformat() + 'Z\t' + payload['sha'] + '\trolling healthy ' + payload['deployment_id'] + '\n')
-    return check(config, payload['sha'], selected)
+    result = check(config, payload['sha'], selected)
+    result['junshi']['static_checks'] = static_acceptance
+    return result
 
 
 def scheduler(config, payload):
@@ -567,6 +619,8 @@ if __name__ == '__main__':
             result = schema_check(CONFIG, request)
         elif action == 'cleanup':
             result = cleanup(CONFIG, request)
+        elif action == 'static':
+            result = static_check(CONFIG, request)
         else:
             raise RuntimeError('Unknown operation')
         print(json.dumps({'ok': True, 'result': result}))

@@ -86,7 +86,8 @@ class Cluster:
                           '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=12']
         self.helper = (ROOT / 'scripts/ops/cluster_remote.py').read_text()
         self.lock = None
-        self.state = {'deployment_id': deployment_id, 'sha': sha, 'selected': selected, 'events': []}
+        self.state = {'deployment_id': deployment_id, 'sha': sha, 'selected': selected,
+                      'tool_sha': command(['git', 'rev-parse', 'HEAD'], cwd=ROOT).strip(), 'events': []}
 
     def journal(self, event, **data):
         record = {'event': event, 'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), **data}
@@ -218,12 +219,19 @@ class Cluster:
         raise RuntimeError('Drain timed out; old processes were kept running, no forced kill performed')
 
     def readiness(self, node):
-        for ip in self.config['verify_ips']:
-            for component in self.config['components'].values():
-                status, body = http_get(ip, component['host'], '/api/health/ready?backend=' + node)
-                if status != 200 or json.loads(body).get('db') != 'up':
-                    raise RuntimeError('ALB readiness failed for ' + node + '/' + component['host'])
-        self.journal('alb_readiness_passed', node=node)
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            try:
+                for ip in self.config['verify_ips']:
+                    for component in self.config['components'].values():
+                        status, body = http_get(ip, component['host'], '/api/health/ready?backend=' + node)
+                        if status != 200 or json.loads(body).get('db') != 'up':
+                            raise RuntimeError('ALB readiness failed')
+                self.journal('alb_readiness_passed', node=node)
+                return
+            except Exception:
+                time.sleep(2)
+        raise RuntimeError('ALB readiness did not converge for node ' + node)
 
     def shared_cache(self, standby, primary):
         self.remote(standby, 'cache', operation='write')

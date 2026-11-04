@@ -148,6 +148,19 @@ class RollingTests(unittest.TestCase):
 
 
 class GuardTests(unittest.TestCase):
+    def test_frontend_asset_fallback_to_html_is_a_release_failure(self):
+        with patch.object(remote.pathlib.Path, 'read_bytes', return_value=b'<script src="/admin/assets/main.js"></script>'), \
+                patch.object(remote, 'local_http', side_effect=[(200, 'text/html', b'<script src="/admin/assets/main.js"></script>'),
+                                                               (200, 'text/html', b'wrong SPA fallback')]):
+            with self.assertRaisesRegex(RuntimeError, 'SPA HTML'):
+                remote.static_check(CONFIG, {'assets': {'admin': True}})
+
+    def test_frontend_wrong_index_is_rejected_even_when_http_200(self):
+        with patch.object(remote.pathlib.Path, 'read_bytes', return_value=b'expected admin index'), \
+                patch.object(remote, 'local_http', return_value=(200, 'text/html', b'wrong product index')):
+            with self.assertRaisesRegex(RuntimeError, 'does not match'):
+                remote.static_check(CONFIG, {'assets': {'admin': True}})
+
     def test_quickreel_quiesce_does_not_stop_military_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             config = copy.deepcopy(CONFIG)
