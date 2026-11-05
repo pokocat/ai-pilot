@@ -842,9 +842,17 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
       const before = await prisma.commissionSettlement.findUnique({ where: { id: req.params.id } });
       if (!before) fail('结算单不存在', 404, 'SETTLEMENT_NOT_FOUND');
       if (before!.status !== 'draft') fail(`只有草稿可核准（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
-      const after = await prisma.commissionSettlement.update({
-        where: { id: before!.id },
-        data: { status: 'approved', approvedBy: actorName(actor), approvedAt: now() },
+      const after = await prisma.$transaction(async (tx) => {
+        // 与 generate 同一把锁：核准/打款/作废三态互斥。此前三者都是「事务外读 before.status → 事务内 where:{id} 无条件 update」，
+        // 并发下 paid 与 void 可交错执行 —— void 把流水 settlementId 解绑放回待结池，paid 却仍把单标成已打款，
+        // 下一次 generate 重新拾起这些 confirmed 流水再结一次 → 同一笔佣金重复打款。加锁 + 条件占状态堵死这个窗口。
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:settle:${before!.distributorId}`}))`;
+        const claimed = await tx.commissionSettlement.updateMany({
+          where: { id: before!.id, status: 'draft' },
+          data: { status: 'approved', approvedBy: actorName(actor), approvedAt: now() },
+        });
+        if (claimed.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+        return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
       });
       await recordAudit({
         action: 'admin.distribution.settlement.approve',
@@ -873,14 +881,18 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         if (before!.status !== 'approved') fail(`只有已核准的单可标记打款（当前 ${before!.status}）`, 409, 'SETTLEMENT_STATUS_INVALID');
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:settle:${before!.distributorId}`}))`;
+          // 先条件占状态：并发的 void 若已把这张单改走，count=0 → 回滚，杜绝「流水被解绑却仍标记已打款」的重复结算源头。
+          const claimed = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: 'approved' },
+            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
+          });
+          if (claimed.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
           await tx.commissionEntry.updateMany({
             where: { settlementId: before!.id, status: 'confirmed' },
             data: { status: 'settled' },
           });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
-            data: { status: 'paid', paidBy: actorName(actor), paidAt: at, paidRef, note: text(req.body?.note, 500) ?? before!.note },
-          });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.paid',
@@ -918,11 +930,15 @@ export async function adminDistributionRoutes(app: FastifyInstance) {
         }
         const at = now();
         const after = await prisma.$transaction(async (tx) => {
-          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
-          return tx.commissionSettlement.update({
-            where: { id: before!.id },
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:settle:${before!.distributorId}`}))`;
+          // 先条件占状态：只作废仍处 draft/approved 的单；并发的 paid 若已把它推成 paid，count=0 → 回滚（已打款不可作废）。
+          const claimed = await tx.commissionSettlement.updateMany({
+            where: { id: before!.id, status: { in: ['draft', 'approved'] } },
             data: { status: 'void', note: `${before!.note ? `${before!.note}\n` : ''}[作废 ${at.toISOString()} by ${actorName(actor)}] ${reason}` },
           });
+          if (claimed.count !== 1) fail('结算单状态已变化，请刷新后重试', 409, 'SETTLEMENT_STATUS_INVALID');
+          await tx.commissionEntry.updateMany({ where: { settlementId: before!.id }, data: { settlementId: null } });
+          return tx.commissionSettlement.findUniqueOrThrow({ where: { id: before!.id } });
         });
         await recordAudit({
           action: 'admin.distribution.settlement.void',
