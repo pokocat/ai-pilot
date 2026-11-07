@@ -84,4 +84,4 @@
 
 ## 下一步取证
 
-供应商需要按上述两组请求 ID 提供历史响应事件类型、content block 类型和 stop reason；当前用户账单接口没有这些信息。代码侧修复应保留 finalMessage 的异常、事件计数和已见 usage，并在流中保留初始正文/最近快照，不能依赖结束后已清理的 currentMessage。已取得 text 但流未完整结束时，只能按不完整结果处理，不能直接标 completed。继续验证错误包装后的 usage 透传，以及 provider/trace/Worker 结算。相关缺口已登记在 `docs/agents/13-todo.md`；本次未实施生产代码修复或发布。
+供应商需要按上述两组请求 ID 提供历史响应事件类型、content block 类型和 stop reason；当前用户账单接口没有这些信息。代码侧修复应保留 finalMessage 的异常、事件计数和已见 usage，并在流中保留初始正文/最近快照，不能依赖结束后已清理的 currentMessage。已取得 text 但流未完整结束时，只能按不完整结果处理，不能直接标 completed。继续验证错误包装后的 usage 透传，以及 provider/trace/Worker 结算。以上是 2026-11-06 调查阶段的取证结论；代码修复已在 2026-11-07 落地，实际发布与验收记录见本文开头及 `docs/CHANGELOG.md`。历史原始流仍需供应商提供。
