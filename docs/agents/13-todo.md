@@ -6,6 +6,8 @@
 ---
 ## 13. 已知限制 / TODO
 
+- [ ] **原生 mock 的连续复盘天数跨 DST 会少算（2026-11-07）**：`weapp-native/services/mock.js` 的 `reviewStreakFrom()` 用本地午夜相差严格 24 小时判断连续日，跨夏令时的一天实际可能为 23/25 小时；本机洛杉矶日期已复现 6 天种子算成 5 天。当前解析修复发布只统一了原本固定在八月的测试时钟，未修改客户端运行逻辑。后续改为按日期的日历日序号比较，并补跨 DST 专项；不通过调整断言或跳过用例掩盖此边界。
+
 - [ ] **爱速拍脚本 AI 的真实产出质量没有验过（2026-09-05，WP-A3）**：`script/generate` / `script/ai-rewrite` / `script/chat` 三条现在全在军师自己的 LLM 网关上，但测试环境 `isAiTestMode()` 恒不接真实 provider，自动化只能锁**入参闸、机审闸、失败形态（产出不可用必须显式报错且不写回上游项目）与开关分流**。以下四件必须用真实 provider 跑一遍才能算完：① `scope:'segment'` 改出来的那一句是否守住了 role / 字数目标、是否和上下段像同一个人说话；② `scope:'all'` 空指令的「润色全篇」会不会把事实改掉或把信息量削平；③ 模型偶发只回部分段时 `byNo.size !== rows.length` 的 502 是否过于频繁（真发生就要加一轮定向重试，而不是放松校验）；④ 单句改写的 `maxTokens: 900` 对长句 + 纠错轮是否够。**不要用「测试全绿」当体验验收**。
 - [ ] **`scope:'segment'` 改写按 `no` 定位段落，端上未保存的新增段会退化成无骨架兜底（2026-09-05，WP-A3）**：端上传的 `text` 是编辑框里的当前文案（可能还没 `saveProject`），`no` 只用来取骨架约束。若 `no` 在上游项目里找不到（典型是端上刚加了一段还没保存），服务层不报错，改按 `role='avatar'`、无 hint、目标字数取原文长度兜底——**宁可少一点上下文，也不因为一次序号对不上把用户的改写请求打回**。真要精确，得让端上在改写前先落一次盘，或把 role/hint 随请求一起上送（要改契约）。
 - [ ] **未拉统一账号中心 outbox（合并 / 注销 / 换绑事件）**：`GET /api/products/{product}/outbox`（aibuzz-id README §9.3，pull + 自持游标）这一路**没做**。当前口径是「账号中心的合并 / 注销通过令牌失效自然体现」——refresh 作废后端上必须重登，军师这边的 `User.identityUid` 不会被主动改写。后果：账号在账号中心被合并到另一个 uid 之后，军师本地仍留着旧 uid 那一行（下次带新 uid 的令牌进来会按手机号命中同一个本地账号并因 `identityUid` 已占用而 409 `IDENTITY_CONFLICT`）；注销事件也不会主动清理本地档案。补的时候要一起做：outbox 游标持久化、`USER_MERGED` 时把本地 `identityUid` repoint 到存活方并重报产品链接（§9.2 的 409 分支）、`USER_CLOSED` 接到既有的 `services/accountDeletion.ts`。前置条件是机密客户端（`ID_SERVER_CLIENT_ID`/`ID_SERVER_CLIENT_SECRET`）已配。

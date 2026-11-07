@@ -22,6 +22,7 @@ const CFG: ResolvedAiConfig = {
   provider: 'claude', label: 'test', baseUrl: 'https://gateway.test', model: 'claude-test', apiKey: 'sk-real-test',
   embeddingModel: '', temperature: 0.6, thinkingMode: 'disabled', thinkingBudget: 1024,
   timeoutMs: 30_000, embeddingEnabled: false, embeddingBaseUrl: '', embeddingApiKey: '',
+  poolBypass: true,
 } as unknown as ResolvedAiConfig;
 
 const CTX = {
@@ -107,5 +108,101 @@ describe('Claude 流式', () => {
     assert.equal(call, 2, '撞上限应自动续写一轮');
     assert.equal(done?.text, '前半段写到这里，后半段补齐了。');
     assert.equal(done?.truncated, undefined, '续写成功后不该再标未写完');
+  });
+});
+
+function diagnosticSse(opts: { initial?: string; chunks?: string[]; stop?: boolean; reason?: string; thinking?: string; error?: boolean; output?: number } = {}): string {
+  const ev = (type: string, data: object) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  let body = ev('message_start', { message: { id: 'msg_diagnostic', type: 'message', role: 'assistant', model: 'claude-test', content: [], stop_reason: null, stop_sequence: null,
+    usage: { input_tokens: 12, output_tokens: 0, cache_read_input_tokens: 20, cache_creation_input_tokens: 5 } } });
+  body += ev('content_block_start', { index: 0, content_block: opts.thinking ? { type: 'thinking', thinking: '', signature: '' } : { type: 'text', text: opts.initial ?? '' } });
+  if (opts.thinking) body += ev('content_block_delta', { index: 0, delta: { type: 'thinking_delta', thinking: opts.thinking } });
+  for (const text of opts.chunks ?? []) body += ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } });
+  body += ev('content_block_stop', { index: 0 });
+  body += ev('message_delta', { delta: { stop_reason: opts.reason ?? 'end_turn', stop_sequence: null }, usage: { output_tokens: opts.output ?? 357, cache_creation_input_tokens: 7 } });
+  if (opts.error) body += ev('error', { error: { type: 'overloaded_error', message: 'synthetic stream error' } });
+  else if (opts.stop !== false) body += ev('message_stop', {});
+  return body;
+}
+
+async function collectDiagnostic(body: string) {
+  stubSse(body);
+  const deltas: string[] = [];
+  let done: Extract<Awaited<ReturnType<ReturnType<typeof claudeChatStream>['next']>>['value'], { type: 'done' }> | undefined;
+  for await (const event of claudeChatStream(CTX, CFG)) {
+    if (event.type === 'delta') deltas.push(event.text);
+    else done = event;
+  }
+  return { deltas, done };
+}
+
+describe('Claude 异常结束与真实失败用量', () => {
+  test('快速流的初始正文只下发一次，不与 SDK 原地累积的 delta 重复', async () => {
+    const { deltas, done } = await collectDiagnostic(diagnosticSse({ initial: '先看', chunks: ['毛利', '结构。'] }));
+    assert.equal(deltas.join(''), '先看毛利结构。');
+    assert.equal(done?.result.text, '先看毛利结构。');
+    assert.equal(done?.result.truncated, undefined);
+    assert.equal(done?.streamDiagnostics?.[0].messageStop, true);
+    assert.deepEqual(done?.usage, { inputTokens: 39, outputTokens: 357, cachedInput: 20, cacheWrite: 7 });
+  });
+
+  for (const [name, fields] of [['初始块正文', { initial: '已经收到的正文' }], ['delta 正文', { chunks: ['已经收到的正文'] }]] as const) {
+    test(`${name}缺 message_stop：保留正文、标未写完，不自动重试`, async () => {
+      const { deltas, done } = await collectDiagnostic(diagnosticSse({ ...fields, stop: false }));
+      assert.equal(deltas.join(''), '已经收到的正文');
+      assert.equal(done?.result.text, deltas.join(''));
+      assert.equal(done?.result.truncated, true);
+      const diagnostic = done?.streamDiagnostics?.[0];
+      assert.equal(diagnostic?.messageStop, false);
+      assert.equal(diagnostic?.errorCode, 'AI_STREAM_INCOMPLETE');
+      assert.match(diagnostic?.finalMessageError ?? '', /without producing/);
+      assert.equal(done?.usage.outputTokens, 357);
+      assert.equal(done?.streamDiagnostics?.length, 1, '缺结束事件不能自动再发一次请求');
+    });
+  }
+
+  test('无正文且缺结束：错误保留已报告输入/输出/缓存用量', async () => {
+    await assert.rejects(() => collectDiagnostic(diagnosticSse({ stop: false })), (err: any) => {
+      assert.equal(err.code, 'AI_STREAM_INCOMPLETE');
+      assert.deepEqual(err.generationUsage, { inputTokens: 39, outputTokens: 357, cachedInput: 20, cacheWrite: 7 });
+      assert.equal(err.streamDiagnostics[0].messageStop, false);
+      return true;
+    });
+  });
+
+  test('只有非文本块：明确报空，诊断不包含思考原文或密钥', async () => {
+    const secret = 'PRIVATE_REASONING_NOT_FOR_LOGS';
+    await assert.rejects(() => collectDiagnostic(diagnosticSse({ thinking: secret })), (err: any) => {
+      assert.equal(err.code, 'AI_EMPTY_RESPONSE');
+      assert.equal(err.generationUsage.outputTokens, 357);
+      assert.deepEqual(err.streamDiagnostics[0].blockTypes, ['thinking']);
+      assert.deepEqual(err.streamDiagnostics[0].deltaTypes, ['thinking_delta']);
+      assert.equal(err.streamDiagnostics[0].stopReason, 'end_turn');
+      assert.ok(!JSON.stringify(err.streamDiagnostics).includes(secret));
+      assert.ok(!JSON.stringify(err.streamDiagnostics).includes(CFG.apiKey));
+      return true;
+    });
+  });
+
+  test('流中 error：已有正文仍保留，并记录错误和用量', async () => {
+    const { done } = await collectDiagnostic(diagnosticSse({ chunks: ['部分结论'], error: true }));
+    assert.equal(done?.result.text, '部分结论');
+    assert.equal(done?.result.truncated, true);
+    assert.equal(done?.usage.outputTokens, 357);
+    assert.equal(done?.streamDiagnostics?.[0].errorCode, 'PROVIDER_STREAM_ERROR');
+  });
+
+  test('续写返回空正文：保留前文，仍标未写完，累加空续写已报告用量', async () => {
+    let calls = 0;
+    __setClaudeFetchForTest(async () => new Response(calls++ === 0
+      ? diagnosticSse({ chunks: ['前半段'], reason: 'max_tokens', output: 40 })
+      : diagnosticSse({ output: 357 }), { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    let done: any;
+    for await (const event of claudeChatStream(CTX, CFG)) if (event.type === 'done') done = event;
+    assert.equal(calls, 2);
+    assert.equal(done.result.text, '前半段');
+    assert.equal(done.result.truncated, true);
+    assert.equal(done.usage.outputTokens, 397);
+    assert.equal(done.streamDiagnostics[1].errorCode, 'AI_EMPTY_RESPONSE');
   });
 });

@@ -8,6 +8,10 @@
 ---
 ## 11. 构建、运行、验证
 
+**临时演练探活的退出**：临时服务停用时，应同步关闭对应 ALB 演练后端组的健康检查；正式业务和 metrics 后端组的探活必须保留。否则 ALB 会持续请求已关闭的端口并刷出 502，污染运行质量判断。变更前核对组 ID、域名与实际监听并保存恢复配置；收到异步 JobId 后必须回读确认，再观察日志停止增长及正式入口健康（守卫：`ListServerGroups`、两节点 API/BFF `/api/health`、Prometheus targets/alerts；见 `docs/CLUSTER_DEPLOYMENT.md`）。
+
+**日期夹具使用同一时钟**：固定日期的行为测试必须同时冻结 `Date.now()` 和无参数 `new Date()`，并在 finally 恢复构造器；只替换前者会让自然日种子混入宿主日期/时区变化。守卫：`app/scripts/native-weapp.test.mjs` 的“原生 mock 目录、经营复盘与海报任务按账号持久化”。
+
 ### 常用操作路径（给 Agent 直接执行）
 
 默认仓库根目录：`/Users/donis/dev/ai-pilot`。微信源码在 `app/weapp-native`，产物在 `app/dist-native`；本地 DevTools 走查优先导入 `app/dist-native/`，发布/auto-preview CLI 仍指向 `app/`（`project.config.json` 的 `miniprogramRoot=dist-native/`）。H5 产物独立放在 `app/dist-h5/`。本机预览二维码和信息文件统一输出到根目录 `weapp-preview.png` / `weapp-preview-info.json` / `weapp-auto-preview-info.json`，均不纳入提交。

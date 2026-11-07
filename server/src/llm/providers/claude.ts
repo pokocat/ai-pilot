@@ -34,6 +34,8 @@ import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndp
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
 import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
+import type { LlmStreamDiagnostic } from '../../../../shared/contracts';
+import { providerFailure, type ProviderFailure } from '../providerError.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
 type ClaudeRawRequest = Anthropic.MessageCreateParamsNonStreaming & { thinking?: ThinkingParam };
@@ -314,7 +316,7 @@ async function* streamChatRound(
   messages: Anthropic.MessageParam[],
   // sink：把「已经下发给用户的正文/用量」实时写给调用方。流中途抛错时调用方才拿得到它们——
   // 用户眼睛已经看过的字不能再被换成错误气泡（与撞上限同一原则）。
-  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; totalTimeoutMs?: number; measureFirstToken?: boolean; firstTokenStartedAtMs?: number; sink?: { text: string; usage: Usage }; signal?: AbortSignal },
+  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; totalTimeoutMs?: number; measureFirstToken?: boolean; firstTokenStartedAtMs?: number; sink?: { text: string; usage: Usage }; signal?: AbortSignal; diagnostics: LlmStreamDiagnostic[] },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
   // 这个 timeout 只约束「多久拿到响应头」——SDK 在 fetch promise 的 .finally() 里 clearTimeout，
   // 而流式 fetch 在响应头到达即 resolve。头到之后的保护由下面的空闲看门狗负责，两者职责不同。
@@ -334,10 +336,25 @@ async function* streamChatRound(
     messages,
   }, { timeout: opts.timeoutMs ?? chatTimeoutMs(ep.timeoutMs), ...(signal ? { signal } : {}) });
 
+  const diagnostic: LlmStreamDiagnostic = {
+    events: {}, blockTypes: [], deltaTypes: [], messageStop: false, stopReason: null,
+    textChars: 0, usageSeen: false, finalMessageError: null, errorCode: null,
+  };
+  opts.diagnostics.push(diagnostic);
+  // SDK 会原地累积 content_block_start 中的对象，消费队列前可能已拼入后续 delta。
+  // 必须在同步事件回调中只快照初始 text，否则快速响应会把同一段正文下发两遍。
+  const initialTexts = new WeakMap<object, string>();
+  stream.on('streamEvent', (event) => {
+    if (event.type === 'content_block_start' && event.content_block.type === 'text') {
+      initialTexts.set(event, event.content_block.text);
+    } else if (event.type === 'message_start') {
+      initialTexts.set(event, textOf(event.message));
+    }
+  });
+
   // 空闲看门狗（**不是总时长超时**）：连续这么久没有任何流事件就判上游装死并 abort。
   // 不设它的后果是请求永久挂起 + 占住一个 LLM 并发槽，只能等客户端断开（见 providerTimeouts 说明）。
   const startedAt = Date.now();
-  let sawEvent = false;
   let sawContent = false;
   let stalled = false;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -353,6 +370,18 @@ async function* streamChatRound(
 
   let text = '';
   let usage: Usage = ZERO_USAGE;
+  const rawUsage: Record<string, number> = { input_tokens: 0, output_tokens: 0 };
+  const updateUsage = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    for (const key of ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']) {
+      const n = (value as Record<string, unknown>)[key];
+      if (typeof n === 'number' && Number.isFinite(n) && n >= 0) {
+        rawUsage[key] = n;
+        diagnostic.usageSeen = true;
+      }
+    }
+    usage = usageOf({ usage: rawUsage } as unknown as Anthropic.Message);
+  };
   let head: string | null = opts.dedupeAgainst ? '' : null; // null=已过缓冲期/首轮，直接下发
 
   let firstDeltaAt = 0;
@@ -367,9 +396,25 @@ async function* streamChatRound(
       }
     }
     text += chunk;
+    diagnostic.textChars = text.length;
     if (opts.sink) opts.sink.text = text;
     opts.onDelta?.();
     return { type: 'delta', text: chunk };
+  };
+  const textChunk = (chunk: string) => {
+    if (!chunk) return null;
+    sawContent = true;
+    if (head === null) return emit(chunk);
+    head += chunk;
+    if (head.length < CONTINUE_DEDUPE_BUFFER_CHARS) return null;
+    const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
+    head = null;
+    return emit(cleaned);
+  };
+  const kind = (value: string, allowed: string[]) => allowed.includes(value) ? value : 'other';
+  const fail = (error: unknown) => {
+    diagnostic.errorCode = (error as ProviderFailure)?.code ?? 'PROVIDER_STREAM_ERROR';
+    return providerFailure(error, diagnostic.usageSeen ? usage : undefined, opts.diagnostics);
   };
 
   try {
@@ -378,27 +423,33 @@ async function* streamChatRound(
     // 于是文字 delta 全被跳过、逐字流静默失效（正文还能靠下面 finalMessage 兜底，所以不报错、极难发现）。
     // 2026-08-04 就这么踩过一次。sink 赋值与看门狗续期一律放在整条链**之后**，且循环里不用 continue。
     for await (const event of stream) {
-      if (event.type === 'message_start') usage = usageOf(event.message);
-      else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+      const name = kind(event.type, ['message_start', 'message_delta', 'message_stop', 'content_block_start', 'content_block_delta', 'content_block_stop']);
+      diagnostic.events[name] = (diagnostic.events[name] ?? 0) + 1;
+      if (event.type === 'message_start') {
+        updateUsage(event.message.usage);
+        const ev = textChunk(initialTexts.get(event) ?? '');
+        if (ev) yield ev;
+      } else if (event.type === 'message_delta') {
+        updateUsage(event.usage);
+        diagnostic.stopReason = event.delta.stop_reason ?? null;
+      } else if (event.type === 'message_stop') diagnostic.messageStop = true;
+      else if (event.type === 'content_block_start') {
+        const blockType = kind(event.content_block.type, ['text', 'tool_use', 'thinking', 'redacted_thinking']);
+        if (!diagnostic.blockTypes.includes(blockType)) diagnostic.blockTypes.push(blockType);
+        const ev = textChunk(initialTexts.get(event) ?? '');
+        if (ev) yield ev;
+      }
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        sawContent = true;
-        if (head !== null) {
-          head += event.delta.text;
-          if (head.length >= CONTINUE_DEDUPE_BUFFER_CHARS) {
-            const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
-            head = null;
-            const ev = emit(cleaned);
-            if (ev) yield ev;
-          }
-        } else {
-          const ev = emit(event.delta.text);
-          if (ev) yield ev;
-        }
+        const ev = textChunk(event.delta.text);
+        if (ev) yield ev;
+      }
+      if (event.type === 'content_block_delta') {
+        const deltaType = kind(event.delta.type, ['text_delta', 'input_json_delta', 'thinking_delta', 'signature_delta']);
+        if (!diagnostic.deltaTypes.includes(deltaType)) diagnostic.deltaTypes.push(deltaType);
       }
       if (opts.sink) opts.sink.usage = usage;
       // thinking / message_start 也算「活着」，但在首个正文 delta 前继续给首字宽窗口；
       // 不能让一个 message_start 把 90s 首字窗口误切成 30s 中途窗口。
-      sawEvent = true;
       armIdle(sawContent ? streamIdleMs() : streamFirstEventIdleMs());
     }
     if (head) { // 整轮短于缓冲长度（续写只补了一句）
@@ -406,28 +457,46 @@ async function* streamChatRound(
       if (ev) yield ev;
     }
   } catch (err) {
+    if (head) {
+      const ev = emit(dedupeContinuation(opts.dedupeAgainst!, head));
+      head = null;
+      if (ev) yield ev;
+    }
     // 看门狗自己 abort 的：换成语义明确的错误，别让上层把「上游装死」读成「用户取消」。
     if (stalled) {
-      throw Object.assign(
+      throw fail(Object.assign(
         new Error(`Claude 流式静默超时（${sawContent ? '中途' : '首段正文前'}无事件，已下发 ${text.length} 字）`),
         { code: 'AI_STREAM_STALL' },
-      );
+      ));
     }
     if (totalTimedOut) {
-      throw Object.assign(new Error(`Claude 续写轮总时长超过 ${opts.totalTimeoutMs}ms`), { code: 'AI_TIMEOUT' });
+      throw fail(Object.assign(new Error(`Claude 续写轮总时长超过 ${opts.totalTimeoutMs}ms`), { code: 'AI_TIMEOUT' }));
     }
-    throw err;
+    throw fail(err);
   } finally {
     clearIdle();
     if (totalTimer) clearTimeout(totalTimer);
   }
 
-  const final = await stream.finalMessage().catch(() => null);
-  if (final) usage = usageOf(final);
+  let final: Anthropic.Message;
+  try {
+    final = await stream.finalMessage();
+    if (!diagnostic.messageStop) throw new Error('Missing message_stop');
+  } catch (err) {
+    // 缺结束事件不能伪装 completed；正文已由初始块/delta 保存在 sink，外层按 truncated 收口。
+    diagnostic.finalMessageError = err instanceof Error ? err.message.slice(0, 240) : 'Final message unavailable';
+    throw fail(Object.assign(new Error('Claude 流式响应未完整结束'), { code: 'AI_STREAM_INCOMPLETE' }));
+  }
+  if (!diagnostic.usageSeen) updateUsage(final.usage);
+  if (opts.sink) opts.sink.usage = usage;
   // 没收到任何 text_delta 但 finalMessage 有正文时的回落。续写轮的回落**必须同样去重**：
   // 否则「逐字流里被剪掉的重复」会从这条回落原样进落库文本，用户看到的和存下来的对不上。
   const fallback = final ? textOf(final) : '';
   const body = text || (opts.dedupeAgainst ? dedupeContinuation(opts.dedupeAgainst, fallback) : fallback);
+  if (!isTruncatedFinish(final.stop_reason)) {
+    try { requireText(body, usage, 'chat_stream'); }
+    catch (err) { throw fail(err); }
+  }
   return { text: body, usage, truncated: isTruncatedFinish(final?.stop_reason) };
 }
 
@@ -435,7 +504,7 @@ export async function* claudeChatStream(
   ctx: GenContext,
   cfg: ResolvedAiConfig,
   opts: { signal?: AbortSignal; firstTokenStartedAtMs?: number } = {},
-): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage; streamDiagnostics?: LlmStreamDiagnostic[] }> {
   const { system, messages: base } = chatRequestBase(ctx);
   // 流式的槽位必须持有到整条流消费完，不能只包住「建流」那一下——一条流在上游眼里全程占用一个并发，
   // 只包建流会让闸门形同虚设（8 个槽位瞬间放完 8 条流，紧接着又放 8 条）。故手动 acquire/release。
@@ -455,6 +524,10 @@ export async function* claudeChatStream(
   let truncated = false;
   let served: ResolvedAiConfig | null = null;
   let lastErr: unknown;
+  const diagnostics: LlmStreamDiagnostic[] = [];
+  let failedUsage: Usage = { ...ZERO_USAGE };
+  let failedUsageSeen = false;
+  const fail = (error: unknown, measured?: Usage) => providerFailure(error, measured ?? (failedUsageSeen ? failedUsage : undefined), diagnostics);
   // 「已下发正文被保全」只记一次，且要记对原因：流中途失败 vs 撞上限续写用尽。
   let partialCause: 'truncated' | 'stream_error' | null = null;
 
@@ -472,41 +545,50 @@ export async function* claudeChatStream(
         firstTokenStartedAtMs: opts.firstTokenStartedAtMs,
         sink,
         signal: opts.signal,
+        diagnostics,
       });
       served = ep;
       text = round.text;
-      usage = round.usage;
+      usage = sumUsage(failedUsage, round.usage);
       truncated = round.truncated;
       break;
     } catch (err) {
       lastErr = err;
+      const consumed = (err as ProviderFailure).generationUsage;
+      if (consumed) {
+        failedUsage = sumUsage(failedUsage, consumed);
+        failedUsageSeen = true;
+      }
       slot.noteError(err);
       const last = attempt === maxAttempts - 1;
       // 流中途出错但**已经有正文流给用户**（多见于慢网关打满 150s 流超时）：不能把用户
       // 已经读到的上万字换成一个错误气泡。按「没写完」收尾——与撞上限完全同一处理：
       // 内容照常落库 + 标 truncated + 端上给「继续写完」。只有一个字都没吐出来时才如实报错。
-      if (yieldedAny && sink.text) {
+      if (yieldedAny && sink.text.trim()) {
         console.warn(`[claude] 流中途失败但已有正文（${sink.text.length} 字），按未写完交回：${(err as Error).message}`);
         partialCause = 'stream_error';
         served = ep;
         text = sink.text;
-        usage = sink.usage;
+        usage = failedUsageSeen ? failedUsage : sink.usage;
         truncated = true;
         break;
       }
       // 已经吐过内容 / 不可转移的错 → 如实抛出；可转移错误即使没有下一个候选也要共享冷却态。
-      if (yieldedAny || !ep.endpointId || !isTransferable(err)) throw err;
+      if (yieldedAny || !ep.endpointId || !isTransferable(err)) throw fail(err);
       await coolEndpoint(ep.endpointId, 30_000, 'stream_error');
-      if (last) throw err;
+      if (last) throw fail(err);
       console.warn(`[claude] 流式端点 ${ep.label || ep.endpointId} 建流失败，转移到下一个：${(err as Error).message}`);
     } finally {
       // 客户端中断（generator 提前 return）也会走到这里，槽位不会泄漏。
       slot.release();
     }
   }
-  if (!served) throw lastErr;
+  if (!served) throw fail(lastErr);
   // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
-  if (truncated && !text) assertChatBodyProduced('Claude', 'max_tokens', usage.outputTokens);
+  if (truncated && !text) {
+    try { assertChatBodyProduced('Claude', 'max_tokens', usage.outputTokens); }
+    catch (err) { throw fail(err, usage); }
+  }
 
   // —— 续写轮：撞上限不是失败，是「还没写完」——
   // 固定用首轮那个端点（换端点=丢提示词缓存且换了口吻）；不做故障转移（已经吐过字）。
@@ -530,6 +612,7 @@ export async function* claudeChatStream(
         totalTimeoutMs: CONTINUE_ROUND_TIMEOUT_MS,
         sink: contSink,
         signal: opts.signal,
+        diagnostics,
       });
       usage = sumUsage(usage, cont.usage);
       text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
@@ -537,10 +620,10 @@ export async function* claudeChatStream(
       noteChatTruncated('Claude', 'continued');
     } catch (err) {
       slot.noteError(err);
-      if (contSink.text) {
-        text += contSink.text;
-        usage = sumUsage(usage, contSink.usage);
-      }
+      text += contSink.text;
+      // 即使续写一个字没交付，已报告的用量也不能消失。
+      const consumed = (err as ProviderFailure).generationUsage;
+      if (consumed) usage = sumUsage(usage, consumed);
       console.warn(`[claude] 第 ${round} 轮续写失败，按未写完交回用户：${(err as Error).message}`);
       break;
     } finally {
@@ -552,8 +635,10 @@ export async function* claudeChatStream(
     if (text) noteChatPartialKept('claude', partialCause ?? 'truncated');
   }
 
-  const out = requireText(text, usage, 'chat_stream');
-  yield { type: 'done', result: { text: out, ...(truncated ? { truncated: true } : {}) }, usage };
+  let out: string;
+  try { out = requireText(text, usage, 'chat_stream'); }
+  catch (err) { throw fail(err, usage); }
+  yield { type: 'done', result: { text: out, ...(truncated ? { truncated: true } : {}) }, usage, streamDiagnostics: diagnostics };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */

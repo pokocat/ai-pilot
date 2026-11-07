@@ -31,6 +31,8 @@ import {
 } from '../services/llmPool.js';
 import { chatMaxTokens } from './thinking.js';
 import { extractPublicThought, PublicThoughtStreamParser } from './publicThought.js';
+import type { LlmContextTrace, LlmStreamDiagnostic } from '../../../shared/contracts';
+import type { ProviderFailure } from './providerError.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -112,7 +114,7 @@ export async function observeImageBatch(args: {
 
 // 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
 function aiUnavailable(err: unknown): Error {
-  const e = err as Error & { code?: string };
+  const e = err as ProviderFailure;
   if (e.code === 'AI_OUTPUT_TRUNCATED') return e;
   // AI_BUSY 来自全局并发闸（services/llmGate）：这是**我方主动降级**，不是上游故障。
   // 原样透出，让前端能提示「排队较多，稍后重试」，而不是笼统的「AI 服务暂时不可用」。
@@ -120,7 +122,10 @@ function aiUnavailable(err: unknown): Error {
   const aborted = e.code === 'AI_TIMEOUT' || e.name === 'AbortError' || /abort|超时|timeout/i.test(e.message || '');
   return Object.assign(
     new Error(aborted ? 'AI 响应超时，请稍后重试' : 'AI 服务暂时不可用，请稍后重试'),
-    { code: 'AI_UNAVAILABLE', statusCode: 503 },
+    { code: 'AI_UNAVAILABLE', statusCode: 503,
+      ...(e.generationUsage ? { generationUsage: e.generationUsage } : {}),
+      ...(e.streamDiagnostics ? { streamDiagnostics: e.streamDiagnostics } : {}),
+    },
   );
 }
 
@@ -648,7 +653,15 @@ export type ChatStreamEvent =
   | { type: 'done'; result: ChatReply; usage: Usage; providerInvoked: boolean };
 type ProviderChatStreamEvent =
   | { type: 'delta'; text: string }
-  | { type: 'done'; result: ChatReply; usage: Usage };
+  | { type: 'done'; result: ChatReply; usage: Usage; streamDiagnostics?: LlmStreamDiagnostic[] };
+
+function streamTraceContext(context: LlmContextTrace | undefined, diagnostics?: LlmStreamDiagnostic[]): LlmContextTrace | undefined {
+  if (!diagnostics?.length) return context;
+  return {
+    ...(context ?? { recallIntent: false, history: { recentMessages: 0, carryoverMessages: 0, totalChars: 0 }, memories: [] }),
+    streamDiagnostics: diagnostics,
+  };
+}
 
 // 按句/词切块，供前端渐进渲染（替代历史「假 sleep」节奏）。
 function* chunkText(text: string): Generator<string> {
@@ -678,7 +691,8 @@ async function* tracedChatProviderStream(
 ): AsyncGenerator<ChatStreamEvent> {
   const t0 = Date.now();
   let text = '';
-  let done: { result: ChatReply; usage: Usage } | null = null;
+  let done: { result: ChatReply; usage: Usage; streamDiagnostics?: LlmStreamDiagnostic[] } | null = null;
+  let usageRecorded = false;
   const capture = createEndpointCapture();
   const publicThought = new PublicThoughtStreamParser();
   const iterator = stream[Symbol.asyncIterator]();
@@ -694,7 +708,7 @@ async function* tracedChatProviderStream(
         text += ev.text;
         for (const visible of publicThought.push(ev.text)) yield visible;
       } else {
-        done = { result: ev.result, usage: ev.usage };
+        done = ev;
       }
     }
     for (const visible of publicThought.finish()) yield visible;
@@ -704,7 +718,7 @@ async function* tracedChatProviderStream(
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: actual.provider, model: actual.model,
       endpointId: actual.endpointId, endpointLabel: actual.endpointLabel, upstreamIds: capture.upstreamIds,
       status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
-      promptText: ctx.userMessage, responseText: done.result.text, context: ctx.contextTrace,
+      promptText: ctx.userMessage, responseText: done.result.text, context: streamTraceContext(ctx.contextTrace, done.streamDiagnostics),
     });
     void auditBannedWords({
       tenantId: meta?.tenantId ?? ctx.tenantId ?? null,
@@ -715,10 +729,12 @@ async function* tracedChatProviderStream(
       text: done.result.text,
     });
     await maybeRecord(actual, 'chat', ctx, meta);
+    usageRecorded = true;
     // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
     const parsed = withAsks(done.result);
     yield { type: 'done', result: meta?.skipAskRecovery ? parsed : await recoverChatAsks(parsed, undefined, { ctx, meta }), usage: done.usage, providerInvoked: true };
   } catch (err) {
+    const failure = err as ProviderFailure;
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat',
       provider: capture.hit?.provider ?? provider,
@@ -727,8 +743,15 @@ async function* tracedChatProviderStream(
       endpointLabel: capture.hit?.endpointLabel,
       upstreamIds: capture.upstreamIds,
       status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: ctx.userMessage,
-      responseText: text, context: ctx.contextTrace,
+      usage: failure.generationUsage,
+      responseText: text, context: streamTraceContext(ctx.contextTrace, failure.streamDiagnostics),
     });
+    // 失败响应也可能已产生上游成本；记实际已报告用量，并回填同一对象的加权额度口径。
+    // 这里只写用量流水，用户额度仍由持久任务结算；成功后其它收尾异常不能再记第二笔。
+    if (!usageRecorded && failure.generationUsage) {
+      await maybeRecord({ result: null, usage: failure.generationUsage,
+        provider: capture.hit?.provider ?? provider, model: capture.hit?.model ?? model }, 'chat', ctx, meta);
+    }
     throw err;
   } finally {
     // 保留原 for-await 的取消语义：客户端断开导致外层 generator 提前 return 时，

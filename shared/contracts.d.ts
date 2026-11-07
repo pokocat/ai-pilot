@@ -2379,7 +2379,20 @@ export interface AdminTraceListView {
   totals: { calls: number; errors: number; avgLatencyMs: number };
   items: AdminTraceItem[];
 }
+/** 流式诊断只保留协议元数据，绝不记录 thinking 内容或原始 SSE。 */
+export interface LlmStreamDiagnostic {
+  events: Record<string, number>;
+  blockTypes: string[];
+  deltaTypes: string[];
+  messageStop: boolean;
+  stopReason: string | null;
+  textChars: number;
+  usageSeen: boolean;
+  finalMessageError: string | null;
+  errorCode: string | null;
+}
 export interface LlmContextTrace {
+  streamDiagnostics?: LlmStreamDiagnostic[];
   recallIntent: boolean;
   continuity?: {
     sessionId: string;

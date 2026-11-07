@@ -2,6 +2,8 @@
 
 当前 A 主用、B 常驻备用，ALB 权重 100/0。API 与爱速拍 BFF 在两台机器都运行，定时任务仅 A 的独立 scheduler 运行。B 的独立探针和 metrics 持续工作，权重 0 的 Unused 是预期状态。域名为 wxapi.aibuzz.cn 与 copilot.aibuzz.cn，新资源实际在杭州同 VPC。
 
+演练环境停用后，`identity-stage`（`id-rehearsal.aibuzz.cn`）与 `aistar-pg-rehearsal-20261104`（`api-rehearsal.aibuzz.cn`）的 ALB 健康检查保持关闭；需要再次演练时，先启动并验收服务，再显式恢复对应组的检查。正式军师、metrics、账号中心和为正式业务预留的后端组不受此操作影响；不能把关闭全部探活作为清理手段。
+
 | 组件 | 当前配置 |
 | --- | --- |
 | ECS A / B | 101.37.189.227 / 121.199.172.157，内网 10.20.1.215 / 10.20.2.195 |

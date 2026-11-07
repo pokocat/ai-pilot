@@ -80,6 +80,9 @@
 | `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型/SKU等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
+
+- **Claude 流异常必须保留正文与已见用量**：同步快照初始内容块中的 text，防止 SDK 对象原地累积造成重复；缺 `message_stop` / finalMessage 失败时不能静默标完成。已有可读正文按 truncated 交回，不自动续写或重试；无正文则显式失败。诊断只存有限事件类型/计数、结束状态与异常元数据，不存思考内容。错误的 `generationUsage` 必须穿过 gateway 的错误包装，写入 trace / token_usage 并传给 Worker，继续按现有保守结算规则处理，不能重新退回全量估算。原因：初始块有正文但结束标记丢失曾被误判为空，失败响应的已报告用量也曾丢失；守卫：`server/test/claudeStream.test.ts`、`server/test/claudeStreamPersistence.test.ts`。
+
 `gateway.ts` 统一封装：路由 provider → 输入审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。普通聊天只对输入做前置审核；OpenAI/Claude 在无工具调用时优先走 provider 原生 streaming，模型 token 到达即经 `/generate` SSE 下发，输出完成后只做 trace/禁用词审计，不做阻塞式输出审核。**持久生成链路不得再让 Worker 重判成果意图**：`generationRequest.ts` 用 `outputIntent.ts` 先处理否定表达，再冻结 `GenerationJob.kind/requestedOutput/deliveryMode`；Worker 只读冻结值，chat 走流式回复、report 走 `generateDeliverable`。旧的 `generateAdaptive` 只保留给未迁移兼容调用，不是持久链路的路由真源。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界与 `CHAT_STYLE_GUIDE`：像了解客户的真人教练，先接住具体处境，再明确指出做得好/风险/建议路径，用因果连接或反直觉洞察制造惊喜；禁止客服腔、汇报腔、空泛正确话和暴露内部提示词。客户硬事实只来自当前 `UserFact(asserted|confirmed)`、企业/军师档案、项目、引用资料、知识库和本轮用户原文；pending/rejected/superseded 不得写成事实。资料不足时自然追问 1-3 个关键缺口。**长会话连续性**：普通轮携带最近 16 条消息（12,000 字符预算；报告轮在摘要追平时收窄 8 条）；摘要总注入仍受 4,000 字符约束并在接近 350 项时滚动合并。摘要抽取与滚动合并必须分别显式给 4,000 / 8,000 output token，不能退回辅助模型通用 700 token；统一 `coerceJson` 先严格解析，只有语法失败才用 `jsonrepair` 修复模型未转义原话双引号/尾逗号，之后仍须通过 Zod。模型同批某一条结构不规范时只丢该条，不能用顶层严格 Zod 把整批好条目一起判废，但逐条 kind、文本、来源数量与批内来源校验绝不能放松。命中明确回忆意图时，额外扫描同会话较早 160 条并挑最多 6 条相关原文（4,500 字符预算）。新 Session 通过 `SessionHandoff` 带关键决策/目标/最近脉络，但确认事实只从当前 `UserFact` 块注入一次，不能从 handoff 再复制一份导致重复或复活旧事实。多图先走专用轻提示词 `image_observation`，每批最多 4 张且只带用户问题和本批图片；最终主模型只看带图号的文本观察，不重复携带原图和完整 system prompt。
 新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 

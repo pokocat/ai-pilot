@@ -1888,9 +1888,14 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     setStorageSync: (key, value) => values.set(key, value),
     removeStorageSync: (key) => values.delete(key),
   };
-  const realNow = Date.now;
-  let clock = Date.parse('2026-08-07T12:00:00.000Z');
-  Date.now = () => clock;
+  const RealDate = Date;
+  let clock = RealDate.parse('2026-08-07T12:00:00.000Z');
+  // 同一个夹具时钟必须覆盖 Date.now 与无参数构造器；否则复盘种子仍读真实日期，
+  // 会把当前时区的 DST 切换混进固定的八月夹具中。
+  globalThis.Date = class extends RealDate {
+    constructor(...args) { if (args.length) super(...args); else super(clock); }
+    static now() { return clock; }
+  };
   try {
     const require = createRequire(import.meta.url);
     const mockPath = path.join(sourceRoot, 'services/mock.js');
@@ -2009,7 +2014,7 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     assert.equal(seededPosters.items.length, 0);
     assert.equal(seededPosters.items.some((item) => item.jobId === created.jobId), false, 'A 号的海报任务不得串到 B 号');
   } finally {
-    Date.now = realNow;
+    globalThis.Date = RealDate;
     delete globalThis.wx;
   }
 });

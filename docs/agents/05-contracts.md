@@ -6,6 +6,8 @@
 ---
 ## 5. ★ SSOT：全栈数据契约 `shared/contracts.d.ts`
 
+- `LlmContextTrace.streamDiagnostics` 为可选的流协议诊断元数据（事件计数、块/增量类型、结束标记、停止原因、正文长度、用量是否已报告及结束异常）；不得保存原始 SSE 或 thinking 内容。沿用 trace 的 `contextJson` 存储，不新增数据库字段；旧客户端忽略该可选字段。原因：流缺结束标记时，单看“空文本”无法区分未交付正文与解析丢失；守卫：`server/test/claudeStream.test.ts`、`server/test/claudeStreamPersistence.test.ts`。
+
 **唯一数据口径**，前端 / 后端 / 运营端共用。
 
 - 形式是 **`.d.ts` 纯类型声明**：编译期类型检查、**运行时被擦除**，各端只 `import type` 引用——不引入运行时依赖、不改打包产物、无需配三套 alias，并绕开后端 `tsc` 的 `rootDir` 限制。

@@ -60,6 +60,7 @@ export function classifyLlmError(err: unknown): LlmErrorBucket {
     case 'AI_TIMEOUT':
     case 'AI_STREAM_STALL': return 'timeout';
     case 'AI_EMPTY_RESPONSE': return 'empty_response';
+    case 'AI_STREAM_INCOMPLETE': return 'network';
   }
   if (e.name === 'AbortError') return 'timeout';
 
