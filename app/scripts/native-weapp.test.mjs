@@ -208,6 +208,42 @@ test('桌面 expanded 档：问策抽屉抬成常驻左栏，对话页收回可�
     '段控一旦用 auto 外边距就会退回内容宽（实测缩成 50px、「近七日」折成两行）');
 });
 
+test('桌面微信：fixed 滚动区清掉宿主默认宽度、顶部不按手机胶囊让位', () => {
+  // 微信渲染层给 scroll-view 宿主的默认样式是 `display:block; width:100%`（基础库 3.16.2 实摘）。
+  // fixed 定位下 width 有值时 right 被丢弃：left 推开之后宽度仍是整窗，整条滚动区右溢。
+  // 2026-11-12 桌面微信 0.2.50 实拍：问策正文与问答卡被推出窗口右边。
+  const sessionsScss = read(sourceRoot, 'pages/sessions/index.scss');
+  const chatScss = read(sourceRoot, 'packages/main/chat/index.scss');
+  assert.match(sessionsScss, /\.wence-scroll \{\s*position: fixed;\s*left: 0; right: 0;\s*width: auto;/, '问策对话滚动区必须显式 width:auto');
+  assert.match(chatScss, /\.chat-scroll \{[^}]*left: 0; right: 0; width: auto;/, '对话分包页滚动区必须显式 width:auto');
+  // 兜底扫一遍：五个 tab 与对话页里任何用 left/right 撑宽的 fixed scroll-view 类都要带 width:auto。
+  const hosts = ['pages/sessions', 'pages/home', 'pages/execution', 'pages/thinktank', 'pages/profile', 'packages/main/chat'];
+  for (const host of hosts) {
+    const wxml = read(sourceRoot, host, 'index.wxml');
+    const scss = read(sourceRoot, host, 'index.scss');
+    const classes = [...wxml.matchAll(/<scroll-view[^>]*class="([a-z][\w-]*)/g)].map((m) => m[1]);
+    for (const cls of new Set(classes)) {
+      const rule = scss.match(new RegExp(`(^|\\n)\\.${cls} \\{([^}]*)\\}`));
+      if (!rule || !/position: fixed/.test(rule[2]) || !/\bleft:/.test(rule[2])) continue;
+      assert.match(rule[2], /width: auto;/, `${host} 的 .${cls} 是 fixed + left 的 scroll-view，必须写 width:auto`);
+    }
+  }
+
+  // PC 的胶囊长在窗口标题栏里，页面从标题栏下沿才开始画；照手机坐标让位会在顶上空出约 80px。
+  // 分流按平台（getDeviceInfo().platform），不按窗口宽度——iPad 横屏也是 expanded，胶囊却真的压在页面上。
+  const pageService = read(sourceRoot, 'services/page.js');
+  assert.match(pageService, /const DESKTOP_PLATFORMS = \['windows', 'mac', 'linux'\];/);
+  assert.match(pageService, /function capsuleMetrics\(\) \{\s*\/\/[^\n]*\n\s*if \(isDesktopClient\(\)\) return \{ navInset: 16,/, 'PC 分支必须排在读胶囊坐标之前');
+  const loginJs = read(sourceRoot, 'components/login-sheet/index.js');
+  assert.match(loginJs, /if \(!isDesktopClient\(\)\) try \{\s*const rect = wx\.getMenuButtonBoundingClientRect\(\);/, '登录层关闭键在 PC 上不能按胶囊坐标往左推');
+
+  // 常驻栏顶上已经有「军师团 / 历史会话」分段器，页头入口在 railOn 下收起，未读角标挪到分段器上。
+  const sessionsWxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  assert.match(sessionsWxml, /<view wx:if="\{\{!railOn\}\}" class="wh-entries">/);
+  assert.match(sessionsWxml, /<text>军师团<\/text><view wx:if="\{\{railOn && councilUnreadText\}\}" class="unread">/);
+  assert.match(sessionsWxml, /<text>历史会话<\/text><view wx:if="\{\{railOn && historyUnreadText\}\}" class="unread">/);
+});
+
 test('桌面 expanded 档：左导航条替代底栏', () => {
   // —— 底栏的收起走既有的 overlay 记账，且必须成对 ——
   // setOverlay 是按 key 记账的（问策浮岛用 'wence-isle'）。桌面档只加不减的话，

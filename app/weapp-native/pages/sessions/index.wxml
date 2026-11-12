@@ -21,7 +21,9 @@
         <text class="wh-kicker">{{title}}{{alias}} · 在线</text>
         <view class="wh-titlerow">
           <text class="wh-title serif">问策</text>
-          <view class="wh-entries">
+          <!-- 桌面常驻左栏（railOn）时不渲染：那两个入口在栏顶的分段器上已经各有一份，
+               页头再挂一份就是同一组导航在一屏里出现两次；未读角标随之挪到分段器上。 -->
+          <view wx:if="{{!railOn}}" class="wh-entries">
             <view class="wh-entry" bindtap="openCouncil">
               <native-icon name="group" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
               <text>军师团</text>
@@ -77,8 +79,8 @@
   <view wx:if="{{drawerOpen || railOn}}" class="wd-sheet {{railOn ? 'as-rail' : ''}}" catchtap="stop">
     <view wx:if="{{!railOn}}" class="wd-grab"></view>
     <view class="wd-seg">
-      <view class="wd-seg-item {{drawerSeg === 'council' ? 'on' : ''}}" data-seg="council" bindtap="switchSeg"><text>军师团</text></view>
-      <view class="wd-seg-item {{drawerSeg === 'history' ? 'on' : ''}}" data-seg="history" bindtap="switchSeg"><text>历史会话</text></view>
+      <view class="wd-seg-item {{drawerSeg === 'council' ? 'on' : ''}}" data-seg="council" bindtap="switchSeg"><text>军师团</text><view wx:if="{{railOn && councilUnreadText}}" class="unread"><text>{{councilUnreadText}}</text></view></view>
+      <view class="wd-seg-item {{drawerSeg === 'history' ? 'on' : ''}}" data-seg="history" bindtap="switchSeg"><text>历史会话</text><view wx:if="{{railOn && historyUnreadText}}" class="unread"><text>{{historyUnreadText}}</text></view></view>
     </view>
     <view class="council-search wd-search">
       <native-icon name="target" tone="neutral" size="14"></native-icon>

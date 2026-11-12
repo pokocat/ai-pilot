@@ -69,9 +69,14 @@
    提示问题 pill 那 36px 的带子按需让位：pill 不在时不许留空——它是 fixed 定位，
    不占布局，早先无条件预留 121px 的结果是浮岛上方常年悬着一条纸色空栏（用户反馈「白色遮罩」）。
    .pill-on 的判据必须与 index.wxml 里 pill 的 wx:if 逐字同源，native-weapp.test.mjs 锁死这一点。 */
+/* width:auto 不能省：微信渲染层给 scroll-view 宿主的默认样式是 `display:block; width:100%`，
+   fixed 定位下 width 一旦有值，right 就被丢弃——left 推到 392 之后宽度仍是整窗，
+   消息流整体右移、右半截被窗口裁掉（2026-11-12 桌面微信 0.2.50 实拍）。手机上 left/right 都是 0，
+   auto 与 100% 等宽，不受影响。 */
 .wence-scroll {
   position: fixed;
   left: 0; right: 0;
+  width: auto;
   top: var(--wence-head-h);
   bottom: calc(var(--composer-height) + 85px + env(safe-area-inset-bottom) + var(--keyboard-height));
 }
@@ -187,6 +192,8 @@
   font-family: var(--serif); font-size: 13.5px; font-weight: 600; color: var(--ink-3);
 }
 .wd-seg-item.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+/* 只在桌面常驻栏渲染（页头入口收起后角标挪到这里）；半屏抽屉里这两个节点不存在。 */
+.wd-seg-item .unread { display: inline-flex; vertical-align: 1px; margin-left: 6px; }
 .wd-search { flex-shrink: 0; height: 40px; margin-top: 10px; border-radius: 14px; }
 .wd-search .cs-input { height: 40px; font-size: 13px; }
 /* 全屏/半屏层里的滚动区必须是带明确高度的原生 ScrollView（§7.2：View + overflow 在真机滑不动）。 */
@@ -312,8 +319,7 @@
 .rail-on .as-rail .wd-body { height: calc(100vh - var(--native-nav-inset) - 108px); }
 
 .rail-on .wence-head,
-.rail-on .wence-scroll { left: calc(var(--nav-w) + var(--rail-w)); }
-.rail-on .wence-isle { left: calc(var(--nav-w) + var(--rail-w) + 14px); }
+.rail-on .wence-scroll { left: calc(var(--nav-w) + var(--rail-w)); }.rail-on .wence-isle { left: calc(var(--nav-w) + var(--rail-w) + 14px); }
 
 /* 桌面档浮岛里那排自绘 tab 行去掉：导航已经常驻在窗口左边，浮岛再挂一份五 tab
    就是同一组导航在一屏里出现两次（而且一横一竖、选中态还得同步）。

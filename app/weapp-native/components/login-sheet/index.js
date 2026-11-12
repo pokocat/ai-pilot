@@ -1,5 +1,6 @@
 const { api } = require('../../services/api');
 const store = require('../../services/store');
+const { isDesktopClient } = require('../../services/page');
 
 const REASONS = {
   chat: '登录后才能发送消息，并把本次判断留在你的案卷里。',
@@ -36,7 +37,9 @@ Component({
       // 卸载 composer，避免 iOS 独立原生输入层继续截获头像与昵称区域的触摸。
       try { wx.hideKeyboard(); } catch (_) { /* 当前没有键盘时无需处理 */ }
       let closeTop = 18; let closeRight = 18;
-      try {
+      // 微信 PC 的胶囊在窗口标题栏里、不压页面，可它照样回手机式坐标：按 windowWidth − rect.left
+      // 算 closeRight 会把关闭键推到弹层左半边去。PC 上直接用默认 18/18（见 services/page.js）。
+      if (!isDesktopClient()) try {
         const rect = wx.getMenuButtonBoundingClientRect();
         const win = wx.getWindowInfo();
         closeTop = Math.max(rect.top + ((rect.height || 32) - 36) / 2, (win.statusBarHeight || 0) + 2);

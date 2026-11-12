@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-11 | `0.2.50` | `桌面双栏布局与近期体验优化` | `3eaad3b` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（`origin/main` 独立干净 detached worktree，先 `npm test` 260 + 109 全绿与 dry-run 校验，经 devq 执行） | 2.8 MB / 2979232 B | 上传成功：开发版已进入微信后台，尚未转体验版、提交审核或发布。首个带自家断点桌面双栏的包（`611b2c5d` 撤官方 `frameset`、`2cf7a168` 左导航条 + 主/副栏，09-05 合入后一直未上传）；`0.2.49` 仍是 `frameset:true` 官方分栏。生产后端已在 `b448b09f`，与本包只差文档。待在桌面微信（窗口 ≥ 960）实看导航条替代底栏与四个 tab 副栏。 |
 | 2026-08-23 | `0.2.49` | `出生时间规则与体验优化` | `2bfeb41` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（独立干净 worktree，先 dry-run 校验） | 2.8 MB / 2963486 B | 上传成功：代码与 `0.2.48` 相同，仅将微信后台上传描述改为不含敏感词的中性口径；开发版已进入微信后台，尚未提交审核或发布。 |
 | 2026-08-23 | `0.2.48` | `命盘统一钟表时间与23点子初换日` | `2bfeb41` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（独立干净 worktree，先 dry-run 校验） | 2.8 MB / 2963486 B | 上传成功：生产 server、admin、H5 已先部署同 SHA，服务 active、`NRestarts=0`、公网健康 200；生产包实算 `1987-03-16 23:30` 为 `1987-03-17`、农历二月十八、`丁卯 癸卯 乙丑 丙子`。开发版已进入微信后台，尚未提交审核或发布。 |
 | 2026-08-19 | `0.2.45` | `快出片成片下载止损；声音训练模型切换 2.0` | `1d4469d` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（dry-run 校验、扫码登录后正式上传） | 2.2 MB / 2346872 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布。成片页不再用详情响应中的缺失/过期 `videoUrl` 拦截下载，始终调用军师同源 `/api/video/works/:id/file` 刷新上游短签名；生产军师 BFF 已部署 `1d4469d` 且未执行数据库结构修改。声音相关 clone 请求统一传 `model: "2.0"`。 |

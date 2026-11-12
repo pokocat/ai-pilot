@@ -1,7 +1,22 @@
 const store = require('./store');
 const { backendEnvironmentData } = require('./backend-environment');
 
+/* 微信 PC（Windows / macOS）：胶囊长在窗口自己的标题栏里，页面从标题栏下沿才开始画，
+   页面顶上根本没有要让的东西。但 getMenuButtonBoundingClientRect 在 PC 上照样回一组
+   手机式坐标，按它算出来的 navInset 让五个 tab 与左导航顶上空出约 80px（2026-11-12 桌面微信
+   0.2.50 实拍：页头大字落在窗口三分之一高处）。这里按**平台**而不是窗口宽度分流——
+   iPad 横屏同样是 expanded 档，可它的胶囊真的浮在页面上，必须照旧让位。 */
+const DESKTOP_PLATFORMS = ['windows', 'mac', 'linux'];
+function isDesktopClient() {
+  try {
+    const info = wx.getDeviceInfo ? wx.getDeviceInfo() : wx.getSystemInfoSync();
+    return DESKTOP_PLATFORMS.indexOf(String(info && info.platform).toLowerCase()) >= 0;
+  } catch (_) { return false; }
+}
+
 function capsuleMetrics() {
+  // 顶部 16px 只是页头与标题栏之间的呼吸；navTop/navRowHeight 给 chat 分包页的返回行用。
+  if (isDesktopClient()) return { navInset: 16, navTop: 6, navRowHeight: 40, navRightInset: 16 };
   try {
     const rect = wx.getMenuButtonBoundingClientRect();
     const win = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
@@ -130,4 +145,4 @@ function syncTabBar(page, selected) {
   if (rail && typeof rail.syncState === 'function') rail.syncState(next);
 }
 
-module.exports = { baseData, backendEnvironmentData, capsuleInset, capsuleMetrics, syncTabBar, syncViewport, viewportData };
+module.exports = { baseData, backendEnvironmentData, capsuleInset, capsuleMetrics, isDesktopClient, syncTabBar, syncViewport, viewportData };

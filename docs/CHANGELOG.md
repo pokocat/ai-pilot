@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-11-12 · 修复桌面微信双栏排版：滚动区右溢、顶部空白、页头入口重复 · 影响面：原生小程序问策 tab、对话分包页、登录层、桌面预览台
+
+- **现象**（开发版 `0.2.50` 桌面微信实拍）：问策的正文和问答卡整体往右偏了约 150px，右半截被窗口裁掉；五个 tab 与左导航顶上空出约 80px；常驻会话栏顶上已有「军师团 / 历史会话」分段器，页头又挂了一份同名入口。
+- **根因**：微信渲染层给 scroll-view 宿主的默认样式是 `display:block; width:100%`（基础库 3.16.2 实摘）。`.wence-scroll` / `.chat-scroll` 是 fixed + `left/right` 撑宽，width 有值时 right 被丢弃，桌面档 `left:392`（对话页 `left:72`）之后宽度仍是整窗。预览台把 scroll-view 换成普通 div，没有这条默认值，所以 09-05 那轮六页全绿。顶部空白是 PC 上 `getMenuButtonBoundingClientRect` 照回手机式坐标，可 PC 的胶囊长在窗口标题栏里、根本不压页面。
+- **修复**：两条滚动区显式 `width:auto`（手机上 left/right 都是 0，与 100% 等宽）；`services/page.js` 新增 `isDesktopClient()`，按 `getDeviceInfo().platform ∈ windows/mac/linux` 让 `capsuleMetrics()` 只留 16px 顶距（按平台不按宽度：iPad 横屏也是 expanded，胶囊真的压在页面上）；登录层关闭键在 PC 上不再按胶囊坐标左推；`railOn` 时页头入口不渲染，未读角标挪到分段器上。
+- **预览台**：scroll-view 落成自定义标签并补回基础库默认样式（scroll-view `width:100%`、image 320×240）；每页 CSS 用 `@scope` 圈在自己的舞台里（原先六页拼一份，对话页的 `.chat-stream{width:100%}` 漏进问策）；问策/对话两页塞一轮长句 + 三题问答卡再抓。反证：撤掉 `width:auto` 后预览台量出的正文起点是 548，与实拍一致。960/1008/1152/1280/1440 五档几何体检无右溢、无越出父容器。
+- **验证**：app `npm test` 261 + 109 全绿（新守卫「桌面微信：fixed 滚动区清掉宿主默认宽度、顶部不按手机胶囊让位」会扫五 tab + 对话页所有 fixed + left 的 scroll-view），`build:weapp:server` / `build:weapp` 通过。**PC 顶距 16px 还没有在真实桌面微信里看过**：webview 从标题栏下沿开始画这件事是按微信 PC 的窗口结构判断的，没量过；需要传开发版到桌面微信核对页头没被标题栏压住。
+
 ### 2026-11-07 · 修复 Claude 异常流正文保留与失败用量记录 · 影响面：后端 provider/gateway、诊断契约、持久生成用量
 
 - 初始 content block 中的正文在流事件回调里快照，避免 SDK 原地累积造成重复；缺结束标记不再吞成空文本或完成，有正文按“未写完”保留，无正文显式失败；异常续写仍累加已报告用量，不自动重放故障请求。

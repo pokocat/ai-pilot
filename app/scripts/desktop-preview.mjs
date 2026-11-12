@@ -44,17 +44,39 @@ const TABS = [
   // isExpanded 打开是为了让 <nav-rail show="{{isExpanded}}"> 渲染进快照——它 show=false 时连节点都没有。
   // 预览台的 apply() 会在 <960 档把 .nav-rail-body 藏回去，与线上 wx:if 的效果等价。
   { key: 'sessions', route: '/pages/sessions/index', label: '问策',
-    prepare: (page) => page.setData({ railOn: true, isExpanded: true }) },
+    prepare: (page) => page.setData(Object.assign({ railOn: true, isExpanded: true }, SAMPLE_CHAT)) },
   { key: 'home', route: '/pages/home/index', label: '战局', prepare: (page) => page.setData({ isExpanded: true }) },
   { key: 'execution', route: '/pages/execution/index', label: '今日', prepare: (page) => page.setData({ isExpanded: true }) },
   { key: 'thinktank', route: '/pages/thinktank/index', label: '图籍', prepare: (page) => page.setData({ isExpanded: true }) },
   { key: 'profile', route: '/pages/profile/index', label: '主公', prepare: (page) => page.setData({ isExpanded: true }) },
   // 不是 tab，但它是问策侧栏里点任何一位军师之后落地的地方，桌面排版一样要核。
   { key: 'chat', route: '/packages/main/chat/index?agentKey=general', label: '对话',
-    wxss: 'packages/main/chat/index.wxss', prepare: (page) => page.setData({ isExpanded: true }) },
+    wxss: 'packages/main/chat/index.wxss', prepare: (page) => page.setData(Object.assign({ isExpanded: true }, SAMPLE_CHAT)) },
 ];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* 带一轮真实形状的对话进快照（2026-11-12 补）：空会话的问策/对话页只有页头和输入台，
+   消息流那条 scroll-view 里什么都没有，它溢不溢出根本看不出来——0.2.50 桌面实拍里
+   正文和问答卡被推出窗口右边，预览台此前六页全绿。长句 + 多题问答卡是最容易撑宽的形状。 */
+const SAMPLE_CHAT = {
+  messages: [
+    { id: 'pv-u1', role: 'user', text: '我做 AI 短视频代运营，最近接单越来越难，想听听你的判断。' },
+    {
+      id: 'pv-a1', role: 'assistant', activeAsk: true,
+      text: '生存期不做选择题，做判断题——我已经帮你判了，你回答完这三个问题，我们就能定下这个月先打哪一仗。',
+      asks: [
+        { key: 'q1', q: '你现有的付费客户最早怎么找到你的？', selected: '',
+          options: ['朋友/熟人介绍', '平台接单(猪八戒/闲鱼等)', '他们看到我发的内容主动找来', '我主动私信/陌拜'].map((value, i) => ({ key: `o${i}`, value })) },
+        { key: 'q2', q: '你之前发帖推广，内容主要讲什么？', selected: '',
+          options: ['展示我做过的视频作品', '讲AI视频多便宜/性价比高', '讲短视频对商家的好处', '没怎么发过'].map((value, i) => ({ key: `o${i}`, value })) },
+        { key: 'q3', q: '咨询了没下单的客户，最后卡在哪？', selected: '',
+          options: ['嫌贵', '不信AI视频效果', '觉得自己不需要视频', '聊着聊着就没回复了'].map((value, i) => ({ key: `o${i}`, value })) },
+      ],
+    },
+  ],
+  askTotal: 3, askAnsweredCount: 0, askRemaining: 3, askReady: false,
+};
 
 /**
  * 端口已经在监听就别再喊一次 `cli auto`：工具已经带着这个项目起来时，
@@ -86,7 +108,10 @@ async function connectWithRetry(attempts = 20) {
 
 /** WXML → HTML：只做标签改名与属性清洗，class 一个字都不动（样式全靠它命中）。 */
 const TAG_MAP = {
-  view: 'div', 'scroll-view': 'div', 'cover-view': 'div', 'movable-area': 'div', 'movable-view': 'div',
+  // scroll-view 不能落成普通 div：微信渲染层给它的宿主默认 `display:block; width:100%`，
+  // 普通 div 是 width:auto。fixed 定位 + left 推开的滚动区在真机会整条右溢，在预览台却严丝合缝
+  // （2026-11-12 0.2.50 实拍对不上的根因）。落成自定义标签，再由 BASE_WXSS 补回那条默认值。
+  view: 'div', 'scroll-view': 'x-scroll-view', 'cover-view': 'div', 'movable-area': 'div', 'movable-view': 'div',
   text: 'span', 'cover-image': 'img', image: 'img', block: 'div',
   swiper: 'div', 'swiper-item': 'div', navigator: 'a', form: 'div', label: 'label',
   textarea: 'textarea', input: 'input', button: 'button', canvas: 'canvas',
@@ -231,7 +256,10 @@ function writeShell(captured) {
   const pageCss = captured.map((tab) => {
     const file = path.join(PROJECT, tab.wxss || `pages/${tab.key}/index.wxss`);
     const css = fs.existsSync(file) ? inlineImports(fs.readFileSync(file, 'utf8'), path.dirname(file)) : '';
-    return `/* ===== ${tab.label} ===== */\n${css}`;
+    // 每页样式用 @scope 圈在自己的舞台里（2026-11-12 补）：真机上页面 WXSS 互相隔离，
+    // 预览台原先六页拼成一份，对话分包页那条 .chat-stream{width:100%} 漏进问策页，量出来的轴宽是错的。
+    // 用 @scope 而不是加前缀选择器，是因为它不抬权重——页面规则与 app.wxss 的较量结果和真机一致。
+    return `/* ===== ${tab.label} ===== */\n@scope (.stage[data-key="${tab.key}"]) {\n${css}\n}`;
   }).join('\n');
   // 产品 CSS 一律先过标签改名，再拼进外壳；外壳自己那段样式是按 HTML 写的，不参与。
   fs.writeFileSync(path.join(OUT, 'index.html'),
@@ -265,7 +293,11 @@ function renderShell(tabs, appCss, pageCss) {
   /* 未映射的自定义组件占位：保住图标在行内的尺寸，不让排版塌掉。 */
   i[data-cmp] { display: inline-block; width: 1em; height: 1em; vertical-align: -.12em;
     background: currentColor; opacity: .35; border-radius: 3px; }
-  img { max-width: 100%; }
+  /* 微信基础库 3.16.2 组件宿主默认样式（WeappVendor/3.16.2.wxvpkg 里原样摘出）：
+     wx-scroll-view{display:block;width:100%} · wx-image{display:inline-block;width:320px;height:240px;overflow:hidden}。
+     产品 CSS 拼在后面，同权重下照样覆盖它们——与真机的层叠顺序一致。 */
+  x-scroll-view { display: block; width: 100%; overflow: hidden; }
+  img { display: inline-block; width: 320px; height: 240px; overflow: hidden; }
   /* 页头通栏那条规则原先按组件标签写（.pad.has-aside > tab-header），预览台整条落空：
      开发者工具的 outerWxml 把自定义组件根节点吐成 <components/tab-header/index …>，
      浏览器解析成标签 components + 属性 tab-header。当时是在这里补一条等价映射兜的。
