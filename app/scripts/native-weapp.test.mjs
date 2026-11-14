@@ -239,7 +239,14 @@ test('桌面微信：fixed 滚动区清掉宿主默认宽度、顶部不按手�
 
   // 常驻栏顶上已经有「军师团 / 历史会话」分段器，页头入口在 railOn 下收起，未读角标挪到分段器上。
   const sessionsWxml = read(sourceRoot, 'pages/sessions/index.wxml');
-  assert.match(sessionsWxml, /<view wx:if="\{\{!railOn\}\}" class="wh-entries">/);
+  // 2026-11-13：「新对话」左栏里没有，两档都留，所以收起改成逐个入口判。
+  assert.match(sessionsWxml, /<view wx:if="\{\{!railOn\}\}" class="wh-entry" bindtap="openCouncil">/);
+  assert.match(sessionsWxml, /<view wx:if="\{\{!railOn\}\}" class="wh-entry" bindtap="openHistory">/);
+  // 问策页必须能原地开新对话（用户反馈「不支持新建会话」）：入口只给登录态，生成中拦住，
+  // 走与 bootChat greet 分支同一条路（不带 sessionId 起 general，首句发出时服务端才建 Session）。
+  assert.match(sessionsWxml, /<view wx:if="\{\{canNewChat\}\}" class="wh-entry" bindtap="newChat">/);
+  const sessionsJs = read(sourceRoot, 'pages/sessions/index.js');
+  assert.match(sessionsJs, /newChat\(\) \{\s*if \(!store\.isAuthed\(\)\) return;\s*if \(this\.data\.busy\) \{[^}]*\}[\s\S]*?this\.chatCoreUnload\(\);\s*this\.chatCoreLoad\(\{ agentKey: 'general' \}\);/);
   assert.match(sessionsWxml, /<text>军师团<\/text><view wx:if="\{\{railOn && councilUnreadText\}\}" class="unread">/);
   assert.match(sessionsWxml, /<text>历史会话<\/text><view wx:if="\{\{railOn && historyUnreadText\}\}" class="unread">/);
 });

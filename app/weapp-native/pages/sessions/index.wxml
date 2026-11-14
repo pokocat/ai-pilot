@@ -21,15 +21,20 @@
         <text class="wh-kicker">{{title}}{{alias}} · 在线</text>
         <view class="wh-titlerow">
           <text class="wh-title serif">问策</text>
-          <!-- 桌面常驻左栏（railOn）时不渲染：那两个入口在栏顶的分段器上已经各有一份，
-               页头再挂一份就是同一组导航在一屏里出现两次；未读角标随之挪到分段器上。 -->
-          <view wx:if="{{!railOn}}" class="wh-entries">
-            <view class="wh-entry" bindtap="openCouncil">
+          <!-- 军师团 / 历史在桌面常驻左栏（railOn）时不渲染：栏顶分段器上已经各有一份，
+               页头再挂一份就是同一组导航在一屏里出现两次；未读角标随之挪到分段器上。
+               「新对话」左栏里没有，两档都留（游客没有会话可换，不渲染）。 -->
+          <view wx:if="{{!railOn || canNewChat}}" class="wh-entries">
+            <view wx:if="{{canNewChat}}" class="wh-entry" bindtap="newChat">
+              <native-icon name="plus" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
+              <text>新对话</text>
+            </view>
+            <view wx:if="{{!railOn}}" class="wh-entry" bindtap="openCouncil">
               <native-icon name="group" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
               <text>军师团</text>
               <view wx:if="{{councilUnreadText}}" class="unread wh-entry-badge"><text>{{councilUnreadText}}</text></view>
             </view>
-            <view class="wh-entry" bindtap="openHistory">
+            <view wx:if="{{!railOn}}" class="wh-entry" bindtap="openHistory">
               <native-icon name="clock" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
               <text>历史</text>
               <view wx:if="{{historyUnreadText}}" class="unread wh-entry-badge"><text>{{historyUnreadText}}</text></view>

@@ -107,7 +107,7 @@ Page(withShare({
     showHistory: false, showLogin: false, loginReason: 'chat', unlockAgent: null, loading: true, error: false, searching: false,
     // 终态专属
     isleTabs: visualTabs('theme-green'), unread: 0, reviewDue: false, councilUnreadText: '', historyUnreadText: '',
-    headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false,
+    headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false, canNewChat: false,
     // railOn = 抽屉改常驻左栏（只在 expanded + chat 形态成立）。它与 drawerOpen 互斥：
     // 侧栏在的时候没有半屏抽屉，也就没有遮罩、没有 overlay 记账、提示 pill 照常出现。
     railOn: false,
@@ -256,6 +256,7 @@ Page(withShare({
     this.loadHints();
     this.measureHead();
     const authed = store.isAuthed();
+    if (authed !== this.data.canNewChat) this.setData({ canNewChat: authed });
     this._agents = await store.loadAgents();
     if (!authed) {
       this._sessions = [];
@@ -515,6 +516,23 @@ Page(withShare({
 
   /* ────────────── 终态：抽屉 / 浮岛 tab 行 / 提示 pill ────────────── */
 
+  /**
+   * 「新对话」：在问策页原地换一条空白主线（2026-11-13 用户反馈「不支持新建会话」）。
+   * 连续会话（2026-08-10）只决定**冷进**续接哪条，从没打算把用户锁在一条线上——可这之前唯一的
+   * 新建入口藏在对话分包页的「更多」菜单里，问策 tab 本身无路可走。
+   * 做法与 bootChat 的 greet 分支同一条路：卸掉当前 chat-core、按 general 起一个空会话，
+   * 首句发出时服务端才建 Session；它随即成为 updatedAt 最新的 general 会话，下次冷进自然续接它。
+   * 旧对话一个字不动，在「历史」里。生成中不许换：在途流会被 chatCoreUnload 断掉订阅，用户以为丢了回答。
+   */
+  newChat() {
+    if (!store.isAuthed()) return;
+    if (this.data.busy) { wx.showToast({ title: '等军师这一轮说完，再开新对话', icon: 'none' }); return; }
+    if (this.data.drawerOpen) this.closeDrawer();
+    this.chatCoreUnload();
+    this.chatCoreLoad({ agentKey: 'general' });
+    this.measureHead();
+    wx.showToast({ title: '已开新对话，原对话在「历史」里', icon: 'none' });
+  },
   openCouncil() { this.openDrawer('council'); },
   openHistory() { this.openDrawer('history'); },
   openDrawer(seg) {

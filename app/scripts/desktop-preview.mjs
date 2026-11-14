@@ -148,7 +148,12 @@ function wxmlToHtml(wxml) {
    不在下面的后行断言字符集里，本来也命中不了；再加上「只处理 `{` 之前那段」两层保险。
    scroll-view 写在 view 前面只是为了看着清楚：`-` 不在前导字符集里，
    `scroll-view` 里的 `view` 本来就不会被单独匹配。 */
-const SELECTOR_TAGS = ['scroll-view', 'view', 'text', 'image', 'button', 'input', 'textarea'];
+// `page` 是小程序页面的根标签，全局设计 token（--surface / --ink / --danger …）全挂在 `page {}` 上。
+// 预览台原先既没把它改名、HTML 里也没有这个根节点，于是所有 token 都是空值：卡片没底色、
+// 字全黑、危险红不见——看着像「排版问题」，其实是预览台失真（2026-11-13 战局页排查时发现）。
+// 改名成自定义标签 x-page 并在每个舞台里包一层，权重仍是一个标签，层叠结果与真机一致。
+const SELECTOR_TAGS = ['scroll-view', 'view', 'text', 'image', 'button', 'input', 'textarea', 'page'];
+const SELECTOR_TAG_MAP = Object.assign({}, TAG_MAP, { page: 'x-page' });
 const SELECTOR_TAG_RE = new RegExp(`(^|[\\s>+~,])(${SELECTOR_TAGS.join('|')})(?=[\\s>+~,{.:#[]|$)`, 'g');
 
 function rewriteSelectors(css) {
@@ -162,12 +167,17 @@ function rewriteSelectors(css) {
   let buf = '';
   for (const ch of masked) {
     if (ch === '{') {
-      // buf 是「选择器」还是「at 规则前奏 / 声明」：@ 开头的前奏（@media 等）里没有标签名，
-      // 带 `;` 的一定是声明尾巴（误判时宁可不改）。其余按选择器改名。
+      // buf 是「选择器」还是「at 规则前奏」：@ 开头的前奏（@media 等）里没有标签名，不改；其余按选择器改名。
       // 逐字符扫是为了 @media 里嵌的选择器也能改到（按 `}` 粗切会把它整段当成声明块）。
-      out += (buf.trimStart().startsWith('@') || buf.includes(';'))
-        ? buf
-        : buf.replace(SELECTOR_TAG_RE, (_, pre, tag) => pre + TAG_MAP[tag]);
+      // 例外：`@charset "UTF-8";` 这类以分号结尾的 at 语句会和紧随其后的第一条选择器落进同一段 buf，
+      // 整段按「带分号」跳过的话，app.wxss 开头那条 `page {}`（全部设计 token）就漏改了。
+      // 所以只看最后一个 `;` 之后的尾巴：它才是这条规则真正的前奏。
+      const cut = buf.lastIndexOf(';') + 1;
+      const head = buf.slice(0, cut);
+      const tail = buf.slice(cut);
+      out += head + (tail.replace(/\0\d+\0/g, '').trimStart().startsWith('@')
+        ? tail
+        : tail.replace(SELECTOR_TAG_RE, (_, pre, tag) => pre + SELECTOR_TAG_MAP[tag]));
       out += ch;
       buf = '';
     } else if (ch === '}') {
@@ -297,6 +307,7 @@ function renderShell(tabs, appCss, pageCss) {
      wx-scroll-view{display:block;width:100%} · wx-image{display:inline-block;width:320px;height:240px;overflow:hidden}。
      产品 CSS 拼在后面，同权重下照样覆盖它们——与真机的层叠顺序一致。 */
   x-scroll-view { display: block; width: 100%; overflow: hidden; }
+  x-page { display: block; }
   img { display: inline-block; width: 320px; height: 240px; overflow: hidden; }
   /* 页头通栏那条规则原先按组件标签写（.pad.has-aside > tab-header），预览台整条落空：
      开发者工具的 outerWxml 把自定义组件根节点吐成 <components/tab-header/index …>，
@@ -323,7 +334,7 @@ function renderShell(tabs, appCss, pageCss) {
   <div class="stage-wrap">
     <div class="stage" data-key="${tab.key}">
       <div class="stage-h">${tab.label} · ${tab.route}</div>
-      ${tab.html}
+      <x-page>${tab.html}</x-page>
     </div>
   </div>`).join('')}
 </div>

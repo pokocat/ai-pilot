@@ -12,7 +12,7 @@
            guest-notice 从 wx:else 里挪出来，条件补 `authed &&` 补回原先由 else 分支提供的登录态判据；
            两种登录态下的渲染顺序都与改动前逐节点相同。 -->
       <view class="aside">
-        <view class="say-strip"><text class="say-k">今日献策 · {{sayingDate}}</text><text class="say-line serif">{{saying}}</text></view>
+        <view class="say-strip"><text class="say-k">今日献策{{sayingDate ? ' · ' + sayingDate : ''}}</text><text class="say-line serif">{{saying}}</text></view>
         <view wx:if="{{authed && onboardingKnown&&!onboarded}}" class="guest-notice card">
           <view class="guest-notice-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="17"></native-icon></view>
           <view class="guest-notice-body"><text class="guest-notice-title serif">你的战局还没有建档</text><text class="guest-notice-desc">建档是自愿的；完成三问后，军师会把第一份判断写到这里。</text></view>
@@ -28,7 +28,7 @@
         <view class="battle-hero" bindtap="toggleHero"><text class="bh-kicker">军 师 判 断 · 主 要 矛 盾</text><text class="bh-title serif {{heroExpanded?'expanded':''}}">{{summary}}</text><text class="bh-source">{{dossierTitle ? '当前案卷 · '+dossierTitle+' · 随变而调' : '还没有案卷 · 和军师聊一次，方案定了就成卷'}}</text><view class="bh-foot"><view class="bh-ask solid" catchtap="ask"><text>问军师</text></view><view class="bh-ask" catchtap="openEvidence"><text>判断依据{{cited.length?' · 已引 '+cited.length+' 类':''}}</text></view></view></view>
 
         <!-- ② 三势压成一行：只给结论和强度，点开是三势合参抽屉。 -->
-        <view wx:if="{{forces.length}}" class="force-grid bf-compact" bindtap="openForces"><view wx:for="{{forces}}" wx:key="kind" class="force card"><text class="force-tag">{{item.name}} · {{item.levelLabel}}</text><text class="force-concl serif">{{item.conclusion}}</text><view class="force-bar"><view class="force-fill {{item.kind}}" style="width:{{item.strength}}%"></view></view></view></view>
+        <view wx:if="{{forces.length}}" class="force-grid bf-compact" bindtap="openForces"><view wx:for="{{forces}}" wx:key="kind" class="force card"><view class="fc-head"><text class="fc-name">{{item.name}}</text><text class="fc-level tone-{{item.tacticTone}}">{{item.levelLabel}}</text></view><text class="force-concl serif">{{item.conclusion}}</text><view class="force-bar"><view class="force-fill tone-{{item.tacticTone}}" style="width:{{item.strength}}%"></view></view></view></view>
         <view wx:elif="{{!loading}}" class="force-empty card" bindtap="ask"><text class="fe-t serif">三势还没断</text><text class="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</text><view class="fe-go"><text>去对话</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
 
         <!-- 时运条：命理回主流程（主公菜单里藏太深）。紧贴三势之下，与天势呼应——天势本来就参命盘。
@@ -40,7 +40,7 @@
           <view class="fs-go" catchtap="openMingpan"><text>命盘</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view>
         </view>
 
-        <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="neutral" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
+        <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="danger" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
 
         <!-- 判断到行动桥接：失败时绝不猜业务态；有令优先于有判断。 -->
         <view wx:if="{{loadFailed}}" class="battle-bridge card" bindtap="retry"><text class="bb-main">判断状态没读完整</text><text class="bb-go">重试</text></view>

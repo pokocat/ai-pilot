@@ -1,6 +1,102 @@
 @use "../../../src/pages/studio/index.scss" as studio;
 @use "../home/index.scss" as home;
 
+/* —— 执行区样式（2026-11-13 从 pages/home/index.scss 原样迁来）——
+   08-18 IA 回归把军令/打卡/复盘从战局搬到今日后，这批规则还留在战局 scss 里、靠上面的 @use 带进来；
+   战局自己一条都不用。挪到这里、紧跟 @use 之后，层叠顺序与迁移前一致。 */
+/* 取数失败提示条（与锦囊/图籍同款，类名复用便于三处一起改） */
+.pch-retry {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 14px;
+}
+.pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+
+/* —— 周计划 · 七日打卡条 ——
+   页面上唯一的连续性可视化：断一天必须一眼看得出来，所以七格固定、不压缩、不跳日。 */
+.week-card { padding: 13px 14px; }
+.wk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.wk-k { font-size: 9.5px; letter-spacing: .4em; color: var(--ink-3); }
+.wk-sum { font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.wk-strip { display: flex; justify-content: space-between; margin-top: 12px; }
+.wk-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.wk-wd { font-size: 10px; color: var(--ink-3); }
+.wk-num { font-size: 10px; color: var(--ink-3); }
+.wk-cell.today .wk-wd, .wk-cell.today .wk-num { color: var(--accent); font-weight: 700; }
+.wk-dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  box-sizing: border-box; border: 1.5px solid var(--line-strong);
+}
+.wk-dot.wk-full { background: var(--accent); border-color: var(--accent); }
+/* 半完成：左满右空的对分，比透明度更能在小尺寸上读出「做了一半」。 */
+.wk-dot.wk-part { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.wk-dot.wk-idle { border-color: var(--accent); background: transparent; }
+.wk-dot.wk-none { border-style: dashed; border-color: var(--line-strong); background: transparent; }
+.wk-cell.today .wk-dot { box-shadow: 0 0 0 3px var(--accent-soft); }
+.wk-note { display: block; margin-top: 11px; font-size: 10.5px; line-height: 1.6; color: var(--ink-3); }
+.wg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wg-done { font-size: 11px; font-weight: 600; color: var(--accent); }
+
+.order-add-row {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px; padding: 0 14px;
+  border: 1px dashed var(--line-strong); border-radius: 13px;
+  color: var(--accent); font-size: 13px; font-weight: 600;
+}
+.order-add-row:active { opacity: .8; }
+.task-check text { color: #fff; font-size: 12px; font-weight: 700; }
+.ac-go, .oe-go, .remind-soon { display: flex; align-items: center; gap: 4px; }
+.dv-more { display: flex; align-items: center; gap: 4px; }
+.fc-op.on { color: #fff; border-color: var(--accent); background: var(--accent); }
+.native-goal-input { height: 46px; min-height: 46px; line-height: 46px; box-sizing: border-box; }
+.native-result-input { height: 40px; min-height: 40px; line-height: 40px; box-sizing: border-box; }
+.ge-save, .tf-btn, .task.done .task-check, .archive-check { background: var(--accent); border-color: var(--accent); }
+.da-k, .da-action, .tf-k { color: var(--accent); }
+.da-action { background: var(--accent-soft); }
+
+
+.ohead { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 2px 2px; }
+.ohead-t { font-size: 17px; font-weight: 600; color: var(--ink); }
+.ohead-m { font-size: 12px; color: var(--accent); font-weight: 600; }
+.ohead-m.busy { color: var(--ink-3); }
+.task-weapon {
+  display: flex; align-items: center; gap: 6px; margin-top: 9px; padding: 8px 10px;
+  border-radius: 10px; background: var(--accent-soft);
+}
+.task-weapon .tw-line { flex: 1; min-width: 0; font-size: 12px; color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-weapon .tw-b { font-weight: 700; }
+.task-weapon .tw-go { flex-shrink: 0; display: flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--accent); }
+/* 已办折叠行：当天已办超过 3 条、或历史已办，收在这一行后面。 */
+.done-more {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 38px; font-size: 12px; color: var(--ink-3);
+}
+.done-more:active { opacity: .7; }
+
+/* 军令卡上的次级动词行（帮我写脚本）：克制到一行小字，别跟兵器条抢。 */
+.task-verbs { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.task-verb { display: flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.task-verb:active { opacity: .75; }
+
+.review-entry { display: flex; align-items: center; gap: 10px; padding: 15px 16px; margin-top: 10px; }
+.review-entry .re-b { flex: 1; min-width: 0; }
+.review-entry .re-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.review-entry .re-s { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+.sheet-remind { display: flex; align-items: center; gap: 8px; padding: 12px 4px; }
+.sheet-remind .remind-text { flex: 1; min-width: 0; }
+.fs-body .rc-btn { margin-top: 10px; }
+
+.rx-item {
+  display: flex; align-items: center; gap: 8px; padding: 11px 13px; margin-bottom: 6px;
+  border: 1px solid transparent; border-radius: var(--r-sm); background: var(--accent-soft);
+}
+.rx-item:active { filter: brightness(.97); transform: scale(.99); }
+.rx-main { flex: 1; min-width: 0; }
+.rx-for { display: block; margin-bottom: 3px; font-size: 12px; color: var(--accent); }
+.rx-play { display: block; font-size: 14px; font-weight: 600; color: var(--accent-ink); }
+.rx-cta { flex-shrink: 0; display: flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; color: var(--accent); }
+
+
 .exec-page { display: flex; flex-direction: column; gap: 11px; }
 .exec-page > view, .exec-page > block, .exec-page > scroll-view { margin-top: 0; margin-bottom: 0; }
 /* 副栏 wrapper（2026-09-05 WP-B）：桌面档右列，手机档必须**看不出来**。

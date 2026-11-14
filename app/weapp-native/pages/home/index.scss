@@ -1,8 +1,31 @@
 @use "../../../src/pages/home/index.scss" as home;
-/* 战局只消费判断样式；执行样式已迁至 pages/execution。 */
+/* 战局只消费判断样式（src/pages/home 那份 H5 仍在用，不动它；这里只做原生端的补丁）。
+   2026-11-13 排版整理：原「点兵(studio)」合并期留下的执行区样式（周打卡条、军令卡、兵器条、复盘入口……）
+   早在 08-18 IA 回归时随军令迁去 pages/execution，这里的副本一条都不再命中，已删。 */
 
-/* 战局 = 沙盘(home) + 点兵(studio) 合并页。两份 src scss 同时导入（选择器全局，H5 仍在消费，
-   不动 src；wxss 体积代价已知）。下方补丁 = 原 home 补丁 + 原 studio 补丁中随执行区块搬来的部分。 */
+/* —— 竖向节奏：只此一处 ——
+   战局的块来自两份 scss，各带各的 margin，叠起来实测是 24 / 4 / 0 / 16 / 0（判断牌→三势贴着、
+   三势→天时条贴着、风险卡→出令卡贴着）。手机与 medium 档统一由容器 gap 发号，子块外边距一律归零；
+   改间距只动这里，别再回各块里加 margin。
+   expanded 档 .pad.has-aside 是 grid（app.scss，权重更高，这里的 flex 自动让位），它的 row-gap
+   刻意归零（见 app.scss 那段 span 200 的说明），主栏行距改由子块 margin-bottom 供给，见文件末。 */
+.pad.home { display: flex; flex-direction: column; gap: 12px; }
+.pad.home > view,
+.pad.home > text,
+.pad.home > button { margin-top: 0; margin-bottom: 0; }
+/* 页头下方那一小段（献策 + 建档提示）：副栏 wrapper 在手机档是一个 flex item，里面自己排。 */
+.home .aside { display: flex; flex-direction: column; gap: 10px; }
+.home .aside .say-strip,
+.home .aside .guest-notice { margin: 0; }
+.home .tab-head { margin-bottom: 2px; }
+
+/* —— 今日献策：页头细线下的一句眉批 —— */
+.home .say-strip { display: flex; align-items: baseline; gap: 8px; }
+.home .say-k { flex-shrink: 0; color: var(--accent); font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.home .say-line {
+  flex: 1; min-width: 0; margin-top: 0; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .guest-notice{display:flex;align-items:center;gap:11px;padding:14px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:var(--shadow-sm);}
 .guest-notice-icon{width:34px;height:34px;border-radius:11px;background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent-glow);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
@@ -10,171 +33,107 @@
 .guest-notice-title{display:block;color:var(--ink);font-size:15px;font-weight:600;}
 .guest-notice-desc{display:block;margin-top:3px;color:var(--ink-3);font-size:12.5px;line-height:1.5;}
 .guest-notice-action{flex-shrink:0;min-width:58px;height:32px;padding:0 11px;border-radius:16px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+
 .battle-empty { padding: 48px 18px; text-align: center; }
 .battle-empty-title { display: block; font-size: 17px; font-weight: 600; }
 .battle-empty-desc { display: block; max-width: 270px; margin: 8px auto 0; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
 .battle-empty button { width: 132px; height: 42px; margin: 16px auto 0; border-radius: 13px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; }
-.bh-toggle, .bh-ask, .fe-go { display: flex; align-items: center; gap: 4px; }
-.nono-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;}
-.nono-row .nono{flex:1;min-width:0;padding:0;}
-.force-sheet-mask{position:fixed;inset:0;z-index:260;background:rgba(18,24,22,.46);display:flex;align-items:flex-end;justify-content:center;}
-.force-sheet{width:100%;max-height:86vh;box-sizing:border-box;padding:10px 20px calc(18px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 -18px 52px rgba(15,31,25,.2);}
-.force-sheet-grip{width:40px;height:4px;margin:0 auto 14px;border-radius:2px;background:var(--line-strong);flex-shrink:0;}
-.force-sheet .fs-body{max-height:52vh;}
-.battle-bridge{display:flex;align-items:center;gap:12px;min-height:68px;padding:13px 15px;border-color:var(--accent-glow);}
-.battle-bridge .bb-copy{flex:1;min-width:0;}
-.battle-bridge .bb-main{display:block;font-size:15px;font-weight:600;color:var(--ink);}
-.battle-bridge .bb-sub{display:block;margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--ink-3);}
-.battle-bridge .bb-go{flex-shrink:0;color:var(--accent);font-size:13px;font-weight:600;}
 
-/* —— 原 studio 补丁（执行区块随迁） —— */
-/* 取数失败提示条（与锦囊/图籍同款，类名复用便于三处一起改） */
-.pch-retry {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 12px 14px;
+/* —— ① 判断牌 ——
+   两个动作原先 space-between 分在两端，一个实心一个描边、隔着半张牌对望，读不出是一组。
+   并排靠左、等高 32，实心那个是主动作。 */
+.home .bh-source { margin-top: 10px; }
+.bh-foot { justify-content: flex-start; gap: 8px; margin-top: 16px; }
+.bh-toggle, .fe-go { display: flex; align-items: center; gap: 4px; }
+.bh-foot .bh-ask {
+  display: flex; align-items: center; height: 32px; padding: 0 14px; box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,.35); border-radius: 999px;
 }
-.pch-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
-.pch-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
-
-/* —— 周计划 · 七日打卡条 ——
-   页面上唯一的连续性可视化：断一天必须一眼看得出来，所以七格固定、不压缩、不跳日。 */
-.week-card { padding: 13px 14px; }
-.wk-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.wk-k { font-size: 9.5px; letter-spacing: .4em; color: var(--ink-3); }
-.wk-sum { font-size: 11.5px; font-weight: 600; color: var(--accent); }
-.wk-strip { display: flex; justify-content: space-between; margin-top: 12px; }
-.wk-cell { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.wk-wd { font-size: 10px; color: var(--ink-3); }
-.wk-num { font-size: 10px; color: var(--ink-3); }
-.wk-cell.today .wk-wd, .wk-cell.today .wk-num { color: var(--accent); font-weight: 700; }
-.wk-dot {
-  width: 20px; height: 20px; border-radius: 50%;
-  box-sizing: border-box; border: 1.5px solid var(--line-strong);
-}
-.wk-dot.wk-full { background: var(--accent); border-color: var(--accent); }
-/* 半完成：左满右空的对分，比透明度更能在小尺寸上读出「做了一半」。 */
-.wk-dot.wk-part { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
-.wk-dot.wk-idle { border-color: var(--accent); background: transparent; }
-.wk-dot.wk-none { border-style: dashed; border-color: var(--line-strong); background: transparent; }
-.wk-cell.today .wk-dot { box-shadow: 0 0 0 3px var(--accent-soft); }
-.wk-note { display: block; margin-top: 11px; font-size: 10.5px; line-height: 1.6; color: var(--ink-3); }
-.wg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.wg-done { font-size: 11px; font-weight: 600; color: var(--accent); }
-
-.order-add-row {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 44px; padding: 0 14px;
-  border: 1px dashed var(--line-strong); border-radius: 13px;
-  color: var(--accent); font-size: 13px; font-weight: 600;
-}
-.order-add-row:active { opacity: .8; }
-.task-check text { color: #fff; font-size: 12px; font-weight: 700; }
-.ac-go, .oe-go, .remind-soon { display: flex; align-items: center; gap: 4px; }
-.dv-more { display: flex; align-items: center; gap: 4px; }
-.fc-op.on { color: #fff; border-color: var(--accent); background: var(--accent); }
-.native-goal-input { height: 46px; min-height: 46px; line-height: 46px; box-sizing: border-box; }
-.native-result-input { height: 40px; min-height: 40px; line-height: 40px; box-sizing: border-box; }
-.ge-save, .tf-btn, .task.done .task-check, .archive-check { background: var(--accent); border-color: var(--accent); }
-.da-k, .da-action, .tf-k { color: var(--accent); }
-.da-action { background: var(--accent-soft); }
-
-/* —— 战局重排（对齐设计稿 v5 战局屏）：判断一张牌 / 三势一行 / 兵器挂军令 / 回填→复盘 ——
-
-   统一竖向节奏：合并页的区块来自两份 scss，各带自己的 margin，堆在一起就是「间距有点乱」
-   （用户 2026-08-12 反馈）。这里把直接子元素的上下 margin 全部归零，改由容器 gap 统一发号施令，
-   只对少数需要更强分组感的段头单独补一点上间距。改间距只动这一处，别再回各自的 scss 里加 margin。 */
-.pad.home.execution { display: flex; flex-direction: column; gap: 11px; }
-.pad.home.execution > view,
-.pad.home.execution > text,
-.pad.home.execution > button,
-.pad.home.execution > scroll-view { margin-top: 0; margin-bottom: 0; }
-/* 段头（今日军令）前多留一档，让判断区与执行区分开；紧随其后的卡不再额外拉开。 */
-.pad.home.execution > .ohead { margin-top: 7px; }
-/* 页头与今日献策压紧：原先 22px 页头留白 + 两行献策，首屏还没进入判断就吃掉小半屏。 */
-.home .tab-head { margin-bottom: 2px; }
-.home .say-strip {
-  display: flex; align-items: baseline; gap: 8px;
-  padding-bottom: 2px;
-}
-.home .say-k { flex-shrink: 0; }
-.home .say-line {
-  flex: 1; min-width: 0; margin-top: 0; font-size: 13px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.bh-ask.solid { background: #F2F1EA; border-radius: 999px; padding: 5px 14px; }
+.bh-foot .bh-ask.solid { background: rgba(255,255,255,.94); border-color: transparent; }
 .bh-ask.solid text { color: var(--accent-deep); font-weight: 600; }
-.bh-foot .bh-ask { border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 5px 14px; }
-/* 三势一行：三张卡等高，强度条一律贴卡底——结论长短不一时条子跟着文字浮动，一排看着是歪的。 */
-.bf-compact { margin-top: 4px; align-items: stretch; }
-.bf-compact .force { display: flex; flex-direction: column; }
-.bf-compact .force-concl { min-height: 0; }
-.bf-compact .force-bar { margin-top: auto; }
-/* 时运条：一行说完节奏，不占版面。命理入口回到主流程（原先只剩主公菜单，太深）。 */
-.fate-strip { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
-.fate-strip .fs-k { flex-shrink: 0; font-size: 10.5px; letter-spacing: .3em; color: var(--accent); font-weight: 600; }
+
+/* —— ② 三势一行 ——
+   头行拆成「名 + 强弱签」：签按强/中/弱着色，与下面强度条同一套色；原先条子按天/市/人着色，
+   人势恒红、市势恒黄，和强弱无关，读者会把颜色当成好坏。
+   卡高交给 stretch 拉齐、强度条 margin-top:auto 贴底；原先 min-height 150 在结论只有三行时
+   会在文字和条子之间空出一截。结论最多四行，再长点卡进三势合参看全文。 */
+.bf-compact { align-items: stretch; }
+.bf-compact .force { min-height: 0; padding: 12px 11px 13px; }
+.fc-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.fc-name { font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--ink-2); }
+.fc-level {
+  flex-shrink: 0; padding: 0 6px; border-radius: 999px;
+  font-size: 10.5px; line-height: 17px; font-weight: 700;
+  color: var(--accent); background: var(--accent-soft);
+}
+.fc-level.tone-warn { color: var(--warn); background: rgba(168,119,46,.12); }
+.fc-level.tone-danger { color: var(--danger); background: rgba(156,74,56,.10); }
+.bf-compact .force-concl {
+  margin-top: 8px; margin-bottom: 12px;
+  font-size: 14px; line-height: 1.45; font-weight: 600;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden;
+}
+.bf-compact .force-bar { margin-top: auto; height: 4px; background: var(--surface-2); }
+.bf-compact .force-fill { background: var(--accent); }
+.bf-compact .force-fill.tone-warn { background: var(--warn); }
+.bf-compact .force-fill.tone-danger { background: var(--danger); }
+
+/* —— 时运条：一行说完节奏，不占版面 —— */
+.fate-strip { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 0 14px; }
+.fate-strip .fs-k { flex-shrink: 0; font-size: 11px; letter-spacing: .2em; color: var(--accent); font-weight: 600; }
 .fate-strip .fs-line { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fate-strip .fs-line.muted { color: var(--ink-3); }
 .fate-strip .fs-go { flex-shrink: 0; display: flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--accent); }
 
-.ohead { display: flex; align-items: baseline; justify-content: space-between; margin: 14px 2px 2px; }
-.ohead-t { font-size: 17px; font-weight: 600; color: var(--ink); }
-.ohead-m { font-size: 12px; color: var(--accent); font-weight: 600; }
-.ohead-m.busy { color: var(--ink-3); }
-.task-weapon {
-  display: flex; align-items: center; gap: 6px; margin-top: 9px; padding: 8px 10px;
-  border-radius: 10px; background: var(--accent-soft);
+/* —— 现在不能做 ——
+   原先是写死的 #F0EFE9 灰底叠 .card 的白卡阴影，像一块没擦干净的灰板；整句红色粗体又太吵。
+   改成极淡的危险色底 + 同色细边、去阴影；警示交给标题与图标的红，正文回到墨色好读。 */
+.home .nono-card.card {
+  padding: 14px 15px 13px;
+  background: rgba(156,74,56,.045);
+  border-color: rgba(156,74,56,.18);
+  box-shadow: none;
 }
-.task-weapon .tw-line { flex: 1; min-width: 0; font-size: 12px; color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-weapon .tw-b { font-weight: 700; }
-.task-weapon .tw-go { flex-shrink: 0; display: flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--accent); }
-/* 已办折叠行：当天已办超过 3 条、或历史已办，收在这一行后面。 */
-.done-more {
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  min-height: 38px; font-size: 12px; color: var(--ink-3);
+.home .nono-card .section-label { margin-bottom: 4px; font-size: 12px; letter-spacing: .2em; }
+.nono-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;}
+.nono-row .nono{flex:1;min-width:0;padding:0;color:var(--ink);font-size:14px;line-height:1.5;}
+.home .nono-src { margin-top: 4px; }
+
+/* —— 判断 → 行动桥：页上唯一的主行动，动作做成实心按钮，不再是一行跟正文同色的小字 —— */
+.battle-bridge{display:flex;align-items:center;gap:12px;min-height:68px;padding:13px 15px;border-color:var(--accent-glow);}
+.battle-bridge .bb-copy{flex:1;min-width:0;}
+.battle-bridge .bb-main{display:block;font-size:15px;font-weight:600;color:var(--ink);}
+.battle-bridge .bb-sub{display:block;margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--ink-3);}
+.battle-bridge .bb-go{
+  flex-shrink: 0; display: flex; align-items: center; height: 32px; padding: 0 14px; box-sizing: border-box;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
 }
-.done-more:active { opacity: .7; }
 
-/* 军令卡上的次级动词行（帮我写脚本）：克制到一行小字，别跟兵器条抢。 */
-.task-verbs { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.task-verb { display: flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--accent); }
-.task-verb:active { opacity: .75; }
-
-.review-entry { display: flex; align-items: center; gap: 10px; padding: 15px 16px; margin-top: 10px; }
-.review-entry .re-b { flex: 1; min-width: 0; }
-.review-entry .re-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
-.review-entry .re-s { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+/* —— 抽屉（三势合参 / 判断依据） —— */
+.force-sheet-mask{position:fixed;inset:0;z-index:260;background:rgba(18,24,22,.46);display:flex;align-items:flex-end;justify-content:center;}
+.force-sheet{width:100%;max-height:86vh;box-sizing:border-box;padding:10px 20px calc(18px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 -18px 52px rgba(15,31,25,.2);}
+.force-sheet-grip{width:40px;height:4px;margin:0 auto 14px;border-radius:2px;background:var(--line-strong);flex-shrink:0;}
+.force-sheet .fs-body{max-height:52vh;}
 .sheet-foot { display: flex; align-items: center; gap: 12px; padding-top: 10px; }
 .sheet-foot .fs-close { flex: 1; }
 .sheet-side { flex-shrink: 0; padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--accent); }
 .sheet-metrics { margin: 2px 0 12px; }
 .ev-group { margin-bottom: 14px; }
 .ev-group .ev-gl { display: block; margin-bottom: 8px; }
-.sheet-remind { display: flex; align-items: center; gap: 8px; padding: 12px 4px; }
-.sheet-remind .remind-text { flex: 1; min-width: 0; }
-.fs-body .rc-btn { margin-top: 10px; }
 
-.rx-item {
-  display: flex; align-items: center; gap: 8px; padding: 11px 13px; margin-bottom: 6px;
-  border: 1px solid transparent; border-radius: var(--r-sm); background: var(--accent-soft);
-}
-.rx-item:active { filter: brightness(.97); transform: scale(.99); }
-.rx-main { flex: 1; min-width: 0; }
-.rx-for { display: block; margin-bottom: 3px; font-size: 12px; color: var(--accent); }
-.rx-play { display: block; font-size: 14px; font-weight: 600; color: var(--accent-ink); }
-.rx-cta { flex-shrink: 0; display: flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; color: var(--accent); }
-
-/* 大窗口战局让核心判断真正展开，三势保持一眼可比，避免只是把手机版空白拉宽。 */
+/* —— 大窗口 —— 核心判断真正展开，三势保持一眼可比，避免只是把手机版空白拉宽。 */
 .viewport-medium .home .battle-hero,
 .viewport-expanded .home .battle-hero { padding-left: 24px; padding-right: 24px; }
 .viewport-expanded .home .battle-hero { padding-top: 28px; padding-bottom: 24px; }
-.viewport-expanded .home .force { min-height: 126px; padding-left: 16px; padding-right: 16px; }
-.viewport-expanded .home .force-concl { font-size: 17px; line-height: 1.35; }
+.viewport-expanded .home .bf-compact .force { min-height: 116px; padding-left: 16px; padding-right: 16px; }
+.viewport-expanded .home .bf-compact .force-concl { font-size: 16px; line-height: 1.4; }
+/* expanded 档主栏行距：grid 的 row-gap 是 0，每块自带 12 的下边距。副栏(.aside)纵跨、页尾留白通栏，
+   它们的下边距不参与主栏节奏，归零。 */
+.viewport-expanded .pad.home > view { margin-bottom: 12px; }
+.viewport-expanded .pad.home > .aside,
+.viewport-expanded .pad.home > .tabbar-space { margin-bottom: 0; }
 
 /* —— 副栏（2026-09-05 WP-B）——
-   手机档一条规则都不加：.aside 是个没有 padding / border 的普通 block，say-strip 与 guest-notice
-   自带的上下 margin 照旧穿过它折叠，渲染结果与包裹前逐像素相同。
-   桌面档 .aside 变成 flex 纵列（app.scss 的 `.pad.has-aside > .aside`，gap 12），此时 say-strip 那条
-   `margin: 2px 0 var(--rhythm-block)` 会与 gap 相加，副栏第一块被顶低、两块之间也拉开两倍——归零，
-   节奏统一交给 gap。guest-notice 的 margin-bottom 落在副栏最末，不影响块间距，留着不动。 */
+   桌面档 .aside 变成 flex 纵列（app.scss 的 `.pad.has-aside > .aside`，gap 12），say-strip 自带的
+   margin 会与 gap 相加，副栏第一块被顶低——归零，节奏统一交给 gap（手机档上面那条已归零，这条保留给守卫）。 */
 .viewport-expanded .aside .say-strip { margin: 0; }
