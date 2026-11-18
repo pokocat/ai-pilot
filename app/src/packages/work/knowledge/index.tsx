@@ -56,9 +56,13 @@ export default function Knowledge() {
   const [loaded, setLoaded] = useState(false); // D2：首屏加载与空态区分，避免拉取期间闪空态
   const [pollHint, setPollHint] = useState(false); // 轮询到上限仍有未就绪项 → 提示下拉刷新
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // 上传后的一次性兜底刷新，也要能被 clearPoll 取消
   const pollAttempt = useRef(0);
 
-  const clearPoll = useCallback(() => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } }, []);
+  const clearPoll = useCallback(() => {
+    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; }
+    if (fallbackTimer.current) { clearTimeout(fallbackTimer.current); fallbackTimer.current = null; }
+  }, []);
 
   // 拉列表；poll=true 时对未就绪项按退避节奏（2s→4s→8s）再拉，累计约 30s 到上限停并提示下拉刷新。
   const load = useCallback((poll = false) => {
@@ -138,7 +142,9 @@ export default function Knowledge() {
       setItems((prev) => (prev.some((it) => it.id === res.id) ? prev : [optimistic, ...prev]));
       pollAttempt.current = 0; setPollHint(false);
       load(true);
-      setTimeout(() => load(true), 1500); // 兜底：解析+嵌入异步，稍后再刷一次
+      // 兜底：解析+嵌入异步，稍后再刷一次。存入 fallbackTimer 以便 useDidHide/卸载时 clearPoll 能取消，
+      // 否则用户上传后 1.5s 内离开本页，这个一次性 timer 仍会对隐藏/已卸载页 load(true) + setState。
+      fallbackTimer.current = setTimeout(() => { fallbackTimer.current = null; load(true); }, 1500);
     } catch (e) {
       if (!uploadCancelled.current) Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     } finally {
