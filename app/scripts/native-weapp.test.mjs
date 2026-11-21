@@ -745,7 +745,8 @@ test('原生流式扣尾：ask 协议块不进打字机缓冲，done 后按落�
   assert.match(behavior, /if \(current\.streamRenderId\) setMdText\(current\.streamRenderId, text\);/);
   assert.doesNotMatch(behavior, /setMdText\(current\.streamRenderId, raw\)/, '模型原文不得进入打字机缓冲');
   // done 收尾以服务端清洗后的正文（落库版本）为准；towxml 只增不减，已打出的字不是它的前缀就换渲染器。
-  assert.match(behavior, /if \(!finished\.streamStarted \|\| !extendsShown\(finished\.text, this\._streamShown\)\) \{[\s\S]*?finished\.streamRenderId = '';/);
+  assert.match(behavior, /const studioAskReady = finished\.studioClarify && finished\.asks\?\.length;/);
+  assert.match(behavior, /if \(studioAskReady \|\| !finished\.streamStarted \|\| !extendsShown\(finished\.text, this\._streamShown\)\) \{\s*stopImmediatelyCb\(finished\.streamRenderId\);[\s\S]*?finished\.streamRenderId = '';[\s\S]*?finished\.typing = false;/);
   assert.match(behavior, /setStreamFinish\(finished\.streamRenderId\)/);
   // 中断/兜底路径也不能把含协议块的模型原文当正文落进气泡。
   assert.match(behavior, /messages\[\$\{index\}\]\.text`\]: current\.text \|\| this\._streamShown \|\| ''/);
@@ -1166,7 +1167,6 @@ test('原生对话使用固定版本开源流式 Markdown 打字机并隔离网�
   assert.match(chatJs, /require\('\.\.\/vendor\/towxml\/globalCb'\)/);
   assert.match(chatJs, /setMdText\(current\.streamRenderId, text\)/);
   assert.match(chatJs, /setStreamFinish\(finished\.streamRenderId\)/);
-  assert.match(chatJs, /const studioAskReady = finished\.studioClarify && finished\.asks\?\.length;\s*if \(studioAskReady \|\|[^\n]+\) \{\s*stopImmediatelyCb\(finished\.streamRenderId\);[\s\S]*?finished\.typing = false;/);
   assert.match(chatJs, /startStreamAutoScroll\(\)[\s\S]*?setInterval\([\s\S]*?, 180\)/);
   const updateStart = chatJs.indexOf('updateStreamText(chunk, replace)');
   const updateEnd = chatJs.indexOf('\n  updateStreamReply(', updateStart);

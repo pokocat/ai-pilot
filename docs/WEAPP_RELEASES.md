@@ -17,6 +17,8 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-21 | `0.2.56` | `修复创作追问选项显示` | `b35cfb12` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927407 B | 上传成功，微信开发版。开发者工具四组对话通过；选图卡可点选并保存一张指定参考图。 |
+| 2026-11-21 | `0.2.55` | `军师创作确认与参考图选择` | `24fa59b6` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927336 B | 上传成功。选图追问在本版流式收尾后未显示选项，由后续开发版修复。 |
 | 2026-11-21 | `0.2.54` | `军师多轮创作接续声量AI草稿` | `4ffeff7b` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927336 B | 上传成功，微信开发版。本人账号在开发者工具重放原四轮，前三轮显示 Skill 追问，确认后保存并打开声量AI图片草稿。 |
 | 2026-11-21 | `0.2.53` | `对话脚本接续图片与视频草稿` | `174563b4` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.9 MB / 2988861 B | 上传成功，微信开发版。账号中心和声量AI已先行发布，工具刷新确认 web-view 业务域名生效。 |
 | 2026-11-13 | `0.2.52` | `战局排版整理与问策新对话` | `9c94abd` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（主检出 `fix/weapp-desktop-layout`，app 目录无未提交改动；先 `npm test` 全绿与 dry-run 校验） | 2.8 MB / 2977045 B | 上传成功：开发版已进入微信后台，未提交审核或发布 |
