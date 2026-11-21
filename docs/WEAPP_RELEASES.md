@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-21 | `0.2.54` | `军师多轮创作接续声量AI草稿` | `4ffeff7b` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927336 B | 上传成功，微信开发版。本人账号在开发者工具重放原四轮，前三轮显示 Skill 追问，确认后保存并打开声量AI图片草稿。 |
 | 2026-11-21 | `0.2.53` | `对话脚本接续图片与视频草稿` | `174563b4` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.9 MB / 2988861 B | 上传成功，微信开发版。账号中心和声量AI已先行发布，工具刷新确认 web-view 业务域名生效。 |
 | 2026-11-13 | `0.2.52` | `战局排版整理与问策新对话` | `9c94abd` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（主检出 `fix/weapp-desktop-layout`，app 目录无未提交改动；先 `npm test` 全绿与 dry-run 校验） | 2.8 MB / 2977045 B | 上传成功：开发版已进入微信后台，未提交审核或发布 |
 | 2026-11-12 | `0.2.51` | `修复桌面微信双栏排版` | `b2dc9b1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（`fix/weapp-desktop-layout` 提交的独立干净 detached worktree，先 `npm test` 261 + 109 全绿与 dry-run 校验，经 devq 执行） | 2.8 MB / 2979908 B | 上传成功：开发版已进入微信后台，尚未转体验版、提交审核或发布；该分支尚未合入 main。修 `0.2.50` 桌面实拍的三处：问策/对话滚动区右溢（scroll-view 宿主默认 `width:100%`，补 `width:auto`）、PC 顶部按手机胶囊让位空出约 80px（按平台只留 16px）、常驻栏时页头入口重复。待在桌面微信核对：页头没被窗口标题栏压住、正文与问答卡不再被裁。 |
