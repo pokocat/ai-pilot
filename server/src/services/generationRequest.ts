@@ -151,7 +151,7 @@ export async function enqueueDurableGeneration(
     });
     if (!existing) {
       if (intent?.action === 'clarify') {
-        studio = { clarification: intent.question };
+        studio = { clarification: intent.question, ...(intent.ask ? { ask: intent.ask } : {}) };
       } else try {
         studio = {
           delegation: studioSession.delegation ?? await studioDelegation(studioSession.user, studioSession.personalToken, body.studioLoginCode),

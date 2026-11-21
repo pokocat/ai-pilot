@@ -27,4 +27,6 @@
 
 - **声量AI草稿契约**：`GenRequest.studioLoginCode` 是小程序一次性身份凭证，只用于明确制作意图的当次建单。生成权威回执为 `ChatReply.studioDraft`（草稿编号、版本、来源消息和稿件摘要、经工具回读的参考图及待补项），SSE、同步请求和历史记录共用。`ChatReply.studioPhoneVerification` 只用于等待历史账号本人核验，`StudioVerifyPhoneRequest/StudioResumeDraftRequest` 根据已保存回复找到同一原始制作指令。网页打开、批准分别用 `StudioOpenRequest/StudioOpenResult/StudioApproveRequest`，短时打开编号只绑定容器与授权，不授予草稿读取权限。守卫 `server/test/studioDraft.test.ts`。 `StudioIntentRequest/StudioIntentResult` 供原生提交本轮上下文。生成请求携带的 `studioIntentTicket` 绑定消息、发送编号、会话和本人登录态，限时验证后冻结服务端生成的制作方案。
 
+- **创作选图确认**：`ChatReply.studioSkillStage='clarify'` 搭配现有的 `asks` 返回候选素材选项。选项作为当前会话的普通用户回复发送，原素材与确认依据由服务端验证；确认前不会签发制作方案或调用 MCP。守卫 `server/test/studioDraft.test.ts`。
+
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。

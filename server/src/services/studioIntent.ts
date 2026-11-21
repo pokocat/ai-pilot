@@ -49,8 +49,15 @@ export function studioSpecifications(text: string, kind: StudioKind) {
 }
 
 const ORDINALS = '一二三四五六七八九';
+export const STUDIO_SCRIPT_VERSION_HEADING = /^\s*(?:#{1,6}\s*)?(?:\*{1,2})?(?:第([一二两三四五六七八九1-9])版|版本\s*([一二两三四五六七八九1-9]))(?=[：:\s，、】）（)*]|$)/gm;
 function ordinal(value: string) {
   return value === '两' ? 2 : /^[1-9]$/.test(value) ? Number(value) : ORDINALS.indexOf(value) + 1;
+}
+
+export function studioScriptVersion(text: string, version: number): string | undefined {
+  const headings = [...text.matchAll(STUDIO_SCRIPT_VERSION_HEADING)];
+  const index = headings.findIndex((heading) => ordinal(heading[1] ?? heading[2]) === version);
+  return index < 0 ? undefined : text.slice(headings[index].index, headings[index + 1]?.index).trim();
 }
 
 export function studioScriptSelection(text: string): number | 'latest' | null {

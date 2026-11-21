@@ -1208,7 +1208,7 @@ export interface ChatReply {
   thoughtSummary?: string;
   factConfirmation?: FactConfirmationCard; // 独立确认卡，不复用 asks/chips
   studioDraft?: StudioDraftCard;
-  studioSkillStage?: 'clarify'; // 已召回创作技能，等待本轮所缺制作信息
+  studioSkillStage?: 'clarify'; // 已召回创作技能，等待本轮所缺制作信息；选图可同时返回 asks
   studioPhoneVerification?: 'required' | 'completed';
   /**
    * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：

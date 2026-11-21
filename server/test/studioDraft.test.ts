@@ -123,6 +123,49 @@ test('AI 召回凭证绑定发送内容和本人会话，可交接短确认，�
   assert.ok(!JSON.stringify(saved.requestJson).includes(clarify.studioIntentTicket));
 });
 
+test('多图指代需要本人明确选择，澄清选项留在同一对话', async () => {
+  const phone = uniquePhone();
+  const token = await login(phone);
+  const user = await prisma.user.findUniqueOrThrow({ where: { phone } });
+  const session = await prisma.session.create({ data: { userId: user.id, tenantId: user.tenantId, agentKey: 'general' } });
+  const refs = [{ kind: 'image', id: 'first-image' }, { kind: 'image', id: 'second-image' }];
+  await prisma.message.create({ data: {
+    sessionId: session.id, role: 'user', contentJson: { text: '先看这两张图，暂时只讨论构图。' }, refsJson: refs,
+  } });
+  const uncertain = { clientRequestId: 'studio-ref-uncertain', sessionId: session.id, text: '用这张做春季新品封面。' };
+  const plan = { action: 'draft' as const, kind: 'image' as const, prompt: '春季新品封面', specs: {}, images: [1] };
+  const clarify = await recallStudioIntent(user, token, uncertain, async () => plan);
+  assert.equal(clarify.action, 'clarify');
+  assert.ok('studioIntentTicket' in clarify);
+  const created = await enqueueDurableGeneration(user, {
+    ...uncertain, studioIntentTicket: clarify.studioIntentTicket,
+  }, undefined, { user, personalToken: token });
+  await tickGenerationWorker();
+  const saved = await prisma.generationJob.findUniqueOrThrow({ where: { id: created.job.id } });
+  assert.deepEqual(saved.replyJson, {
+    text: '请确认哪张图要作为制作素材。', studioSkillStage: 'clarify',
+    asks: [{ q: '选择参考图', options: ['第 1 张作为参考图', '第 2 张作为参考图', '不带参考图'] }],
+  });
+
+  const typed = { ...uncertain, text: '用第一张作为参考图，第二张不传。', clientRequestId: 'studio-ref-explicit' };
+  const picked = { ...typed, text: '第 1 张作为参考图', clientRequestId: 'studio-ref-quick-reply' };
+  for (const body of [typed, picked]) {
+    const wrong = await recallStudioIntent(user, token, body, async () => ({ ...plan, images: [2] }));
+    assert.equal(wrong.action, 'clarify');
+    const correct = await recallStudioIntent(user, token, body, async () => plan);
+    assert.ok('studioIntentTicket' in correct);
+    const frozen = openStudioIntentTicket(correct.studioIntentTicket, user.id, token, body);
+    assert.equal(frozen.action, 'draft');
+    if (frozen.action === 'draft') assert.deepEqual(frozen.plan.referenceIds, ['first-image']);
+  }
+  const noPhoto = { ...uncertain, text: '不带参考图', clientRequestId: 'studio-ref-declined' };
+  const declined = await recallStudioIntent(user, token, noPhoto, async () => ({ ...plan, images: [] }));
+  assert.ok('studioIntentTicket' in declined);
+  const noReferences = openStudioIntentTicket(declined.studioIntentTicket, user.id, token, noPhoto);
+  assert.equal(noReferences.action, 'draft');
+  if (noReferences.action === 'draft') assert.deepEqual(noReferences.plan.referenceIds, []);
+});
+
 test('真实持久任务路径保存选中原稿与本人原图，开卡时另行授权', async (t) => {
   const phone = '13922198765';
   const token = await login(phone);
@@ -157,7 +200,7 @@ test('真实持久任务路径保存选中原稿与本人原图，开卡时另�
   let openSubject = '';
   let checkSessionId = '';
   let toolCalls = 0;
-  let shortScript = false;
+  let expectedPrompt: string | undefined;
   const openCalls: string[] = [];
   const approved: string[] = [];
   const view = () => ({
@@ -244,7 +287,7 @@ test('真实持久任务路径保存选中原稿与本人原图，开卡时另�
         break;
       case 'fill_media_draft':
         assert.equal(args.docVersion, 'v1');
-        if (shortScript) assert.equal(args.prompt, '今天下单更划算');
+        if (expectedPrompt) assert.equal(args.prompt, expectedPrompt);
         else {
           assert.match(args.prompt, /^## 第二版/);
           assert.doesNotMatch(args.prompt, /初稿镜头|第三版/);
@@ -348,7 +391,7 @@ test('真实持久任务路径保存选中原稿与本人原图，开卡时另�
   assert.equal(newUser.identityUid, 'studio-new-person');
   assert.equal(newUser.wechatOpenId, 'studio-new-openid');
 
-  shortScript = true;
+  expectedPrompt = '今天下单更划算';
   prompt = ''; duration = undefined; ratio = undefined; operationId = ''; uploaded = false; docVersion = 'v1';
   const linkedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
   const linkedContext = { user: linkedUser, personalToken: token };
@@ -359,12 +402,33 @@ test('真实持久任务路径保存选中原稿与本人原图，开卡时另�
   await tickGenerationWorker();
   const shortReply = await prisma.generationJob.findUniqueOrThrow({ where: { id: short.job.id } });
   await prisma.message.update({ where: { id: shortReply.resultMessageId! }, data: { contentJson: { text: '今天下单更划算' } } });
+  const shortBody = { text: '把你上一条完整分镜做成视频草稿', sessionId: short.session.id, clientRequestId: 'studio-short-video' };
+  const shortIntent = await recallStudioIntent(linkedUser, token, shortBody, async () => ({
+    action: 'draft', kind: 'video', prompt: '这里是模型整理后的描述，不替代原稿', images: [], specs: {}, scriptTurn: 2,
+  }));
+  assert.ok('studioIntentTicket' in shortIntent);
   const shortDraft = await enqueueDurableGeneration(linkedUser, {
-    text: '用这版做视频', sessionId: short.session.id, clientRequestId: 'studio-short-video', studioLoginCode: 'proof-verified-short',
+    ...shortBody, studioIntentTicket: shortIntent.studioIntentTicket, studioLoginCode: 'proof-verified-short',
   }, undefined, linkedContext);
   await tickGenerationWorker();
   const shortSaved = (await prisma.generationJob.findUniqueOrThrow({ where: { id: shortDraft.job.id } })).replyJson as any;
   assert.ok(shortSaved.studioDraft, JSON.stringify(shortSaved));
   assert.equal(shortSaved.studioDraft.sourceScriptMessageId, shortReply.resultMessageId);
   assert.equal(prompt, '今天下单更划算');
+
+  expectedPrompt = '用三个镜头讲书店老板收到一封信。';
+  prompt = ''; operationId = ''; docVersion = 'v1';
+  const newBody = { text: '书店老板收到一封信，三个镜头。就按这版做。', clientRequestId: 'studio-new-brief' };
+  const newIntent = await recallStudioIntent(linkedUser, token, newBody, async () => ({
+    action: 'draft', kind: 'video', prompt: expectedPrompt!, images: [], specs: {},
+  }));
+  assert.ok('studioIntentTicket' in newIntent);
+  const newDraft = await enqueueDurableGeneration(linkedUser, {
+    ...newBody, studioIntentTicket: newIntent.studioIntentTicket, studioLoginCode: 'proof-verified-brief',
+  }, undefined, linkedContext);
+  await tickGenerationWorker();
+  const newSaved = (await prisma.generationJob.findUniqueOrThrow({ where: { id: newDraft.job.id } })).replyJson as any;
+  assert.ok(newSaved.studioDraft, JSON.stringify(newSaved));
+  assert.equal(newSaved.studioDraft.sourceScriptMessageId, null);
+  assert.equal(prompt, expectedPrompt);
 });

@@ -180,6 +180,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 - **声量AI草稿（`studio_media_draft`）**：`JUNSHI_STUDIO_ENABLED` 与账号中心、专用机密客户端及存储加密配置同时就绪时启用；已配置技能数组的智能体须勾选该技能，未配置数组的总军师可用。持久生成只在用户明确要求制作时调用 `list_media_scenes → open_media_draft → fill_media_draft → prepare_reference_upload → open_media_draft`；写稿、阅图和快出片保持原入口。工具只接受本人委托，逐张上传本来由该用户上传的 JPG/PNG。直接用图或图生视频明确采用单张、指定序号或符合数量的整组原图；多图指代不清先追问。凭摘要和幂等编号回读实际素材，时效内重试同稿且尊重网页修改。草稿不是付费任务，回包须是固定主站同草稿零积分结果。守卫 `server/test/studioDraft.test.ts`。 原生新版经 `/studio/intent` 将本轮消息与最近 12 条同会话消息交给模型，区分聊天、澄清、图片或视频制作。默认沿用辅助档，可通过 `JUNSHI_STUDIO_INTENT_MODEL` 在当前对话服务商端点指定单独的创作识别模型。只有通过限时绑定的召回凭证和本人授权的制作进入 MCP。历史账号核验后复用已冻结方案。旧版的制作指令仍可按原协议发送。守卫 `server/test/studioDraft.test.ts`。
 
+- **AI 草稿方案优先**：新版 worker 直接执行已冻结的 `studioPlan`。模型确认当前需求时使用新描述；指定先前脚本时须定位同会话真实助手正文，选定同一条回复里的带编号版本时从原文截取。模型提出素材后只校验用户消息是否明确选择了对应的上传批次和图序，证据不足用 `clarify` 与现有 `asks` 追问。模型是新版 Skill 的唯一召回入口。守卫 `server/test/studioDraft.test.ts`。
+
 ### 8.4 海报成品图（`canvas_design` artifact 技能，2026-07-29）
 
 「海报设计师」（agent `poster`）用短对话确认需求；这个技能把确认后的 brief 变成**真图**（3:4 PNG，1080×1440）。完整设计见 `docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md`，实现落在 `server/src/services/creative/*` + `routes/creative.ts` + admin`views/creative.tsx` + app `packages/work/poster|posterJob`。

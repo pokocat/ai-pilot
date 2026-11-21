@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { GenerationJob } from '@prisma/client';
 import { z } from 'zod';
-import type { ChatReply, MessageRef, StudioDraftCard } from '../../../shared/contracts';
+import type { ChatAsk, ChatReply, MessageRef, StudioDraftCard } from '../../../shared/contracts';
 import { prisma } from '../db.js';
 import { getStudioReferenceImage } from './chatImage.js';
 import { StudioBridgeError, StudioMcp, studioDraftUrl, studioId, type StudioDelegation } from './studioBridge.js';
-import { studioIntent, studioReferenceSelection, studioScriptSelection, studioSpecifications } from './studioIntent.js';
+import { STUDIO_SCRIPT_VERSION_HEADING, studioIntent, studioReferenceSelection, studioScriptSelection, studioScriptVersion, studioSpecifications } from './studioIntent.js';
 import { moderate } from './moderation.js';
 import { requireLocalIdentityActive } from './identityState.js';
 import type { StudioDraftPlan } from './studioAiRecall.js';
 
 export type StudioGeneration = { delegation: StudioDelegation; sourceMessageId?: string }
-  | { error: string; code: string } | { clarification: string };
+  | { error: string; code: string } | { clarification: string; ask?: ChatAsk };
 const scriptRequest = /(?:写|稿|脚本|改|剧本|分镜|文案|提示词)/;
 const videoWords = /视频|分镜|短片|口播/;
 const imageWords = /图片|图像|海报|主视觉|商品图/;
@@ -41,30 +41,23 @@ function imagesOf(raw: unknown) {
 }
 
 interface ScriptCandidate { messageId: string; text: string; request: string; refs: unknown; }
-const VERSION_HEADING = /^\s*(?:#{1,6}\s*)?(?:\*{1,2})?(?:第([一二两三四五六七八九1-9])版|版本\s*([一二两三四五六七八九1-9]))(?=[：:\s，、】）（)*]|$)/gm;
-
 function selectedScript(candidates: ScriptCandidate[], selection: number | 'latest' | null): ScriptCandidate | undefined {
   if (typeof selection !== 'number') {
     const recent = candidates.at(-1);
     if (!recent) return undefined;
-    const headings = [...recent.text.matchAll(VERSION_HEADING)];
+    const headings = [...recent.text.matchAll(STUDIO_SCRIPT_VERSION_HEADING)];
     return headings.length > 1 ? { ...recent, text: recent.text.slice(headings.at(-1)!.index) } : recent;
   }
-  const labels = [String(selection), '一二三四五六七八九'[selection - 1], ...(selection === 2 ? ['两'] : [])];
-  let labelled = false;
   for (const candidate of [...candidates].reverse()) {
-    const headings = [...candidate.text.matchAll(VERSION_HEADING)];
-    labelled ||= headings.length > 0;
-    const index = headings.findIndex((match) => labels.includes(match[1] ?? match[2]));
-    if (index >= 0) {
-      return { ...candidate, text: candidate.text.slice(headings[index].index, headings[index + 1]?.index).trim() };
-    }
+    const section = studioScriptVersion(candidate.text, selection);
+    if (section) return { ...candidate, text: section };
   }
-  return labelled ? undefined : candidates[selection - 1];
+  return candidates.some((candidate) => candidate.text.search(STUDIO_SCRIPT_VERSION_HEADING) >= 0)
+    ? undefined : candidates[selection - 1];
 }
 
-async function scopedInputs(job: GenerationJob, sourceMessageId: string, text: string, refs: unknown, plannedKind?: 'image' | 'video') {
-  const intent = plannedKind ? { kind: plannedKind } : studioIntent(text);
+async function scopedInputs(job: GenerationJob, sourceMessageId: string, text: string, refs: unknown) {
+  const intent = studioIntent(text);
   if (!intent) return null;
   const source = await prisma.message.findFirstOrThrow({ where: { id: sourceMessageId, sessionId: job.sessionId, role: 'user' } });
   const previous = await prisma.message.findMany({
@@ -143,7 +136,11 @@ export async function prepareStudioDraft(job: GenerationJob, request: {
   text: string; refs?: unknown[]; studio: StudioGeneration; studioPlan?: StudioDraftPlan;
 }, signal: AbortSignal): Promise<ChatReply> {
   try {
-    if ('clarification' in request.studio) return { text: request.studio.clarification, studioSkillStage: 'clarify' };
+    if ('clarification' in request.studio) return {
+      text: request.studio.clarification,
+      studioSkillStage: 'clarify',
+      ...(request.studio.ask ? { asks: [request.studio.ask] } : {}),
+    };
     if ('error' in request.studio) return {
       text: request.studio.error,
       ...(request.studio.code === 'STUDIO_PHONE_PROOF_REQUIRED' ? { studioPhoneVerification: 'required' as const } : {}),
@@ -157,10 +154,8 @@ export async function prepareStudioDraft(job: GenerationJob, request: {
     if (!user) return { text: '本次账号授权已失效，请重新登录军师后发起制作。' };
     await requireLocalIdentityActive(user.identityUid);
     const sourceMessageId = request.studio.sourceMessageId ?? job.userMessageId;
-    // 既有明确选版仍按原文和选定参考图解析。模型召回负责判断这轮是否进入制作。
-    const plan = request.studioPlan && !studioScriptSelection(request.text)
-      ? request.studioPlan
-      : await scopedInputs(job, sourceMessageId, request.text, request.refs, request.studioPlan?.kind);
+    // 模型方案已验证并冻结。只有仍使用旧协议的任务才解析原始制作指令。
+    const plan = request.studioPlan ?? await scopedInputs(job, sourceMessageId, request.text, request.refs);
     if (!plan) return { text: '请明确要制作的视频或图片，以及需要随稿保存的图片。' };
     const allowed = await moderate('input', `${request.text}\n${plan.prompt}`, {
       tenantId: job.tenantId, userId: job.userId, sessionId: job.sessionId, failClosed: true,
