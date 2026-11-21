@@ -19,14 +19,23 @@ export const studioPlanSchema = z.object({
 });
 export type StudioDraftPlan = z.infer<typeof studioPlanSchema>;
 const question = z.string().trim().min(1).max(240);
+const modelSpecs = z.object({
+  ratio: studioPlanSchema.shape.specs.shape.ratio.nullish(),
+  duration: studioPlanSchema.shape.specs.shape.duration.nullish(),
+  count: studioPlanSchema.shape.specs.shape.count.nullish(),
+}).nullish().transform((value) => ({
+  ...(value?.ratio ? { ratio: value.ratio } : {}),
+  ...(value?.duration ? { duration: value.duration } : {}),
+  ...(value?.count ? { count: value.count } : {}),
+}));
 const decisionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('chat') }),
   z.object({ action: z.literal('clarify'), question }),
   z.object({
     action: z.literal('draft'), kind: z.enum(['image', 'video']),
-    prompt: z.string().trim().min(1).max(6_000), specs: studioPlanSchema.shape.specs,
-    images: z.array(z.number().int().positive()).max(9),
-    scriptTurn: z.number().int().positive().optional(),
+    prompt: z.string().trim().min(1).max(6_000), specs: modelSpecs,
+    images: z.array(z.number().int().positive()).max(9).nullish().transform((value) => value ?? []),
+    scriptTurn: z.number().int().positive().nullish(),
   }),
 ]);
 const ticketSchema = z.object({
@@ -67,7 +76,7 @@ function classifyStudioTurn(input: string, usageMeta: { tenantId: string; userId
   return structured(decisionSchema, {
     system: SYSTEM, user: input, maxChars: 24_000, maxTokens: 620,
     model: process.env.JUNSHI_STUDIO_INTENT_MODEL?.trim() || undefined,
-    temperature: 0, timeoutMs: 9_000, signal: AbortSignal.timeout(9_000), usageMeta,
+    temperature: 0, timeoutMs: 12_000, signal: AbortSignal.timeout(12_000), usageMeta,
   });
 }
 
@@ -136,8 +145,12 @@ export async function recallStudioIntent(
       intent = { action: 'clarify', question: '请明确要用哪版原稿或哪张参考图。' };
     } else {
       const { kind, specs } = decision;
+      const brief = [...history.map((turn) => turn.text), latest.text].join('\n');
+      const ratio = specs.ratio && (brief.includes(specs.ratio)
+        || (specs.ratio === '9:16' && /竖屏|竖版/.test(brief))
+        || (specs.ratio === '16:9' && /横屏|横版/.test(brief))) ? specs.ratio : undefined;
       intent = { action: 'draft', plan: {
-        kind, specs: kind === 'image' ? { ratio: specs.ratio, count: specs.count } : { ratio: specs.ratio, duration: specs.duration },
+        kind, specs: kind === 'image' ? { ratio, count: specs.count } : { ratio, duration: specs.duration },
         prompt: useManuscript ? original.data.text : decision.prompt,
         sourceScriptMessageId: useManuscript ? manuscript.id : null,
         referenceIds: [...new Set(refIds)],
