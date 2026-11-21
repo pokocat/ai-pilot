@@ -70,6 +70,7 @@ type GenerationRequestBody = {
   clientRequestId?: string;
   parentGenerationId?: string;
   studioLoginCode?: string;
+  studioIntentTicket?: string;
 };
 
 /**

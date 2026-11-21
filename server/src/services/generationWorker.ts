@@ -67,6 +67,7 @@ type RequestData = {
   newChapter?: boolean;
   chapterGapHours?: number | null;
   studio?: StudioGeneration;
+  studioPlan?: import('./studioAiRecall.js').StudioDraftPlan;
 };
 
 type FrozenContext = {

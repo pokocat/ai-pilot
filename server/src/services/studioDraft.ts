@@ -8,8 +8,10 @@ import { StudioBridgeError, StudioMcp, studioDraftUrl, studioId, type StudioDele
 import { studioIntent, studioReferenceSelection, studioScriptSelection, studioSpecifications } from './studioIntent.js';
 import { moderate } from './moderation.js';
 import { requireLocalIdentityActive } from './identityState.js';
+import type { StudioDraftPlan } from './studioAiRecall.js';
 
-export type StudioGeneration = { delegation: StudioDelegation; sourceMessageId?: string } | { error: string; code: string };
+export type StudioGeneration = { delegation: StudioDelegation; sourceMessageId?: string }
+  | { error: string; code: string } | { clarification: string };
 const scriptRequest = /(?:写|稿|脚本|改|剧本|分镜|文案|提示词)/;
 const videoWords = /视频|分镜|短片|口播/;
 const imageWords = /图片|图像|海报|主视觉|商品图/;
@@ -61,8 +63,8 @@ function selectedScript(candidates: ScriptCandidate[], selection: number | 'late
   return labelled ? undefined : candidates[selection - 1];
 }
 
-async function scopedInputs(job: GenerationJob, sourceMessageId: string, text: string, refs: unknown) {
-  const intent = studioIntent(text);
+async function scopedInputs(job: GenerationJob, sourceMessageId: string, text: string, refs: unknown, plannedKind?: 'image' | 'video') {
+  const intent = plannedKind ? { kind: plannedKind } : studioIntent(text);
   if (!intent) return null;
   const source = await prisma.message.findFirstOrThrow({ where: { id: sourceMessageId, sessionId: job.sessionId, role: 'user' } });
   const previous = await prisma.message.findMany({
@@ -138,9 +140,10 @@ function chooseScene(rows: z.infer<typeof scenes>, kind: 'video' | 'image', refe
 }
 
 export async function prepareStudioDraft(job: GenerationJob, request: {
-  text: string; refs?: unknown[]; studio: StudioGeneration;
+  text: string; refs?: unknown[]; studio: StudioGeneration; studioPlan?: StudioDraftPlan;
 }, signal: AbortSignal): Promise<ChatReply> {
   try {
+    if ('clarification' in request.studio) return { text: request.studio.clarification, studioSkillStage: 'clarify' };
     if ('error' in request.studio) return {
       text: request.studio.error,
       ...(request.studio.code === 'STUDIO_PHONE_PROOF_REQUIRED' ? { studioPhoneVerification: 'required' as const } : {}),
@@ -154,7 +157,10 @@ export async function prepareStudioDraft(job: GenerationJob, request: {
     if (!user) return { text: '本次账号授权已失效，请重新登录军师后发起制作。' };
     await requireLocalIdentityActive(user.identityUid);
     const sourceMessageId = request.studio.sourceMessageId ?? job.userMessageId;
-    const plan = await scopedInputs(job, sourceMessageId, request.text, request.refs);
+    // 既有明确选版仍按原文和选定参考图解析。模型召回负责判断这轮是否进入制作。
+    const plan = request.studioPlan && !studioScriptSelection(request.text)
+      ? request.studioPlan
+      : await scopedInputs(job, sourceMessageId, request.text, request.refs, request.studioPlan?.kind);
     if (!plan) return { text: '请明确要制作的视频或图片，以及需要随稿保存的图片。' };
     const allowed = await moderate('input', `${request.text}\n${plan.prompt}`, {
       tenantId: job.tenantId, userId: job.userId, sessionId: job.sessionId, failClosed: true,

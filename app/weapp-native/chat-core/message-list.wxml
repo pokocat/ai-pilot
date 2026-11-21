@@ -30,6 +30,10 @@
         <text wx:if="{{item.report&&item.streaming&&item.streamHint}}" class="stream-hint report-note">{{item.streamHint}}</text>
         <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
         <view wx:else class="ai-text">
+          <view wx:if="{{item.studioClarify&&!item.streaming}}" class="studio-skill-label">
+            <native-icon name="image" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
+            <text>声量AI创作 · 补充需求</text>
+          </view>
           <view wx:if="{{item.thoughtSummary}}" class="thought-card {{item.thoughtOpen?'open':''}}" data-index="{{messageIndex}}" catchtap="toggleThought">
             <view class="thought-head">
               <view wx:if="{{item.streaming}}" class="thought-live"></view>

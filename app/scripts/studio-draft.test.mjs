@@ -14,6 +14,7 @@ function fixture(t) {
   let session = 'first-session';
   let logins = 0;
   let nextUrl = `${ORIGIN}/junshi/open?openId=${OPEN_ID}`;
+  let intent = { action: 'chat' };
   let pages = [];
   const calls = [];
   const routes = [];
@@ -23,6 +24,7 @@ function fixture(t) {
     if (parent?.filename === source && request === './request') {
       return { request: async (path, options) => {
         calls.push({ path, ...options });
+        if (path === '/studio/intent') return intent;
         if (path === '/studio/resume-draft') return { generationId: 'resumed-generation' };
         return { url: nextUrl, openId: OPEN_ID, expiresAt: new Date(Date.now() + 60_000).toISOString() };
       } };
@@ -47,6 +49,7 @@ function fixture(t) {
   return {
     studio, calls, routes, setSession: (value) => { session = value; },
     setUrl: (value) => { nextUrl = value; }, setPages: (value) => { pages = value; },
+    setIntent: (value) => { intent = value; },
   };
 }
 
@@ -94,12 +97,19 @@ test('历史用户取消授权时保留原指令，完成核验后用新凭证�
   ]);
 });
 
-test('直接用图的制作请求会获取本人凭证', (t) => {
-  const { studio } = fixture(t);
-  for (const text of ['把这张图做成视频', '把第一张图做成视频', '将这张照片转成视频', '用这两张图片生成视频', '图生视频']) {
-    assert.equal(studio.mayPrepareStudioDraft(text), true, text);
-  }
-  for (const text of ['怎么图生视频？', '先看图，再写视频脚本', '用快出片生成视频']) {
-    assert.equal(studio.mayPrepareStudioDraft(text), false, text);
-  }
+test('根据服务端的多轮召回结果补签凭证，不在端上判断制作关键词', async (t) => {
+  const { studio, calls, setIntent, setSession } = fixture(t);
+  const body = { text: '是的', sessionId: 's', agentKey: 'general', clientRequestId: 'request-1', refs: [] };
+  assert.equal(await studio.studioIntentForMessage(body, 'first-session', () => true), null);
+  setIntent({ action: 'clarify', studioIntentTicket: 'clarify-ticket' });
+  assert.deepEqual(await studio.studioIntentForMessage(body, 'first-session', () => true), {
+    action: 'clarify', credentials: { studioIntentTicket: 'clarify-ticket' },
+  });
+  setIntent({ action: 'draft', studioIntentTicket: 'draft-ticket' });
+  assert.deepEqual(await studio.studioIntentForMessage(body, 'first-session', () => true), {
+    action: 'draft', credentials: { studioIntentTicket: 'draft-ticket', studioLoginCode: 'one-time-wechat-proof' },
+  });
+  assert.deepEqual(calls[2], { path: '/studio/intent', method: 'POST', token: 'first-session', data: body });
+  setSession('other-session');
+  assert.equal(await studio.studioIntentForMessage(body, 'first-session', () => true), null);
 });

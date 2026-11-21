@@ -209,6 +209,7 @@ export interface CreateGenerationJobInput {
   creditCost?: number;
   requestMeta?: Record<string, unknown>;
   studio?: StudioGeneration;
+  studioPlan?: import('./studioAiRecall.js').StudioDraftPlan;
   requestedOutput?: RequestedOutput;
   deliveryMode?: DeliveryMode;
   classificationRequired?: boolean;
@@ -393,6 +394,7 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
     const frozenSnapshot = {
       ...snapshot,
       ...(input.studio ? { studio: input.studio } : {}),
+      ...(input.studioPlan ? { studioPlan: input.studioPlan } : {}),
       newChapter: chapterGapHours != null && chapterGapHours > 24,
       chapterGapHours,
     };

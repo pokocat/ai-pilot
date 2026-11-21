@@ -3,7 +3,7 @@
 // 这里只承载与页面宿主无关的逻辑：消息加载/规范化、发送、SSE 流式对接、生成态/停止/重试、
 // 键盘避让、粘贴归卷、asks 问答卡、成果卡闭环。导航参数解析、页头与返回键留在各宿主页。
 const POSTER_READY_RE = /去出图|出成品图|可以出图|够了[^\n]{0,6}出图/;
-const { studioLoginCode, mayPrepareStudioDraft, openStudioDraft, verifyAndResumeStudioDraft } = require('../services/studio-draft');
+const { studioIntentForMessage, openStudioDraft, verifyAndResumeStudioDraft } = require('../services/studio-draft');
 const { getToken } = require('../services/token');
 const { api } = require('../services/api');
 const store = require('../services/store');
@@ -246,7 +246,7 @@ function normalizeReply(reply) {
     text: stripSerializedAsksTail(value.text, value.asks),
     thoughtSummary: textOf(value.thoughtSummary).trim(),
     points, asks, factConfirmation, studioDraft: presentStudioDraft(value.studioDraft),
-    studioVerifyPhone: value.studioPhoneVerification === 'required', truncated: value.truncated === true,
+    studioVerifyPhone: value.studioPhoneVerification === 'required', studioClarify: value.studioSkillStage === 'clarify', truncated: value.truncated === true,
   };
 }
 
@@ -292,7 +292,7 @@ function normalizeMessage(message, index) {
   };
   const reply = normalizeReply(content);
   return {
-    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, truncated: reply.truncated,
+    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, studioClarify: reply.studioClarify, truncated: reply.truncated,
     // 快捷回应：服务端 SessionMessage.chips 原样带进消息对象（当前唯一写入方是进场主动消息）。
     // 无 chips 的消息拿到空数组，模板据此不渲染这一排。
     chips: stringList(message && message.chips),
@@ -1266,13 +1266,17 @@ const methods = {
         text, agentKey: this._agentKey, sessionId: this._sessionId || undefined,
         projectId: this._projectId || undefined, clientRequestId: uid('native'), refs: sendRefs,
       };
-      if (mayPrepareStudioDraft(text)) {
-        const actionToken = getToken();
-        const me = store.snapshot().me || await store.loadMe();
+      const actionToken = getToken();
+      const me = store.snapshot().me || await store.loadMe();
+      if (!active() || actionToken !== getToken()) return;
+      let studioHint = '';
+      if (me?.features?.studioAiRecall) {
+        const recall = await studioIntentForMessage(body, actionToken, active);
         if (!active() || actionToken !== getToken()) return;
-        if (me?.features?.studioDrafts) {
-          body.studioLoginCode = await studioLoginCode();
-          if (!active() || actionToken !== getToken()) return;
+        if (recall) {
+          Object.assign(body, recall.credentials);
+          studioHint = recall.action === 'draft' ? '声量AI · 正在准备草稿' : '声量AI · 正在梳理制作需求';
+          this.safeSetData({ thinkingText: studioHint });
         }
       }
       const streamed = await generateStream(body, {
@@ -1282,7 +1286,7 @@ const methods = {
           this._generationId = data.generationId || data.id || this._generationId;
           if (data.sessionId) this._sessionId = data.sessionId;
           this._runRefNotices = mergedStrings(this._runRefNotices, data.refNotices);
-          const thinkingText = generationProgressText(data);
+          const thinkingText = studioHint || generationProgressText(data);
           const patch = { canStop: Boolean(this._generationId), thinkingText };
           if (this._streamIndex != null && this.data.messages[this._streamIndex]) patch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
           this.safeSetData(patch);
@@ -1454,6 +1458,7 @@ const methods = {
       [`messages[${index}].factConfirmation`]: value.factConfirmation,
       [`messages[${index}].studioDraft`]: value.studioDraft,
       [`messages[${index}].studioVerifyPhone`]: value.studioVerifyPhone,
+      [`messages[${index}].studioClarify`]: value.studioClarify,
       [`messages[${index}].truncated`]: value.truncated,
     };
     if (!current.streamStarted && value.text) patch[`messages[${index}].streamStarted`] = true;
@@ -1501,6 +1506,7 @@ const methods = {
         finished.factConfirmation = reply.factConfirmation;
         finished.studioDraft = reply.studioDraft;
         finished.studioVerifyPhone = reply.studioVerifyPhone;
+        finished.studioClarify = reply.studioClarify;
         finished.truncated = reply.truncated;
         finished.thoughtSummary = reply.thoughtSummary || this._thoughtText || finished.thoughtSummary || '';
         finished.thoughtOpen = false;
@@ -1829,7 +1835,7 @@ const methods = {
     else {
       const reply = normalizeReply(result.reply || { text: result.partialText, thoughtSummary: result.thoughtSummary, truncated: result.status === 'truncated' });
       item = {
-        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, truncated: reply.truncated,
+        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, studioClarify: reply.studioClarify, truncated: reply.truncated,
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
       };
     }

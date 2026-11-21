@@ -1,5 +1,6 @@
 import { hasStudioDraftSkill, studioIntent, studioScriptWritingIntent } from './studioIntent.js';
-import { StudioBridgeError, studioBridgeEnabled, studioDelegation, type StudioDelegation } from './studioBridge.js';
+import { assertPersonalStudioUser, StudioBridgeError, studioBridgeEnabled, studioDelegation, type StudioDelegation } from './studioBridge.js';
+import { openStudioIntentTicket, type StudioDraftPlan } from './studioAiRecall.js';
 import type { StudioGeneration } from './studioDraft.js';
 import { GenerationKind, type User } from '@prisma/client';
 import type { ComplexityAssessment, DeliveryMode, DeliveryStage, RequestedOutput } from '../../../shared/contracts';
@@ -37,6 +38,7 @@ export interface DurableGenerationBody {
   clientRequestId: string;
   parentGenerationId?: string;
   studioLoginCode?: string;
+  studioIntentTicket?: string;
 }
 
 export interface DurableGenerationCreated extends CreatedGenerationJob {
@@ -89,7 +91,7 @@ export async function enqueueDurableGeneration(
   user: Pick<User, 'id' | 'tenantId'>,
   body: DurableGenerationBody,
   forcedStage?: ForcedDeliveryStage,
-  studioSession?: { user: User; personalToken: string | undefined; delegation?: StudioDelegation; sourceMessageId?: string },
+  studioSession?: { user: User; personalToken: string | undefined; delegation?: StudioDelegation; sourceMessageId?: string; plan?: StudioDraftPlan },
 ): Promise<DurableGenerationCreated> {
   const text = (body.text || '').trim();
   if (!text) throw Object.assign(new Error('empty text'), { statusCode: 400, code: 'EMPTY_TEXT' });
@@ -130,8 +132,17 @@ export async function enqueueDurableGeneration(
   const onDemand = isDeliverable
     && (effective.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
   const studioSkillOn = !forcedStage && studioBridgeEnabled() && hasStudioDraftSkill(agentKey, effective.skillsConfig);
-  const wantsStudio = studioSkillOn && !!studioSession
+  if (body.studioIntentTicket !== undefined && (!studioSkillOn || !studioSession || typeof body.studioIntentTicket !== 'string')) {
+    throw new StudioBridgeError('当前对话的草稿制作暂不可用。');
+  }
+  if (body.studioIntentTicket !== undefined && studioSession) assertPersonalStudioUser(studioSession.user, studioSession.personalToken);
+  const intent = body.studioIntentTicket !== undefined && studioSession
+    ? openStudioIntentTicket(body.studioIntentTicket, user.id, studioSession.personalToken!, body)
+    : undefined;
+  const studioPlan = (intent?.action === 'draft' ? intent.plan : undefined) ?? studioSession?.plan;
+  const legacyStudio = studioSkillOn && !!studioSession
     && typeof body.studioLoginCode === 'string' && !!studioIntent(text);
+  const wantsStudio = studioSkillOn && Boolean(intent || studioPlan || legacyStudio);
   let studio: StudioGeneration | undefined;
   if (wantsStudio && studioSession) {
     const existing = await prisma.generationJob.findUnique({
@@ -139,7 +150,9 @@ export async function enqueueDurableGeneration(
       select: { id: true },
     });
     if (!existing) {
-      try {
+      if (intent?.action === 'clarify') {
+        studio = { clarification: intent.question };
+      } else try {
         studio = {
           delegation: studioSession.delegation ?? await studioDelegation(studioSession.user, studioSession.personalToken, body.studioLoginCode),
           ...(studioSession.sourceMessageId ? { sourceMessageId: studioSession.sourceMessageId } : {}),
@@ -197,6 +210,7 @@ export async function enqueueDurableGeneration(
     deliveryStages: stages,
     priority,
     studio,
+    studioPlan,
     requestMeta: {
       effectiveVersionId: effective.versionId,
       effectiveVersionNumber: effective.versionNumber,

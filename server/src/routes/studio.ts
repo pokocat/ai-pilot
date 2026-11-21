@@ -2,11 +2,14 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
-import type { StudioApproveRequest, StudioOpenRequest, StudioOpenResult, StudioResumeDraftRequest, StudioResumeDraftResult, StudioVerifyPhoneRequest } from '../../../shared/contracts';
+import type { StudioApproveRequest, StudioIntentRequest, StudioIntentResult, StudioOpenRequest, StudioOpenResult, StudioResumeDraftRequest, StudioResumeDraftResult, StudioVerifyPhoneRequest } from '../../../shared/contracts';
 import { prisma } from '../db.js';
 import { enqueueDurableGeneration } from '../services/generationRequest.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
 import { hasStudioDraftSkill, studioIntent } from '../services/studioIntent.js';
+import { recallStudioIntent, studioPlanSchema } from '../services/studioAiRecall.js';
+import { assertAgentAccess } from '../services/entitlements.js';
+import { moderate } from '../services/moderation.js';
 import { resolveUser } from '../services/context.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../services/secretBox.js';
 import {
@@ -22,6 +25,11 @@ const sourceRefs = z.array(z.object({
   kind: z.enum(['project', 'report', 'knowledge', 'memory', 'image']), id: studioId, label: z.string(),
   versionId: z.string().optional(), version: z.number().optional(),
 }));
+const intentSchema = z.object({
+  sessionId: studioId.optional(), agentKey: studioId.optional(),
+  text: z.string().trim().min(1).max(24_000), clientRequestId: z.string().trim().min(1).max(256),
+  refs: sourceRefs.max(25).optional(),
+});
 const approveSchema = z.object({ openId: studioPublicId, transactionId: studioPublicId });
 const cancelSchema = z.object({ openId: studioPublicId });
 const sessionDigest = (token: string | undefined) => createHash('sha256').update(token ?? '').digest('hex');
@@ -33,7 +41,7 @@ function expired() {
 async function recoverableStudioSource(user: { id: string; tenantId: string }, sessionId: string, messageId: string) {
   const source = await prisma.generationJob.findFirst({
     where: { userId: user.id, tenantId: user.tenantId, sessionId, resultMessageId: messageId, status: 'completed' },
-    select: { id: true, agentKey: true, replyJson: true, userMessage: { select: { id: true, contentJson: true, refsJson: true } } },
+    select: { id: true, agentKey: true, requestJson: true, replyJson: true, userMessage: { select: { id: true, contentJson: true, refsJson: true } } },
   });
   const response = recoveryReply.safeParse(source?.replyJson);
   if (!source || !response.success) throw expired();
@@ -41,6 +49,27 @@ async function recoverableStudioSource(user: { id: string; tenantId: string }, s
 }
 
 export async function studioRoutes(app: FastifyInstance) {
+  app.post<{ Body: StudioIntentRequest }>('/studio/intent', { config: { rateLimit: { max: 40, timeWindow: '1 minute' } } }, async (req, reply): Promise<StudioIntentResult | void> => {
+    if (!studioBridgeReady()) return { action: 'chat' };
+    const token = req.headers.authorization ? undefined : req.headers['x-user-id'] as string | undefined;
+    const user = await resolveUser(token);
+    assertPersonalStudioUser(user, token);
+    const parsed = intentSchema.safeParse(req.body);
+    if (!parsed.success) return { action: 'chat' };
+    const input = parsed.data;
+    const session = input.sessionId ? await prisma.session.findFirst({
+      where: { id: input.sessionId, userId: user.id, tenantId: user.tenantId }, select: { agentKey: true },
+    }) : null;
+    if (input.sessionId && !session) return reply.code(404).send({ code: 'SESSION_NOT_FOUND', error: '找不到这条对话。' });
+    const agent = await resolveEffectiveAgent(session?.agentKey ?? input.agentKey ?? 'general');
+    if (!agent || !hasStudioDraftSkill(agent.key, agent.skillsConfig)) return { action: 'chat' };
+    await assertAgentAccess(user.id, { key: agent.key, billing: agent.billing });
+    if (!await moderate('input', input.text, { userId: user.id, tenantId: user.tenantId, sessionId: input.sessionId, failClosed: true })) {
+      return { action: 'chat' };
+    }
+    return recallStudioIntent(user, token!, input);
+  });
+
   app.post<{ Body: StudioOpenRequest }>('/studio/open', guard, async (req, reply): Promise<StudioOpenResult> => {
     if (!studioBridgeReady()) throw new StudioBridgeError('声量AI草稿暂不可用');
     const token = req.headers.authorization ? undefined : req.headers['x-user-id'] as string | undefined;
@@ -121,7 +150,9 @@ export async function studioRoutes(app: FastifyInstance) {
     const { source, response } = await recoverableStudioSource(user, sessionId, messageId);
     const original = z.object({ text: z.string() }).safeParse(source.userMessage.contentJson);
     const refs = sourceRefs.safeParse(source.userMessage.refsJson ?? []);
-    if (!original.success || !refs.success || !studioIntent(original.data.text)) throw expired();
+    const rawPlan = (source.requestJson as { studioPlan?: unknown } | null)?.studioPlan;
+    const plan = studioPlanSchema.safeParse(rawPlan);
+    if (!original.success || !refs.success || (!plan.success && !studioIntent(original.data.text))) throw expired();
     const agent = await resolveEffectiveAgent(source.agentKey);
     if (!agent || !hasStudioDraftSkill(agent.key, agent.skillsConfig)) throw new StudioBridgeError('当前对话的草稿制作暂不可用');
     const clientRequestId = `studio-verify-${source.id}`;
@@ -133,7 +164,7 @@ export async function studioRoutes(app: FastifyInstance) {
       const delegation = await studioDelegation(user, token, studioLoginCode);
       const created = await enqueueDurableGeneration(user, {
         sessionId, text: original.data.text, refs: refs.data, studioLoginCode, clientRequestId,
-      }, undefined, { user, personalToken: token, delegation, sourceMessageId: source.userMessage.id });
+      }, undefined, { user, personalToken: token, delegation, sourceMessageId: source.userMessage.id, plan: plan.data });
       generationId = created.job.id;
     }
 

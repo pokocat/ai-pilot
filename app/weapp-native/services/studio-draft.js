@@ -15,11 +15,15 @@ function studioLoginCode() {
   }));
 }
 
-// 端上只粗筛以按需获取微信凭证。实际制作意图和上传范围全部由后端裁决。
-function mayPrepareStudioDraft(text) {
-  return /图生视频|转成|变成|生成|制作|创建|建|做|保存|导入|送到|发到|出片|出图|生图|画|出一条|出一张|出一段|来一张|用.{1,6}版/.test(text)
-    && /视频|短片|短剧|成片|出片|图片|图像|海报|生图|出图|主视觉|商品图|图|版|一张/.test(text)
-    && !/快出片|爱速拍|只写|只看|先写|先看|暂不|(?:能不能|怎么|如何)|[?？]$/.test(text.trim());
+async function studioIntentForMessage(body, token, active) {
+  const { text, sessionId, agentKey, clientRequestId, refs } = body;
+  const intent = await request('/studio/intent', {
+    method: 'POST', token, data: { text, sessionId, agentKey, clientRequestId, refs },
+  });
+  if (!active() || token !== getToken() || !intent || typeof intent.studioIntentTicket !== 'string') return null;
+  const credentials = { studioIntentTicket: intent.studioIntentTicket };
+  if (intent.action === 'draft') credentials.studioLoginCode = await studioLoginCode();
+  return active() && token === getToken() ? { action: intent.action, credentials } : null;
 }
 
 function valid(intent) {
@@ -109,6 +113,6 @@ function cancelStudioConfirmation(page) {
 }
 
 module.exports = {
-  studioLoginCode, mayPrepareStudioDraft, openStudioDraft, verifyAndResumeStudioDraft, attachStudioContainer, releaseStudioContainer,
+  studioLoginCode, studioIntentForMessage, openStudioDraft, verifyAndResumeStudioDraft, attachStudioContainer, releaseStudioContainer,
   approveStudioContainer, cancelStudioConfirmation,
 };

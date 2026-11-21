@@ -11,7 +11,7 @@ export function isoSecond(d: Date): string {
 type AuditJsonObject = { [key: string]: Prisma.InputJsonValue | null };
 
 const requestStart = new WeakMap<FastifyRequest, number>();
-const SENSITIVE_KEY = /(^code$|password|passwd|pwd|^token$|[-_]token$|authToken|accessToken|refreshToken|authorization|cookie|secret|api.?key|session.?key|phoneCode|loginCode|smsCode|verifyCode|verificationCode|captcha)$/i;
+const SENSITIVE_KEY = /(^code$|password|passwd|pwd|^token$|[-_]token$|authToken|accessToken|refreshToken|authorization|cookie|secret|api.?key|session.?key|phoneCode|loginCode|smsCode|verifyCode|verificationCode|captcha|intentTicket)$/i;
 const PHONE_KEY = /(phone|mobile|tel)$/i;
 const MAX_STRING = 360;
 const MAX_KEYS = 40;

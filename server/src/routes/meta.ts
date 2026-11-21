@@ -125,7 +125,7 @@ export async function metaRoutes(app: FastifyInstance) {
       inviteCode,
       referral,
       service,
-      features: { fortune, wenceForm, conversationContinuity, studioDrafts: studioBridgeReady() },
+      features: { fortune, wenceForm, conversationContinuity, studioDrafts: studioBridgeReady(), studioAiRecall: studioBridgeReady() },
       capabilities: { attachments: ATTACHMENT_CAPABILITIES },
     };
   });

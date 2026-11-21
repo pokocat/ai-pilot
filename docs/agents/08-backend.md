@@ -178,7 +178,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录除 `/api/health` 外的所有 `/api/*` 行为，覆盖匿名、无效 token、登录、后台与用户请求，payload 写入方法/路径/状态码/耗时/IP/UA/鉴权状态/脱敏 body 摘要；登录、短信、后台账号等入口另写成功失败语义审计，关键业务动作继续写语义日志（建档、产出、存库、汇总、后台配置变更）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
 
-- **声量AI草稿（`studio_media_draft`）**：`JUNSHI_STUDIO_ENABLED` 与账号中心、专用机密客户端及存储加密配置同时就绪时启用；已配置技能数组的智能体须勾选该技能，未配置数组的总军师可用。持久生成只在用户明确要求制作时调用 `list_media_scenes → open_media_draft → fill_media_draft → prepare_reference_upload → open_media_draft`；写稿、阅图和快出片保持原入口。工具只接受本人委托，逐张上传本来由该用户上传的 JPG/PNG。直接用图或图生视频明确采用单张、指定序号或符合数量的整组原图；多图指代不清先追问。凭摘要和幂等编号回读实际素材，时效内重试同稿且尊重网页修改。草稿不是付费任务，回包须是固定主站同草稿零积分结果。守卫 `server/test/studioDraft.test.ts`。
+- **声量AI草稿（`studio_media_draft`）**：`JUNSHI_STUDIO_ENABLED` 与账号中心、专用机密客户端及存储加密配置同时就绪时启用；已配置技能数组的智能体须勾选该技能，未配置数组的总军师可用。持久生成只在用户明确要求制作时调用 `list_media_scenes → open_media_draft → fill_media_draft → prepare_reference_upload → open_media_draft`；写稿、阅图和快出片保持原入口。工具只接受本人委托，逐张上传本来由该用户上传的 JPG/PNG。直接用图或图生视频明确采用单张、指定序号或符合数量的整组原图；多图指代不清先追问。凭摘要和幂等编号回读实际素材，时效内重试同稿且尊重网页修改。草稿不是付费任务，回包须是固定主站同草稿零积分结果。守卫 `server/test/studioDraft.test.ts`。 原生新版经 `/studio/intent` 将本轮消息与最近 12 条同会话消息交给模型，区分聊天、澄清、图片或视频制作。默认沿用辅助档，可通过 `JUNSHI_STUDIO_INTENT_MODEL` 在当前对话服务商端点指定单独的创作识别模型。只有通过限时绑定的召回凭证和本人授权的制作进入 MCP。历史账号核验后复用已冻结方案。旧版的制作指令仍可按原协议发送。守卫 `server/test/studioDraft.test.ts`。
 
 ### 8.4 海报成品图（`canvas_design` artifact 技能，2026-07-29）
 

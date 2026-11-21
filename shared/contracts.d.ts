@@ -392,6 +392,7 @@ export interface FeatureFlags {
   fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
   wenceForm?: WenceForm; // 问策入口 A/B 分组（服务端稳定分桶下发；旧客户端可忽略，按 control 渲染）
   studioDrafts?: boolean; // 声量AI对话草稿入口
+  studioAiRecall?: boolean; // 原生可用多轮制作意图识别
   conversationContinuity?: boolean; // 总军师跨 24h 仍续接同一 Session；false 时回退为新 Session + 交接包
 }
 
@@ -1196,12 +1197,18 @@ export interface StudioApproveRequest { openId: string; transactionId: string; }
 export interface StudioVerifyPhoneRequest { sessionId: string; messageId: string; studioLoginCode: string; phoneCode: string; }
 export interface StudioResumeDraftRequest { sessionId: string; messageId: string; studioLoginCode: string; }
 export interface StudioResumeDraftResult { generationId: string; }
+export type StudioIntentRequest = Pick<GenRequest, 'text' | 'agentKey' | 'sessionId' | 'refs'>
+  & { clientRequestId: string };
+export type StudioIntentResult =
+  | { action: 'chat' }
+  | { action: 'clarify' | 'draft'; studioIntentTicket: string };
 export interface ChatReply {
   text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
   /** 模型主动撰写、允许向用户展示的简短思路摘要；不是供应商隐藏推理或 chain-of-thought。 */
   thoughtSummary?: string;
   factConfirmation?: FactConfirmationCard; // 独立确认卡，不复用 asks/chips
   studioDraft?: StudioDraftCard;
+  studioSkillStage?: 'clarify'; // 已召回创作技能，等待本轮所缺制作信息
   studioPhoneVerification?: 'required' | 'completed';
   /**
    * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：
@@ -1382,6 +1389,7 @@ export interface GenRequest {
   clientRequestId?: string;  // 同一次用户发送在网络重试中保持不变；服务端据此幂等
   parentGenerationId?: string; // 用户点「继续写完」时关联上一终态任务
   studioLoginCode?: string;  // 原生制作意图使用的一次性登录凭证
+  studioIntentTicket?: string; // 绑定本次消息和账号的服务端识别结果
   projectId?: string;       // 本次对话归属的项目（产出/记忆/知识会落到该项目）
   refs?: MessageRef[];      // 显式引用的资料（注入上下文，可溯源）
 }

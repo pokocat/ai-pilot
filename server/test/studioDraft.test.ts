@@ -11,6 +11,7 @@ import { hasStudioDraftSkill, studioIntent, studioReferenceSelection, studioSpec
 import { STUDIO_ORIGIN, studioDraftUrl, studioSubjectToken } from '../src/services/studioBridge.js';
 import { resetIdentityJwksCache } from '../src/services/identity.js';
 import { signUserToken } from '../src/services/userToken.js';
+import { openStudioIntentTicket, recallStudioIntent } from '../src/services/studioAiRecall.js';
 
 const ISSUER = 'https://identity.studio.test';
 const DRAFT_ID = 'draft-junshi-studio-test';
@@ -91,6 +92,35 @@ after(async () => {
   }
   resetIdentityJwksCache();
   await closeApp();
+});
+
+test('AI 召回凭证绑定发送内容和本人会话，可交接短确认，澄清不需要微信凭证', async () => {
+  const phone = uniquePhone();
+  const token = await login(phone);
+  const user = await prisma.user.findUniqueOrThrow({ where: { phone } });
+  const turn = { clientRequestId: 'studio-ai-turn', agentKey: 'general', text: '是的', refs: [] };
+  const intent = await recallStudioIntent(user, token, turn, async (input) => {
+    assert.equal(JSON.parse(input).latest.text, '是的');
+    return { action: 'draft', kind: 'image', specs: { ratio: '3:4' }, prompt: '藏青色的品牌海报，右下角放标志。', images: [] };
+  });
+  assert.equal(intent.action, 'draft');
+  assert.ok('studioIntentTicket' in intent);
+  const frozen = openStudioIntentTicket(intent.studioIntentTicket, user.id, token, turn);
+  assert.equal(frozen.action, 'draft');
+  if (frozen.action === 'draft') assert.match(frozen.plan.prompt, /藏青/);
+  assert.throws(() => openStudioIntentTicket(intent.studioIntentTicket, user.id, token, { ...turn, text: '取消制作' }));
+  assert.throws(() => openStudioIntentTicket(intent.studioIntentTicket, user.id, 'other-session', turn));
+  const ambiguous = { ...turn, text: '做个AI图', clientRequestId: 'studio-ai-question' };
+  const clarify = await recallStudioIntent(user, token, ambiguous, async () => ({ action: 'clarify', question: '想做什么图？' }));
+  assert.ok('studioIntentTicket' in clarify);
+  const created = await enqueueDurableGeneration(user, {
+    ...ambiguous, studioIntentTicket: clarify.studioIntentTicket,
+  }, undefined, { user, personalToken: token });
+  await tickGenerationWorker();
+  const saved = await prisma.generationJob.findUniqueOrThrow({ where: { id: created.job.id } });
+  assert.equal(saved.status, 'completed');
+  assert.deepEqual(saved.replyJson, { text: '想做什么图？', studioSkillStage: 'clarify' });
+  assert.ok(!JSON.stringify(saved.requestJson).includes(clarify.studioIntentTicket));
 });
 
 test('真实持久任务路径保存选中原稿与本人原图，开卡时另行授权', async (t) => {
