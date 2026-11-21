@@ -1166,6 +1166,7 @@ test('原生对话使用固定版本开源流式 Markdown 打字机并隔离网�
   assert.match(chatJs, /require\('\.\.\/vendor\/towxml\/globalCb'\)/);
   assert.match(chatJs, /setMdText\(current\.streamRenderId, text\)/);
   assert.match(chatJs, /setStreamFinish\(finished\.streamRenderId\)/);
+  assert.match(chatJs, /const studioAskReady = finished\.studioClarify && finished\.asks\?\.length;\s*if \(studioAskReady \|\|[^\n]+\) \{\s*stopImmediatelyCb\(finished\.streamRenderId\);[\s\S]*?finished\.typing = false;/);
   assert.match(chatJs, /startStreamAutoScroll\(\)[\s\S]*?setInterval\([\s\S]*?, 180\)/);
   const updateStart = chatJs.indexOf('updateStreamText(chunk, replace)');
   const updateEnd = chatJs.indexOf('\n  updateStreamReply(', updateStart);

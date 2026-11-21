@@ -1523,7 +1523,9 @@ const methods = {
         // 已打出的字不是最终正文的前缀时（扣尾没兜住的协议块残字、或流中途换了说法），
         // 喂短文本收不回去，必须停掉打字机、清掉 streamRenderId，整条换回 markdown-text 渲染最终正文。
         // 打字机压根没开口（think-dots 阶段就 done）同样要清，否则模板会永远停在三个点上。
-        if (!finished.streamStarted || !extendsShown(finished.text, this._streamShown)) {
+        // 选图追问在 done 时已有完整短文和选项，直接显示问答卡，避免等待打字机的 finish 回调。
+        const studioAskReady = finished.studioClarify && finished.asks?.length;
+        if (studioAskReady || !finished.streamStarted || !extendsShown(finished.text, this._streamShown)) {
           stopImmediatelyCb(finished.streamRenderId);
           finished.streamRenderId = '';
           finished.streamStarted = false;

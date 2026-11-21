@@ -120,6 +120,7 @@ chat-core 的四项对外能力（WP3' 追加）：
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 - **声量AI草稿的原生入口**：对话卡只渲染服务端已回读并持久化的 `studioDraft`，流式结束、轮询恢复和历史记录共用。开启入口后对话选图请求原件，阅图仍读取服务端生成的推理副本；旧会话只能使用当时上传的源文件。未核验历史用户可在原对话用手机号授权继续原始制作指令，取消时草稿和历史保留。打开按钮凭消息归属向军师申请打开记录，专用 WebView 只加载固定主站的接入页。确认页核对前页、内存打开记录和当前登录态，两页隐藏分享菜单。原因：不能从分享、扫码或其它容器恢复免登录授权。守卫 `app/scripts/studio-draft.test.mjs`、`app/scripts/native-weapp.test.mjs`。 `studioAiRecall` 开启时会先取服务端多轮识别结果，普通对话及追问省略微信换码，制作已就绪才获取一次性凭证。追问消息显示「声量AI创作 · 补充需求」，保存进度显示「声量AI · 正在准备草稿」，草稿卡仍只根据真实回执展示。切换账号或离开对话时丢弃本轮识别。守卫 `app/scripts/studio-draft.test.mjs`。
+- **声量AI选图问答卡**复用 `asks`。选图短回复收到服务端终态后直接切到完整正文并激活问答卡，不等待打字机结束事件，避免回调先于服务端终态时只显示问题。守卫 `app/scripts/native-weapp.test.mjs`。
   - 对话中的执行活动参照 [beUI Agent Activity](https://beui.dev/components/agents/agent-activity) 和 [Tool Result](https://beui.dev/components/agents/tool-result)。活动留在对应回复内，成稿后收起详情，保留打开草稿的主操作。
 
 ### 7.3 启动流程
