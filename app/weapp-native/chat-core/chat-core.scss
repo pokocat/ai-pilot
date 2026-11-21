@@ -234,6 +234,11 @@
   display: flex; align-items: center; gap: 6px; margin: 0 0 7px;
   color: var(--ink-3); font-size: 12px; line-height: 18px;
 }
+.studio-activity-head { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.studio-activity-name { flex: 1; color: var(--ink); font-size: 13px; font-weight: 600; }
+.studio-activity-chevron { display: flex; align-items: center; transition: transform .16s ease-out; }
+.studio-activity-chevron.open { transform: rotate(180deg); }
+.studio-activity-details { margin: 0 0 9px 24px; }
 .studio-draft-detail { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; }
 .studio-draft-open {
   display: inline-flex; align-items: center; margin: 10px 0 0; padding: 0 12px;

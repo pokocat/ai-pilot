@@ -2003,6 +2003,14 @@ const methods = {
       this._studioVerifying = false;
     }
   },
+  toggleStudioActivity(event) {
+    const index = Number(event.currentTarget.dataset.message);
+    const item = this.data.messages[index];
+    if (item?.studioDraft && !item.streaming) {
+      this.safeSetData({ [`messages[${index}].studioActivityOpen`]: !item.studioActivityOpen });
+    }
+  },
+
   async openStudio(event) {
     const item = this.data.messages[Number(event.currentTarget.dataset.message)];
     if (!item || !item.studioDraft || item.streaming || this._studioOpening) return;

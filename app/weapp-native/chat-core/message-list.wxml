@@ -64,10 +64,20 @@
         <view wx:if="{{item.studioVerifyPhone&&!item.streaming}}" class="fact-card studio-draft-card">
           <button class="studio-draft-open" open-type="getPhoneNumber" bindgetphonenumber="verifyStudio" disabled="{{busy}}" data-message="{{messageIndex}}">核验手机号</button>
         </view>
+        <!-- beUI Agent Activity / Tool Result：工具状态留在本轮，完成后收起详情，结果仍可直接打开。 -->
         <view wx:if="{{item.studioDraft&&!item.streaming}}" class="fact-card studio-draft-card">
-          <view class="fact-head"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>声量AI · {{item.studioDraft.title}}</text></view>
-          <text wx:if="{{item.studioDraft.detail}}" class="studio-draft-detail">{{item.studioDraft.detail}}</text>
-          <text wx:if="{{item.studioDraft.missing}}" class="studio-draft-detail">待补：{{item.studioDraft.missing}}</text>
+          <view class="studio-activity-head" data-message="{{messageIndex}}" bindtap="toggleStudioActivity" aria-role="button" aria-label="查看草稿详情">
+            <native-icon name="check" tone="accent" color-key="{{colorKey}}" size="16"></native-icon>
+            <text class="studio-activity-name">声量AI · {{item.studioDraft.title}}</text>
+            <view class="studio-activity-chevron {{item.studioActivityOpen?'open':''}}">
+              <native-icon name="chevron" tone="muted" size="14"></native-icon>
+            </view>
+          </view>
+          <view wx:if="{{item.studioActivityOpen}}" class="studio-activity-details">
+            <text wx:if="{{item.studioDraft.detail}}" class="studio-draft-detail">{{item.studioDraft.detail}}</text>
+            <text wx:if="{{item.studioDraft.missing}}" class="studio-draft-detail">待补：{{item.studioDraft.missing}}</text>
+            <text wx:if="{{!item.studioDraft.detail&&!item.studioDraft.missing}}" class="studio-draft-detail">已保存，可继续编辑</text>
+          </view>
           <button class="studio-draft-open" data-message="{{messageIndex}}" bindtap="openStudio">{{item.studioDraft.action}}</button>
         </view>
         <view wx:if="{{item.factConfirmation&&item.factConfirmation.items.length}}" class="fact-card">
