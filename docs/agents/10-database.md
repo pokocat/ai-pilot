@@ -8,6 +8,8 @@
 
 租户 `Tenant` / 用户 `User`(phone 唯一；`wechatOpenId/wechatUnionId` 可选唯一绑定微信账号；`identityUid` 可选唯一 = 统一账号中心 uid，见 §6；`role=owner|member|admin`) / 档案 `Profile` / 智能体 `Agent`（`billing/price/gift/enabled` 定义权益与价格）/ 用户智能体权益 `UserAgent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
 
+- **`StudioOpenIntent`** 绑定原始会话/消息、用户及租户、本人 UID、本地令牌摘要和中心打开编号。中心本人令牌加密，仅在 120 秒内可用；撤销、定时过期或提交军师账号注销时删除，物理注销按用户外键级联。草稿本身保存在声量AI，军师只将工具回执写入 `Message.contentJson`。原因：草稿历史需要长期恢复，网页登录凭证只为当前窗口短时存在。守卫 `server/test/studioDraft.test.ts`。
+
 **新增模型（企业事务操作系统）**：
 - `UserAgent`（用户已开通的智能体，`(userId,agentKey)` 唯一；`source=gift|purchase|admin_grant`，用于 `unlock` 权益校验和后台开通管理）。
 - `Project`（项目主线，租户级，`(tenantId,slug)` 唯一）；`Session.projectId` / `Memory.projectId` / `Deliverable.projectId` 归属项目。

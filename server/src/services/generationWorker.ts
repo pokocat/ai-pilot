@@ -1,3 +1,4 @@
+import { prepareStudioDraft, type StudioGeneration } from './studioDraft.js';
 import { randomUUID } from 'node:crypto';
 import { GenerationKind, Prisma, type GenerationJob } from '@prisma/client';
 import type { ChatReply, Deliverable, GenContext, Usage } from '../llm/schema.js';
@@ -65,6 +66,7 @@ type RequestData = {
   effectiveVersionId?: string | null;
   newChapter?: boolean;
   chapterGapHours?: number | null;
+  studio?: StudioGeneration;
 };
 
 type FrozenContext = {
@@ -548,6 +550,15 @@ async function processJob(job: GenerationJob): Promise<void> {
       return;
     }
     if (latest.cancelRequestedAt) controller.abort(new Error('user_cancelled'));
+    const request = requestOf(latest);
+    if (request.studio) {
+      if (!latest.resultMessageId) {
+        const reply = await prepareStudioDraft(latest, { ...request, studio: request.studio }, controller.signal);
+        await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'assistant', content: reply, partialText: reply.text, kind: 'chat' });
+      }
+      await finalizeGeneration({ jobId: job.id, workerId, leaseVersion, status: 'completed' });
+      return;
+    }
     let frozen = await loadOrBuildContext(latest);
     frozenContext = frozen;
     if (await resumePersistedFinalize(latest, frozen, leaseVersion)) return;
@@ -556,7 +567,6 @@ async function processJob(job: GenerationJob): Promise<void> {
       return;
     }
 
-    const request = requestOf(latest);
     if ((request.refs ?? []).some((ref) => ref && typeof ref === 'object' && (ref as { kind?: string }).kind === 'image')) {
       const prepared = await prepareImageObservations({
         job: latest,

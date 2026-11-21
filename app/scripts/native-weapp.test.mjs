@@ -113,7 +113,8 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   // 2026-08-12 快出片：+1 = packages/video/templates（模板专区，从首页拆出，便于后续上新模板）。
   // 2026-08-13 成片封面：+1 = packages/video/cover（出片确认页的可选支线，填四个文本槽位）。
   // 2026-08-15 独立声音：+1 = packages/video/voices（我的声音列表页，声音可脱离形象单独存在）。
-  assert.equal(routes.length, 55, '路由数量变化时必须同步审计原生迁移覆盖');
+  // 2026-11-21 声量AI：两个独立页面分别承接固定主站和当前窗口授权。
+  assert.equal(routes.length, 57, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -634,8 +635,8 @@ test('采集与素材上传必须取原始画质：上传分辨率决定成片�
   const [major, minor] = String(libVersion).split('.').map(Number);
   assert.ok(major > 2 || (major === 2 && minor >= 25),
     `sizeType 对视频要基础库 ≥2.25.0 才生效，当前 libVersion=${libVersion}`);
-  // 图片场景（聊天附件 / 海报）是**故意**压缩的，不要被这条规则带跑
-  assert.match(read(chatCoreRoot, 'behavior.js'), /sizeType:\s*\['compressed'\]/, '聊天图片附件仍应压缩');
+  // 普通聊天保持压缩；草稿制作启用后上传原件，模型仍读取推理副本。
+  assert.match(read(chatCoreRoot, 'behavior.js'), /studioDrafts \? \['original'\] : \['compressed'\]/);
 });
 
 test('素材分辨率：未知与 0 不许混，端上不得渲染 0×0', () => {

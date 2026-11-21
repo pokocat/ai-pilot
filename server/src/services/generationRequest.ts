@@ -1,3 +1,6 @@
+import { hasStudioDraftSkill, studioIntent, studioScriptWritingIntent } from './studioIntent.js';
+import { StudioBridgeError, studioBridgeEnabled, studioDelegation, type StudioDelegation } from './studioBridge.js';
+import type { StudioGeneration } from './studioDraft.js';
 import { GenerationKind, type User } from '@prisma/client';
 import type { ComplexityAssessment, DeliveryMode, DeliveryStage, RequestedOutput } from '../../../shared/contracts';
 import type { MessageRef } from '../llm/schema.js';
@@ -33,6 +36,7 @@ export interface DurableGenerationBody {
   refs?: MessageRef[];
   clientRequestId: string;
   parentGenerationId?: string;
+  studioLoginCode?: string;
 }
 
 export interface DurableGenerationCreated extends CreatedGenerationJob {
@@ -85,6 +89,7 @@ export async function enqueueDurableGeneration(
   user: Pick<User, 'id' | 'tenantId'>,
   body: DurableGenerationBody,
   forcedStage?: ForcedDeliveryStage,
+  studioSession?: { user: User; personalToken: string | undefined; delegation?: StudioDelegation; sourceMessageId?: string },
 ): Promise<DurableGenerationCreated> {
   const text = (body.text || '').trim();
   if (!text) throw Object.assign(new Error('empty text'), { statusCode: 400, code: 'EMPTY_TEXT' });
@@ -124,8 +129,30 @@ export async function enqueueDurableGeneration(
   const isDeliverable = !!effective.deliverableKey;
   const onDemand = isDeliverable
     && (effective.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-  const requestedOutput = forcedStage?.requestedOutput ?? resolveRequestedOutput(text);
-  const kind: 'chat' | 'report' = forcedStage
+  const studioSkillOn = !forcedStage && studioBridgeEnabled() && hasStudioDraftSkill(agentKey, effective.skillsConfig);
+  const wantsStudio = studioSkillOn && !!studioSession
+    && typeof body.studioLoginCode === 'string' && !!studioIntent(text);
+  let studio: StudioGeneration | undefined;
+  if (wantsStudio && studioSession) {
+    const existing = await prisma.generationJob.findUnique({
+      where: { userId_clientRequestId: { userId: user.id, clientRequestId: body.clientRequestId.trim() } },
+      select: { id: true },
+    });
+    if (!existing) {
+      try {
+        studio = {
+          delegation: studioSession.delegation ?? await studioDelegation(studioSession.user, studioSession.personalToken, body.studioLoginCode),
+          ...(studioSession.sourceMessageId ? { sourceMessageId: studioSession.sourceMessageId } : {}),
+        };
+      } catch (error) {
+        const e = error instanceof StudioBridgeError ? error : new StudioBridgeError('声量AI暂时无法核验授权，请稍后重试');
+        studio = { error: e.message, code: e.code };
+      }
+    }
+  }
+  const writingStudioScript = studioSkillOn && onDemand && studioScriptWritingIntent(text);
+  const requestedOutput = wantsStudio || writingStudioScript ? 'chat' : forcedStage?.requestedOutput ?? resolveRequestedOutput(text);
+  const kind: 'chat' | 'report' = wantsStudio ? 'chat' : forcedStage
     ? 'report'
     : isDeliverable && (!onDemand || requestedOutput === 'report') ? 'report' : 'chat';
   const prefilter = forcedStage || requestedOutput === 'chat'
@@ -169,6 +196,7 @@ export async function enqueueDurableGeneration(
     stageAttempt: forcedStage?.stageAttempt ?? 1,
     deliveryStages: stages,
     priority,
+    studio,
     requestMeta: {
       effectiveVersionId: effective.versionId,
       effectiveVersionNumber: effective.versionNumber,

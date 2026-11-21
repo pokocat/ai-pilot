@@ -1,3 +1,4 @@
+import { bindStudioVerifiedLogin, studioBridgeReady, verifyStudioWechatLogin } from '../services/studioBridge.js';
 // 账号体系：**手机号是账号的唯一登录身份键**。登录身份解析只看手机号；openid/unionid 只是
 // 附着在账号上的补充绑定（快捷登录关联 + 昵称头像场景），会随每次手机号快捷登录迁到当前账号。
 // 纯 openid 登录不再建号：未关联过手机号账号的 openid 直接 404 PHONE_LOGIN_REQUIRED。
@@ -570,9 +571,12 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
     }
     try {
-      const phone = await getPhoneNumberByCode(parsed.data.phoneCode);
-      let openid: string | undefined, unionid: string | undefined;
-      if (parsed.data.loginCode) {
+      const verified = studioBridgeReady() && parsed.data.loginCode
+        ? await verifyStudioWechatLogin(parsed.data.loginCode, parsed.data.phoneCode) : null;
+      const phone = verified?.phone ?? await getPhoneNumberByCode(parsed.data.phoneCode);
+      let openid = verified?.openid;
+      let unionid = verified?.unionid ?? undefined;
+      if (!verified && parsed.data.loginCode) {
         try { const wx = await code2Session(parsed.data.loginCode); openid = wx.openid; unionid = wx.unionid; } catch { /* 关联失败不阻断登录 */ }
       }
 
@@ -626,6 +630,7 @@ export async function authRoutes(app: FastifyInstance) {
         }
       }
 
+      if (verified?.uid) await bindStudioVerifiedLogin(user, verified.uid);
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
         ok: true,

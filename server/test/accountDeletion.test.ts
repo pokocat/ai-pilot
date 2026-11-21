@@ -24,6 +24,11 @@ test('独占租户注销先进入 30 天隔离期，公开入口立即撤销，�
   const share = await prisma.reportHtml.create({
     data: { tenantId: user.tenantId, userId: user.id, title: '待撤销报告', html: '<html>secret</html>' },
   });
+  await prisma.studioOpenIntent.create({ data: {
+    id: 'pending-before-account-deletion', tenantId: user.tenantId, userId: user.id,
+    sessionId: 'private-session', messageId: 'private-message', identityUid: 'private-uid',
+    identityTokenVersion: 0, sessionDigest: 'test-session-digest', expiresAt: new Date(Date.now() + 120_000),
+  } });
   await prisma.knowledgeItem.create({
     data: {
       tenantId: user.tenantId, userId: user.id, kind: 'document', sourceType: 'upload',
@@ -56,6 +61,7 @@ test('独占租户注销先进入 30 天隔离期，公开入口立即撤销，�
   const deleted = await api('DELETE', '/api/me', { token });
   assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
   assert.equal(deleted.body.ok, true);
+  assert.equal(await prisma.studioOpenIntent.count({ where: { userId: user.id } }), 0);
   assert.ok(deleted.body.erasureJobId);
   assert.ok(Date.parse(deleted.body.retentionUntil) > Date.now() + 29 * 86400_000);
 

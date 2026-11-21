@@ -1,3 +1,4 @@
+import { studioBridgeReady } from '../services/studioBridge.js';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { providerInfo } from '../llm/gateway.js';
@@ -124,7 +125,7 @@ export async function metaRoutes(app: FastifyInstance) {
       inviteCode,
       referral,
       service,
-      features: { fortune, wenceForm, conversationContinuity },
+      features: { fortune, wenceForm, conversationContinuity, studioDrafts: studioBridgeReady() },
       capabilities: { attachments: ATTACHMENT_CAPABILITIES },
     };
   });

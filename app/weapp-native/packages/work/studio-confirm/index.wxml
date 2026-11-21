@@ -1,0 +1,4 @@
+<view class="studio-open-state">
+  <text>{{error || '正在打开声量AI草稿'}}</text>
+  <button wx:if="{{error}}" bindtap="back">返回</button>
+</view>

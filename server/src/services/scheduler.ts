@@ -432,6 +432,9 @@ registerJob({ name: 'clip-render-notification', owner: 'quickreel', intervalMs: 
     console.log(`[scheduler] clip render: settled=${result.settled} sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
   }
 } });
+registerJob({ name: 'studio-open-expiry', intervalMs: 60_000, run: async () => {
+  await prisma.studioOpenIntent.deleteMany({ where: { expiresAt: { lte: now() } } });
+} });
 registerJob({ name: 'account-erasure-sweep', intervalMs: 5 * 60_000, run: async () => {
   const completed = await scanDataErasureJobs();
   if (completed) console.log(`[scheduler] account erasure completed: ${completed}`);

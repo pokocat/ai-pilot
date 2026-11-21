@@ -25,4 +25,6 @@
 - **问策入口预发基线（2026-08-11）**：预发库 `feature_flag.wence_entry` 已显式设置为 `enabled=true`、`payload.arms={control:0,dock:0,chat:100}`，游客与登录用户均全量进入新版“对话即 Tab”，不再参与旧列表 A/B；`GET /api_preprod/wence/hints` 已验证 `guestForm=chat`，`junshi-api-preprod` active、`NRestarts=0`。原生 server 包 `9078b02` 已指向 `https://wxapi.aibuzz.cn/api_preprod` auto-preview 到 AppID `wx810ebe6dfef8e75f`。
 - **连续会话与渐进交付契约（2026-08-10）**：`SessionDetail.page` / `SessionMessage.at` 支撑尾页 100 条与复合游标向上分页、可重算视觉分章；`FeatureFlags.conversationContinuity` 是跨 24h 同 Session 的逃生开关（默认开，关后走新 Session + handoff）。`UserFact*` / `FactConfirmation*` 承载可审计事实状态和独立确认卡；`RequestedOutput` / `DeliveryMode` / `ComplexityAssessment` / `DeliveryStage` 将“要不要成果”与“一次还是分阶段”解耦；`GenerationView.imageProgress/refNotices` 和 `AttachmentCapabilities` 承载 9 图进度、失败序号及服务端权威限制。
 
+- **声量AI草稿契约**：`GenRequest.studioLoginCode` 是小程序一次性身份凭证，只用于明确制作意图的当次建单。生成权威回执为 `ChatReply.studioDraft`（草稿编号、版本、来源消息和稿件摘要、经工具回读的参考图及待补项），SSE、同步请求和历史记录共用。`ChatReply.studioPhoneVerification` 只用于等待历史账号本人核验，`StudioVerifyPhoneRequest/StudioResumeDraftRequest` 根据已保存回复找到同一原始制作指令。网页打开、批准分别用 `StudioOpenRequest/StudioOpenResult/StudioApproveRequest`，短时打开编号只绑定容器与授权，不授予草稿读取权限。守卫 `server/test/studioDraft.test.ts`。
+
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。

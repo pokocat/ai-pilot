@@ -69,6 +69,7 @@ type GenerationRequestBody = {
   refs?: MessageRef[];
   clientRequestId?: string;
   parentGenerationId?: string;
+  studioLoginCode?: string;
 };
 
 /**
@@ -472,7 +473,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     const durableBody = durableGenerationBody(req.body);
     if (durableBody) {
       try {
-        const created = await enqueueDurableGeneration(user, durableBody);
+        const created = await enqueueDurableGeneration(user, durableBody, undefined, {
+          user, personalToken: req.headers.authorization ? undefined : req.headers['x-user-id'] as string | undefined,
+        });
         const deadline = Date.now() + 175_000;
         let job = created.job;
         while (!['completed', 'truncated', 'failed', 'cancelled'].includes(job.status) && Date.now() < deadline) {
@@ -747,7 +750,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     const durableBody = durableGenerationBody(req.body);
     if (durableBody) {
       try {
-        const created = await enqueueDurableGeneration(user, durableBody);
+        const created = await enqueueDurableGeneration(user, durableBody, undefined, {
+          user, personalToken: req.headers.authorization ? undefined : req.headers['x-user-id'] as string | undefined,
+        });
         setupGenerationSSE(reply);
         if (created.createdSession) {
           reply.raw.write(`event: session\ndata: ${JSON.stringify({ id: created.session.id, agentKey: created.agentKey, title: created.session.title, projectId: created.session.projectId })}\n\n`);

@@ -3,6 +3,7 @@
 // 运营自建 HTTP 工具不在此处，走 DB(services/skillTools)；两类在 selectableMeta 里汇合成统一技能库。
 
 import { searchKnowledge, recallMemory, renderReport } from './builtin.js';
+import { STUDIO_DRAFT_SKILL } from '../../services/studioIntent.js';
 import type { Tool, OutputSkill, SkillMeta } from './types.js';
 
 // —— native 技能清单(可插拔挂载点) ——
@@ -12,6 +13,7 @@ const OUTPUT_SKILLS: OutputSkill[] = [renderReport];           // kind='output'�
 // kind='artifact'：异步任务产二进制交付物，不进模型循环、也没有可注册的执行体（提交入口是 creative 服务函数）。
 // 因此这里只登记元信息供技能库展示 + 按 agent 勾选；出现第二个 artifact 技能时再抽 ArtifactSkill 注册表。
 const ARTIFACT_SKILL_META: SkillMeta[] = [
+  { key: STUDIO_DRAFT_SKILL, name: '声量AI · 图片与视频草稿', description: '在小程序对话收到明确制作指令后，将选定内容和明确指定的原始参考图保存到本人草稿。生成在声量AI确认。', kind: 'artifact', builtin: true },
   { key: 'canvas_design', name: '海报成品图', description: '将海报设计师的方案渲染为可保存分享的成品图片', kind: 'artifact', builtin: true },
 ];
 

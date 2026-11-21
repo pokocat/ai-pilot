@@ -391,6 +391,7 @@ export type WenceForm = 'control' | 'dock' | 'chat';
 export interface FeatureFlags {
   fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
   wenceForm?: WenceForm; // 问策入口 A/B 分组（服务端稳定分桶下发；旧客户端可忽略，按 control 渲染）
+  studioDrafts?: boolean; // 声量AI对话草稿入口
   conversationContinuity?: boolean; // 总军师跨 24h 仍续接同一 Session；false 时回退为新 Session + 交接包
 }
 
@@ -1174,11 +1175,34 @@ export interface AdminCreativeJobsView {
 // 军师反问的结构化提问：q 为问题原文，options 为 2-4 个推荐答案（前端渲染为可点选项 + 自动附「其他」）。
 // 由模型在回复末尾以 ```ask 代码块产出，网关解析剥离后挂到 asks（见 server/llm/schema.extractAsks）。
 export interface ChatAsk { q: string; options: string[]; }
+export interface StudioDraftCard {
+  kind: 'image' | 'video';
+  draftId: string;
+  docVersion: string;
+  sceneId: string;
+  url: string;
+  sourceMessageId: string;
+  sourceScriptMessageId: string | null;
+  sourceScriptSha256: string;
+  referenceIds: string[];
+  referenceCount: number;
+  missing: string[];
+  duration?: number;
+  ratio?: string;
+}
+export interface StudioOpenRequest { sessionId: string; messageId: string; studioLoginCode: string; }
+export interface StudioOpenResult { openId: string; expiresAt: string; url: string; }
+export interface StudioApproveRequest { openId: string; transactionId: string; }
+export interface StudioVerifyPhoneRequest { sessionId: string; messageId: string; studioLoginCode: string; phoneCode: string; }
+export interface StudioResumeDraftRequest { sessionId: string; messageId: string; studioLoginCode: string; }
+export interface StudioResumeDraftResult { generationId: string; }
 export interface ChatReply {
   text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
   /** 模型主动撰写、允许向用户展示的简短思路摘要；不是供应商隐藏推理或 chain-of-thought。 */
   thoughtSummary?: string;
   factConfirmation?: FactConfirmationCard; // 独立确认卡，不复用 asks/chips
+  studioDraft?: StudioDraftCard;
+  studioPhoneVerification?: 'required' | 'completed';
   /**
    * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：
    * 撞上限会先自动续写，用户无感）。text 是可读的真实内容，不是错误——端上要按
@@ -1357,6 +1381,7 @@ export interface GenRequest {
   text: string; agentKey?: string; sessionId?: string;
   clientRequestId?: string;  // 同一次用户发送在网络重试中保持不变；服务端据此幂等
   parentGenerationId?: string; // 用户点「继续写完」时关联上一终态任务
+  studioLoginCode?: string;  // 原生制作意图使用的一次性登录凭证
   projectId?: string;       // 本次对话归属的项目（产出/记忆/知识会落到该项目）
   refs?: MessageRef[];      // 显式引用的资料（注入上下文，可溯源）
 }

@@ -125,7 +125,11 @@ export function registerHttpAudit(app: FastifyInstance) {
       }
     }
     const query = summarizeForAudit(req.query);
-    const body = summarizeForAudit(req.body);
+    const rawBody = req.body;
+    const body = summarizeForAudit(path.startsWith('/api/studio/') && rawBody && typeof rawBody === 'object'
+      ? Object.fromEntries(Object.entries(rawBody).map(([key, value]) =>
+        [key, key === 'openId' || key === 'transactionId' ? '[redacted]' : value]))
+      : rawBody);
 
     const payload: AuditJsonObject = {
       method: req.method,

@@ -14,6 +14,7 @@
 import type { PrismaClient } from '@prisma/client';
 
 export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
+  await prisma.studioOpenIntent.deleteMany();
   await prisma.identitySubject.deleteMany();
   await prisma.identityOutboxCursor.deleteMany();
   await prisma.dataErasureJob.deleteMany();

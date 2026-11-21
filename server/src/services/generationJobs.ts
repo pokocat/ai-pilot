@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { StudioGeneration } from './studioDraft.js';
 import { PRODUCT } from './products.js';
 import { envNum } from '../env.js';
 import { noteLeaseThrashing } from './metrics.js';
@@ -130,6 +131,12 @@ function schedulingKeySql(alias: 'j' | 'q' | 'me', agingSec: number): Prisma.Sql
   return Prisma.sql`(${t}."createdAt" - ${t}.priority * ${agingSec} * interval '1 second')`;
 }
 
+function withoutStudioCredential(request: Prisma.JsonValue): Prisma.InputJsonValue | undefined {
+  if (!request || typeof request !== 'object' || Array.isArray(request) || !Object.hasOwn(request, 'studio')) return undefined;
+  const { studio: _, ...retained } = request;
+  return retained as Prisma.InputJsonValue;
+}
+
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (!value || typeof value !== 'object') return value;
@@ -201,6 +208,7 @@ export interface CreateGenerationJobInput {
   grace?: GraceKind;
   creditCost?: number;
   requestMeta?: Record<string, unknown>;
+  studio?: StudioGeneration;
   requestedOutput?: RequestedOutput;
   deliveryMode?: DeliveryMode;
   classificationRequired?: boolean;
@@ -384,6 +392,7 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
       : null;
     const frozenSnapshot = {
       ...snapshot,
+      ...(input.studio ? { studio: input.studio } : {}),
       newChapter: chapterGapHours != null && chapterGapHours > 24,
       chapterGapHours,
     };
@@ -676,6 +685,7 @@ export async function requestGenerationCancel(
       return tx.generationJob.update({
         where: { id: job.id },
         data: {
+          requestJson: withoutStudioCredential(job.requestJson),
           status: GenerationStatus.cancelled,
           phase: GenerationPhase.finalize,
           cancelRequestedAt: job.cancelRequestedAt ?? now(),
@@ -780,6 +790,7 @@ export async function claimNextGenerationJob(
       await tx.generationJob.update({
         where: { id },
         data: {
+          requestJson: withoutStudioCredential(current.requestJson),
           status: GenerationStatus.failed,
           phase: GenerationPhase.finalize,
           leaseOwner: null,
@@ -1183,6 +1194,7 @@ export async function finalizeGeneration(args: {
         phase: GenerationPhase.finalize,
         usageJson: aggregate.usage as unknown as Prisma.InputJsonValue,
         usageSource: aggregate.source,
+        requestJson: withoutStudioCredential(job.requestJson),
         quotaCharged: charged,
         settlementStatus,
         creditSettlementStatus,

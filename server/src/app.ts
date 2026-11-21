@@ -20,6 +20,7 @@ import { creativeRoutes } from './routes/creative.js';
 import { bizMetricRoutes } from './routes/bizMetrics.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { studioRoutes } from './routes/studio.js';
 import { generationRoutes } from './routes/generations.js';
 import { libraryRoutes } from './routes/library.js';
 import { casefileRoutes } from './routes/casefiles.js';
@@ -235,7 +236,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       'POST /api/quickscan',
     ]);
     // 注销是法定退出能力，不属于商业写权限；无套餐与已过期账号都必须可用。
-    const ALLOW_WITHOUT_PLAN = new Set(['DELETE /api/me']);
+    const ALLOW_WITHOUT_PLAN = new Set(['DELETE /api/me', 'POST /api/studio/open', 'POST /api/studio/approve', 'POST /api/studio/cancel']);
     app.addHook('onRequest', async (req, reply) => {
       if (!WRITE_METHODS.has(req.method)) return;
       if (!req.url.startsWith('/api/')) return;
@@ -300,6 +301,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   if (allProfile) await app.register(sayingRoutes, { prefix: '/api' });
   if (allProfile) await app.register(sessionRoutes, { prefix: '/api' });
   if (allProfile) await app.register(generationRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(studioRoutes, { prefix: '/api' });
   if (allProfile) await app.register(libraryRoutes, { prefix: '/api' });
   if (allProfile) await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
   if (allProfile) await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告

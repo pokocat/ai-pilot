@@ -41,6 +41,8 @@
         "quickscan/index",
         "brandkit/index",
         "webview/index",
+        "studio-webview/index",
+        "studio-confirm/index",
         "command/index",
         "reminders/index",
         "daily/index",

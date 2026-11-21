@@ -259,6 +259,7 @@ model User {
   wechatNotifications WechatNotificationLog[]
   generationJobs      GenerationJob[]
   userFacts           UserFact[]
+  studioOpenIntents   StudioOpenIntent[]
 
   @@map("app_user")
 }
@@ -2539,4 +2540,24 @@ model IdentityOutboxCursor {
   product String @id
   after BigInt @default(0)
   @@map("identity_outbox_cursor")
+}
+
+/// 声量AI WebView 打开事务。关联已持久化的本人草稿消息；凭证加密，取消或到期时清除。
+model StudioOpenIntent {
+  id                   String    @id
+  userId               String
+  tenantId             String
+  sessionId            String
+  messageId            String
+  identityUid          String
+  identityTokenVersion Int
+  subjectToken         String?
+  sessionDigest        String
+  transactionId        String?
+  expiresAt            DateTime
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("studio_open_intent")
 }

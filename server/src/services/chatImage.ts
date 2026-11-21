@@ -295,3 +295,15 @@ export async function resolveImageRefs(
   const resolved = await resolveImageRefsDetailed(tenantId, refs);
   return resolved.images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
 }
+
+/** 制作参考图只取本人原件，不能使用模型观察、推理副本或其它项目成员的附件。 */
+export async function getStudioReferenceImage(userId: string, tenantId: string, refId: string) {
+  const item = await prisma.knowledgeItem.findFirst({
+    where: { id: refId, userId, tenantId, sourceType: 'image', status: 'ready' },
+    select: { fileKey: true, fileType: true, fileName: true },
+  });
+  if (!item?.fileKey || !/^(jpg|jpeg|png)$/.test(item.fileType ?? '')) return null;
+  const bytes = await getChatImage(item.fileKey);
+  if (!bytes?.length || bytes.length > MAX_IMAGE_BYTES) return null;
+  return { bytes, contentType: mediaTypeFromExt(item.fileType), fileName: item.fileName || '参考图' };
+}

@@ -3,6 +3,8 @@
 // 这里只承载与页面宿主无关的逻辑：消息加载/规范化、发送、SSE 流式对接、生成态/停止/重试、
 // 键盘避让、粘贴归卷、asks 问答卡、成果卡闭环。导航参数解析、页头与返回键留在各宿主页。
 const POSTER_READY_RE = /去出图|出成品图|可以出图|够了[^\n]{0,6}出图/;
+const { studioLoginCode, mayPrepareStudioDraft, openStudioDraft, verifyAndResumeStudioDraft } = require('../services/studio-draft');
+const { getToken } = require('../services/token');
 const { api } = require('../services/api');
 const store = require('../services/store');
 const { generateStream } = require('../services/streaming');
@@ -213,6 +215,19 @@ function reportText(deliverable) {
   return lines.filter(Boolean).join('\n\n');
 }
 
+function presentStudioDraft(card) {
+  if (!card || !card.draftId || !['image', 'video'].includes(card.kind)) return null;
+  const video = card.kind === 'video';
+  const ratio = card.ratio === '9:16' ? '竖屏' : card.ratio === '16:9' ? '横屏' : textOf(card.ratio);
+  return {
+    title: video ? '视频草稿' : '图片草稿',
+    action: video ? '打开视频草稿' : '打开图片草稿',
+    detail: [card.duration && video ? `${card.duration} 秒` : '', ratio,
+      card.referenceCount ? `已添加 ${card.referenceCount} 张参考图` : ''].filter(Boolean).join(' · '),
+    missing: stringList(card.missing).join('、'),
+  };
+}
+
 function normalizeReply(reply) {
   const value = reply && typeof reply === 'object' ? reply : {};
   const points = Array.isArray(value.points) ? value.points.map(textOf).filter(Boolean) : [];
@@ -230,7 +245,8 @@ function normalizeReply(reply) {
   return {
     text: stripSerializedAsksTail(value.text, value.asks),
     thoughtSummary: textOf(value.thoughtSummary).trim(),
-    points, asks, factConfirmation, truncated: value.truncated === true,
+    points, asks, factConfirmation, studioDraft: presentStudioDraft(value.studioDraft),
+    studioVerifyPhone: value.studioPhoneVerification === 'required', truncated: value.truncated === true,
   };
 }
 
@@ -276,7 +292,7 @@ function normalizeMessage(message, index) {
   };
   const reply = normalizeReply(content);
   return {
-    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
+    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, truncated: reply.truncated,
     // 快捷回应：服务端 SessionMessage.chips 原样带进消息对象（当前唯一写入方是进场主动消息）。
     // 无 chips 的消息拿到空数组，模板据此不渲染这一排。
     chips: stringList(message && message.chips),
@@ -1090,7 +1106,8 @@ const methods = {
     const remainingRefs = REF_LIMIT - this._refs.length - this.data.pastePendings.length;
     const count = Math.min(remainingImages, remainingRefs);
     if (count <= 0) { wx.showToast({ title: `一次至多带 ${imageAttachmentLimit()} 张图片`, icon: 'none' }); return; }
-    wx.chooseMedia({ count, mediaType: ['image'], sourceType: ['album', 'camera'], sizeType: ['compressed'], success: async (result) => {
+    const sizeType = store.snapshot().me?.features?.studioDrafts ? ['original'] : ['compressed'];
+    wx.chooseMedia({ count, mediaType: ['image'], sourceType: ['album', 'camera'], sizeType, success: async (result) => {
       for (const file of result.tempFiles || []) {
         if (Number(file.size || 0) > 10 * 1024 * 1024) { wx.showToast({ title: '单张图片不能超过 10MB', icon: 'none' }); continue; }
         this.safeSetData({ uploading: true, canSend: false }, () => this.measureComposer());
@@ -1249,6 +1266,15 @@ const methods = {
         text, agentKey: this._agentKey, sessionId: this._sessionId || undefined,
         projectId: this._projectId || undefined, clientRequestId: uid('native'), refs: sendRefs,
       };
+      if (mayPrepareStudioDraft(text)) {
+        const actionToken = getToken();
+        const me = store.snapshot().me || await store.loadMe();
+        if (!active() || actionToken !== getToken()) return;
+        if (me?.features?.studioDrafts) {
+          body.studioLoginCode = await studioLoginCode();
+          if (!active() || actionToken !== getToken()) return;
+        }
+      }
       const streamed = await generateStream(body, {
         onControl: (control) => { if (active()) this._streamControl = control; else if (control && control.abort) control.abort(); },
         onGeneration: (data) => {
@@ -1426,6 +1452,8 @@ const methods = {
       [`messages[${index}].points`]: value.points,
       [`messages[${index}].asks`]: value.asks,
       [`messages[${index}].factConfirmation`]: value.factConfirmation,
+      [`messages[${index}].studioDraft`]: value.studioDraft,
+      [`messages[${index}].studioVerifyPhone`]: value.studioVerifyPhone,
       [`messages[${index}].truncated`]: value.truncated,
     };
     if (!current.streamStarted && value.text) patch[`messages[${index}].streamStarted`] = true;
@@ -1471,6 +1499,8 @@ const methods = {
         finished.points = reply.points;
         finished.asks = reply.asks;
         finished.factConfirmation = reply.factConfirmation;
+        finished.studioDraft = reply.studioDraft;
+        finished.studioVerifyPhone = reply.studioVerifyPhone;
         finished.truncated = reply.truncated;
         finished.thoughtSummary = reply.thoughtSummary || this._thoughtText || finished.thoughtSummary || '';
         finished.thoughtOpen = false;
@@ -1799,7 +1829,7 @@ const methods = {
     else {
       const reply = normalizeReply(result.reply || { text: result.partialText, thoughtSummary: result.thoughtSummary, truncated: result.status === 'truncated' });
       item = {
-        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
+        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, thoughtSummary: reply.thoughtSummary, thoughtOpen: false, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, studioDraft: reply.studioDraft, studioVerifyPhone: reply.studioVerifyPhone, truncated: reply.truncated,
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
       };
     }
@@ -1942,6 +1972,48 @@ const methods = {
    * 需求单由服务端从**整段对话**里抽（briefDraft.loadConversationText），所以只带 sessionId；
    * 没有 sessionId（还没发过第一句）就先不放行——那时对话是空的，抽出来必然是张空表。
    */
+  async verifyStudio(event) {
+    const item = this.data.messages[Number(event.currentTarget.dataset.message)];
+    if (!item || !item.studioVerifyPhone || item.streaming || this.data.busy || this._studioVerifying || !this._sessionId) return;
+    const phoneCode = event.detail && event.detail.code;
+    if (!phoneCode) return;
+    const epoch = this._epoch;
+    const sessionId = this._sessionId;
+    const token = getToken();
+    this._studioVerifying = true;
+    wx.showLoading({ title: '正在核验', mask: true });
+    try {
+      const result = await verifyAndResumeStudioDraft(sessionId, item.messageId || item.id, phoneCode);
+      if (result?.generationId && this.isCurrent(epoch) && this._sessionId === sessionId && getToken() === token) {
+        this.startSessionPolling(epoch);
+      }
+    } catch (error) {
+      wx.hideLoading();
+      if (this.isCurrent(epoch) && !(error && (error.authHandled || error.staleAuth))) {
+        wx.showToast({ title: error?.message || '手机号核验未完成，请重试', icon: 'none' });
+      }
+    } finally {
+      wx.hideLoading();
+      this._studioVerifying = false;
+    }
+  },
+  async openStudio(event) {
+    const item = this.data.messages[Number(event.currentTarget.dataset.message)];
+    if (!item || !item.studioDraft || item.streaming || this._studioOpening) return;
+    if (!store.isAuthed()) { this.safeSetData({ showLogin: true, loginReason: 'studio-draft' }); return; }
+    this._studioOpening = true;
+    wx.showLoading({ title: '正在打开', mask: true });
+    try {
+      await openStudioDraft(this._sessionId, item.messageId || item.id);
+    } catch (error) {
+      wx.hideLoading();
+      if (error && (error.authHandled || error.staleAuth)) return;
+      wx.showToast({ title: error?.message || '草稿打开失败，请重试', icon: 'none' });
+    } finally {
+      wx.hideLoading();
+      this._studioOpening = false;
+    }
+  },
   openPoster() {
     if (this._agentKey !== 'poster' || !this.data.posterEnabled) return;
     if (!this._sessionId) { wx.showToast({ title: '先跟设计师说说这张海报要做什么', icon: 'none' }); return; }

@@ -1,0 +1,5 @@
+<web-view wx:if="{{url}}" src="{{url}}" binderror="loadError"></web-view>
+<view wx:else class="studio-open-state">
+  <text>{{error}}</text>
+  <button bindtap="back">返回对话</button>
+</view>

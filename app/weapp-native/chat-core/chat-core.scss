@@ -229,3 +229,11 @@
    position:static（见 pages/sessions/index.scss），左沿由浮岛自己算，
    不加前缀这条虽然不生效也会让人以为问策也归它管。 */
 .chat-page.viewport-expanded .composer-dock { left: 72px; }
+
+.studio-draft-detail { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; }
+.studio-draft-open {
+  display: inline-flex; align-items: center; margin: 10px 0 0; padding: 0 12px;
+  min-height: 36px; border-radius: 8px; background: var(--accent-soft); color: var(--accent);
+  font-size: 13px; font-weight: 600; line-height: 1.4;
+}
+.studio-draft-open::after { border-color: var(--accent-glow); }

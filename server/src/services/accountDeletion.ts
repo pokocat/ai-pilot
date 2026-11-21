@@ -22,7 +22,7 @@ import { aidramaDeleteOwnerData } from './video/aidramaGateway.js';
 export const ACCOUNT_DELETION_POLICY = {
   delete: [
     'UserJourney', 'Prescription', 'BrandKit', 'BizMetricWeekly', 'UserAgent',
-    'Session', 'GenerationJob', 'SessionContextSnapshot', 'Deliverable', 'Memory', 'UserFact',
+    'Session', 'GenerationJob', 'SessionContextSnapshot', 'StudioOpenIntent', 'Deliverable', 'Memory', 'UserFact',
     'Project', 'ReportDoc', 'KnowledgeItem', 'KnowledgeChunk',
     'PlanEntitlement', 'MonthlyCreditGrant', 'TokenQuotaAdjustment', 'SkuEntitlement',
     'CreditLedger', 'TokenWallet', 'WechatSubscription', 'WechatNotificationLog',
@@ -49,7 +49,7 @@ type Tx = Prisma.TransactionClient;
 type Delegate = { deleteMany(args: { where: Record<string, unknown> }): Promise<unknown> };
 
 const DELETE_ORDER = [
-  'creativeAsset', 'creativeJob',
+  'creativeAsset', 'creativeJob', 'studioOpenIntent',
   'generationJob', 'sessionContextSnapshot', 'deliverable', 'memory', 'userFact',
   'session', 'reportDoc', 'knowledgeItem', 'project',
   'casefileOrder', 'casefileMetric', 'casefile',
@@ -194,6 +194,7 @@ export async function eraseAccount(userId: string): Promise<{ ok: true; erasureJ
         },
       });
       await tx.user.update({ where: { id: user.id }, data: { deletedAt, purgeAfter } });
+      await tx.studioOpenIntent.deleteMany({ where: { userId: user.id } });
       await tx.reportHtml.updateMany({
         where: deleteTenant ? { tenantId: user.tenantId } : { userId: user.id },
         data: { revokedAt: deletedAt },

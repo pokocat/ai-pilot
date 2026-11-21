@@ -274,6 +274,10 @@ WEAPP_APP_MODE=server WEAPP_APP_API=https://你的域名/api npm run build:weapp
 ```
 微信开发者工具本地走查导入 `app/dist-native/`；真机/预览必须把 `WEAPP_APP_API` 的 HTTPS 域名加入小程序后台 request 合法域名。
 
+### 声量AI草稿联调
+
+军师服务配置 `JUNSHI_STUDIO_ENABLED=true`、`JUNSHI_STUDIO_CLIENT_SECRET`、`ID_ISSUER`、`APP_ENCRYPTION_KEY` 和本地 JWT。中心需已登记军师 appid 的 `mini-junshi`、`junshi-s2s` 与主站桥接客户端，声量AI主站需已启用对应服务，微信后台将 `aiavatar.aibuzz.cn` 配为 WebView 业务域名。总军师已显式配置技能数组时，在运营后台勾选 `studio_media_draft` 并发布该配置。用两张图试写并选第二稿，只指定一张原图进草稿，点开后验稿件、素材、费用和返回位置。拨测新用户正常手机号快捷登录无额外确认、历史同号授权继续原稿、拒绝和异号不建稿。另用 iOS 和 Android 无主站历史会话分别验证第一次从同一个 WebView 无需再次点击即可进入，验证码登录作为单独结果。守卫 `server/test/studioDraft.test.ts`、`app/scripts/studio-draft.test.mjs`。
+
 ### 微信消息推送 URL 验签联调
 ```bash
 cd server

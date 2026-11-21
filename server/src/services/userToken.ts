@@ -106,3 +106,12 @@ export function identityVersionOfVerifiedUserToken(token?: string): number {
     return Number.isSafeInteger(payload.iv) && payload.iv >= 0 ? payload.iv : 0;
   } catch { return -1; }
 }
+
+/** 草稿制作与网页交接只接受本人签发的当前产品 JWT。 */
+export function isPersonalUserToken(token: string | undefined, userId: string): boolean {
+  if (!token || !looksLikeJwt(token) || verifyUserToken(token) !== userId) return false;
+  try {
+    const claims = JSON.parse(fromB64url(token.split('.')[1]).toString('utf8'));
+    return !Object.hasOwn(claims, 'imp') && Number.isFinite(claims.exp) && claims.exp * 1000 > Date.now();
+  } catch { return false; }
+}
