@@ -17,7 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| 2026-11-21 | `0.2.57` | `军师声量AI联动正式环境` | `30e2ecd4` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927391 B | 上传成功，微信开发版连接军师正式 API。 |
+| 2026-11-21 | `0.2.57` | `军师声量AI联动正式环境` | `30e2ecd4` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927391 B | 上传成功，微信开发版连接军师正式 API。开发者工具验收通过：双图点选第一张建稿、首次授权直接打开声量AI编辑页，补充要求留空时生成按钮可用。 |
 | 2026-11-21 | `0.2.56` | `修复创作追问选项显示` | `b35cfb12` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927407 B | 上传成功，微信开发版。开发者工具四组对话通过；选图卡可点选并保存一张指定参考图。 |
 | 2026-11-21 | `0.2.55` | `军师创作确认与参考图选择` | `24fa59b6` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927336 B | 上传成功。选图追问在本版流式收尾后未显示选项，由后续开发版修复。 |
 | 2026-11-21 | `0.2.54` | `军师多轮创作接续声量AI草稿` | `4ffeff7b` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api_preprod` | `npm run release:weapp`（Node 24，微信开发者工具 CLI） | 2.8 MB / 2927336 B | 上传成功，微信开发版。本人账号在开发者工具重放原四轮，前三轮显示 Skill 追问，确认后保存并打开声量AI图片草稿。 |
