@@ -167,11 +167,15 @@ export async function recallStudioIntent(
       ? (decision.scriptVersion ? studioScriptVersion(original.data.text, decision.scriptVersion) : original.data.text.trim())
       : undefined;
     const selected = [...new Set(decision.images)];
-    const evidence = decision.referenceTurn ? history[decision.referenceTurn - 1] : { ...latest, role: 'user' };
-    const proofBatch = decision.referenceTurn && evidence
-      ? candidateImages(evidence.images, history.slice(0, decision.referenceTurn - 1)) : candidates;
-    const positions = selected.length && evidence?.role === 'user'
-      ? studioReferenceSelection(evidence.text, proofBatch.length) : [];
+    // The upload turn can be where the images came from without being where the user approved them.
+    const currentSelection = selected.length ? studioReferenceSelection(latest.text, candidates.length) : [];
+    const referenceTurn = Array.isArray(currentSelection) && currentSelection.length ? undefined : decision.referenceTurn;
+    const evidence = referenceTurn ? history[referenceTurn - 1] : undefined;
+    const proofBatch = referenceTurn && evidence
+      ? candidateImages(evidence.images, history.slice(0, referenceTurn - 1)) : candidates;
+    const positions = referenceTurn
+      ? (selected.length && evidence?.role === 'user' ? studioReferenceSelection(evidence.text, proofBatch.length) : [])
+      : currentSelection;
     const verified = positions === 'clarify' ? [] : positions.map((position) => proofBatch[position - 1]);
     if ((decision.scriptTurn || decision.scriptVersion) && (!script || script.length > 12_000)) {
       intent = { action: 'clarify', question: '请明确要用哪版原稿。' };

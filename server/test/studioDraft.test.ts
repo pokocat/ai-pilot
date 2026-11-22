@@ -149,10 +149,10 @@ test('多图指代需要本人明确选择，澄清选项留在同一对话', as
 
   const typed = { ...uncertain, text: '用第一张作为参考图，第二张不传。', clientRequestId: 'studio-ref-explicit' };
   const picked = { ...typed, text: '第 1 张作为参考图', clientRequestId: 'studio-ref-quick-reply' };
-  for (const body of [typed, picked]) {
-    const wrong = await recallStudioIntent(user, token, body, async () => ({ ...plan, images: [2] }));
+  for (const [body, modelPlan] of [[typed, plan], [picked, { ...plan, referenceTurn: 1 }]] as const) {
+    const wrong = await recallStudioIntent(user, token, body, async () => ({ ...modelPlan, images: [2] }));
     assert.equal(wrong.action, 'clarify');
-    const correct = await recallStudioIntent(user, token, body, async () => plan);
+    const correct = await recallStudioIntent(user, token, body, async () => modelPlan);
     assert.ok('studioIntentTicket' in correct);
     const frozen = openStudioIntentTicket(correct.studioIntentTicket, user.id, token, body);
     assert.equal(frozen.action, 'draft');
