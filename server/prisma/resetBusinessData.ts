@@ -18,6 +18,7 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.identitySubject.deleteMany();
   await prisma.identityOutboxCursor.deleteMany();
   await prisma.dataErasureJob.deleteMany();
+  await prisma.externalPlanGrant.deleteMany();
   await prisma.monthlyCreditGrant.deleteMany();
   await prisma.tokenQuotaAdjustment.deleteMany();
   await prisma.planEntitlement.deleteMany();

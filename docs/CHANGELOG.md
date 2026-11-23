@@ -6,6 +6,13 @@
 
 ## 变更日志
 
+### 2026-11-23 · 声量AI 网页直连军师与代售套餐到账 · 影响面：军师 API、数据库（新表）、跨域
+
+- 新增 `POST /api/s2s/plan-grants` 及按订单号/条件查询：声量AI 后端用账号中心机器令牌（`aud=junshi-plan-grant`、`azp=aistar-junshi-grant`、scope `junshi:plan.grant`）通知开通。按 `(source, orderNo)` 防重，重放返回第一次结果；同单号异内容 409；用户还没有军师账号时挂起，首次带令牌进军师时领取；会缩短现有权益的记 blocked 待人工。内部复用 `applyPlanPurchase`，升级结转与后台手动开通同口径。退款暂不自动回收。新表 `external_plan_grant`（`prisma db push` 纯加法）。
+- 新增 `/api/studio-web/status`、`/intent`、`/references/:id`：只认 `aud` 含 `junshi-api` 的账号中心令牌。制作方案与小程序同一判断，明文返回、不发票据；小程序 `/studio/intent` 不变。
+- 跨域 `origin:true` 收成白名单（`CORS_ALLOWED_ORIGINS` 或内置清单，非 production 放行 localhost）；SSE 不再写死 `Access-Control-Allow-Origin: *`，`Cache-Control` 改为 `no-cache, no-transform`。
+- 新开关全部默认关闭：`JUNSHI_PLAN_GRANT_ENABLED`、`JUNSHI_STUDIO_WEB_ENABLED`。需账号中心登记两个客户端（见 `docs/STUDIO_WEB_API.md` §6）。只在本地测试库与本机服务验证，未部署。
+
 ### 2026-11-21 · 声量AI草稿正式联动与点选授权修正 · 影响面：军师会话、正式 API、RDS
 
 - 军师正式主备和独立定时任务上线声量AI草稿桥接。正式业务仍使用迁移后的 RDS `junshi_prod`，本次新增 `studio_open_intent` 与所需索引，运行账号仅获该表业务读写权限，临时迁移账号已回收。主备和公网健康均已核对。

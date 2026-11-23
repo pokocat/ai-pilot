@@ -41,6 +41,9 @@ export const ACCOUNT_DELETION_POLICY = {
     // 佣金流水删了，上级代理的结算净额也跟着变。所以 purge 时只抹 Distributor 上的
     // displayName / contactPhone / remark 三个 PII 字段（见 redactRetained），行与金额全留。
     'Distributor', 'CommissionEntry', 'CommissionSettlement',
+    // 外部渠道代售订单（声量AI，2026-11-23）：对方的订单账，对账要按订单号查得到，保留行与金额，
+    // purge 时只断开与本地账号的关联（见 redactRetained）。identityUid 是跨产品化名标识，对账必需。
+    'ExternalPlanGrant',
   ],
   identity: ['User', 'Tenant'],
 } as const;
@@ -130,6 +133,10 @@ async function redactRetained(tx: Tx, userId: string, tenantId: string, deleteTe
   await tx.distributor.updateMany({
     where: { userId },
     data: { displayName: null, contactPhone: null, remark: null },
+  });
+  await tx.externalPlanGrant.updateMany({
+    where: { userId },
+    data: { userId: null, ...(deleteTenant ? { tenantId: null } : {}) },
   });
   await tx.auditLog.updateMany({
     where: { userId },

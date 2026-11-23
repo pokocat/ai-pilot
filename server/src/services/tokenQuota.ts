@@ -293,6 +293,11 @@ async function graceUsedToday(userId: string, kind: GraceKind): Promise<number> 
   });
 }
 
+/** 某保底类别今天还剩几次（只读；与 reserveQuota 判定同口径）。 */
+export async function graceRemainingToday(userId: string, kind: GraceKind): Promise<number> {
+  return Math.max(0, (await gracePerDay(kind)) - (await graceUsedToday(userId, kind)));
+}
+
 /**
  * GenerationJob 的持久预留前置准备。钱包的首建/跨期/过期回收仍复用 loadWallet，
  * 真正的「读余额→扣预留」由 reserveDurableQuotaInTransaction 在建 job 的事务内完成。

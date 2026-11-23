@@ -200,7 +200,7 @@ function audienceOf(payload: Record<string, unknown>): string[] {
 }
 
 /** 校验 claims（签名之外的部分）。不合法返回 null。 */
-function validateClaims(payload: Record<string, unknown>): IdentityClaims | null {
+function validateClaims(payload: Record<string, unknown>, accepted = identityAudiences()): IdentityClaims | null {
   const sub = typeof payload.sub === 'string' ? payload.sub.trim() : '';
   if (!sub) return null;
   if (payload.iss !== identityIssuer()) return null;               // 逐字符相等
@@ -209,7 +209,6 @@ function validateClaims(payload: Record<string, unknown>): IdentityClaims | null
   if (!exp || exp + CLOCK_SKEW_SEC <= now) return null;            // 过期
   if (typeof payload.nbf === 'number' && payload.nbf - CLOCK_SKEW_SEC > now) return null;
   const aud = audienceOf(payload);
-  const accepted = identityAudiences();
   if (!aud.some((item) => accepted.includes(item))) return null;   // aud 不匹配
   return {
     sub,
@@ -262,6 +261,30 @@ export async function verifyIdentityToken(token: string): Promise<IdentityClaims
   // claims 先过一遍：iss/aud/exp 不对的令牌不值得为它去打一次 JWKS。
   const claims = validateClaims(parsed.payload);
   if (!claims) return null;
+  if (cacheUsable() && verifySignature(parsed)) return claims;
+  await refreshJwks();
+  if (!cacheUsable()) return null;
+  return verifySignature(parsed) ? claims : null;
+}
+
+/**
+ * 机器令牌（账号中心 client_credentials）校验：签名 + iss + exp + **aud 恰好是 audience** +
+ * azp 是指定客户端 + scope 含指定权限 + 是机器令牌（`sub === azp`，不带 `amr`）。
+ *
+ * 镜像声量AI 的 `IdentityTokenVerifier.verifyJunshi`：用户令牌（带 amr、sub=uid）即使 aud 配错也进不来；
+ * 用户侧的 `identityAudiences()` 与这里互不相通——机器 audience 不进 `ID_AUDIENCES`，
+ * 否则 `attachIdentityUser` 会把它当成用户令牌去建档。
+ */
+export async function verifyMachineToken(token: string, expected: { audience: string; clientId: string; scope: string }): Promise<IdentityClaims | null> {
+  if (!identityEnabled() || !expected.audience || !expected.clientId || !expected.scope) return null;
+  const parsed = parseRs256Jwt(token);
+  if (!parsed) return null;
+  const payload = parsed.payload;
+  const claims = validateClaims(payload, [expected.audience]);
+  if (!claims) return null;
+  if (claims.aud.length !== 1 || claims.aud[0] !== expected.audience) return null;
+  if (claims.azp !== expected.clientId || claims.sub !== expected.clientId || 'amr' in payload) return null;
+  if (!(claims.scope ?? '').split(/\s+/).includes(expected.scope)) return null;
   if (cacheUsable() && verifySignature(parsed)) return claims;
   await refreshJwks();
   if (!cacheUsable()) return null;

@@ -25,6 +25,7 @@ import {
 } from './identity.js';
 import { signUserToken, verifyUserToken } from './userToken.js';
 import { lockIdentityUid, requireIdentityActive } from './identityState.js';
+import { claimPendingPlanGrants, hasPendingPlanGrant } from './externalPlanGrant.js';
 
 export class PhoneBindingRequiredError extends Error {
   statusCode = 403;
@@ -245,7 +246,9 @@ export function identifyRequest(req: FastifyRequest): RequestIdentity | null {
 
 /** 不参与账号中心解析的路径：运营后台与指标端点自带 Bearer（不透明 token，不是 JWT）。 */
 function skipIdentity(url: string): boolean {
-  return url.startsWith('/api/admin') || url.startsWith('/api/metrics') || url.startsWith('/api/health');
+  // /api/s2s/*：服务间接口带的是账号中心**机器令牌**（sub=client_id），绝不能被当成用户令牌建档。
+  return url.startsWith('/api/admin') || url.startsWith('/api/metrics') || url.startsWith('/api/health')
+    || url.startsWith('/api/s2s/');
 }
 
 /**
@@ -282,6 +285,13 @@ export async function attachIdentityUser(req: FastifyRequest, reply: FastifyRepl
       if (linked.identityUid !== claims.sub || linked.deletedAt) throw new IdentityConflictError();
       return signUserToken(userId, { ttlSec: 300, extra: { iv: linked.identityTokenVersion } });
     });
+    // 外部渠道（声量AI）先付款、后进军师的订单挂在 uid 上：账号落地后的第一个请求领取。
+    // best-effort——领取失败只记日志，不挡这次请求；网页拉 /studio-web/status 时还会再领一次。
+    if (await hasPendingPlanGrant(claims.sub).catch(() => false)) {
+      await claimPendingPlanGrants(claims.sub).catch((error) => {
+        console.warn(`[plan-grant] 领取挂起订单失败 uid=${claims.sub}：${(error as Error).message}`);
+      });
+    }
   } catch (err) {
     const e = err as { statusCode?: number; code?: string; message?: string };
     return reply.code(e.statusCode ?? 500).send({

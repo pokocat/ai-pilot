@@ -1202,6 +1202,49 @@ export type StudioIntentRequest = Pick<GenRequest, 'text' | 'agentKey' | 'sessio
 export type StudioIntentResult =
   | { action: 'chat' }
   | { action: 'clarify' | 'draft'; studioIntentTicket: string };
+/* ── 声量AI 网页直连 /api/studio-web/*（账号中心 Bearer，aud 含 junshi-api）；契约文档 docs/STUDIO_WEB_API.md ── */
+export interface StudioWebPlan {
+  kind: 'image' | 'video';
+  prompt: string;
+  referenceIds: string[];
+  specs: { ratio?: string; duration?: number; count?: number };
+  sourceScriptMessageId: string | null;
+}
+export type StudioWebIntentResult =
+  | { action: 'chat' }
+  | { action: 'clarify'; question: string; ask?: { q: string; options: string[] } }
+  | {
+    action: 'draft'; plan: StudioWebPlan;
+    references: { id: string; fileName: string | null; fileType: string | null; url: string }[];
+    source: { sessionId: string | null; scriptMessageId: string | null; clientRequestId: string };
+  };
+export interface StudioWebStatus {
+  account: { userId: string; identityUid: string; onboarded: boolean; hasProfile: boolean };
+  plan: { id: string; name: string; period: string } | null;
+  planStatus: { state: 'none' | 'active' | 'expired'; expiresAt: string | null; daysRemaining: number | null; nextResetAt: string };
+  tokenQuota: { limit: number; used: number; remaining: number; unlimited: boolean; packRemaining: number };
+  creditBalance: number;
+  quickscan: { availableToday: boolean; freeAvailableToday: boolean; usedToday: number; dailyLimit: number };
+  externalGrants: { claimedNow: number; unresolved: number };
+  features: { fortune: boolean };
+}
+
+/* ── 外部渠道代售套餐 /api/s2s/plan-grants（账号中心机器令牌） ── */
+export interface ExternalPlanGrantRequest {
+  orderNo: string; identityUid: string; planId: string; source: 'studio'; amount: number;
+}
+export interface ExternalPlanGrantView {
+  grantId: string; source: 'studio'; orderNo: string; identityUid: string; planId: string; amount: number;
+  status: 'pending' | 'applied' | 'blocked';
+  createdAt: string; appliedAt: string | null;
+  replay?: boolean;
+  plan?: { id: string; name: string; period: string };
+  planExpiresAt?: string | null;
+  grantedCredits?: number; grantedTokens?: number; carriedDays?: number; renewal?: boolean;
+  /** 读时现算的当前对话额度；其余字段是开通那一刻冻结的。 */
+  tokenQuota?: { limit: number; remaining: number; used: number; unlimited: boolean; packRemaining: number };
+  blocked?: { code: string; message: string; currentPlanId: string | null; currentPlanName: string | null };
+}
 export interface ChatReply {
   text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
   /** 模型主动撰写、允许向用户展示的简短思路摘要；不是供应商隐藏推理或 chain-of-thought。 */

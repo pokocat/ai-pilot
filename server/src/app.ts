@@ -58,6 +58,9 @@ import { enterNow } from './services/clock.js';
 import { getRedis } from './services/redis.js';
 import { QUICKREEL_AUDIENCE } from './services/identity.js';
 import { attachIdentityUser, identifyRequest } from './services/identityProvisioning.js';
+import { isCorsOriginAllowed } from './services/cors.js';
+import { studioWebRoutes } from './routes/studioWeb.js';
+import { s2sRoutes } from './routes/s2s.js';
 import { planGateState, PlanRequiredError } from './services/planGate.js';
 import { PlanExpiredError } from './services/tokenQuota.js';
 import {
@@ -106,7 +109,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     catch (err) { (err as Error & { statusCode?: number }).statusCode = 400; done(err as Error, undefined); }
   });
 
-  await app.register(cors, { origin: true });
+  // 跨域白名单（services/cors.ts）：CORS_ALLOWED_ORIGINS 或内置清单；非白名单 Origin 不回任何 CORS 头。
+  // 不带 Origin 的请求（小程序、服务间调用）不受影响。SSE 走 raw.writeHead，另由 sseCorsHeaders 补头。
+  await app.register(cors, { origin: (origin, cb) => cb(null, isCorsOriginAllowed(origin)) });
   // 知识库文档上传：单文件、≤20MB（解析器在 docParse 按需动态加载）。
   // 快出片视频素材允许 100MB；其余上传路由继续在自身 handler 按 5/10/20MB 业务上限二次校验。
   // 克隆上传当前有 7 个业务字段：kind/voiceSource/avatarId/voiceId/name/clientRequestId/expectedCredits。
@@ -227,7 +232,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
     // '/api/events' 是纯埋点写入，不是业务写：新注册用户在生产默认没有套餐（TEST_DEFAULT_PLAN_NAME 未配时），
     // 被本闸拦住的恰恰是问策入口改版要观测的那批人——漏斗分母会系统性缺口，且失败得毫无声响。
-    const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin', '/api/events'];
+    // '/api/s2s/' 是服务间接口（机器令牌，没有用户态），本闸本来也认不出用户；显式列出免得以后误伤。
+    const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin', '/api/events', '/api/s2s/'];
     const ALLOW_NONE_ONLY = new Set([
       'PUT /api/me',
       'PUT /api/me/color',
@@ -302,6 +308,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   if (allProfile) await app.register(sessionRoutes, { prefix: '/api' });
   if (allProfile) await app.register(generationRoutes, { prefix: '/api' });
   if (allProfile) await app.register(studioRoutes, { prefix: '/api' });
+  if (allProfile) await app.register(studioWebRoutes, { prefix: '/api' }); // 声量AI 网页直连（账号中心 Bearer）
+  if (allProfile) await app.register(s2sRoutes, { prefix: '/api' }); // 服务间：声量AI 代售套餐开通/对账（机器令牌）
   if (allProfile) await app.register(libraryRoutes, { prefix: '/api' });
   if (allProfile) await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
   if (allProfile) await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告

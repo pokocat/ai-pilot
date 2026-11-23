@@ -10,6 +10,7 @@ import {
 } from '../services/generationJobs.js';
 import { prisma } from '../db.js';
 import { enqueueNextDeliveryStage } from '../services/generationRequest.js';
+import { sseCorsHeaders } from '../services/cors.js';
 
 const TERMINAL = new Set(['completed', 'truncated', 'failed', 'cancelled']);
 const POLL_MS = 350;
@@ -19,9 +20,11 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function setupGenerationSSE(reply: FastifyReply): void {
   reply.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    // no-transform：禁止中间层压缩/改写事件流（网页直连时经 CDN/网关也照样逐条到达）。
+    'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    // 跨域只回显白名单 Origin（services/cors.ts），不再写死 *。
+    ...sseCorsHeaders(reply),
     'X-Accel-Buffering': 'no',
   });
 }

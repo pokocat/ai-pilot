@@ -21,6 +21,12 @@ function dayKey(): string {
   return dateKey(); // 上海时区日历日（P1-4），限流 key 稳定不随进程 TZ 漂移
 }
 
+export const QUICKSCAN_DAILY_LIMIT = DAILY_LIMIT;
+/** 今天已成功速诊几次（与 POST /quickscan 的限流计数同一个键；只读）。 */
+export async function quickscanUsedToday(userId: string): Promise<number> {
+  return (await cacheGet<number>(`quickscan:rl:${userId}:${dayKey()}`)) ?? 0;
+}
+
 // 速诊即建档：三字段「空则填、不覆盖已有值」。revenueBand → Profile.stage（营收阶段口径）。
 async function backfillProfile(tenantId: string, f: { industry: string; stage: string; pain: string }): Promise<void> {
   const existing = await prisma.profile.findFirst({ where: { tenantId }, orderBy: { updatedAt: 'desc' } });

@@ -1128,6 +1128,32 @@ model PlanEntitlement {
   @@map("plan_entitlement")
 }
 
+/// 外部渠道代售军师套餐的开通记录（声量AI 等，经 `POST /api/s2s/plan-grants`）。
+/// `(source, orderNo)` 是防重键：同一订单重复通知只返回第一次的结果；内容不同（requestHash 不同）一律 409。
+/// 用户还没有军师账号时先存 `pending`，在他第一次带账号中心令牌进军师建档/绑定时领取（claimPendingStudioGrants）。
+/// 不是运营目录：属于交易流水，进 resetBusinessData。退款暂不自动回收（status 不会变成 refunded），走线下。
+model ExternalPlanGrant {
+  id           String    @id @default(cuid())
+  source       String // studio
+  orderNo      String
+  identityUid  String
+  planId       String
+  amount       Int // 渠道实收（分），只用于对账与升级折算快照
+  requestHash  String
+  status       String    @default("pending") // pending | applied
+  userId       String?
+  tenantId     String?
+  resultJson   Json?
+  appliedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([source, orderNo])
+  @@index([identityUid, status])
+  @@index([userId])
+  @@map("external_plan_grant")
+}
+
 /// 每月钻石权益幂等发放锚点。年付每个锚点周期最多发一次，提前续费不会重复发当月。
 model MonthlyCreditGrant {
   id            String   @id @default(cuid())

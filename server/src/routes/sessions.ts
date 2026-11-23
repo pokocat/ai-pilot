@@ -41,6 +41,7 @@ import { pipeGenerationSSE, setupGenerationSSE } from './generations.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { WENCE_FLAG, firstProactiveTemplate, normalizeChips } from '../services/wence.js';
 import { wantsDeliverableRequest } from '../services/outputIntent.js';
+import { sseCorsHeaders } from '../services/cors.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SESSION_MESSAGE_PAGE_DEFAULT = 100;
@@ -1232,9 +1233,11 @@ async function resolveProjectId(
 function setupSSE(reply: FastifyReply) {
   reply.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    // no-transform：禁止中间层压缩/改写事件流（网页直连时经 CDN/网关也照样逐条到达）。
+    'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    // 跨域只回显白名单 Origin（services/cors.ts），不再写死 *。
+    ...sseCorsHeaders(reply),
     // 让反代不要缓冲这条流。当前生产 Nginx 站点配了 proxy_buffering off 所以看不出问题，
     // 但一旦换 ALB、或中间再加一层网关（压测报告建议的双实例 + ALB 就是这个形态），
     // 缺这个头会让事件被憋在缓冲区里，表现为「问完很久没反应然后一次性刷出来」。

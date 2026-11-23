@@ -103,12 +103,17 @@ export function openStudioIntentTicket(value: string, userId: string, token: str
   }
 }
 
-export async function recallStudioIntent(
+export type StudioIntentDecision = { action: 'chat' } | z.infer<typeof ticketSchema>['intent'];
+
+/**
+ * 判断这一轮要不要进入制作，并给出明文方案。小程序走 recallStudioIntent（再加密成票据，只给后端自己用）；
+ * 声量AI 网页走 /studio-web/intent，直接拿明文（网页自己在声量AI 建草稿，军师不代为写入）。
+ */
+export async function decideStudioIntent(
   user: { id: string; tenantId: string },
-  token: string,
   body: StudioIntentRequest,
   classify = classifyStudioTurn,
-): Promise<StudioIntentResult> {
+): Promise<StudioIntentDecision> {
   const rows = body.sessionId ? await prisma.message.findMany({
     where: { sessionId: body.sessionId, session: { userId: user.id, tenantId: user.tenantId } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 12,
@@ -195,6 +200,17 @@ export async function recallStudioIntent(
       } };
     }
   }
+  return intent;
+}
+
+export async function recallStudioIntent(
+  user: { id: string; tenantId: string },
+  token: string,
+  body: StudioIntentRequest,
+  classify = classifyStudioTurn,
+): Promise<StudioIntentResult> {
+  const intent = await decideStudioIntent(user, body, classify);
+  if (intent.action === 'chat') return { action: 'chat' };
   return {
     action: intent.action,
     studioIntentTicket: encryptSecret(JSON.stringify({
