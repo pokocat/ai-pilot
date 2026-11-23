@@ -149,6 +149,28 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
 - `GET /api/s2s/plan-grants/:source/:orderNo`：查一笔，体同 3.2（无 `replay`）；没有 404 `GRANT_NOT_FOUND`。
 - `GET /api/s2s/plan-grants?source=studio[&orderNo=][&identityUid=][&status=pending|applied|blocked][&from=ISO][&to=ISO][&limit=1..200]`：按创建时间倒序，`{ "items": [...] }`。
 
+### 3.3.1 `GET /api/s2s/users/:uid/plan` —— 按 uid 查军师当前套餐
+
+付费弹窗用：判断用户是否已在小程序开通，以及收款前预判会不会落到 `PLAN_CHANGE_SHORTENS`（`plan.tierRank` 高于要卖的档且 `active=true` 时别卖低档）。同一张机器令牌、同一 scope。只读，不建档、不领取挂起单。
+
+```json
+{ "identityUid": "…", "linked": true, "active": true, "state": "active",
+  "plan": { "id": "…", "name": "入门版", "period": "month", "tierRank": 1, "planFamilyKey": "starter" },
+  "expiresAt": "2026-12-23T…Z", "daysRemaining": 30, "pendingGrants": 0 }
+```
+`linked=false` 表示该 uid 在军师还没有账号（此时 `active=false`、`state="none"`、`plan=null`）。`state` 为 `none | active | expired`。`expiresAt=null` 且 `active=true` 是不限期方案（企业版）。
+
+### 3.3.2 与声量AI 草拟形状的对照（以本文为准）
+
+| 声量AI 草拟 | 军师实际 |
+|---|---|
+| `aud=junshi-api`、`azp=aistar-junshi-s2s`、scope `junshi.plan.grant` | `aud=junshi-plan-grant`（只这一项）、`azp=sub=aistar-junshi-grant`、scope `junshi:plan.grant`。`junshi-api` 是用户令牌的 aud，机器令牌不能用 |
+| 头 `Idempotency-Key` | 不用；防重键是体里的 `orderNo`（+`source`） |
+| `orderId/uid/planCode/days/priceCents/paidAt` | `orderNo/identityUid/planId/source/amount`；时长由套餐 `period` 决定（月付一个月、年付一年），不收 `days`/`paidAt` |
+| 回包 `{success,data:{…}}` | 不包壳，直接是 3.2 的对象；错误是 `{error,code}` |
+| 只有 200 / 4xx | 另有 202（挂起，可重试也可不管）和 409 blocked |
+| `GET /api/s2s/plans/{uid}` | `GET /api/s2s/users/{uid}/plan`（3.3.1） |
+
 ### 3.4 退款与撤销（现状）
 
 **不自动回收。** 军师没有撤销接口；声量AI 退款后，军师侧的套餐、钻石和对话额度保持原样。处理方式：声量AI 按 §3.3 查到这笔开通，线下联系军师运营人工处理。`blocked` 的单同样人工处理。

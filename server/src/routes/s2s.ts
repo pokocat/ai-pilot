@@ -4,6 +4,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+import { now } from '../services/clock.js';
+import { daysRemaining, isExpired } from '../services/planTime.js';
 import {
   authorizePlanGrantCaller, createOrReplayPlanGrant, findPlanGrant, grantRequestSchema, grantView,
   GRANT_SOURCES, PlanGrantError,
@@ -38,6 +40,37 @@ export async function s2sRoutes(app: FastifyInstance) {
       if (row.status === 'pending') return reply.code(202).send(view);
       if (row.status === 'blocked') return reply.code(409).send({ ...view, error: '开通会缩短用户现有权益，需人工处理', code: 'PLAN_CHANGE_SHORTENS' });
       return view;
+    } catch (error) { return fail(reply, error); }
+  });
+
+  // 按账号中心 uid 查军师当前套餐（声量AI 付费弹窗用：判断「已在小程序开通」、收款前预判会不会被 blocked）。
+  // 用户在军师还没有账号 → linked=false、active=false。只读，不建档、不领取挂起单。
+  app.get<{ Params: { uid: string } }>('/s2s/users/:uid/plan', async (req, reply) => {
+    try {
+      await authorizePlanGrantCaller(req.headers as Record<string, unknown>);
+      const uid = req.params.uid.trim();
+      if (!uid || uid.length > 128) return reply.code(400).send({ error: 'uid 不合法', code: 'BAD_REQUEST' });
+      const [user, pendingGrants] = await Promise.all([
+        prisma.user.findUnique({
+          where: { identityUid: uid },
+          select: { deletedAt: true, planExpiresAt: true, plan: { select: { id: true, name: true, period: true, price: true, tierRank: true, planFamilyKey: true } } },
+        }),
+        prisma.externalPlanGrant.count({ where: { identityUid: uid, status: 'pending' } }),
+      ]);
+      const at = now();
+      const live = user && !user.deletedAt ? user : null;
+      const plan = live?.plan ?? null;
+      const expired = !!plan && isExpired(live!.planExpiresAt, at);
+      return {
+        identityUid: uid,
+        linked: !!live,
+        active: !!plan && !expired,
+        state: !plan ? 'none' : expired ? 'expired' : 'active',
+        plan: plan ? { id: plan.id, name: plan.name, period: plan.period, tierRank: plan.tierRank ?? null, planFamilyKey: plan.planFamilyKey ?? null } : null,
+        expiresAt: live?.planExpiresAt ? live.planExpiresAt.toISOString() : null,
+        daysRemaining: plan ? daysRemaining(live!.planExpiresAt, at) : null,
+        pendingGrants,
+      };
     } catch (error) { return fail(reply, error); }
   });
 

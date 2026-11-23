@@ -408,3 +408,23 @@ test('网页制作方案：draft 明文返回方案与参考图地址；参考�
     __setStudioWebClassifierForTest(undefined);
   }
 });
+
+test('按 uid 查军师套餐：无账号 / 有效 / 过期；要机器令牌', async () => {
+  const none = await call('GET', '/api/s2s/users/uid-ghost/plan', { bearer: machineToken() });
+  assert.equal(none.status, 200);
+  assert.deepEqual([none.body.linked, none.body.active, none.body.state, none.body.plan], [false, false, 'none', null]);
+  assert.equal(await prisma.user.count(), 0, '查询不建档');
+  assert.equal((await call('GET', '/api/s2s/users/uid-ghost/plan', { bearer: userToken('uid-ghost') })).status, 401);
+
+  const user = await linkedUser('uid-look');
+  const plan = await planByName('入门版');
+  await call('POST', '/api/s2s/plan-grants', { bearer: machineToken(), body: grant({ identityUid: 'uid-look', planId: plan.id, orderNo: 'SO-LOOK' }) });
+  const active = await call('GET', '/api/s2s/users/uid-look/plan', { bearer: machineToken() });
+  assert.equal(active.body.active, true);
+  assert.equal(active.body.state, 'active');
+  assert.equal(active.body.plan.id, plan.id);
+  assert.ok(active.body.expiresAt);
+  await prisma.user.update({ where: { id: user.id }, data: { planExpiresAt: new Date(Date.now() - 1000) } });
+  const expired = await call('GET', '/api/s2s/users/uid-look/plan', { bearer: machineToken() });
+  assert.deepEqual([expired.body.active, expired.body.state], [false, 'expired']);
+});

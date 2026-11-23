@@ -1233,6 +1233,11 @@ export interface StudioWebStatus {
 export interface ExternalPlanGrantRequest {
   orderNo: string; identityUid: string; planId: string; source: 'studio'; amount: number;
 }
+export interface ExternalUserPlanView {
+  identityUid: string; linked: boolean; active: boolean; state: 'none' | 'active' | 'expired';
+  plan: { id: string; name: string; period: string; tierRank: number | null; planFamilyKey: string | null } | null;
+  expiresAt: string | null; daysRemaining: number | null; pendingGrants: number;
+}
 export interface ExternalPlanGrantView {
   grantId: string; source: 'studio'; orderNo: string; identityUid: string; planId: string; amount: number;
   status: 'pending' | 'applied' | 'blocked';
