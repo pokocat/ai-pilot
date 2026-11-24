@@ -73,16 +73,20 @@ const intentSchema = z.object({
 });
 
 /**
- * 本人名下、能作为参考图原图取出的图片 id（与 getStudioReferenceImage 同一判定：图片、已就绪、JPG/PNG、有存储键）。
- * 只查库不取字节；存储抖动导致的取图失败仍要由 /references/:id 的 404 兜底。
+ * 本人名下、已就绪、有存储键的图片。`originalOnly` 再要求 JPG/PNG——与 getStudioReferenceImage 同一判定，
+ * 只有这种才能作为参考图原图送去声量AI。只查库不取字节；存储抖动导致的取图失败仍由 /references/:id 的 404 兜底。
+ *
+ * 受理校验**不**加格式条件：上传接口也收 GIF/WebP，用户带一张 WebP 图只是问问题（不做内容）时不能被 422 拦下。
  */
-async function usableReferenceIds(user: { id: string; tenantId: string }, ids: string[]): Promise<Map<string, { fileName: string | null; fileType: string | null }>> {
+async function ownedImageIds(user: { id: string; tenantId: string }, ids: string[], originalOnly: boolean): Promise<Map<string, { fileName: string | null; fileType: string | null }>> {
   if (!ids.length) return new Map();
   const rows = await prisma.knowledgeItem.findMany({
     where: { id: { in: ids }, userId: user.id, tenantId: user.tenantId, sourceType: 'image', status: 'ready', fileKey: { not: null } },
     select: { id: true, fileName: true, fileType: true },
   });
-  return new Map(rows.filter((row) => /^(jpg|jpeg|png)$/.test(row.fileType ?? '')).map((row) => [row.id, { fileName: row.fileName, fileType: row.fileType }]));
+  return new Map(rows
+    .filter((row) => !originalOnly || /^(jpg|jpeg|png)$/.test(row.fileType ?? ''))
+    .map((row) => [row.id, { fileName: row.fileName, fileType: row.fileType }]));
 }
 
 export async function studioWebRoutes(app: FastifyInstance) {
@@ -164,14 +168,14 @@ export async function studioWebRoutes(app: FastifyInstance) {
       const parsed = intentSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: '参数不合法', code: 'BAD_REQUEST' });
       const input = parsed.data;
-      // 本轮附带的图片必须是本人上传、可取原图的；不存在/不属于本人/不是 JPG·PNG 原图 → 受理时就拒，
+      // 本轮附带的图片必须是本人上传、已就绪的；不存在/不属于本人 → 受理时就拒（格式不在这里判，见 ownedImageIds），
       // 不要等制作单出来、用户点生成时前端取图才失败（联调第四轮发现）。在分类模型调用之前判，不花模型钱。
       const imageRefIds = [...new Set((input.refs ?? []).filter((ref) => ref.kind === 'image').map((ref) => ref.id))];
       if (imageRefIds.length) {
-        const usable = await usableReferenceIds(user, imageRefIds);
+        const usable = await ownedImageIds(user, imageRefIds, false);
         const missing = imageRefIds.filter((id) => !usable.has(id));
         if (missing.length) {
-          return reply.code(422).send({ error: '有图片找不到或不能作为参考图，请重新上传 JPG 或 PNG 原图。', code: 'REFERENCE_NOT_FOUND', missing });
+          return reply.code(422).send({ error: '有图片找不到了，请重新上传。', code: 'REFERENCE_NOT_FOUND', missing });
         }
       }
       const session = input.sessionId ? await prisma.session.findFirst({
@@ -186,8 +190,8 @@ export async function studioWebRoutes(app: FastifyInstance) {
       }
       const intent = await decideStudioIntent(user, input, testClassifier);
       if (intent.action !== 'draft') return intent;
-      // 方案里的参考图可能来自更早的轮次（之后被删），逐张标出现在还能不能取到。
-      const usableRefs = await usableReferenceIds(user, intent.plan.referenceIds);
+      // 方案里的参考图可能来自更早的轮次（之后被删），也可能是 GIF/WebP（不能作原图），逐张标出现在还能不能取到。
+      const usableRefs = await ownedImageIds(user, intent.plan.referenceIds, true);
       return {
         action: 'draft' as const,
         plan: intent.plan,

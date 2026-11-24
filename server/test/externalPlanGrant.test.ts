@@ -521,6 +521,16 @@ test('网页制作方案：本轮图片 refs 不存在或不属于本人 → 422
     }
     assert.equal(classified, 0, '校验失败不该调分类模型');
 
+    // WebP 图：受理照常（用户可能只是带图问问题），进了制作单则标 available=false
+    const webp = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#604020' } }).webp().toBuffer();
+    const webpImage = await ingestChatImage({ userId: user.id, tenantId: user.tenantId, mime: 'image/webp', buf: webp, fileName: '门头.webp' });
+    const webpTurn = await call('POST', '/api/studio-web/intent', {
+      bearer: userToken('uid-refcheck'),
+      body: { text: '这张图片做成开业海报', clientRequestId: 'webp', refs: [{ kind: 'image', id: webpImage.id, label: '门头.webp' }] },
+    });
+    assert.equal(webpTurn.status, 200, JSON.stringify(webpTurn.body));
+    assert.equal(webpTurn.body.references[0].available, false);
+
     const ok = await call('POST', '/api/studio-web/intent', {
       bearer: userToken('uid-refcheck'),
       body: { text: '这张图片做成开业海报', clientRequestId: 'good', refs: [{ kind: 'image', id: image.id, label: '海报.png' }] },

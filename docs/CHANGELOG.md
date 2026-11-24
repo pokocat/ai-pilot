@@ -8,7 +8,7 @@
 
 ### 2026-11-24 · 网页制作方案受理时校验参考图 · 影响面：`POST /api/studio-web/intent`
 
-- 本轮 `refs` 里的图片不存在、不属于本人或不是 JPG/PNG 原图时，受理即返回 422 `REFERENCE_NOT_FOUND`（带 `missing`），不调分类模型。以前会照收，出了带着这张图的制作单，用户点生成时前端取图才失败（联调第四轮发现）。制作单的 `references[]` 新增 `available`，标出沿用自更早轮次、之后被删的图。小程序 `/studio/intent` 不变。守卫 `server/test/externalPlanGrant.test.ts`。
+- 本轮 `refs` 里的图片不存在或不属于本人时，受理即返回 422 `REFERENCE_NOT_FOUND`（带 `missing`），不调分类模型；格式不在受理时判断（上传也收 GIF/WebP，带这类图问问题不能被拦），GIF/WebP 进了制作单标 `available=false`。以前会照收，出了带着这张图的制作单，用户点生成时前端取图才失败（联调第四轮发现）。制作单的 `references[]` 新增 `available`，标出沿用自更早轮次、之后被删的图。小程序 `/studio/intent` 不变。守卫 `server/test/externalPlanGrant.test.ts`。
 
 ### 2026-11-24 · 网页状态接口补「本次领取」与最近一笔代售开通 · 影响面：`GET /api/studio-web/status`
 

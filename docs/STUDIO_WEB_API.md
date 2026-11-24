@@ -82,8 +82,8 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
 ```
 - `kind`：`image | video`；`specs` 只含用户明确说过的：`ratio`（`9:16` 等）、视频 `duration`（秒）、图片 `count`（张）。
 - `clarify.ask` 只在需要选参考图时出现。
-- 本轮 `refs` 里的图片必须是本人上传、已就绪的 JPG/PNG 原图，否则**受理时**就返回 422 `REFERENCE_NOT_FOUND`，体里 `missing` 列出取不到的 id；这时不调用模型。
-- `references[].available`：这张图现在能不能取到。方案可能沿用更早轮次的图，之后它被删除了；为 false 时，网页应提示重新上传，不要等用户点生成时才取图失败。取图仍可能因存储抖动失败，`/references/:id` 的 404 照样要处理。
+- 本轮 `refs` 里的图片必须是本人上传、已就绪的，否则**受理时**就返回 422 `REFERENCE_NOT_FOUND`，体里 `missing` 列出取不到的 id；这时不调用模型。格式不在受理时判断：上传接口也收 GIF/WebP，用户带这类图只是问问题时照常受理。
+- `references[].available`：这张图现在能不能作为参考图原图取到（只认 JPG/PNG；GIF/WebP 进了制作单也是 false）。方案可能沿用更早轮次的图，之后它被删除了；为 false 时，网页应提示重新上传，不要等用户点生成时才取图失败。取图仍可能因存储抖动失败，`/references/:id` 的 404 照样要处理。
 - 网页随后照常 `POST /api/generate` 让军师回复本轮对话（不带 `studioIntentTicket`）；军师不会代建草稿。
 - `JUNSHI_STUDIO_WEB_ENABLED` 未开、该智能体没挂制作技能、内容审核不过时，一律返回 `{ "action": "chat" }`。
 
