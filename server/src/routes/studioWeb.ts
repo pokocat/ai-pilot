@@ -8,7 +8,7 @@
 // 契约见 docs/STUDIO_WEB_API.md。
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { StudioIntentRequest, StudioWebIntentResult, StudioWebStatus } from '../../../shared/contracts';
+import type { StudioIntentRequest, StudioWebIntentResult, StudioWebMiniCode, StudioWebStatus } from '../../../shared/contracts';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { identityEnabled, JUNSHI_AUDIENCE } from '../services/identity.js';
@@ -26,6 +26,7 @@ import { planGateState } from '../services/planGate.js';
 import { claimPendingPlanGrants } from '../services/externalPlanGrant.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { QUICKSCAN_DAILY_LIMIT, quickscanUsedToday } from './quickscan.js';
+import { WEB_CHAT_PAGE, webChatMiniCode } from '../services/webMiniCode.js';
 
 /** 网页入口开关：与小程序草稿开关（JUNSHI_STUDIO_ENABLED）分开，网页不需要 junshi-s2s 密钥与票据加密。 */
 export function studioWebEnabled(): boolean {
@@ -72,6 +73,16 @@ const intentSchema = z.object({
 });
 
 export async function studioWebRoutes(app: FastifyInstance) {
+  // 扫码回手机小程序接着聊：全站同一张码（scene=web=chat，与用户无关、不带邀请码）。
+  // 鉴权与开关同 /studio-web/status；生成失败回 dataUri:null，不回 5xx（口径同 /invite/qrcode）。
+  app.get('/studio-web/mini-code', async (req, reply): Promise<StudioWebMiniCode | void> => {
+    try {
+      if (!identityEnabled()) throw new StudioWebError('账号服务尚未配置', 503, 'IDENTITY_NOT_CONFIGURED');
+      await webUser(req);
+      return { dataUri: await webChatMiniCode(), page: WEB_CHAT_PAGE };
+    } catch (error) { return send(reply, error); }
+  });
+
   app.get('/studio-web/status', async (req, reply): Promise<StudioWebStatus | void> => {
     try {
       if (!identityEnabled()) throw new StudioWebError('账号服务尚未配置', 503, 'IDENTITY_NOT_CONFIGURED');

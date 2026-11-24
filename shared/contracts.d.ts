@@ -1218,6 +1218,8 @@ export type StudioWebIntentResult =
     references: { id: string; fileName: string | null; fileType: string | null; url: string }[];
     source: { sessionId: string | null; scriptMessageId: string | null; clientRequestId: string };
   };
+/** GET /api/studio-web/mini-code：扫码回手机小程序。dataUri=null 表示这次没生成出来，网页降级不显示码。 */
+export interface StudioWebMiniCode { dataUri: string | null; page: 'pages/sessions/index' }
 export interface StudioWebStatus {
   account: { userId: string; identityUid: string; onboarded: boolean; hasProfile: boolean };
   plan: { id: string; name: string; period: string } | null;

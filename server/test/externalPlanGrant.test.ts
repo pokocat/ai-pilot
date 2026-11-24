@@ -13,6 +13,8 @@ import { __resetPlanGate } from '../src/services/planGate.js';
 import sharp from 'sharp';
 import { ingestChatImage } from '../src/services/chatImage.js';
 import { __setStudioWebClassifierForTest } from '../src/routes/studioWeb.js';
+import { WEB_CHAT_SCENE, webChatMiniCode } from '../src/services/webMiniCode.js';
+import { __clearMemoryCache } from '../src/services/cache.js';
 import { api, cleanBusiness, closeApp, getApp, login, seedBaseline, uniquePhone } from './helpers.js';
 
 const ISSUER = 'https://id.example.test';
@@ -427,4 +429,36 @@ test('按 uid 查军师套餐：无账号 / 有效 / 过期；要机器令牌', 
   await prisma.user.update({ where: { id: user.id }, data: { planExpiresAt: new Date(Date.now() - 1000) } });
   const expired = await call('GET', '/api/s2s/users/uid-look/plan', { bearer: machineToken() });
   assert.deepEqual([expired.body.active, expired.body.state], [false, 'expired']);
+});
+
+test('扫码回小程序：鉴权同状态接口；测试环境无微信凭据时 dataUri:null 不报错', async () => {
+  __clearMemoryCache();
+  const legacy = await login(uniquePhone(), '老用户');
+  assert.equal((await api('GET', '/api/studio-web/mini-code', { token: legacy })).status, 401);
+  await linkedUser('uid-code');
+  const r = await call('GET', '/api/studio-web/mini-code', { bearer: userToken('uid-code') });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body, { dataUri: null, page: 'pages/sessions/index' });
+  userinfoByUid.set('uid-code-qr', { sub: 'uid-code-qr', phone_verified: true, phone_number: uniquePhone(), phone_number_verified: true });
+  assert.equal((await call('GET', '/api/studio-web/mini-code', { bearer: userToken('uid-code-qr', { aud: ['quickreel-api'] }) })).status, 403);
+});
+
+test('扫码回小程序：scene 固定 web=chat 且不像邀请码；成功缓存、失败只短缓存、并发只打一次', async () => {
+  __clearMemoryCache();
+  assert.equal(WEB_CHAT_SCENE, 'web=chat');
+  // 与小程序 services/invite.js 的邀请码形状对照：scene 去掉 ic: 前缀后的第一段不能被当成邀请码。
+  assert.doesNotMatch(WEB_CHAT_SCENE.split(':')[0], /^JS[0-9A-HJKMNP-TV-Z]{4}$/);
+  let calls = 0;
+  const fail = async () => { calls += 1; return null; };
+  assert.equal(await webChatMiniCode(fail), null);
+  assert.equal(await webChatMiniCode(fail), null);
+  assert.equal(calls, 1, '失败结果在短 TTL 内复用');
+  __clearMemoryCache();
+  const scenes: string[] = [];
+  const ok = async (scene: string) => { calls += 1; scenes.push(scene); await new Promise((r) => setTimeout(r, 20)); return 'data:image/png;base64,AAAA'; };
+  const results = await Promise.all([0, 1, 2].map(() => webChatMiniCode(ok)));
+  assert.deepEqual(results, Array(3).fill('data:image/png;base64,AAAA'));
+  assert.deepEqual(scenes, ['web=chat'], '并发只生成一次');
+  assert.equal(await webChatMiniCode(async () => { throw new Error('不该再调'); }), 'data:image/png;base64,AAAA');
+  __clearMemoryCache();
 });

@@ -88,6 +88,16 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
 
 错误：404 `REFERENCE_NOT_FOUND`（不存在、不是本人、不是 JPG/PNG）；404 `STUDIO_WEB_DISABLED`；401。
 
+### 2.4 `GET /api/studio-web/mini-code` —— 扫码回手机小程序接着聊
+
+鉴权与开关同 §2.1（账号中心用户令牌、`aud` 含 `junshi-api`；只要求账号中心已配置）。
+200：`{ "dataUri": "data:image/png;base64,…" | null, "page": "pages/sessions/index" }`
+- 全站同一张码：scene 固定 `web=chat`，与用户无关、不带邀请码（不要用 `/api/invite/qrcode`，那张会被算成邀请渠道）。不传 page，微信落小程序主页 = `pages/sessions/index`（问策）。码默认对应**正式版**小程序。
+- 小程序端只有 `services/invite.js` 读 scene，只认 `JS` 开头的邀请码形状，`web=chat` 被忽略，正常进问策，不算邀请。
+- `dataUri=null`：没生成出来（未配微信凭据、微信报错、超时），网页隐藏码即可；不会返回 5xx。
+- 缓存：成功 12 小时，失败 60 秒；同进程并发只调一次微信。不记录 access_token 与图片内容。
+- 用户在手机上登录军师后看到的是自己的会话列表；网页对话与小程序是同一个账号的同一批会话（前提是同一手机号）。
+
 ## 3. 代售套餐（声量AI 后端 → 军师）
 
 ### 3.1 鉴权：账号中心机器令牌
