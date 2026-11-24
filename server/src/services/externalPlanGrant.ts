@@ -81,6 +81,8 @@ interface AppliedFacts {
   planId: string; planName: string; period: string;
   planExpiresAt: string | null; grantedCredits: number; grantedTokens: number;
   carriedDays: number; renewal: boolean;
+  /** 先挂起（用户当时还没有军师账号）、后到账。老记录没有这个字段按 false。 */
+  pendingFirst?: boolean;
 }
 interface BlockedFacts { code: string; message: string; currentPlanId?: string | null; currentPlanName?: string | null }
 
@@ -132,6 +134,7 @@ async function applyGrantInTx(
   tx: Prisma.TransactionClient,
   grant: GrantRow,
   user: { id: string; tenantId: string },
+  pendingFirst = false,
 ): Promise<GrantRow> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${user.id}`}))`;
   const plan = await loadSellablePlan(tx, grant.planId);
@@ -175,6 +178,7 @@ async function applyGrantInTx(
     planExpiresAt: expiresAt ? expiresAt.toISOString() : null,
     grantedCredits: purchase.grantedCredits, grantedTokens: purchase.grantedTokens,
     carriedDays, renewal: !!cur && cur.id === plan.id && !isExpired(current!.planExpiresAt, at),
+    pendingFirst,
   };
   await tx.auditLog.create({
     data: {
@@ -214,7 +218,7 @@ export async function createOrReplayPlanGrant(input: GrantRequest): Promise<{ ro
     if (existing) {
       if (existing.status !== 'pending') return { row: existing, replay: true };
       const user = await liveUserByUid(tx, input.identityUid);
-      return { row: user && !user.deletedAt ? await applyGrantInTx(tx, existing, user) : existing, replay: true };
+      return { row: user && !user.deletedAt ? await applyGrantInTx(tx, existing, user, true) : existing, replay: true };
     }
     // 订单号之外再挡一次「未开通前就打来的不可售套餐」，免得先落一条永远领不走的 pending。
     await loadSellablePlan(tx, input.planId);
@@ -257,7 +261,7 @@ export async function claimPendingPlanGrants(uid: string): Promise<number> {
       if (!grant || grant.status !== 'pending') return null;
       const user = await liveUserByUid(tx, uid);
       if (!user || user.deletedAt) return null;
-      return applyGrantInTx(tx, grant, user);
+      return applyGrantInTx(tx, grant, user, true);
     });
     if (row?.userId) bustPlanGate(row.userId);
     if (row?.status === 'applied') applied += 1;

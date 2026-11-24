@@ -1227,7 +1227,20 @@ export interface StudioWebStatus {
   tokenQuota: { limit: number; used: number; remaining: number; unlimited: boolean; packRemaining: number };
   creditBalance: number;
   quickscan: { availableToday: boolean; freeAvailableToday: boolean; usedToday: number; dailyLimit: number };
-  externalGrants: { claimedNow: number; unresolved: number };
+  /**
+   * claimedNow：本次请求领取到账的代售挂起单笔数（含建档/换票阶段领取的）。只有「付款后第一次进军师」那个请求是 >0，
+   * 之后的请求都是 0——页面要判断「是不是在声量AI 付的款」请看 lastApplied。
+   */
+  externalGrants: {
+    claimedNow: number; unresolved: number;
+    lastApplied: {
+      source: 'studio'; orderNo: string; planId: string; planName: string | null; appliedAt: string;
+      /** 先付款、后进军师（挂起后才到账）。 */
+      pendingFirst: boolean;
+      /** 这笔开通的套餐就是当前套餐。 */
+      isCurrentPlan: boolean;
+    } | null;
+  };
   features: { fortune: boolean };
 }
 

@@ -46,13 +46,18 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
   "tokenQuota": { "limit": 400000, "used": 0, "remaining": 400000, "unlimited": false, "packRemaining": 0 },
   "creditBalance": 20,
   "quickscan": { "availableToday": true, "freeAvailableToday": true, "usedToday": 0, "dailyLimit": 3 },
-  "externalGrants": { "claimedNow": 0, "unresolved": 0 },
+  "externalGrants": {
+    "claimedNow": 0, "unresolved": 0,
+    "lastApplied": { "source": "studio", "orderNo": "SO-…", "planId": "…", "planName": "入门版", "appliedAt": "…", "pendingFirst": true, "isCurrentPlan": true }
+  },
   "features": { "fortune": true }
 }
 ```
 - `plan` 为 null = 从未开通；`planStatus.state` 为 `none | active | expired`。
 - `tokenQuota.remaining` 可以是负数（透支），`limit=-1` 且 `unlimited=true` 是不限量。
 - `quickscan.freeAvailableToday`：今天那一次「不占套餐额度」的诊断还在；`availableToday`：现在点诊断会不会被拦（过期一律 false）。
+- `externalGrants.claimedNow`：**本次请求**领取到账的挂起单笔数，包括建档/换票阶段领取的（2026-11-24 修：以前漏算了建档阶段，先付款后打开时恒为 0）。只有付款后第一次进军师的那个请求会大于 0；如果网页第一次请求打的是别的接口，挂起单会在那里到账，status 看到的就是 0。
+- `externalGrants.lastApplied`：最近一笔已到账的代售开通，没有则 null，不受「哪个请求先领走」影响。**判断「是不是在声量AI 付款开通的」请用它**：`pendingFirst=true` 表示先付款、后进军师才到账；`isCurrentPlan=true` 表示这笔开通的套餐就是当前套餐。
 - `externalGrants.unresolved`：该 uid 还有几笔代售订单没到账（挂起或需人工）。
 - `features.fortune` 是军师现有的全局命理开关，只读下发；按入口关闭命理还没做（见 §6）。
 

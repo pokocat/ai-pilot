@@ -12,7 +12,7 @@ import type { StudioIntentRequest, StudioWebIntentResult, StudioWebMiniCode, Stu
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { identityEnabled, JUNSHI_AUDIENCE } from '../services/identity.js';
-import { identifyRequest } from '../services/identityProvisioning.js';
+import { identifyRequest, identityClaimedGrants } from '../services/identityProvisioning.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
 import { hasStudioDraftSkill } from '../services/studioIntent.js';
 import { decideStudioIntent } from '../services/studioAiRecall.js';
@@ -88,11 +88,13 @@ export async function studioWebRoutes(app: FastifyInstance) {
       if (!identityEnabled()) throw new StudioWebError('账号服务尚未配置', 503, 'IDENTITY_NOT_CONFIGURED');
       const { user, uid } = await webUser(req);
       // 先领挂起的代售订单，再读套餐：付完款第一次打开就能看到已开通。
-      const claimed = await claimPendingPlanGrants(uid).catch((error) => {
+      // 挂起单通常已在 attachIdentityUser（本请求的建档/换票阶段）被领走，这里两段相加才是「本次请求领取的笔数」。
+      const claimedHere = await claimPendingPlanGrants(uid).catch((error) => {
         req.log?.warn?.(`[plan-grant] 状态页领取失败 uid=${uid}：${(error as Error).message}`);
         return 0;
       });
-      const [plan, planStatus, gate, quota, credit, profile, onboarded, scanned, graceLeft, pending, fortune] = await Promise.all([
+      const claimed = identityClaimedGrants(req) + claimedHere;
+      const [plan, planStatus, gate, quota, credit, profile, onboarded, scanned, graceLeft, pending, lastGrant, fortune] = await Promise.all([
         user.planId ? prisma.plan.findUnique({ where: { id: user.planId }, select: { id: true, name: true, period: true, tokenQuotaPerMonth: true, creditsPerMonth: true } }) : null,
         getPlanStatus(user.id),
         planGateState(user.id),
@@ -103,6 +105,10 @@ export async function studioWebRoutes(app: FastifyInstance) {
         quickscanUsedToday(user.id),
         graceRemainingToday(user.id, 'quickscan'),
         prisma.externalPlanGrant.count({ where: { identityUid: uid, status: { in: ['pending', 'blocked'] } } }),
+        prisma.externalPlanGrant.findFirst({
+          where: { identityUid: uid, status: 'applied' }, orderBy: [{ appliedAt: 'desc' }, { id: 'desc' }],
+          select: { source: true, orderNo: true, planId: true, appliedAt: true, resultJson: true },
+        }),
         isFeatureEnabled('fortune'),
       ]);
       // 速诊（初诊卡）：过期用户被 assertPlanActive 拦；无套餐用户靠每日 1 次保底；有效套餐走额度（额度用完也有保底）。
@@ -121,7 +127,18 @@ export async function studioWebRoutes(app: FastifyInstance) {
           freeAvailableToday: gate !== 'expired' && underDailyLimit && graceLeft > 0,
           usedToday: scanned, dailyLimit: QUICKSCAN_DAILY_LIMIT,
         },
-        externalGrants: { claimedNow: claimed, unresolved: pending },
+        externalGrants: {
+          claimedNow: claimed,
+          unresolved: pending,
+          // 最近一笔已到账的代售开通（不受「哪个请求先领走」影响）。pendingFirst=先付款、后进军师才到账。
+          lastApplied: lastGrant?.appliedAt ? {
+            source: lastGrant.source as 'studio', orderNo: lastGrant.orderNo, planId: lastGrant.planId,
+            planName: (lastGrant.resultJson as { planName?: string } | null)?.planName ?? null,
+            appliedAt: lastGrant.appliedAt.toISOString(),
+            pendingFirst: (lastGrant.resultJson as { pendingFirst?: boolean } | null)?.pendingFirst === true,
+            isCurrentPlan: !!plan && plan.id === lastGrant.planId,
+          } : null,
+        },
         features: { fortune },
       };
     } catch (error) { return send(reply, error); }

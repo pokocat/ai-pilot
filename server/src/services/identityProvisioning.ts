@@ -215,7 +215,16 @@ export interface RequestIdentity {
   aud: string[];
 }
 
-type IdentityRequest = FastifyRequest & { identityContext?: { sub: string; userId: string; aud: string[] } };
+type IdentityRequest = FastifyRequest & {
+  identityContext?: { sub: string; userId: string; aud: string[] };
+  /** 本次请求在 attachIdentityUser 里领取到账的代售挂起单笔数（/studio-web/status 要把它算进 claimedNow）。 */
+  identityClaimedGrants?: number;
+};
+
+/** 本次请求在建档/换票阶段已领取的代售挂起单笔数；没领或非账号中心请求为 0。 */
+export function identityClaimedGrants(req: FastifyRequest): number {
+  return (req as IdentityRequest).identityClaimedGrants ?? 0;
+}
 
 /**
  * 取「这个请求是谁」——**纯计算、不查库**（限流 keyGenerator 与套餐闸共用同一把尺子）。
@@ -288,8 +297,9 @@ export async function attachIdentityUser(req: FastifyRequest, reply: FastifyRepl
     // 外部渠道（声量AI）先付款、后进军师的订单挂在 uid 上：账号落地后的第一个请求领取。
     // best-effort——领取失败只记日志，不挡这次请求；网页拉 /studio-web/status 时还会再领一次。
     if (await hasPendingPlanGrant(claims.sub).catch(() => false)) {
-      await claimPendingPlanGrants(claims.sub).catch((error) => {
+      (req as IdentityRequest).identityClaimedGrants = await claimPendingPlanGrants(claims.sub).catch((error) => {
         console.warn(`[plan-grant] 领取挂起订单失败 uid=${claims.sub}：${(error as Error).message}`);
+        return 0;
       });
     }
   } catch (err) {

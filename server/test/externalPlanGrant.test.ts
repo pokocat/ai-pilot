@@ -462,3 +462,38 @@ test('扫码回小程序：scene 固定 web=chat 且不像邀请码；成功缓�
   assert.equal(await webChatMiniCode(async () => { throw new Error('不该再调'); }), 'data:image/png;base64,AAAA');
   __clearMemoryCache();
 });
+
+test('先付款后进军师：第一次请求就是 status 时 claimedNow=1、lastApplied 标出 pendingFirst；之后 claimedNow=0 但 lastApplied 仍在', async () => {
+  const plan = await planByName('入门版');
+  const pending = await call('POST', '/api/s2s/plan-grants', { bearer: machineToken(), body: grant({ identityUid: 'uid-paidfirst', planId: plan.id, orderNo: 'SO-PAIDFIRST' }) });
+  assert.equal(pending.status, 202);
+  userinfoByUid.set('uid-paidfirst', { sub: 'uid-paidfirst', phone_verified: true, phone_number: uniquePhone(), phone_number_verified: true });
+  const first = await call('GET', '/api/studio-web/status', { bearer: userToken('uid-paidfirst') });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.planStatus.state, 'active');
+  assert.equal(first.body.externalGrants.claimedNow, 1, '建档阶段领到的那笔要算进本次请求');
+  assert.equal(first.body.externalGrants.unresolved, 0);
+  assert.equal(first.body.externalGrants.lastApplied.orderNo, 'SO-PAIDFIRST');
+  assert.equal(first.body.externalGrants.lastApplied.planName, '入门版');
+  assert.equal(first.body.externalGrants.lastApplied.pendingFirst, true);
+  assert.equal(first.body.externalGrants.lastApplied.isCurrentPlan, true);
+  const second = await call('GET', '/api/studio-web/status', { bearer: userToken('uid-paidfirst') });
+  assert.equal(second.body.externalGrants.claimedNow, 0);
+  assert.equal(second.body.externalGrants.lastApplied.pendingFirst, true);
+
+  // 先进别的接口（建档并领取），再进 status：claimedNow=0，但 lastApplied 仍能说明是声量AI 付款开通
+  await call('POST', '/api/s2s/plan-grants', { bearer: machineToken(), body: grant({ identityUid: 'uid-paidfirst2', planId: plan.id, orderNo: 'SO-PAIDFIRST2' }) });
+  userinfoByUid.set('uid-paidfirst2', { sub: 'uid-paidfirst2', phone_verified: true, phone_number: uniquePhone(), phone_number_verified: true });
+  assert.equal((await call('GET', '/api/journey', { bearer: userToken('uid-paidfirst2') })).status, 200);
+  const later = await call('GET', '/api/studio-web/status', { bearer: userToken('uid-paidfirst2') });
+  assert.equal(later.body.externalGrants.claimedNow, 0);
+  assert.equal(later.body.externalGrants.lastApplied.pendingFirst, true);
+
+  // 已有账号时直接到账：pendingFirst=false；从没在声量AI 买过：lastApplied=null
+  await linkedUser('uid-direct');
+  await call('POST', '/api/s2s/plan-grants', { bearer: machineToken(), body: grant({ identityUid: 'uid-direct', planId: plan.id, orderNo: 'SO-DIRECT' }) });
+  const direct = await call('GET', '/api/studio-web/status', { bearer: userToken('uid-direct') });
+  assert.equal(direct.body.externalGrants.lastApplied.pendingFirst, false);
+  await linkedUser('uid-never');
+  assert.equal((await call('GET', '/api/studio-web/status', { bearer: userToken('uid-never') })).body.externalGrants.lastApplied, null);
+});

@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-11-24 · 网页状态接口补「本次领取」与最近一笔代售开通 · 影响面：`GET /api/studio-web/status`
+
+- 先付款、后进军师时，挂起单在建档/换票阶段就已到账，`externalGrants.claimedNow` 却恒为 0，军师页把「刚付款开通」说成「在小程序开通过」（联调验收发现）。现在 claimedNow 计入建档阶段领取的笔数；另新增 `externalGrants.lastApplied`（orderNo、planName、appliedAt、`pendingFirst`、`isCurrentPlan`），页面据此判断开通来源，不依赖哪个请求先到。开通记录新增 `pendingFirst` 标记。守卫 `server/test/externalPlanGrant.test.ts`。
+
 ### 2026-11-24 · 本地种子不再写空 key 的模型配置 · 影响面：本地/测试机 seed、模型配置读取日志
 
 - `prisma/seed.ts` 不再建 `ai_setting(default)`。这行 provider=openai、apiKey 为空，优先于 `server/.env`，导致本地配好的模型不生效、对话和制作意图判断静默降级成模板（声量AI 本地联调实测踩到）。没有这行时直接用 env。
