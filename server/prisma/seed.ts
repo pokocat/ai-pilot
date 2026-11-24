@@ -40,7 +40,7 @@ async function main() {
   console.log('🌱 seeding 军师 数据库 …');
 
   // 先按外键顺序清空业务数据，保证 seed 幂等（顺序表见 prisma/resetBusinessData.ts，勿在此处复制副本）。
-  // 注意：它也会清 aiSetting，而下方会重建——所以这一步必须在创建 ai-setting 之前。
+  // 注意：它也会清 aiSetting，且本 seed **不再重建**（见下方「大模型配置」说明）。
   await resetBusinessData(prisma);
 
   // —— 套餐（夹具，仅本地）：生产由运营后台配置，这里只为让本地/测试机有可买的档位 ——
@@ -116,13 +116,11 @@ async function main() {
   }
   console.log(`  ✓ ${SURVEY.length} survey questions`);
 
-  // —— 大模型配置（默认 Agnes 2.0 Flash；key 留空时安全降级 mock，后台填入即切真实） ——
-  await prisma.aiSetting.upsert({
-    where: { id: 'default' },
-    update: { provider: 'openai', label: 'Agnes 2.0 Flash', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash' },
-    create: { id: 'default', provider: 'openai', label: 'Agnes 2.0 Flash', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash', apiKey: '', embeddingModel: '', temperature: 0.7 },
-  });
-  console.log('  ✓ ai-setting=Agnes 2.0 Flash（填 key 后即切真实模型）');
+  // —— 大模型配置：seed **不写** ai_setting（2026-11-24）——
+  // 以前这里会建一行 provider=openai、apiKey 为空的 ai_setting(default)。这行优先于 env，
+  // key 为空就判未就绪，于是本地 .env 里配好的 AI_PROVIDER/OPENAI_* 全部失效、整站静默降级成模板
+  // （声量AI 联调实测踩到）。没有这行时 getAiConfig 直接用 env；要用后台配置，在运营后台「模型」里配。
+  console.log('  ✓ ai-setting 不写入：模型取 server/.env 的 AI_PROVIDER/OPENAI_*（或运营后台配置）');
 
   // —— 演示租户与用户（云栖科技 / 王总）——租户/用户/档案已由开头的 resetBusinessData 清空，
   // 这里不再重复 deleteMany（原来那 4 行是 resetBusinessData 的过时子集，缺 tokenWallet 导致 seed 不幂等）。

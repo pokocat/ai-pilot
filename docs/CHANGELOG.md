@@ -6,6 +6,11 @@
 
 ## 变更日志
 
+### 2026-11-24 · 本地种子不再写空 key 的模型配置 · 影响面：本地/测试机 seed、模型配置读取日志
+
+- `prisma/seed.ts` 不再建 `ai_setting(default)`。这行 provider=openai、apiKey 为空，优先于 `server/.env`，导致本地配好的模型不生效、对话和制作意图判断静默降级成模板（声量AI 本地联调实测踩到）。没有这行时直接用 env。
+- `aiConfig.ts` 读到「声明真实 provider 却没有可用 key」的旧配置行时，每进程告警一次，写明正在降级、env 是否被覆盖、怎么处理；不输出密钥。降级行为本身不变。生产不跑 seed，不受影响；已有本地库里的空 key 行需手动删除或填 key。
+
 ### 2026-11-23 · 声量AI 网页直连军师与代售套餐到账 · 影响面：军师 API、数据库（新表）、跨域
 
 - 新增 `POST /api/s2s/plan-grants` 及按订单号/条件查询：声量AI 后端用账号中心机器令牌（`aud=junshi-plan-grant`、`azp=aistar-junshi-grant`、scope `junshi:plan.grant`）通知开通。按 `(source, orderNo)` 防重，重放返回第一次结果；同单号异内容 409；用户还没有军师账号时挂起，首次带令牌进军师时领取；会缩短现有权益的记 blocked 待人工。内部复用 `applyPlanPurchase`，升级结转与后台手动开通同口径。退款暂不自动回收。新表 `external_plan_grant`（`prisma db push` 纯加法）。

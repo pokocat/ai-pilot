@@ -6,7 +6,7 @@
 //       部署脚本会做一次性明文化迁移。对外一律只回传 hasKey，不出明文。
 
 import { prisma } from '../db.js';
-import { env, isRealKey } from '../env.js';
+import { env, isAiTestMode, isRealKey } from '../env.js';
 import type { ModelRate } from '../data/modelPrices.js';
 import { aiCredentialReadFailed, readAiCredential } from './aiCredentialStorage.js';
 import type { AiProvider, AiThinkingMode, AiEndpointTest } from '../llm/schema.js';
@@ -229,6 +229,20 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
   return cfg;
 }
 
+let warnedLegacyUnready = false;
+/** 每进程只喊一次；测试环境本来就一律 mock，不喊。导出给测试复位。 */
+export function __resetLegacyUnreadyWarning(): void { warnedLegacyUnready = false; }
+function warnLegacyUnready(row: ResolvedAiConfig, envCfg: ResolvedAiConfig): void {
+  if (warnedLegacyUnready || isAiTestMode()) return;
+  warnedLegacyUnready = true;
+  const envNote = isReady(envCfg)
+    ? `env 里已配好 provider=${envCfg.provider} model=${envCfg.model}，但被这行覆盖、没有生效`
+    : 'env 里也没有可用的模型 key';
+  console.warn(`[aiConfig] ai_setting(default) 声明 provider=${row.provider} model=${row.model}，但没有可用的 apiKey —— `
+    + `对话、成果与结构化抽取全部降级为本地模板（mock）。${envNote}。`
+    + '处理：在运营后台填好 key，或删除这一行（DELETE FROM ai_setting WHERE id=\'default\'）改用 env。');
+}
+
 /** 旧读路径（AiSetting 单例 > env）。三期切换后仍作为回落与迁移来源保留。 */
 async function getLegacyAiConfig(): Promise<ResolvedAiConfig> {
   let cfg = fromEnv();
@@ -260,6 +274,11 @@ async function getLegacyAiConfig(): Promise<ResolvedAiConfig> {
         traceEndpointId: row.activeModelId ?? undefined,
         traceEndpointLabel: row.label || undefined,
       };
+      // 有这行、声明了真实 provider、却没有可用 key → 它会盖掉 env 的配置，整站静默降级成本地模板。
+      // 以前完全没有日志（2026-11-24 本地联调踩到：seed 写的空 key 行让 .env 里的 Agnes 配置失效）。
+      if (cfg.provider !== 'mock' && !isReady(cfg) && !cfg.keyDecryptFailed) {
+        warnLegacyUnready(cfg, fromEnv());
+      }
       // 滚动迁移保护：历史密文解不开时明确记 error 级日志，供告警。
       if (cfg.keyDecryptFailed) {
         console.error('[aiConfig] 对话模型 apiKey 解密失败（APP_ENCRYPTION_KEY 轮换错误或未配但库内为密文）——'
