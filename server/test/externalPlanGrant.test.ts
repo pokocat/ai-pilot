@@ -497,3 +497,52 @@ test('先付款后进军师：第一次请求就是 status 时 claimedNow=1、la
   await linkedUser('uid-never');
   assert.equal((await call('GET', '/api/studio-web/status', { bearer: userToken('uid-never') })).body.externalGrants.lastApplied, null);
 });
+
+test('网页制作方案：本轮图片 refs 不存在或不属于本人 → 422 不调模型；方案里历史图被删 → available=false', async () => {
+  process.env.JUNSHI_STUDIO_WEB_ENABLED = 'true';
+  const user = await linkedUser('uid-refcheck');
+  const plan = await planByName('入门版');
+  await call('POST', '/api/s2s/plan-grants', { bearer: machineToken(), body: grant({ identityUid: 'uid-refcheck', planId: plan.id, orderNo: 'SO-REFCHECK' }) });
+  const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#406020' } }).png().toBuffer();
+  const image = await ingestChatImage({ userId: user.id, tenantId: user.tenantId, mime: 'image/png', buf: png, fileName: '海报.png' });
+  const other = await linkedUser('uid-refcheck-other');
+  const theirs = await ingestChatImage({ userId: other.id, tenantId: other.tenantId, mime: 'image/png', buf: png, fileName: '别人的.png' });
+  let classified = 0;
+  __setStudioWebClassifierForTest(async () => { classified += 1; return { action: 'draft', kind: 'image', prompt: '开业海报', specs: {}, images: [1] }; });
+  try {
+    for (const [name, id] of [['不存在', 'e4fake1'], ['别人的', theirs.id]] as const) {
+      const r = await call('POST', '/api/studio-web/intent', {
+        bearer: userToken('uid-refcheck'),
+        body: { text: '这张图片做成开业海报', clientRequestId: `bad-${name}`, refs: [{ kind: 'image', id, label: 'x.png' }] },
+      });
+      assert.equal(r.status, 422, `${name}: ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.code, 'REFERENCE_NOT_FOUND');
+      assert.deepEqual(r.body.missing, [id]);
+    }
+    assert.equal(classified, 0, '校验失败不该调分类模型');
+
+    const ok = await call('POST', '/api/studio-web/intent', {
+      bearer: userToken('uid-refcheck'),
+      body: { text: '这张图片做成开业海报', clientRequestId: 'good', refs: [{ kind: 'image', id: image.id, label: '海报.png' }] },
+    });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.references[0].available, true);
+
+    // 方案沿用了更早轮次授权的图、它后来被删：本轮没带 refs 不会被 422，制作单照出，但标 available=false
+    const session = await prisma.session.create({ data: { userId: user.id, tenantId: user.tenantId, agentKey: 'general', title: '开业海报' } });
+    await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text: '这张图片做成开业海报' }, refsJson: [{ kind: 'image', id: image.id, label: '海报.png' }] } });
+    await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: { text: '好的，想放什么文案？' } } });
+    await prisma.knowledgeItem.update({ where: { id: image.id }, data: { status: 'failed' } });
+    __setStudioWebClassifierForTest(async () => ({ action: 'draft', kind: 'image', prompt: '开业海报', specs: {}, images: [1], referenceTurn: 1 }));
+    const stale = await call('POST', '/api/studio-web/intent', {
+      bearer: userToken('uid-refcheck'), body: { sessionId: session.id, text: '文案写开业八折', clientRequestId: 'stale' },
+    });
+    assert.equal(stale.status, 200, JSON.stringify(stale.body));
+    assert.equal(stale.body.action, 'draft');
+    assert.deepEqual(stale.body.plan.referenceIds, [image.id]);
+    assert.equal(stale.body.references[0].available, false);
+    assert.equal((await call('GET', `/api/studio-web/references/${image.id}`, { bearer: userToken('uid-refcheck') })).status, 404);
+  } finally {
+    __setStudioWebClassifierForTest(undefined);
+  }
+});

@@ -72,6 +72,19 @@ const intentSchema = z.object({
   refs: sourceRefs.max(25).optional(),
 });
 
+/**
+ * 本人名下、能作为参考图原图取出的图片 id（与 getStudioReferenceImage 同一判定：图片、已就绪、JPG/PNG、有存储键）。
+ * 只查库不取字节；存储抖动导致的取图失败仍要由 /references/:id 的 404 兜底。
+ */
+async function usableReferenceIds(user: { id: string; tenantId: string }, ids: string[]): Promise<Map<string, { fileName: string | null; fileType: string | null }>> {
+  if (!ids.length) return new Map();
+  const rows = await prisma.knowledgeItem.findMany({
+    where: { id: { in: ids }, userId: user.id, tenantId: user.tenantId, sourceType: 'image', status: 'ready', fileKey: { not: null } },
+    select: { id: true, fileName: true, fileType: true },
+  });
+  return new Map(rows.filter((row) => /^(jpg|jpeg|png)$/.test(row.fileType ?? '')).map((row) => [row.id, { fileName: row.fileName, fileType: row.fileType }]));
+}
+
 export async function studioWebRoutes(app: FastifyInstance) {
   // 扫码回手机小程序接着聊：全站同一张码（scene=web=chat，与用户无关、不带邀请码）。
   // 鉴权与开关同 /studio-web/status；生成失败回 dataUri:null，不回 5xx（口径同 /invite/qrcode）。
@@ -151,6 +164,16 @@ export async function studioWebRoutes(app: FastifyInstance) {
       const parsed = intentSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: '参数不合法', code: 'BAD_REQUEST' });
       const input = parsed.data;
+      // 本轮附带的图片必须是本人上传、可取原图的；不存在/不属于本人/不是 JPG·PNG 原图 → 受理时就拒，
+      // 不要等制作单出来、用户点生成时前端取图才失败（联调第四轮发现）。在分类模型调用之前判，不花模型钱。
+      const imageRefIds = [...new Set((input.refs ?? []).filter((ref) => ref.kind === 'image').map((ref) => ref.id))];
+      if (imageRefIds.length) {
+        const usable = await usableReferenceIds(user, imageRefIds);
+        const missing = imageRefIds.filter((id) => !usable.has(id));
+        if (missing.length) {
+          return reply.code(422).send({ error: '有图片找不到或不能作为参考图，请重新上传 JPG 或 PNG 原图。', code: 'REFERENCE_NOT_FOUND', missing });
+        }
+      }
       const session = input.sessionId ? await prisma.session.findFirst({
         where: { id: input.sessionId, userId: user.id, tenantId: user.tenantId }, select: { agentKey: true },
       }) : null;
@@ -163,16 +186,14 @@ export async function studioWebRoutes(app: FastifyInstance) {
       }
       const intent = await decideStudioIntent(user, input, testClassifier);
       if (intent.action !== 'draft') return intent;
-      const refs = intent.plan.referenceIds.length ? await prisma.knowledgeItem.findMany({
-        where: { id: { in: intent.plan.referenceIds }, userId: user.id, tenantId: user.tenantId },
-        select: { id: true, fileName: true, fileType: true },
-      }) : [];
+      // 方案里的参考图可能来自更早的轮次（之后被删），逐张标出现在还能不能取到。
+      const usableRefs = await usableReferenceIds(user, intent.plan.referenceIds);
       return {
         action: 'draft' as const,
         plan: intent.plan,
         references: intent.plan.referenceIds.map((id) => {
-          const item = refs.find((ref) => ref.id === id);
-          return { id, fileName: item?.fileName ?? null, fileType: item?.fileType ?? null, url: `/api/studio-web/references/${id}` };
+          const item = usableRefs.get(id);
+          return { id, fileName: item?.fileName ?? null, fileType: item?.fileType ?? null, url: `/api/studio-web/references/${id}`, available: !!item };
         }),
         source: { sessionId: input.sessionId ?? null, scriptMessageId: intent.plan.sourceScriptMessageId, clientRequestId: input.clientRequestId },
       };

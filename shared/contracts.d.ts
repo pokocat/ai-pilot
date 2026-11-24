@@ -1215,7 +1215,8 @@ export type StudioWebIntentResult =
   | { action: 'clarify'; question: string; ask?: { q: string; options: string[] } }
   | {
     action: 'draft'; plan: StudioWebPlan;
-    references: { id: string; fileName: string | null; fileType: string | null; url: string }[];
+    /** available=false：这张图现在取不到（被删、不是本人或不是 JPG/PNG 原图），网页应提示重新上传而不是等取图失败。 */
+    references: { id: string; fileName: string | null; fileType: string | null; url: string; available: boolean }[];
     source: { sessionId: string | null; scriptMessageId: string | null; clientRequestId: string };
   };
 /** GET /api/studio-web/mini-code：扫码回手机小程序。dataUri=null 表示这次没生成出来，网页降级不显示码。 */

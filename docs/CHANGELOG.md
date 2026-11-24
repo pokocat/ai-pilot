@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-11-24 · 网页制作方案受理时校验参考图 · 影响面：`POST /api/studio-web/intent`
+
+- 本轮 `refs` 里的图片不存在、不属于本人或不是 JPG/PNG 原图时，受理即返回 422 `REFERENCE_NOT_FOUND`（带 `missing`），不调分类模型。以前会照收，出了带着这张图的制作单，用户点生成时前端取图才失败（联调第四轮发现）。制作单的 `references[]` 新增 `available`，标出沿用自更早轮次、之后被删的图。小程序 `/studio/intent` 不变。守卫 `server/test/externalPlanGrant.test.ts`。
+
 ### 2026-11-24 · 网页状态接口补「本次领取」与最近一笔代售开通 · 影响面：`GET /api/studio-web/status`
 
 - 先付款、后进军师时，挂起单在建档/换票阶段就已到账，`externalGrants.claimedNow` 却恒为 0，军师页把「刚付款开通」说成「在小程序开通过」（联调验收发现）。现在 claimedNow 计入建档阶段领取的笔数；另新增 `externalGrants.lastApplied`（orderNo、planName、appliedAt、`pendingFirst`、`isCurrentPlan`），页面据此判断开通来源，不依赖哪个请求先到。开通记录新增 `pendingFirst` 标记。守卫 `server/test/externalPlanGrant.test.ts`。
