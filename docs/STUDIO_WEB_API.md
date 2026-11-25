@@ -8,7 +8,7 @@
 
 | 调用方 | 令牌 | 接口 |
 |---|---|---|
-| 声量AI **网页**（浏览器） | 账号中心发的**用户令牌**，`aud` 含 `junshi-api`、带 `phone` scope | 军师现有全部用户接口（诊断、对话、方案、任务、复盘）+ 本文 §2 的 `/api/studio-web/*` |
+| 声量AI **网页**（浏览器） | 账号中心**换票**得到的用户令牌：`aud` 只有 `junshi-api`、`azp=web-aiavatar`、带 `phone` scope、600 秒（见 §6） | 军师现有全部用户接口（诊断、对话、方案、任务、复盘）+ 本文 §2 的 `/api/studio-web/*` |
 | 声量AI **后端** | 账号中心 `client_credentials` **机器令牌**（见 §3.1） | 本文 §3 的 `/api/s2s/plan-grants*` |
 
 - 军师现有接口原样可用：带 `Authorization: Bearer <用户令牌>` 即可。第一次带令牌进来时军师按手机号自动建档（已有手机号账号则合并到同一个账号），所以令牌必须有 `phone_verified=true` 且申请时带 `phone` scope，否则 403 `PHONE_BINDING_REQUIRED` / 502 `IDENTITY_PHONE_UNAVAILABLE`。
@@ -60,7 +60,7 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
 - `externalGrants.claimedNow`：**本次请求**领取到账的挂起单笔数，包括建档/换票阶段领取的（2026-11-24 修：以前漏算了建档阶段，先付款后打开时恒为 0）。只有付款后第一次进军师的那个请求会大于 0；如果网页第一次请求打的是别的接口，挂起单会在那里到账，status 看到的就是 0。
 - `externalGrants.lastApplied`：最近一笔已到账的代售开通，没有则 null，不受「哪个请求先领走」影响。**判断「是不是在声量AI 付款开通的」请用它**：`pendingFirst=true` 表示先付款、后进军师才到账；`isCurrentPlan=true` 表示这笔开通的套餐就是当前套餐。
 - `externalGrants.unresolved`：该 uid 还有几笔代售订单没到账（挂起或需人工）。
-- `features.fortune` 是军师现有的全局命理开关，只读下发；按入口关闭命理还没做（见 §6）。
+- `features.fortune` 是军师现有的全局命理开关，只读下发；按入口关闭命理还没做（见 `docs/agents/13-todo.md`）。
 
 错误：401 `UNAUTHORIZED`；403 `STUDIO_WEB_AUDIENCE_REQUIRED`；503 `IDENTITY_NOT_CONFIGURED`；建档相关 403/409/502 同 §0。
 
@@ -209,21 +209,34 @@ SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no
 | `JUNSHI_PLAN_GRANT_CLIENT_ID` | 机器令牌 azp/sub | `aistar-junshi-grant` |
 | `CORS_ALLOWED_ORIGINS` | 跨域白名单 | 内置清单 |
 
-## 6. 需要账号中心配合（军师不改 `aibuzz-id`）
+## 6. 账号中心配合（aibuzz-id 已实现，分支见下）
 
-1. **声量AI 后端的机器客户端**（纯配置，`id-server-clients.yml` 加一段，不用改代码）：
-   ```yaml
-   - client-id: aistar-junshi-grant
-     display-name: 声量AI 代售军师套餐
-     client-secret: ${ID_CLIENT_SECRET_AISTAR_JUNSHI_GRANT}
-     product-code: aistar
-     audience: junshi-plan-grant
-     grants: [client_credentials]
-     scopes: ["junshi:plan.grant"]
-   ```
-   账号中心对 `client_credentials` 令牌按配置写 `aud`（`IdTokenClaimsCustomizer`）、`sub=azp=client_id`、不带 `amr`，scope 不做白名单校验，所以现有代码就能发。
-2. **声量AI 网页拿到 `aud=junshi-api` 的用户令牌**：现在 `web-aiavatar` 客户端的 `audience` 是单值 `aistar-api`，军师不认。两种做法，需要拍板：
-   - 甲（推荐，纯配置）：新登记一个公开客户端（例如 `web-junshi-studio`，`audience: junshi-api`，`authorization_code` + PKCE，scopes `openid profile phone`，回调用声量AI 主站域名下的独立路径）。网页在已登录账号中心的前提下再走一次授权码流程拿军师令牌（账号中心有会话时不需要再输入）。需要确认账号中心对已登录会话是否免确认直接回跳；若要「完全无感」，需要账号中心支持 `prompt=none`，那是代码改动。
-   - 乙：账号中心让一个客户端可以发多 audience（`web-aiavatar` 同时带 `aistar-api` 与 `junshi-api`）。要改 `IdTokenClaimsCustomizer` 与客户端配置结构，是代码改动；且同一张令牌两边都认，被任一后端拿去都能调另一边。
-   - 不建议：军师把 `aistar-api` 加进 `ID_AUDIENCES`。那样声量AI 系所有产品（音乐人、短剧等）的令牌都能调军师。
-3. 计划里提到的「跨产品凭据做成配置表」：第 1 项已经是配置，第 2 项甲方案也只是配置，暂时不阻塞。
+账号中心会话（aibuzz-id `dev/distracted-mirzakhani-78baa2`，提交 `0ebdf0d`、`a98a857`）已实现，契约真源是该仓 README §29 与 `docs/junshi-token-exchange.md`。军师侧不需要为此改代码，已用 `verifyIdentityToken` / `fetchIdentityUserinfo` / `verifyMachineToken` 实测通过。
+
+1. **网页换票（RFC 8693）**：网页拿自己的声量AI 令牌（`aud=aistar-api`）向 `POST {ID_ISSUER}/oauth2/token` 换一张军师票：`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`、`client_id=web-aiavatar`、`subject_token=<声量AI 令牌>`、`subject_token_type=urn:ietf:params:oauth:token-type:access_token`、`audience=junshi-api`，不带 secret、不带 Cookie。
+   - 票的 `aud` 只有 `junshi-api`，`azp=web-aiavatar`，`sub`/`sid`/`amr`/`phone_verified` 同原令牌，600 秒，没有 refresh_token；过期用当前声量AI 令牌再换（提前 60 秒换、单飞、只放内存）。
+   - 只对主站三个 Origin 开放（aiavatar / aistar / www.aistar），贴牌站 400 `unauthorized_client`；体验账号 403 `TOKEN_EXCHANGE_DEMO_ACCOUNT`；限流 429 `TOKEN_EXCHANGE_RATE_LIMITED`。
+   - 军师不把 `aistar-api` 加进 `ID_AUDIENCES`（否则声量AI 系所有产品的令牌都能调军师）。
+   - 不要拿这张票调账号中心 `/api/me/logout`：`sid` 是原那次登录，会把声量AI 登录也退掉。
+2. **声量AI 后端的机器客户端** `aistar-junshi-grant`（配置项）：`client_credentials` + Basic，scope `junshi:plan.grant`，发出的令牌 `aud=junshi-plan-grant`、`sub=azp=aistar-junshi-grant`、不带 `amr`、300 秒。生产 secret 在账号中心是 `ID_CLIENT_SECRET_AISTAR_JUNSHI_GRANT`，声量AI 后端配同一个值；dev 默认 `aistar-junshi-grant-dev-secret`。
+
+## 7. 上线步骤（军师侧）
+
+顺序不能反：账号中心先能发票，军师再开开关，最后声量AI 打开入口。
+
+1. **建表（发布前）**：用有 DDL 权限的账号在正式 RDS 执行 `deploy/sql/2026-11-24-external-plan-grant.sql`（纯加法，只建 `external_plan_grant` 一张表和三个索引；旧代码不读它，先建表不影响线上）。发布工具不执行 DDL，见 `docs/MIGRATION_SOP.md` §5。
+2. **发布代码**：`bash scripts/deploy-prod.sh --schema-reviewed`（该参数只读核对 RDS 已有新表）。服务端新依赖 `heic-decode`（纯 wasm，无系统包）随 `npm ci` 安装。此时两个开关仍关：`/studio-web/intent` 一律回 `chat`、取参考图 404 `STUDIO_WEB_DISABLED`、代售接口 503 `PLAN_GRANT_DISABLED`；小程序行为不变（图片上传转换除外，它不受开关控制，现在就生效）。
+3. **账号中心上线**换票与 `aistar-junshi-grant`（该仓自己的发布流程）。
+4. **军师 env**（两台节点的 EnvironmentFile 都要改，重启后核对实际进程环境）：
+   - `JUNSHI_STUDIO_WEB_ENABLED=true`
+   - `JUNSHI_PLAN_GRANT_ENABLED=true`（`JUNSHI_PLAN_GRANT_AUDIENCE` / `JUNSHI_PLAN_GRANT_CLIENT_ID` 用默认值即可）
+   - `ID_ISSUER=https://id.aibuzz.cn` 已有；`ID_AUDIENCES` 留空或含 `junshi-api`
+   - `CORS_ALLOWED_ORIGINS` 留空用内置清单（已含 aiavatar / aistar / www.aistar）
+   - 小程序码接口要 `WECHAT_MINI_APPID/WECHAT_MINI_SECRET`（已有）
+5. **上线验收**（真实环境，不发付费生成）：
+   - 用声量AI 主站登录 → 换票 → `GET /api/studio-web/status` 200，且 `account.identityUid` 与声量AI uid 一致；没有手机号的账号得到 403 `PHONE_BINDING_REQUIRED`。
+   - 跨域：从 `https://aiavatar.aibuzz.cn` 发 OPTIONS，有 `Access-Control-Allow-Origin`；SSE 响应头有 `Cache-Control: no-cache, no-transform` 和 `X-Accel-Buffering: no`，逐段到达不被缓冲。
+   - 机器令牌调 `GET /api/s2s/plan-grants?source=studio&limit=1` 200；用户令牌调同一接口 401。
+   - 一笔真实代售（运营指定的测试账号）：200 applied 或 202 pending → 进军师后 `externalGrants.lastApplied` 有这笔；同单号重放返回 `replay:true`。
+   - 小程序冒烟：登录、对话、上传一张 HEIC 照片（小程序上限放宽要等下次发版，服务端转换现在就生效）。
+6. **回退**：先让声量AI 关掉军师入口（网页不再换票、不再调军师）；军师侧关 `JUNSHI_STUDIO_WEB_ENABLED` 停制作方案与取图，关 `JUNSHI_PLAN_GRANT_ENABLED` 停代售到账（声量AI 已付款的单会收到 503，按它的重试/人工流程处理）。`/studio-web/status` 和现有用户接口只要账号中心还发票就仍能用。已到账的套餐保留；代码回退不需要删表。

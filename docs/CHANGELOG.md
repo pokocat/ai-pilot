@@ -6,6 +6,11 @@
 
 ## 变更日志
 
+### 2026-11-24 · 声量AI 接军师：正式发布准备 · 影响面：`docs/STUDIO_WEB_API.md` §0/§6/§7、`deploy/sql/`、`docs/agents/13-todo.md`
+
+- 契约 §6 改成账号中心的实际做法：网页用 RFC 8693 换票拿 `aud=junshi-api`、`azp=web-aiavatar` 的 600 秒票，机器客户端 `aistar-junshi-grant`（aibuzz-id `dev/distracted-mirzakhani-78baa2`），不再推荐新登记 `web-junshi-studio`。新增 §7 上线步骤：先建表、再发布、账号中心上线、开两个开关、验收与回退。
+- 新增 `deploy/sql/2026-11-24-external-plan-grant.sql`：`external_plan_grant` 的纯加法 DDL（由 `prisma migrate diff` 生成），发布工具不执行 DDL，须在 `deploy-prod.sh --schema-reviewed` 之前由 DDL 账号执行。
+
 ### 2026-11-24 · 图片上传统一由系统处理格式与大小 · 影响面：聊天图片、海报素材、头像、爱速拍照片/素材、声量AI 参考图；小程序与 H5 选图
 
 - 用户要求：能由系统处理的不交给用户，且军师所有上传入口一致。新增 `services/imageNormalize.ts` 统一处理：HEIC（新依赖 `heic-decode` 2.1.0，ISC；其依赖 `libheif-js` 为 LGPL-3.0，仅服务端运行）、AVIF、TIFF 等自动转 JPEG/PNG，超过入口上限自动压缩；入口本来接受的图片原样不动。只有不是图片/解不开（400 `IMAGE_DECODE_FAILED`）或原始文件超过 40MB（413）才报错。五个上传入口与声量AI 参考图都改为调用它。
