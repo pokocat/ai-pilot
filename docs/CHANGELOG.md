@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-11-25 · 正式发布工具的 SSH 加保活 · 影响面：`scripts/ops/deploy_cluster.py`
+
+- 发布 `42a3877f` 时，备用机 B 上构建和全量测试（约 12 分钟没有输出）已经通过，回传结果的 SSH 却被 NAT 掐成半开连接；本机 ssh 没有保活，察觉不到，一直挂着，同时占住 A 上的发布锁和本机 devq 唯一重任务槽 1 小时。流量始终在 A，新版没装到任何节点。现在所有 ssh/scp 都带 `ServerAliveInterval=30`、`ServerAliveCountMax=6`：连接断了约 3 分钟内退出，走既有的失败路径（不切流、保留原主）。守卫 `scripts/ops/test_release.py::test_ssh_transport_keeps_idle_connections_alive`。
+
 ### 2026-11-24 · 声量AI 接军师：正式发布准备 · 影响面：`docs/STUDIO_WEB_API.md` §0/§6/§7、`deploy/sql/`、`docs/agents/13-todo.md`
 
 - 契约 §6 改成账号中心的实际做法：网页用 RFC 8693 换票拿 `aud=junshi-api`、`azp=web-aiavatar` 的 600 秒票，机器客户端 `aistar-junshi-grant`（aibuzz-id `dev/distracted-mirzakhani-78baa2`），不再推荐新登记 `web-junshi-studio`。新增 §7 上线步骤：先建表、再发布、账号中心上线、开两个开关、验收与回退。

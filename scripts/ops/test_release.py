@@ -149,6 +149,13 @@ class RollingTests(unittest.TestCase):
 
 
 class GuardTests(unittest.TestCase):
+    def test_ssh_transport_keeps_idle_connections_alive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cluster = deploy.Cluster(CONFIG, pathlib.Path(tmp), 'test', 'sha', ['junshi'], {'admin': False})
+        options = [cluster.transport[i + 1] for i, item in enumerate(cluster.transport) if item == '-o']
+        self.assertIn('ServerAliveInterval=30', options)
+        self.assertIn('ServerAliveCountMax=6', options)
+
     def test_transient_ssh_failure_retries_only_read_operations(self):
         cluster = deploy.Cluster.__new__(deploy.Cluster)
         cluster.config = CONFIG

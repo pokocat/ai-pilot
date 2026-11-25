@@ -83,7 +83,10 @@ class Cluster:
         self.sha, self.selected, self.assets = sha, selected, assets
         self.bootstrap_legacy_drain = bootstrap_legacy_drain
         self.transport = ['-i', os.environ.get('SSH_KEY', config['ssh_key']), '-o', 'BatchMode=yes',
-                          '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=12']
+                          '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=12',
+                          # 远端构建/全量测试会静默十几分钟；没有保活时 NAT 会掐掉空闲连接，而本机 ssh 察觉不到，
+                          # 半开连接会无限期占着发布锁和 devq 槽位（2026-11-25 事故）。30s×6 无应答即断开，走既有失败路径。
+                          '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=6']
         self.helper = (ROOT / 'scripts/ops/cluster_remote.py').read_text()
         self.lock = None
         self.state = {'deployment_id': deployment_id, 'sha': sha, 'selected': selected,
