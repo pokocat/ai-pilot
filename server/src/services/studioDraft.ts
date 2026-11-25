@@ -195,7 +195,7 @@ export async function prepareStudioDraft(job: GenerationJob, request: {
       try {
         const image = await getStudioReferenceImage(job.userId, job.tenantId, refId);
         if (!image) {
-          missing.push(`参考图 ${index + 1}（需要原始 JPG 或 PNG）`);
+          missing.push(`参考图 ${index + 1}（原图取不到）`);
           continue;
         }
         const permit = await client.call('prepare_reference_upload', {

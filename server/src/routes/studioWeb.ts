@@ -3,7 +3,7 @@
 //
 // · GET  /studio-web/status          我的军师状态（账号/档案/套餐/额度/今天能否免费诊断），顺带领取挂起的代售订单
 // · POST /studio-web/intent          这一轮是不是要做内容；是就返回**明文**制作方案（网页自己去声量AI 建草稿）
-// · GET  /studio-web/references/:id  取制作方案里参考图的原图（JPG/PNG），网页拿去传给声量AI
+// · GET  /studio-web/references/:id  取制作方案里参考图的原图（JPG/PNG 原样；GIF/WebP 等由系统转成 JPG/PNG），网页拿去传给声量AI
 //
 // 契约见 docs/STUDIO_WEB_API.md。
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -73,20 +73,16 @@ const intentSchema = z.object({
 });
 
 /**
- * 本人名下、已就绪、有存储键的图片。`originalOnly` 再要求 JPG/PNG——与 getStudioReferenceImage 同一判定，
- * 只有这种才能作为参考图原图送去声量AI。只查库不取字节；存储抖动导致的取图失败仍由 /references/:id 的 404 兜底。
- *
- * 受理校验**不**加格式条件：上传接口也收 GIF/WebP，用户带一张 WebP 图只是问问题（不做内容）时不能被 422 拦下。
+ * 本人名下、已就绪、有存储键的图片。不按格式筛：声量AI 要的 JPG/PNG 由 getStudioReferenceImage 从原件转换，
+ * 格式问题不交给用户（2026-11-24 用户要求）。只查库不取字节；存储抖动/解码失败仍由 /references/:id 的 404 兜底。
  */
-async function ownedImageIds(user: { id: string; tenantId: string }, ids: string[], originalOnly: boolean): Promise<Map<string, { fileName: string | null; fileType: string | null }>> {
+async function ownedImageIds(user: { id: string; tenantId: string }, ids: string[]): Promise<Map<string, { fileName: string | null; fileType: string | null }>> {
   if (!ids.length) return new Map();
   const rows = await prisma.knowledgeItem.findMany({
     where: { id: { in: ids }, userId: user.id, tenantId: user.tenantId, sourceType: 'image', status: 'ready', fileKey: { not: null } },
     select: { id: true, fileName: true, fileType: true },
   });
-  return new Map(rows
-    .filter((row) => !originalOnly || /^(jpg|jpeg|png)$/.test(row.fileType ?? ''))
-    .map((row) => [row.id, { fileName: row.fileName, fileType: row.fileType }]));
+  return new Map(rows.map((row) => [row.id, { fileName: row.fileName, fileType: row.fileType }]));
 }
 
 export async function studioWebRoutes(app: FastifyInstance) {
@@ -172,7 +168,7 @@ export async function studioWebRoutes(app: FastifyInstance) {
       // 不要等制作单出来、用户点生成时前端取图才失败（联调第四轮发现）。在分类模型调用之前判，不花模型钱。
       const imageRefIds = [...new Set((input.refs ?? []).filter((ref) => ref.kind === 'image').map((ref) => ref.id))];
       if (imageRefIds.length) {
-        const usable = await ownedImageIds(user, imageRefIds, false);
+        const usable = await ownedImageIds(user, imageRefIds);
         const missing = imageRefIds.filter((id) => !usable.has(id));
         if (missing.length) {
           return reply.code(422).send({ error: '有图片找不到了，请重新上传。', code: 'REFERENCE_NOT_FOUND', missing });
@@ -190,8 +186,9 @@ export async function studioWebRoutes(app: FastifyInstance) {
       }
       const intent = await decideStudioIntent(user, input, testClassifier);
       if (intent.action !== 'draft') return intent;
-      // 方案里的参考图可能来自更早的轮次（之后被删），也可能是 GIF/WebP（不能作原图），逐张标出现在还能不能取到。
-      const usableRefs = await ownedImageIds(user, intent.plan.referenceIds, true);
+      // 方案里的参考图可能来自更早的轮次（之后被删），逐张标出现在还能不能取到。
+      // GIF/WebP 不算取不到：/references/:id 会由系统转成 JPG/PNG（getStudioReferenceImage）。
+      const usableRefs = await ownedImageIds(user, intent.plan.referenceIds);
       return {
         action: 'draft' as const,
         plan: intent.plan,
@@ -210,7 +207,7 @@ export async function studioWebRoutes(app: FastifyInstance) {
       const { user } = await webUser(req);
       if (!studioId.safeParse(req.params.id).success) return reply.code(404).send({ error: '找不到这张图', code: 'REFERENCE_NOT_FOUND' });
       const image = await getStudioReferenceImage(user.id, user.tenantId, req.params.id);
-      if (!image) return reply.code(404).send({ error: '找不到这张图，或它不是 JPG/PNG 原图', code: 'REFERENCE_NOT_FOUND' });
+      if (!image) return reply.code(404).send({ error: '找不到这张图', code: 'REFERENCE_NOT_FOUND' });
       return reply
         .header('content-type', image.contentType)
         .header('cache-control', 'private, no-store')

@@ -521,7 +521,7 @@ test('网页制作方案：本轮图片 refs 不存在或不属于本人 → 422
     }
     assert.equal(classified, 0, '校验失败不该调分类模型');
 
-    // WebP 图：受理照常（用户可能只是带图问问题），进了制作单则标 available=false
+    // WebP 图：受理照常，进了制作单也可用；取图时系统转成 JPG/PNG，不让用户换图
     const webp = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#604020' } }).webp().toBuffer();
     const webpImage = await ingestChatImage({ userId: user.id, tenantId: user.tenantId, mime: 'image/webp', buf: webp, fileName: '门头.webp' });
     const webpTurn = await call('POST', '/api/studio-web/intent', {
@@ -529,7 +529,12 @@ test('网页制作方案：本轮图片 refs 不存在或不属于本人 → 422
       body: { text: '这张图片做成开业海报', clientRequestId: 'webp', refs: [{ kind: 'image', id: webpImage.id, label: '门头.webp' }] },
     });
     assert.equal(webpTurn.status, 200, JSON.stringify(webpTurn.body));
-    assert.equal(webpTurn.body.references[0].available, false);
+    assert.equal(webpTurn.body.references[0].available, true);
+    const webpRaw = await (await getApp()).inject({ method: 'GET', url: webpTurn.body.references[0].url, headers: { authorization: `Bearer ${userToken('uid-refcheck')}` } });
+    assert.equal(webpRaw.statusCode, 200);
+    assert.equal(webpRaw.headers['content-type'], 'image/jpeg');
+    assert.equal((await sharp(webpRaw.rawPayload).metadata()).format, 'jpeg');
+    assert.match(String(webpRaw.headers['content-disposition']), /%E9%97%A8%E5%A4%B4\.jpg/);
 
     const ok = await call('POST', '/api/studio-web/intent', {
       bearer: userToken('uid-refcheck'),
@@ -555,4 +560,16 @@ test('网页制作方案：本轮图片 refs 不存在或不属于本人 → 422
   } finally {
     __setStudioWebClassifierForTest(undefined);
   }
+});
+
+test('参考图格式转换：透明图转 PNG、不透明转 JPEG、GIF 取首帧；JPG/PNG 原样；解不开返回 null', async () => {
+  const { toStudioReferenceFormat } = await import('../src/services/chatImage.js');
+  const alphaWebp = await sharp({ create: { width: 32, height: 32, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.5 } } }).webp().toBuffer();
+  const a = await toStudioReferenceFormat(alphaWebp);
+  assert.equal(a?.contentType, 'image/png');
+  assert.equal((await sharp(a!.bytes).metadata()).format, 'png');
+  const gif = await sharp({ create: { width: 32, height: 32, channels: 3, background: '#ff0000' } }).gif().toBuffer();
+  const g = await toStudioReferenceFormat(gif);
+  assert.ok(g && ['image/jpeg', 'image/png'].includes(g.contentType));
+  assert.equal(await toStudioReferenceFormat(Buffer.from('not an image')), null);
 });

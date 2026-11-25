@@ -296,14 +296,48 @@ export async function resolveImageRefs(
   return resolved.images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
 }
 
-/** 制作参考图只取本人原件，不能使用模型观察、推理副本或其它项目成员的附件。 */
+/**
+ * 制作参考图只取本人原件，不能使用模型观察、推理副本或其它项目成员的附件。
+ *
+ * 声量AI 只收 JPG/PNG。GIF/WebP 等其它格式由**系统**从原件转换（2026-11-24 用户要求：能由系统处理的格式问题
+ * 不交给用户）：有透明通道转 PNG，否则转 JPEG（q90）；GIF 取第一帧；转换后超过 10MB 则逐步缩小长边再转 JPEG。
+ * JPG/PNG 原样返回，字节不变。解不开或取不到才返回 null。
+ */
 export async function getStudioReferenceImage(userId: string, tenantId: string, refId: string) {
   const item = await prisma.knowledgeItem.findFirst({
     where: { id: refId, userId, tenantId, sourceType: 'image', status: 'ready' },
     select: { fileKey: true, fileType: true, fileName: true },
   });
-  if (!item?.fileKey || !/^(jpg|jpeg|png)$/.test(item.fileType ?? '')) return null;
+  if (!item?.fileKey) return null;
   const bytes = await getChatImage(item.fileKey);
-  if (!bytes?.length || bytes.length > MAX_IMAGE_BYTES) return null;
-  return { bytes, contentType: mediaTypeFromExt(item.fileType), fileName: item.fileName || '参考图' };
+  if (!bytes?.length) return null;
+  const fileName = item.fileName || '参考图';
+  if (/^(jpg|jpeg|png)$/.test(item.fileType ?? '') && bytes.length <= MAX_IMAGE_BYTES) {
+    return { bytes, contentType: mediaTypeFromExt(item.fileType), fileName };
+  }
+  const converted = await toStudioReferenceFormat(bytes);
+  if (!converted) return null;
+  return { bytes: converted.bytes, contentType: converted.contentType, fileName: `${fileName.replace(/\.[A-Za-z0-9]{1,5}$/, '')}.${converted.ext}` };
+}
+
+/** 任意可解码图片 → ≤10MB 的 PNG（有透明）或 JPEG。导出供测试。 */
+export async function toStudioReferenceFormat(input: Buffer): Promise<{ bytes: Buffer; contentType: 'image/png' | 'image/jpeg'; ext: 'png' | 'jpg' } | null> {
+  try {
+    const base = () => sharp(input, { pages: 1, failOn: 'none' }).rotate();
+    const meta = await base().metadata();
+    if (meta.hasAlpha) {
+      const png = await base().png({ compressionLevel: 9 }).toBuffer();
+      if (png.length <= MAX_IMAGE_BYTES) return { bytes: png, contentType: 'image/png', ext: 'png' };
+    }
+    const longest = Math.max(meta.width ?? 0, meta.height ?? 0) || 4096;
+    for (const side of [longest, 4096, 3072, 2048, 1536]) {
+      if (side > longest) continue;
+      const jpg = await base().resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#ffffff' }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+      if (jpg.length <= MAX_IMAGE_BYTES) return { bytes: jpg, contentType: 'image/jpeg', ext: 'jpg' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

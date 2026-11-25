@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-11-24 · 参考图格式由系统转换，不再交给用户 · 影响面：`/api/studio-web/references/:id`、`intent` 的 `available`、小程序声量AI 草稿上传
+
+- 用户要求：能由系统处理的格式问题不交给用户。`getStudioReferenceImage` 对 GIF/WebP 等非 JPG/PNG 原件自动转换（透明转 PNG、否则 JPEG q90、GIF 取首帧、超 10MB 逐步缩小长边），JPG/PNG 原样不变。网页制作单的 `available` 不再因格式为 false；小程序草稿以前会把这类图记成「需要原始 JPG 或 PNG」并跳过，现在也会转换后上传。守卫 `server/test/externalPlanGrant.test.ts`。
+
 ### 2026-11-24 · 网页制作方案受理时校验参考图 · 影响面：`POST /api/studio-web/intent`
 
 - 本轮 `refs` 里的图片不存在或不属于本人时，受理即返回 422 `REFERENCE_NOT_FOUND`（带 `missing`），不调分类模型；格式不在受理时判断（上传也收 GIF/WebP，带这类图问问题不能被拦），GIF/WebP 进了制作单标 `available=false`。以前会照收，出了带着这张图的制作单，用户点生成时前端取图才失败（联调第四轮发现）。制作单的 `references[]` 新增 `available`，标出沿用自更早轮次、之后被删的图。小程序 `/studio/intent` 不变。守卫 `server/test/externalPlanGrant.test.ts`。

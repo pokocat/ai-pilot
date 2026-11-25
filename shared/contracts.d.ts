@@ -1215,7 +1215,7 @@ export type StudioWebIntentResult =
   | { action: 'clarify'; question: string; ask?: { q: string; options: string[] } }
   | {
     action: 'draft'; plan: StudioWebPlan;
-    /** available=false：这张图现在取不到（被删、不是本人或不是 JPG/PNG 原图），网页应提示重新上传而不是等取图失败。 */
+    /** available=false：这张图现在取不到（被删或不是本人）。格式不影响：GIF/WebP 取图时由系统转成 JPG/PNG。 */
     references: { id: string; fileName: string | null; fileType: string | null; url: string; available: boolean }[];
     source: { sessionId: string | null; scriptMessageId: string | null; clientRequestId: string };
   };
