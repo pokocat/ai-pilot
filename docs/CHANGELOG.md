@@ -6,6 +6,11 @@
 
 ## 变更日志
 
+### 2026-11-24 · 图片上传统一由系统处理格式与大小 · 影响面：聊天图片、海报素材、头像、爱速拍照片/素材、声量AI 参考图；小程序与 H5 选图
+
+- 用户要求：能由系统处理的不交给用户，且军师所有上传入口一致。新增 `services/imageNormalize.ts` 统一处理：HEIC（新依赖 `heic-decode` 2.1.0，ISC；其依赖 `libheif-js` 为 LGPL-3.0，仅服务端运行）、AVIF、TIFF 等自动转 JPEG/PNG，超过入口上限自动压缩；入口本来接受的图片原样不动。只有不是图片/解不开（400 `IMAGE_DECODE_FAILED`）或原始文件超过 40MB（413）才报错。五个上传入口与声量AI 参考图都改为调用它。
+- 小程序聊天与海报选图、H5 聊天选图的前置上限从 10MB 放到 40MB（与服务端读取上限一致）；爱速拍照片训数字人走直传 OSS，服务端碰不到文件，改为端上 `wx.compressImage` 逐级压到 10MB 以内，压不下来才提示。小程序改动需随下一个版本上传才对用户生效。
+
 ### 2026-11-24 · 参考图格式由系统转换，不再交给用户 · 影响面：`/api/studio-web/references/:id`、`intent` 的 `available`、小程序声量AI 草稿上传
 
 - 用户要求：能由系统处理的格式问题不交给用户。`getStudioReferenceImage` 对 GIF/WebP 等非 JPG/PNG 原件自动转换（透明转 PNG、否则 JPEG q90、GIF 取首帧、超 10MB 逐步缩小长边），JPG/PNG 原样不变。网页制作单的 `available` 不再因格式为 false；小程序草稿以前会把这类图记成「需要原始 JPG 或 PNG」并跳过，现在也会转换后上传。守卫 `server/test/externalPlanGrant.test.ts`。

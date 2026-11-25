@@ -1109,7 +1109,8 @@ const methods = {
     const sizeType = store.snapshot().me?.features?.studioDrafts ? ['original'] : ['compressed'];
     wx.chooseMedia({ count, mediaType: ['image'], sourceType: ['album', 'camera'], sizeType, success: async (result) => {
       for (const file of result.tempFiles || []) {
-        if (Number(file.size || 0) > 10 * 1024 * 1024) { wx.showToast({ title: '单张图片不能超过 10MB', icon: 'none' }); continue; }
+        // 格式与大小由服务端统一处理（转 JPG/PNG、超 10MB 自动压缩），这里只挡服务端读取上限 40MB。
+        if (Number(file.size || 0) > 40 * 1024 * 1024) { wx.showToast({ title: '单张图片不能超过 40MB', icon: 'none' }); continue; }
         this.safeSetData({ uploading: true, canSend: false }, () => this.measureComposer());
         try { const uploaded = await api.uploadChatImage(file.tempFilePath, this._projectId || undefined, '对话图片'); if (!this._alive) return; this._refs.push({ kind: 'image', id: uploaded.id, label: '对话图片', previewUrl: file.tempFilePath }); this.safeSetData(this.refViewPatch(), () => this.measureComposer()); }
         catch (error) { wx.showToast({ title: error.message || '图片上传失败', icon: 'none' }); }

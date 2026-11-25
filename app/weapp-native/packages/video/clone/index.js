@@ -6,6 +6,21 @@ const api = require('../api');
 const { POLL_INTERVAL_MS } = require('../config');
 const model = require('../model');
 const { withShare } = require('../../../services/share');
+
+// 照片训数字人：上游只收 ≤10MB。超了在端上逐级压（只降质量、不改分辨率），压到上限内为止。
+const PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+function fileSize(path) {
+  return new Promise((resolve) => wx.getFileInfo({ filePath: path, success: (r) => resolve(Number(r.size || 0)), fail: () => resolve(0) }));
+}
+async function shrinkPhoto(src) {
+  for (const quality of [80, 60, 40]) {
+    const out = await new Promise((resolve) => wx.compressImage({ src, quality, success: (r) => resolve(r.tempFilePath), fail: () => resolve('') }));
+    if (!out) return null;
+    const size = await fileSize(out);
+    if (size > 0 && size <= PHOTO_MAX_BYTES) return { path: out, size };
+  }
+  return null;
+}
 const { mediaDimensions, formatResolution, cloneCostText, voiceChoices, cloneCostRows } = model;
 
 const STEPS = [
@@ -652,15 +667,24 @@ Page(withShare({
       sizeType: ['original'],
       maxDuration: Math.min(60, this.captureRule('avatar').maxDurationSec),
       camera: 'front',
-      success: (res) => {
+      success: async (res) => {
         const file = res.tempFiles && res.tempFiles[0];
         if (!file) return;
         // 照片没有时长，走不了 avatar 那套时长校验；分辨率与真实格式由服务端按 image 档判。
         if (!image && !this.validateCapture('avatar', file)) return;
-        if (image && Number(file.size || 0) > 10 * 1024 * 1024) { host.toast('照片不能超过 10MB'); return; }
+        let path = file.tempFilePath;
+        let size = Number(file.size || 0);
+        // 照片超过上游 10MB 上限时由系统先压缩（2026-11-24 用户要求：能系统处理的不交给用户）。
+        // 直传 OSS 的照片服务端碰不到，只能在端上处理；压不下来才提示换一张。
+        if (image && size > PHOTO_MAX_BYTES) {
+          const shrunk = await shrinkPhoto(path);
+          if (!shrunk) { host.toast('这张照片太大，系统没能压缩，请换一张'); return; }
+          path = shrunk.path;
+          size = shrunk.size;
+        }
         this.setData({
           faceFile: Object.assign(
-            { path: file.tempFilePath, duration: file.duration || 0, size: file.size || 0, image },
+            { path, duration: file.duration || 0, size, image },
             mediaDimensions(file),
           ),
         });

@@ -25,6 +25,7 @@
 | 方案 | `GET /api/reports`、`GET /api/reports/:id` |
 | 操盘台 | `GET /api/casefile`、`GET /api/progress`、`GET /api/reviews` 及 `/api/casefile*` 写接口 |
 | 套餐与价格 | `GET /api/plans`（套餐 id 给 §3 用） |
+| 对话里的图片 | `POST /api/chat/image-upload`（multipart，字段 `file`）。格式和大小由系统处理：HEIC、AVIF、TIFF 等自动转成 JPEG/PNG，超过 10MB 自动压缩；JPG/PNG/GIF/WebP 不超限的原样保存。只有不是图片或解不开（400 `IMAGE_DECODE_FAILED`）、原始文件超过 40MB（413 `IMAGE_TOO_LARGE`）才报错；没配存储 503 `OSS_NOT_CONFIGURED`；本月空间用完 402 `KNOWLEDGE_QUOTA`。网页选图时不要再按格式或 10MB 拦，只挡 40MB |
 | 完整的我 | `GET /api/me`（较重；网页优先用 §2.1） |
 
 SSE 响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache, no-transform`、`X-Accel-Buffering: no`，`Access-Control-Allow-Origin` 只回显白名单 Origin。

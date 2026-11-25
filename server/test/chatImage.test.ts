@@ -47,22 +47,33 @@ async function validImage(format: 'png' | 'jpeg' | 'webp', width = 8, height = 8
 
 // ───────────────── 1) 上传端点：MIME / 大小 / 成功 ─────────────────
 
-test('POST /chat/image-upload 拒绝非白名单 MIME → 400 IMAGE_BAD_TYPE', async () => {
+test('POST /chat/image-upload 不是图片的文件 → 400 IMAGE_DECODE_FAILED（格式由系统处理，只有解不开才报错）', async () => {
   const token = await login(uniquePhone(), '图客甲');
   const app = await getApp();
   const { payload, headers } = imageMultipart('a.pdf', 'application/pdf', Buffer.from('%PDF-1.4 not an image'));
   const res = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...headers, 'x-user-id': token }, payload });
   assert.equal(res.statusCode, 400, `实得 ${res.statusCode} ${res.body}`);
-  assert.equal(res.json().code, 'IMAGE_BAD_TYPE');
+  assert.equal(res.json().code, 'IMAGE_DECODE_FAILED');
 });
 
-test('POST /chat/image-upload 超 10MB → 413', async () => {
+test('POST /chat/image-upload 超 10MB 的真实图片 → 系统压缩后保存（不再 413）；超 40MB 读取上限才 413', async () => {
   const token = await login(uniquePhone(), '图客乙');
   const app = await getApp();
-  const big = Buffer.alloc(11 * 1024 * 1024, 1); // 11MB > 10MB 上限（< 20MB multipart 上限，故走我们自己的 413）
-  const { payload, headers } = imageMultipart('big.png', 'image/png', big);
-  const res = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...headers, 'x-user-id': token }, payload });
-  assert.equal(res.statusCode, 413, `实得 ${res.statusCode} ${res.body}`);
+  // 随机噪点 PNG 几乎不可压，2000×2000 约 12MB，确保超过 10MB 上限。
+  const noise = await sharp(Buffer.from(Array.from({ length: 2000 * 2000 * 3 }, () => Math.floor(Math.random() * 256))), {
+    raw: { width: 2000, height: 2000, channels: 3 },
+  }).png({ compressionLevel: 0 }).toBuffer();
+  assert.ok(noise.length > 10 * 1024 * 1024, `样张只有 ${noise.length} 字节`);
+  const big = imageMultipart('big.png', 'image/png', noise);
+  const ok = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...big.headers, 'x-user-id': token }, payload: big.payload });
+  assert.equal(ok.statusCode, 200, `实得 ${ok.statusCode} ${ok.body}`);
+  const item = await prisma.knowledgeItem.findUniqueOrThrow({ where: { id: ok.json().id } });
+  assert.ok(item.fileSize != null && item.fileSize <= 10 * 1024 * 1024, `落库大小 ${item.fileSize}`);
+  assert.equal(item.fileType, 'jpg');
+
+  const huge = imageMultipart('huge.png', 'image/png', Buffer.alloc(41 * 1024 * 1024, 1));
+  const tooBig = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...huge.headers, 'x-user-id': token }, payload: huge.payload });
+  assert.equal(tooBig.statusCode, 413, `实得 ${tooBig.statusCode} ${tooBig.body}`);
 });
 
 test('POST /chat/image-upload 成功 → 200 + 建 sourceType=image、status=ready 条目', async () => {

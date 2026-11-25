@@ -20,8 +20,8 @@ import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 import { eraseAccount } from '../services/accountDeletion.js';
 import type { AccountDeletionResult } from '../../../shared/contracts';
+import { ImageNormalizeError, normalizeUploadedImage } from '../services/imageNormalize.js';
 
-const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 export async function metaRoutes(app: FastifyInstance) {
   // 健康检查须真正探 DB：否则 DB 挂了进程还活着时仍返回 ok，部署门禁/探活会误判为健康。
@@ -212,19 +212,26 @@ export async function metaRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     if (!ossConfigured()) return reply.code(503).send({ error: '头像存储未配置', code: 'OSS_NOT_CONFIGURED' });
     let data;
-    try { data = await req.file(); } catch { return reply.code(413).send({ error: '图片过大（上限 5MB）' }); }
+    try { data = await req.file(); } catch { return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' }); }
     if (!data) return reply.code(400).send({ error: '未收到图片' });
-    const ext = AVATAR_MIME[data.mimetype];
-    if (!ext) return reply.code(400).send({ error: '仅支持 JPG / PNG / WebP 图片', code: 'AVATAR_BAD_TYPE' });
-    let buf: Buffer;
-    try { buf = await data.toBuffer(); } catch { return reply.code(413).send({ error: '图片过大（上限 5MB）' }); }
-    if (data.file.truncated || buf.length > 5 * 1024 * 1024) return reply.code(413).send({ error: '图片过大（上限 5MB）' });
-    if (!buf.length) return reply.code(400).send({ error: '空文件' });
+    let raw: Buffer;
+    try { raw = await data.toBuffer(); } catch { return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' }); }
+    if (data.file.truncated) return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
+    // 头像格式与大小由系统处理（services/imageNormalize.ts）：HEIC/GIF 等转 JPEG/PNG，超 5MB 自动压缩。
+    let image;
+    try {
+      image = await normalizeUploadedImage(raw, { accept: ['jpg', 'png', 'webp'], maxBytes: 5 * 1024 * 1024 });
+    } catch (error) {
+      if (error instanceof ImageNormalizeError) return reply.code(error.statusCode).send({ error: error.message, code: error.code });
+      throw error;
+    }
+    const buf = image.buf;
+    const ext = image.ext;
     // 文件名带 user 维度，覆盖式存储（key 含 createdAt 时间戳避免 CDN 缓存旧图）。
     const key = `avatars/${user.id}/${Date.now()}.${ext}`;
     let avatarUrl: string;
     try {
-      avatarUrl = await ossPutPublic(key, buf, data.mimetype);
+      avatarUrl = await ossPutPublic(key, buf, image.mime);
     } catch {
       return reply.code(502).send({ error: '头像上传失败，请稍后再试', code: 'AVATAR_UPLOAD_FAILED' });
     }

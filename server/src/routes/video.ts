@@ -26,6 +26,7 @@ import type {
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipTtsPreview, ClipVoicePreview, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 import { assertSafeUrl } from '../llm/tools/httpTool.js';
+import { isHeicLike, normalizeUploadedImage, renameForExt } from '../services/imageNormalize.js';
 
 type Identity = { userId: string; tenantId: string };
 type UpstreamCloneUploadStatus = ClipCloneUploadStatus & { reviewUrl?: string | null };
@@ -180,6 +181,18 @@ function resolveAssetMime(declared: string, buf: Buffer): string {
   const sniffed = sniffCaptureMime(buf);
   if (!sniffed) return lower;
   return sniffed === 'application/mp4' ? 'video/mp4' : sniffed;
+}
+
+/**
+ * 素材是不是一张需要系统转换的图片：HEIC/HEIF（魔数）、或声明为 image/* 但不是 JPG/PNG/GIF/WebP（AVIF、TIFF…）。
+ * 视频/音频、以及四种常用图片一律不转。
+ */
+function needsImageConversion(buf: Buffer, declared: string): boolean {
+  if (isHeicLike(buf)) return true;
+  const sniffed = sniffCaptureMime(buf);
+  if (sniffed && sniffed.startsWith('image/')) return false;
+  const lower = String(declared || '').toLowerCase();
+  return lower.startsWith('image/') && !['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'].includes(lower);
 }
 
 function captureMimeWhitelist(kind: CaptureKind): Set<string> {
@@ -892,7 +905,15 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到素材', code: 'CLIP_ASSET_REQUIRED' });
-      const buffer = await data.toBuffer();
+      let buffer = await data.toBuffer();
+      let fileName = data.filename || 'asset';
+      // HEIC/AVIF/TIFF 等图片素材由系统转成 JPEG/PNG（services/imageNormalize.ts），不让用户自己转。
+      // 视频、音频与 JPG/PNG/GIF/WebP 图片原样不动（这里不做压缩：素材上限是 100MB，真正的门在 AIStar 侧）。
+      if (needsImageConversion(buffer, data.mimetype)) {
+        const image = await normalizeUploadedImage(buffer, { accept: ['jpg', 'png'], maxBytes: 30 * 1024 * 1024 });
+        buffer = image.buf;
+        fileName = renameForExt(fileName, image.ext, 'asset');
+      }
       // 必须先读完 buffer 才能按魔数判型，所以审核就绪检查挪到取 buffer 之后。
       const mimeType = resolveAssetMime(data.mimetype, buffer);
       await assertVideoMediaModerationReady(mimeType);
@@ -902,7 +923,7 @@ export async function videoRoutes(app: FastifyInstance) {
       // 扩容权益在军师这边，上传闸在 AIStar 那边：把增量带上，两边才用同一个额度判断。
       // 少了这一行，买过扩容的用户仍然会在默认额度上被拦住 —— 花了钱没拿到东西。
       fields.extraQuotaBytes = String(await purchasedStorageBytes(user.id));
-      return await aidramaUpload<ClipAsset>('/api/me/clip/assets', identityOf(user), { buffer, fileName: data.filename || 'asset', mimeType }, fields);
+      return await aidramaUpload<ClipAsset>('/api/me/clip/assets', identityOf(user), { buffer, fileName, mimeType }, fields);
     } catch (e) { return sendErr(reply, e, 422); }
   });
 
@@ -1190,7 +1211,7 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到采集文件', code: 'CLIP_CLONE_FILE_REQUIRED' });
-      const buffer = await data.toBuffer();
+      let buffer = await data.toBuffer();
       const fields = data.fields as Record<string, { value?: unknown }> | undefined;
       const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
@@ -1220,8 +1241,18 @@ export async function videoRoutes(app: FastifyInstance) {
       // 余额闸提前到内容审核之前：别让用户等审完大文件才被告知钱不够。真正扣费仍在调上游前。
       await assertCloneAffordable(user.id, total);
 
+      // 照片训数字人：上游只收 JPG/PNG ≤10MB。HEIC、WebP、超大原图等由系统转换/压缩（services/imageNormalize.ts），
+      // 不再 422「照片只支持 JPG 或 PNG」/ 413 让用户自己处理。解不开的照片才报错。
+      let declaredMime = data.mimetype;
+      let captureName = data.filename;
+      if (kind === 'avatarImage') {
+        const image = await normalizeUploadedImage(buffer, { accept: ['jpg', 'png'], maxBytes: 10 * 1024 * 1024 });
+        buffer = image.buf;
+        declaredMime = image.mime;
+        if (image.converted) captureName = renameForExt(captureName, image.ext, 'avatar');
+      }
       // 同 consent：录音临时文件常被 wx.uploadFile 标成 octet-stream，必须按魔数纠正后再校验。
-      const mimeType = resolveCaptureMime(kind as CaptureKind, data.mimetype, buffer);
+      const mimeType = resolveCaptureMime(kind as CaptureKind, declaredMime, buffer);
       assertCaptureUpload(kind as CaptureKind, mimeType, buffer.length, data.file.truncated);
       await assertVideoMediaModerationReady(mimeType);
       await assertVideoUploadContent(buffer, mimeType, identityOf(user));
@@ -1247,7 +1278,7 @@ export async function videoRoutes(app: FastifyInstance) {
       }
       ownsSubmission = true;
 
-      const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as CaptureKind, data.filename, mimeType), mimeType }, {
+      const result = await aidramaUpload<{ avatarId?: string; voiceId?: string }>('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as CaptureKind, captureName, mimeType), mimeType }, {
         kind,
         ...(kind !== 'avatarImage' ? { model: CLIP_VOICE_MODEL } : {}),
         // 声音来源的显式意图：'video' = 只从本次视频提取，服务端据此禁止回退到旧声音。

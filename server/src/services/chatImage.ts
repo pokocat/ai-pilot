@@ -12,6 +12,7 @@ import { env } from '../env.js';
 import { prisma } from '../db.js';
 import { ossConfigured, ossPutBuffer, ossGetBuffer } from './ossUpload.js';
 import type { MessageRef } from '../llm/schema.js';
+import { normalizeUploadedImage } from './imageNormalize.js';
 
 // 允许的图片 MIME → 扩展名（与 Anthropic/OpenAI 视觉支持口径一致）。
 export const IMAGE_MIME_EXT: Record<string, string> = {
@@ -154,7 +155,7 @@ export async function createInferenceImageCopy(buf: Buffer, mediaType: string): 
     pipeline = pipeline.jpeg({ quality: 88, mozjpeg: true });
     return { buf: await pipeline.toBuffer(), mediaType: 'image/jpeg', ext: 'jpg', resized: true };
   } catch (cause) {
-    throw Object.assign(new Error('图片内容无法识别，请重新选择或先另存为 JPG/PNG'), {
+    throw Object.assign(new Error('图片内容无法识别，请换一张'), {
       statusCode: 400,
       code: 'IMAGE_DECODE_FAILED',
       cause,
@@ -312,31 +313,18 @@ export async function getStudioReferenceImage(userId: string, tenantId: string, 
   const bytes = await getChatImage(item.fileKey);
   if (!bytes?.length) return null;
   const fileName = item.fileName || '参考图';
-  if (/^(jpg|jpeg|png)$/.test(item.fileType ?? '') && bytes.length <= MAX_IMAGE_BYTES) {
-    return { bytes, contentType: mediaTypeFromExt(item.fileType), fileName };
-  }
   const converted = await toStudioReferenceFormat(bytes);
   if (!converted) return null;
-  return { bytes: converted.bytes, contentType: converted.contentType, fileName: `${fileName.replace(/\.[A-Za-z0-9]{1,5}$/, '')}.${converted.ext}` };
+  // JPG/PNG 且不超限时 normalizer 原样返回字节，文件名也不动。
+  const same = converted.bytes === bytes;
+  return { bytes: converted.bytes, contentType: converted.contentType, fileName: same ? fileName : `${fileName.replace(/\.[A-Za-z0-9]{1,5}$/, '')}.${converted.ext}` };
 }
 
-/** 任意可解码图片 → ≤10MB 的 PNG（有透明）或 JPEG。导出供测试。 */
+/** 任意可解码图片（含 HEIC）→ ≤10MB 的 PNG（有透明）或 JPEG。走统一的 imageNormalize。导出供测试。 */
 export async function toStudioReferenceFormat(input: Buffer): Promise<{ bytes: Buffer; contentType: 'image/png' | 'image/jpeg'; ext: 'png' | 'jpg' } | null> {
   try {
-    const base = () => sharp(input, { pages: 1, failOn: 'none' }).rotate();
-    const meta = await base().metadata();
-    if (meta.hasAlpha) {
-      const png = await base().png({ compressionLevel: 9 }).toBuffer();
-      if (png.length <= MAX_IMAGE_BYTES) return { bytes: png, contentType: 'image/png', ext: 'png' };
-    }
-    const longest = Math.max(meta.width ?? 0, meta.height ?? 0) || 4096;
-    for (const side of [longest, 4096, 3072, 2048, 1536]) {
-      if (side > longest) continue;
-      const jpg = await base().resize({ width: side, height: side, fit: 'inside', withoutEnlargement: true })
-        .flatten({ background: '#ffffff' }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
-      if (jpg.length <= MAX_IMAGE_BYTES) return { bytes: jpg, contentType: 'image/jpeg', ext: 'jpg' };
-    }
-    return null;
+    const out = await normalizeUploadedImage(input, { accept: ['jpg', 'png'], maxBytes: MAX_IMAGE_BYTES });
+    return { bytes: out.buf, contentType: out.ext === 'png' ? 'image/png' : 'image/jpeg', ext: out.ext === 'png' ? 'png' : 'jpg' };
   } catch {
     return null;
   }

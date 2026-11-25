@@ -451,7 +451,7 @@ async function uploadChatImageFile(
 }
 
 // 海报源素材上传（人像 / Logo / 二维码）：multipart 单文件 → 私有 OSS + CreativeAsset(kind='source')。
-// 服务端约束：仅 png/jpg/gif/webp、单张 ≤10MB；越限回 413/415，这里把 error 原样透出（服务端文案已面向用户）。
+// 服务端统一处理格式与大小：HEIC 等自动转 JPG/PNG、超 10MB 自动压缩；只有解不开（415）或超过 40MB（413）才报错，error 原样透出。
 async function uploadCreativeAssetFile(file: UploadSource, role: CreativeUploadRole): Promise<CreativeUploadResult> {
   const tokenAtRequest = getToken();
   const res = await platform.upload({

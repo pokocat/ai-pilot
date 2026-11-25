@@ -422,7 +422,8 @@ Page(withShare({
     let picked;
     try { picked = parsePicked(await pickImage()); } catch (_) { return; }
     if (!picked.path) return;
-    if (picked.size > 10 * 1024 * 1024) { wx.showToast({ title: '单张图片不超过 10MB', icon: 'none' }); return; }
+    // 格式与大小由服务端统一处理（超 10MB 自动压缩），这里只挡服务端读取上限 40MB。
+    if (picked.size > 40 * 1024 * 1024) { wx.showToast({ title: '单张图片不超过 40MB', icon: 'none' }); return; }
     let assets = this.data.assets.map((item) => item.role === role ? Object.assign({}, item, { uploading: true }) : item);
     this.setData({ assets });
     try {

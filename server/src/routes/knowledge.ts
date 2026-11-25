@@ -15,6 +15,7 @@ import {
 import { hybridSearch } from '../services/retrieval.js';
 import { checkQuota, getQuota, ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
 import { ingestChatImage, imageExtFromMime, chatImageStorageReady, MAX_IMAGE_BYTES } from '../services/chatImage.js';
+import { ImageNormalizeError, normalizeUploadedImage, renameForExt } from '../services/imageNormalize.js';
 import { bestUploadName } from '../services/uploadName.js';
 import { looksFinancial } from '../services/finParse.js';
 import { runFinCheckup } from '../services/finCheckup.js';
@@ -132,22 +133,26 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     try {
       data = await req.file();
     } catch {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+      return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
     }
     if (!data) return reply.code(400).send({ error: '未收到图片' });
-    if (!imageExtFromMime(data.mimetype)) {
-      return reply.code(400).send({ error: '仅支持 JPG / PNG / GIF / WebP 图片', code: 'IMAGE_BAD_TYPE' });
-    }
-    let buf: Buffer;
+    let raw: Buffer;
     try {
-      buf = await data.toBuffer();
+      raw = await data.toBuffer();
     } catch {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+      return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
     }
-    if (data.file.truncated || buf.length > MAX_IMAGE_BYTES) {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+    if (data.file.truncated) return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
+    // 格式与大小由系统处理（services/imageNormalize.ts）：HEIC 等转 JPEG/PNG，超 10MB 自动压缩；
+    // JPG/PNG/GIF/WebP 且不超限的原样保存。只有解不开、超过读取上限才报错。
+    let image;
+    try {
+      image = await normalizeUploadedImage(raw, { accept: ['jpg', 'png', 'gif', 'webp'], maxBytes: MAX_IMAGE_BYTES });
+    } catch (error) {
+      if (error instanceof ImageNormalizeError) return reply.code(error.statusCode).send({ error: error.message, code: error.code });
+      throw error;
     }
-    if (!buf.length) return reply.code(400).send({ error: '空图片' });
+    const buf = image.buf;
 
     // 字节配额门禁（图片计入本月字节额度，但不计入文档份数——故不查 30 份上限）。
     const q = await getQuota({ tenantId: user.tenantId, userId: user.id });
@@ -161,9 +166,9 @@ export async function knowledgeRoutes(app: FastifyInstance) {
         tenantId: user.tenantId,
         userId: user.id,
         projectId: req.query.projectId ?? null,
-        mime: data.mimetype,
+        mime: image.mime,
         buf,
-        fileName: rawOriginal || data.filename || null,
+        fileName: image.converted ? renameForExt(rawOriginal || data.filename, image.ext) : (rawOriginal || data.filename || null),
       });
     } catch (error) {
       const detail = error as Error & { statusCode?: number; code?: string };

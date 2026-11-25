@@ -130,7 +130,7 @@
         <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="{{faceSource === 'image' ? 'pickPhoto' : 'pickFace'}}">
           <view class="cl-upload-plus"><native-icon name="plus" tone="neutral" size="24"></native-icon></view>
           <text class="cl-upload-title">{{faceSource === 'image' ? '选择或拍一张照片' : '选择或录制视频'}}</text>
-          <text class="cl-upload-meta">{{faceSource === 'image' ? 'JPG/PNG · 360p–4K · 不超过 10MB' : '支持竖屏 · MP4/MOV · H.264 · 360p–4K'}}</text>
+          <text class="cl-upload-meta">{{faceSource === 'image' ? '常见照片格式 · 360p–4K' : '支持竖屏 · MP4/MOV · H.264 · 360p–4K'}}</text>
         </view>
 
         <view wx:else class="cl-video-card">

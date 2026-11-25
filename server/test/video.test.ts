@@ -24,6 +24,7 @@ let jobStatus = 'queued';
 let voiceStatus = 'ready';
 let cloneCalls = 0;
 let cloneUpstream: Record<string, unknown> = { voiceId: 'VC-new' };
+let seenCloneFile: File | null = null;
 /** 非 null 时让上游 clone 直接报错，用来验「上游失败 → 预扣必须退回」。 */
 let cloneUpstreamError: { status: number; code: string; error: string } | null = null;
 let renderCalls = 0;
@@ -92,6 +93,7 @@ before(async () => {
     if (url.pathname === '/api/me/clip/avatar/clone') {
       cloneCalls += 1;
       seenCloneModel = (init?.body as FormData | undefined)?.get('model') ?? null;
+      seenCloneFile = ((init?.body as FormData | undefined)?.get('file') as File | null) ?? null;
       if (cloneUpstreamError) return json({ error: cloneUpstreamError.error, code: cloneUpstreamError.code }, cloneUpstreamError.status);
       return json({ ok: true, kind: 'voice', status: 'training', ...cloneUpstream });
     }
@@ -143,6 +145,7 @@ beforeEach(async () => {
   voiceStatus = 'ready';
   cloneCalls = 0;
   cloneUpstream = { voiceId: 'VC-new' };
+  seenCloneFile = null;
   cloneUpstreamError = null;
   jobStatus = 'queued';
   renderCalls = 0;
@@ -511,25 +514,25 @@ test('封面藏在 payloadJson 里也照样送检，且没有封面时口径不�
  * 手搓 multipart。字段必须排在文件之前 —— @fastify/multipart 的 req.file() 是流式的，
  * 排在文件后面的字段读不到，测试会莫名其妙地缺参数。
  */
-function multipart(fields: Record<string, string>) {
+function multipart(fields: Record<string, string>, file?: { name: string; type: string; body: Buffer }) {
   const boundary = '----clipCloneTestBoundary';
   const parts: Buffer[] = [];
   for (const [key, value] of Object.entries(fields)) {
     parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`));
   }
   parts.push(Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="voice.mp3"\r\n`
-    + 'Content-Type: audio/mpeg\r\n\r\n',
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file?.name ?? 'voice.mp3'}"\r\n`
+    + `Content-Type: ${file?.type ?? 'audio/mpeg'}\r\n\r\n`,
   ));
   // ID3 magic：服务端按魔数判真实类型，不信 multipart 声明的 MIME。
-  parts.push(Buffer.concat([Buffer.from('ID3'), Buffer.alloc(4096, 1)]));
+  parts.push(file?.body ?? Buffer.concat([Buffer.from('ID3'), Buffer.alloc(4096, 1)]));
   parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
   return { payload: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-async function postClone(token: string, fields: Record<string, string>) {
+async function postClone(token: string, fields: Record<string, string>, file?: { name: string; type: string; body: Buffer }) {
   const app = await getApp();
-  const { payload, contentType } = multipart(fields);
+  const { payload, contentType } = multipart(fields, file);
   const res = await app.inject({
     method: 'POST', url: '/api/video/avatar/clone',
     headers: { 'x-user-id': token, 'content-type': contentType }, payload,
@@ -677,4 +680,22 @@ test('同一请求标识在失败退款后不许复用：必须换一单重来',
   const retry = await postClone(token, { kind: 'voice', voiceId: 'VC-scene', clientRequestId: 'clone-req-0008', expectedCredits: '60' });
   assert.equal(retry.status, 409);
   assert.equal(retry.body.code, 'CLIP_CLONE_REQUEST_CLOSED');
+});
+
+test('照片训数字人：HEIC 照片由系统转成 JPEG 再送上游，不再 422「照片只支持 JPG 或 PNG」', async () => {
+  const { readFileSync } = await import('node:fs');
+  const heic = readFileSync(new URL('./fixtures/sample.heic', import.meta.url));
+  const token = await cloneUser(1000);
+  const pricing = await api('GET', '/api/video/clone-pricing', { token });
+  const price = Number(pricing.body?.avatarImage);
+  assert.ok(Number.isSafeInteger(price) && price > 0, JSON.stringify(pricing.body));
+  cloneUpstream = { avatarId: 'DH-photo' };
+  const res = await postClone(token, { kind: 'avatarImage', clientRequestId: 'clone-heic-0001', expectedCredits: String(price) },
+    { name: 'IMG_0001.HEIC', type: 'image/heic', body: heic });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.ok(seenCloneFile, '上游必须收到照片');
+  assert.equal(seenCloneFile!.type, 'image/jpeg');
+  assert.match(seenCloneFile!.name, /^IMG_0001\.jpg$/);
+  const bytes = Buffer.from(await seenCloneFile!.arrayBuffer());
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xff, 0xd8, 0xff]);
 });

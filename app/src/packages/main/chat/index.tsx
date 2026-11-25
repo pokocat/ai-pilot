@@ -2109,7 +2109,7 @@ export default function Chat() {
     }
     const files = (chosen.tempFiles || []).slice(0, remain);
     if (!files.length) return;
-    // 单张体积上限（与 server 10MB 对齐）：一张超限即整批不发，提示压缩后再来。
+    // 单张体积上限（与服务端读取上限 40MB 对齐；10MB 以上服务端自动压缩）：一张超限即整批不发。
     for (const f of files) {
       const chk = checkImageUpload({ size: f.size });
       if (!chk.ok) { Taro.showToast({ title: chk.desc || '图片太大', icon: 'none' }); return; }

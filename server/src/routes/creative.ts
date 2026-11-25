@@ -20,7 +20,8 @@ import {
 import { ingestSourceAsset } from '../services/creative/uploads.js';
 import { creativeStorageReady, getCreativeObject } from '../services/creative/storage.js';
 import { ossConfigured, ossSignedUrl } from '../services/ossUpload.js';
-import { imageExtFromMime, MAX_IMAGE_BYTES } from '../services/chatImage.js';
+import { MAX_IMAGE_BYTES } from '../services/chatImage.js';
+import { ImageNormalizeError, normalizeUploadedImage, renameForExt } from '../services/imageNormalize.js';
 import type {
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest, CreativeStatusResult,
 } from '../../../shared/contracts';
@@ -93,30 +94,34 @@ export async function creativeRoutes(app: FastifyInstance) {
     try {
       data = await req.file();
     } catch {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）', code: 'IMAGE_TOO_LARGE' });
+      return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
     }
     if (!data) return reply.code(400).send({ error: '未收到图片', code: 'FILE_REQUIRED' });
-    if (!imageExtFromMime(data.mimetype)) {
-      return reply.code(415).send({ error: '仅支持 JPG / PNG / GIF / WebP 图片', code: 'IMAGE_BAD_TYPE' });
-    }
-    let buf: Buffer;
+    let raw: Buffer;
     try {
-      buf = await data.toBuffer();
+      raw = await data.toBuffer();
     } catch {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）', code: 'IMAGE_TOO_LARGE' });
+      return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
     }
-    if (data.file.truncated || buf.length > MAX_IMAGE_BYTES) {
-      return reply.code(413).send({ error: '图片过大（单张上限 10MB）', code: 'IMAGE_TOO_LARGE' });
+    if (data.file.truncated) return reply.code(413).send({ error: '图片超过 40MB，无法处理', code: 'IMAGE_TOO_LARGE' });
+    // 格式与大小由系统处理（services/imageNormalize.ts），不让用户自己转格式或压缩。
+    let image;
+    try {
+      image = await normalizeUploadedImage(raw, { accept: ['jpg', 'png', 'gif', 'webp'], maxBytes: MAX_IMAGE_BYTES });
+    } catch (error) {
+      if (error instanceof ImageNormalizeError) return reply.code(error.statusCode).send({ error: error.message, code: error.code });
+      throw error;
     }
+    const buf = image.buf;
     const roleField = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.role?.value;
     try {
       return await ingestSourceAsset({
         tenantId: user.tenantId,
         userId: user.id,
-        mimeType: data.mimetype,
+        mimeType: image.mime,
         buf,
         role: roleField,
-        fileName: data.filename ?? null,
+        fileName: image.converted ? renameForExt(data.filename, image.ext) : (data.filename ?? null),
       });
     } catch (e) {
       return sendErr(reply, e, 422);
