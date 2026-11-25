@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-11-25 · 声量AI 接军师正式上线（军师侧） · 影响面：正式 RDS、军师 A/B、小程序开发版
+
+- 正式 RDS `junshi_prod` 新建 `external_plan_grant` 与三个索引（`deploy/sql/2026-11-24-external-plan-grant.sql`，临时迁移账号执行，属主 `aibuzz`，`junshi_app` 读写，临时账号已删除）；执行前核对最近全量快照成功、日志备份开启。
+- 已部署 `02e0f208` 到 A/B 两节点 API 与 A 唯一定时进程（`--schema-reviewed`），A100/B0，两节点 ALB 就绪；备用机全量 2244 项（2242 通过、2 既有跳过、0 失败）、profile 12/12、运营后台 108/108。第一次发布 `42a3877f` 因回传 SSH 半开卡住，未改任何节点，已取消并释放 A 上本次的发布锁，修复见上一条。
+- 两台 `/etc/junshi/junshi-prod.env` 打开 `JUNSHI_STUDIO_WEB_ENABLED`、`JUNSHI_PLAN_GRANT_ENABLED`（改前备份 `.before-studio-web-20261125`），运行进程环境已核实。账号中心换票与 `aistar-junshi-grant` 已先上线（aibuzz-id `d6bff06`）。
+- 线上验收：主站 Origin 预检放行、其他 Origin 无 CORS 头；机器令牌（aud=junshi-plan-grant、300 秒）调 `/api/s2s/plan-grants`、`/api/s2s/users/:uid/plan`、单笔查询 200/200/404，用户接口拒收机器令牌；三个服务 15 分钟内 0 个 error 日志。未验：真实手机号账号的网页换票全链路、SSE 经 ALB 不缓冲、真实代售付款。
+- 小程序 `0.2.58` 已上传为开发版（`02e0f208`），未转体验版、未提审。
+
 ### 2026-11-25 · 正式发布工具的 SSH 加保活 · 影响面：`scripts/ops/deploy_cluster.py`
 
 - 发布 `42a3877f` 时，备用机 B 上构建和全量测试（约 12 分钟没有输出）已经通过，回传结果的 SSH 却被 NAT 掐成半开连接；本机 ssh 没有保活，察觉不到，一直挂着，同时占住 A 上的发布锁和本机 devq 唯一重任务槽 1 小时。流量始终在 A，新版没装到任何节点。现在所有 ssh/scp 都带 `ServerAliveInterval=30`、`ServerAliveCountMax=6`：连接断了约 3 分钟内退出，走既有的失败路径（不切流、保留原主）。守卫 `scripts/ops/test_release.py::test_ssh_transport_keeps_idle_connections_alive`。
